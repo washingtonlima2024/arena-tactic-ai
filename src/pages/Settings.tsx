@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -33,6 +33,21 @@ export default function Settings() {
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [deleteConfirmTeam, setDeleteConfirmTeam] = useState<Team | null>(null);
 
+  // Profile settings
+  const [profileName, setProfileName] = useState('');
+  const [profileEmail, setProfileEmail] = useState('');
+  const [profileOrg, setProfileOrg] = useState('');
+  
+  // Appearance settings
+  const [darkMode, setDarkMode] = useState(true);
+  const [animations, setAnimations] = useState(true);
+
+  // Notification settings
+  const [notifyAnalysis, setNotifyAnalysis] = useState(true);
+  const [notifyInsights, setNotifyInsights] = useState(true);
+  const [notifyErrors, setNotifyErrors] = useState(true);
+  const [notifyUpdates, setNotifyUpdates] = useState(false);
+
   // Teams
   const { data: teams, isLoading: teamsLoading } = useTeams();
   const createTeam = useCreateTeam();
@@ -40,19 +55,40 @@ export default function Settings() {
   const deleteTeam = useDeleteTeam();
 
   // API Settings
-  const { data: apiSettings } = useApiSettings();
+  const { data: apiSettings, isLoading: settingsLoading } = useApiSettings();
   const upsertApiSetting = useUpsertApiSetting();
 
-  const getSetting = (key: string) => {
-    return apiSettings?.find(s => s.setting_key === key)?.setting_value || '';
-  };
+  // Load settings from database
+  useEffect(() => {
+    if (apiSettings) {
+      setProfileName(apiSettings.find(s => s.setting_key === 'profile_name')?.setting_value || '');
+      setProfileEmail(apiSettings.find(s => s.setting_key === 'profile_email')?.setting_value || '');
+      setProfileOrg(apiSettings.find(s => s.setting_key === 'profile_org')?.setting_value || '');
+      setDarkMode(apiSettings.find(s => s.setting_key === 'dark_mode')?.setting_value !== 'false');
+      setAnimations(apiSettings.find(s => s.setting_key === 'animations')?.setting_value !== 'false');
+      setNotifyAnalysis(apiSettings.find(s => s.setting_key === 'notify_analysis')?.setting_value !== 'false');
+      setNotifyInsights(apiSettings.find(s => s.setting_key === 'notify_insights')?.setting_value !== 'false');
+      setNotifyErrors(apiSettings.find(s => s.setting_key === 'notify_errors')?.setting_value !== 'false');
+      setNotifyUpdates(apiSettings.find(s => s.setting_key === 'notify_updates')?.setting_value === 'true');
+    }
+  }, [apiSettings]);
 
-  const handleSaveSetting = async (key: string, value: string) => {
+  const handleSaveAllSettings = async () => {
     try {
-      await upsertApiSetting.mutateAsync({ key, value });
-      toast.success('Configuração salva!');
+      await Promise.all([
+        upsertApiSetting.mutateAsync({ key: 'profile_name', value: profileName }),
+        upsertApiSetting.mutateAsync({ key: 'profile_email', value: profileEmail }),
+        upsertApiSetting.mutateAsync({ key: 'profile_org', value: profileOrg }),
+        upsertApiSetting.mutateAsync({ key: 'dark_mode', value: String(darkMode) }),
+        upsertApiSetting.mutateAsync({ key: 'animations', value: String(animations) }),
+        upsertApiSetting.mutateAsync({ key: 'notify_analysis', value: String(notifyAnalysis) }),
+        upsertApiSetting.mutateAsync({ key: 'notify_insights', value: String(notifyInsights) }),
+        upsertApiSetting.mutateAsync({ key: 'notify_errors', value: String(notifyErrors) }),
+        upsertApiSetting.mutateAsync({ key: 'notify_updates', value: String(notifyUpdates) }),
+      ]);
+      toast.success('Todas as configurações foram salvas!');
     } catch (error) {
-      toast.error('Erro ao salvar configuração');
+      toast.error('Erro ao salvar configurações');
     }
   };
 
@@ -231,16 +267,29 @@ export default function Settings() {
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Nome</Label>
-                    <Input defaultValue="Analista" />
+                    <Input 
+                      value={profileName} 
+                      onChange={(e) => setProfileName(e.target.value)}
+                      placeholder="Seu nome"
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>Email</Label>
-                    <Input defaultValue="analista@arenaplay.com" type="email" />
+                    <Input 
+                      value={profileEmail} 
+                      onChange={(e) => setProfileEmail(e.target.value)}
+                      type="email" 
+                      placeholder="seu@email.com"
+                    />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Organização</Label>
-                  <Input defaultValue="Kakttus Solutions" />
+                  <Input 
+                    value={profileOrg} 
+                    onChange={(e) => setProfileOrg(e.target.value)}
+                    placeholder="Nome da organização"
+                  />
                 </div>
               </CardContent>
             </Card>
@@ -261,7 +310,7 @@ export default function Settings() {
                     <p className="font-medium">Tema Escuro</p>
                     <p className="text-sm text-muted-foreground">Ativar modo escuro</p>
                   </div>
-                  <Switch defaultChecked />
+                  <Switch checked={darkMode} onCheckedChange={setDarkMode} />
                 </div>
                 <Separator />
                 <div className="flex items-center justify-between">
@@ -269,7 +318,7 @@ export default function Settings() {
                     <p className="font-medium">Animações</p>
                     <p className="text-sm text-muted-foreground">Ativar efeitos visuais</p>
                   </div>
-                  <Switch defaultChecked />
+                  <Switch checked={animations} onCheckedChange={setAnimations} />
                 </div>
               </CardContent>
             </Card>
@@ -380,28 +429,57 @@ export default function Settings() {
                 </CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                {[
-                  { title: 'Análise Concluída', description: 'Quando uma análise de vídeo for finalizada' },
-                  { title: 'Novos Insights', description: 'Quando insights táticos importantes forem detectados' },
-                  { title: 'Erros de Processamento', description: 'Quando ocorrer um erro no processamento' },
-                  { title: 'Atualizações do Sistema', description: 'Sobre novas funcionalidades e melhorias' },
-                ].map((notification, i) => (
-                  <div key={i} className="flex items-center justify-between">
-                    <div>
-                      <p className="font-medium">{notification.title}</p>
-                      <p className="text-sm text-muted-foreground">{notification.description}</p>
-                    </div>
-                    <Switch defaultChecked={i < 3} />
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Análise Concluída</p>
+                    <p className="text-sm text-muted-foreground">Quando uma análise de vídeo for finalizada</p>
                   </div>
-                ))}
+                  <Switch checked={notifyAnalysis} onCheckedChange={setNotifyAnalysis} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Novos Insights</p>
+                    <p className="text-sm text-muted-foreground">Quando insights táticos importantes forem detectados</p>
+                  </div>
+                  <Switch checked={notifyInsights} onCheckedChange={setNotifyInsights} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Erros de Processamento</p>
+                    <p className="text-sm text-muted-foreground">Quando ocorrer um erro no processamento</p>
+                  </div>
+                  <Switch checked={notifyErrors} onCheckedChange={setNotifyErrors} />
+                </div>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Atualizações do Sistema</p>
+                    <p className="text-sm text-muted-foreground">Sobre novas funcionalidades e melhorias</p>
+                  </div>
+                  <Switch checked={notifyUpdates} onCheckedChange={setNotifyUpdates} />
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
         </Tabs>
 
         <div className="flex justify-end gap-3">
-          <Button variant="outline">Cancelar</Button>
-          <Button variant="arena">Salvar Alterações</Button>
+          <Button variant="outline" onClick={() => window.location.reload()}>
+            Cancelar
+          </Button>
+          <Button 
+            variant="arena" 
+            onClick={handleSaveAllSettings}
+            disabled={upsertApiSetting.isPending}
+          >
+            {upsertApiSetting.isPending ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Salvando...
+              </>
+            ) : (
+              'Salvar Alterações'
+            )}
+          </Button>
         </div>
       </div>
 
