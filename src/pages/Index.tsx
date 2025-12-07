@@ -6,7 +6,8 @@ import {
   Zap, 
   TrendingUp,
   Users,
-  Activity
+  Activity,
+  RotateCcw
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { StatCard } from '@/components/dashboard/StatCard';
@@ -112,6 +113,12 @@ export default function Dashboard() {
     return () => clearInterval(interval);
   }, [analysisJob.status]);
 
+  const restartSimulation = () => {
+    setAnalysisJob({
+      ...initialAnalysisJob,
+      startedAt: new Date().toISOString(),
+    });
+  };
   return (
     <AppLayout>
       <div className="space-y-8">
@@ -197,9 +204,33 @@ export default function Dashboard() {
               ))}
             </div>
 
-            {/* Analysis in Progress */}
+            {/* Analysis in Progress or Completed */}
             {analysisJob.status === 'processing' && (
               <AnalysisProgress job={analysisJob} />
+            )}
+            
+            {analysisJob.status === 'completed' && (
+              <Card variant="glow" className="border-success/30 bg-success/5">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-success/10">
+                        <Zap className="h-6 w-6 text-success" />
+                      </div>
+                      <div>
+                        <h3 className="font-semibold">Análise Concluída!</h3>
+                        <p className="text-sm text-muted-foreground">
+                          Todos os passos foram processados com sucesso
+                        </p>
+                      </div>
+                    </div>
+                    <Button variant="arena-outline" onClick={restartSimulation}>
+                      <RotateCcw className="mr-2 h-4 w-4" />
+                      Reiniciar Simulação
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             )}
 
             {/* Tactical Insights */}
