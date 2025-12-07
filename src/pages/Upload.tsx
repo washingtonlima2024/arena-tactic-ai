@@ -84,7 +84,12 @@ export default function VideoUpload() {
     setFiles(prev => [...prev, newFile]);
 
     try {
-      const fileName = `${Date.now()}-${file.name}`;
+      // Sanitize filename: remove accents and special characters
+      const sanitizedName = file.name
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '') // Remove accents
+        .replace(/[^a-zA-Z0-9._-]/g, '_'); // Replace special chars with underscore
+      const fileName = `${Date.now()}-${sanitizedName}`;
       
       // Simulate progress
       const progressInterval = setInterval(() => {
