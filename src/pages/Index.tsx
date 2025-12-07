@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { 
   Video, 
   BarChart3, 
@@ -22,15 +23,94 @@ import {
   mockEvents, 
   mockDashboardStats, 
   mockTacticalAnalysis,
-  mockAnalysisJob,
   mockPlayerStats
 } from '@/data/mockData';
+import { AnalysisJob } from '@/types/arena';
 import heroBg from '@/assets/hero-bg.jpg';
 import { Link } from 'react-router-dom';
+
+const initialAnalysisJob: AnalysisJob = {
+  id: 'job-1',
+  matchId: 'match-2',
+  status: 'processing',
+  progress: 0,
+  currentStep: 'Iniciando análise...',
+  steps: [
+    { name: 'Upload do vídeo', status: 'pending', progress: 0 },
+    { name: 'Detecção de jogadores', status: 'pending', progress: 0 },
+    { name: 'Rastreamento de movimento', status: 'pending', progress: 0 },
+    { name: 'Identificação de eventos', status: 'pending', progress: 0 },
+    { name: 'Análise tática', status: 'pending', progress: 0 },
+    { name: 'Geração de insights', status: 'pending', progress: 0 },
+    { name: 'Criação de cortes', status: 'pending', progress: 0 },
+  ],
+  startedAt: new Date().toISOString(),
+};
 
 export default function Dashboard() {
   const recentEvents = mockEvents.slice(0, 5);
   const recentInsights = mockTacticalAnalysis.insights.slice(0, 2);
+  
+  const [analysisJob, setAnalysisJob] = useState<AnalysisJob>(initialAnalysisJob);
+
+  useEffect(() => {
+    if (analysisJob.status !== 'processing') return;
+
+    const interval = setInterval(() => {
+      setAnalysisJob(prev => {
+        const steps = [...prev.steps];
+        let currentStepIndex = steps.findIndex(s => s.status === 'processing');
+        
+        // If no step is processing, start the first pending one
+        if (currentStepIndex === -1) {
+          currentStepIndex = steps.findIndex(s => s.status === 'pending');
+          if (currentStepIndex === -1) {
+            // All done
+            return { ...prev, status: 'completed', progress: 100 };
+          }
+          steps[currentStepIndex] = { ...steps[currentStepIndex], status: 'processing', progress: 0 };
+        }
+
+        // Increment the current step progress
+        const currentStep = steps[currentStepIndex];
+        const newProgress = Math.min(currentStep.progress + Math.random() * 15 + 5, 100);
+        
+        if (newProgress >= 100) {
+          // Complete this step and move to next
+          steps[currentStepIndex] = { ...currentStep, status: 'completed', progress: 100 };
+          const nextIndex = currentStepIndex + 1;
+          if (nextIndex < steps.length) {
+            steps[nextIndex] = { ...steps[nextIndex], status: 'processing', progress: 0 };
+          }
+        } else {
+          steps[currentStepIndex] = { ...currentStep, progress: newProgress };
+        }
+
+        // Calculate overall progress
+        const completedSteps = steps.filter(s => s.status === 'completed').length;
+        const processingStep = steps.find(s => s.status === 'processing');
+        const overallProgress = Math.round(
+          ((completedSteps / steps.length) * 100) + 
+          ((processingStep?.progress || 0) / steps.length)
+        );
+
+        const allCompleted = steps.every(s => s.status === 'completed');
+        const currentStepName = steps.find(s => s.status === 'processing')?.name || 
+                                (allCompleted ? 'Análise concluída!' : 'Iniciando...');
+
+        return {
+          ...prev,
+          steps,
+          progress: allCompleted ? 100 : overallProgress,
+          currentStep: currentStepName,
+          status: allCompleted ? 'completed' : 'processing',
+          completedAt: allCompleted ? new Date().toISOString() : undefined,
+        };
+      });
+    }, 800);
+
+    return () => clearInterval(interval);
+  }, [analysisJob.status]);
 
   return (
     <AppLayout>
@@ -118,8 +198,8 @@ export default function Dashboard() {
             </div>
 
             {/* Analysis in Progress */}
-            {mockAnalysisJob.status === 'processing' && (
-              <AnalysisProgress job={mockAnalysisJob} />
+            {analysisJob.status === 'processing' && (
+              <AnalysisProgress job={analysisJob} />
             )}
 
             {/* Tactical Insights */}
