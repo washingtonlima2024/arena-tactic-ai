@@ -22,7 +22,8 @@ import {
   Loader2,
   Zap,
   Brain,
-  BarChart3
+  BarChart3,
+  FileText
 } from 'lucide-react';
 import { useTeams } from '@/hooks/useTeams';
 import { toast } from '@/hooks/use-toast';
@@ -39,6 +40,7 @@ export default function VideoUpload() {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [srtFile, setSrtFile] = useState<File | null>(null);
   const { data: teams = [], isLoading: teamsLoading } = useTeams();
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
@@ -183,6 +185,57 @@ export default function VideoUpload() {
                     className="absolute inset-0 cursor-pointer opacity-0"
                   />
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* SRT File Upload */}
+            <Card variant="glass">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Arquivo de Legendas (SRT)
+                </CardTitle>
+                <CardDescription>
+                  Importe um arquivo SRT com a narração ou legendas da partida
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="flex items-center gap-4">
+                  <div className="flex-1">
+                    <Input
+                      type="file"
+                      accept=".srt,.vtt"
+                      onChange={(e) => {
+                        if (e.target.files?.[0]) {
+                          setSrtFile(e.target.files[0]);
+                          toast({
+                            title: "Arquivo SRT carregado",
+                            description: e.target.files[0].name
+                          });
+                        }
+                      }}
+                      className="cursor-pointer"
+                    />
+                  </div>
+                  {srtFile && (
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="flex items-center gap-1">
+                        <FileText className="h-3 w-3" />
+                        {srtFile.name}
+                      </Badge>
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => setSrtFile(null)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                </div>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Formatos aceitos: .srt, .vtt
+                </p>
               </CardContent>
             </Card>
 
