@@ -1,10 +1,17 @@
+import { useState } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FootballField } from '@/components/tactical/FootballField';
-import { InsightCard } from '@/components/tactical/InsightCard';
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select';
 import { 
   BarChart3, 
   Users, 
@@ -13,19 +20,68 @@ import {
   Swords,
   Shield,
   Zap,
-  Download
+  Download,
+  Loader2,
+  Video
 } from 'lucide-react';
-import { 
-  mockTacticalAnalysis, 
-  mockTeamStats, 
-  mockMatches,
-  mockPlayerStats 
-} from '@/data/mockData';
+import { useAllCompletedMatches, useMatchAnalysis, useMatchEvents } from '@/hooks/useMatchDetails';
+import { Link } from 'react-router-dom';
 
 export default function Analysis() {
-  const match = mockMatches[0];
-  const homeStats = mockTeamStats[0];
-  const awayStats = mockTeamStats[1];
+  const { data: matches = [], isLoading: matchesLoading } = useAllCompletedMatches();
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+
+  // Auto-select first match if none selected
+  const currentMatchId = selectedMatchId || matches[0]?.id || null;
+  const selectedMatch = matches.find(m => m.id === currentMatchId);
+  
+  const { data: analysis, isLoading: analysisLoading } = useMatchAnalysis(currentMatchId);
+  const { data: events = [] } = useMatchEvents(currentMatchId);
+
+  const tacticalAnalysis = analysis?.tacticalAnalysis;
+
+  // Calculate stats from events
+  const eventCounts = {
+    goals: events.filter(e => e.event_type === 'goal').length,
+    shots: events.filter(e => e.event_type.includes('shot')).length,
+    fouls: events.filter(e => e.event_type === 'foul' || e.event_type.includes('card')).length,
+    tactical: events.filter(e => ['high_press', 'transition', 'ball_recovery', 'substitution'].includes(e.event_type)).length,
+  };
+
+  if (matchesLoading) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (matches.length === 0) {
+    return (
+      <AppLayout>
+        <div className="space-y-6">
+          <div>
+            <h1 className="font-display text-3xl font-bold">Análise Tática</h1>
+            <p className="text-muted-foreground">Visualize a análise tática das partidas</p>
+          </div>
+          <Card variant="glass">
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <Video className="h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Nenhuma análise disponível</h3>
+              <p className="text-muted-foreground text-center mb-4">
+                Importe e analise um vídeo para ver os resultados
+              </p>
+              <Button variant="arena" asChild>
+                <Link to="/upload">Importar Partida</Link>
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>
@@ -35,226 +91,245 @@ export default function Analysis() {
           <div>
             <div className="flex items-center gap-3">
               <h1 className="font-display text-3xl font-bold">Análise Tática</h1>
-              <Badge variant="arena">{match.homeTeam.shortName} vs {match.awayTeam.shortName}</Badge>
+              {selectedMatch && (
+                <Badge variant="arena">
+                  {selectedMatch.home_team?.short_name || 'Casa'} vs {selectedMatch.away_team?.short_name || 'Visitante'}
+                </Badge>
+              )}
             </div>
             <p className="text-muted-foreground">
-              {match.competition} • {new Date(match.date).toLocaleDateString('pt-BR')}
+              {selectedMatch?.competition || 'Partida'} • {selectedMatch?.match_date ? new Date(selectedMatch.match_date).toLocaleDateString('pt-BR') : 'Data não definida'}
             </p>
           </div>
-          <Button variant="arena-outline">
-            <Download className="mr-2 h-4 w-4" />
-            Exportar Relatório
-          </Button>
+          <div className="flex gap-2">
+            <Select value={currentMatchId || ''} onValueChange={setSelectedMatchId}>
+              <SelectTrigger className="w-64">
+                <SelectValue placeholder="Selecionar partida" />
+              </SelectTrigger>
+              <SelectContent>
+                {matches.map(match => (
+                  <SelectItem key={match.id} value={match.id}>
+                    {match.home_team?.short_name || 'Casa'} vs {match.away_team?.short_name || 'Visitante'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="arena-outline">
+              <Download className="mr-2 h-4 w-4" />
+              Exportar Relatório
+            </Button>
+          </div>
         </div>
 
-        {/* Formation Overview */}
-        <div className="grid gap-6 lg:grid-cols-2">
-          <Card variant="tactical">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>{match.homeTeam.name}</CardTitle>
-                <Badge variant="arena">{mockTacticalAnalysis.formation.home}</Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <FootballField 
-                players={[
-                  { x: 5, y: 50, number: 1, team: 'home' },
-                  { x: 20, y: 20, number: 4, team: 'home' },
-                  { x: 20, y: 40, number: 3, team: 'home' },
-                  { x: 20, y: 60, number: 15, team: 'home' },
-                  { x: 20, y: 80, number: 2, team: 'home' },
-                  { x: 45, y: 30, number: 8, team: 'home' },
-                  { x: 45, y: 50, number: 5, team: 'home' },
-                  { x: 45, y: 70, number: 17, team: 'home' },
-                  { x: 70, y: 20, number: 19, team: 'home' },
-                  { x: 75, y: 50, number: 9, team: 'home' },
-                  { x: 70, y: 80, number: 11, team: 'home' },
-                ]}
-              />
-            </CardContent>
-          </Card>
-
-          <Card variant="tactical">
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <CardTitle>{match.awayTeam.name}</CardTitle>
-                <Badge variant="arena">{mockTacticalAnalysis.formation.away}</Badge>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <FootballField 
-                players={[
-                  { x: 95, y: 50, number: 1, team: 'away' },
-                  { x: 80, y: 20, number: 2, team: 'away' },
-                  { x: 80, y: 40, number: 4, team: 'away' },
-                  { x: 80, y: 60, number: 5, team: 'away' },
-                  { x: 80, y: 80, number: 23, team: 'away' },
-                  { x: 60, y: 25, number: 8, team: 'away' },
-                  { x: 60, y: 50, number: 10, team: 'away' },
-                  { x: 60, y: 75, number: 15, team: 'away' },
-                  { x: 35, y: 30, number: 11, team: 'away' },
-                  { x: 30, y: 50, number: 9, team: 'away' },
-                  { x: 35, y: 70, number: 7, team: 'away' },
-                ]}
-              />
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Stats Comparison */}
-        <Card variant="glass">
-          <CardHeader>
-            <CardTitle>Comparativo de Estatísticas</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="space-y-4">
-              {[
-                { label: 'Posse de Bola', home: homeStats.possession, away: awayStats.possession, suffix: '%' },
-                { label: 'Finalizações', home: homeStats.shots, away: awayStats.shots },
-                { label: 'Finalizações no Gol', home: homeStats.shotsOnTarget, away: awayStats.shotsOnTarget },
-                { label: 'Precisão de Passes', home: homeStats.passAccuracy, away: awayStats.passAccuracy, suffix: '%' },
-                { label: 'xG (Gols Esperados)', home: homeStats.expectedGoals, away: awayStats.expectedGoals, decimal: true },
-                { label: 'Escanteios', home: homeStats.corners, away: awayStats.corners },
-                { label: 'Eventos de Pressão', home: homeStats.pressureEvents, away: awayStats.pressureEvents },
-              ].map((stat, index) => (
-                <div key={index} className="grid grid-cols-[1fr,2fr,1fr] items-center gap-4">
-                  <div className="text-right">
-                    <span className="text-lg font-bold">
-                      {stat.decimal ? stat.home.toFixed(2) : stat.home}{stat.suffix || ''}
-                    </span>
+        {analysisLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : (
+          <>
+            {/* Formation Overview */}
+            <div className="grid gap-6 lg:grid-cols-2">
+              <Card variant="tactical">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>{selectedMatch?.home_team?.name || 'Time Casa'}</CardTitle>
+                    <Badge variant="arena">{tacticalAnalysis?.formation?.home || '4-3-3'}</Badge>
                   </div>
-                  <div className="space-y-1">
-                    <div className="flex h-2 overflow-hidden rounded-full bg-muted">
-                      <div 
-                        className="bg-gradient-arena transition-all"
-                        style={{ width: `${(stat.home / (stat.home + stat.away)) * 100}%` }}
-                      />
+                </CardHeader>
+                <CardContent>
+                  <FootballField 
+                    players={[
+                      { x: 5, y: 50, number: 1, team: 'home' },
+                      { x: 20, y: 20, number: 4, team: 'home' },
+                      { x: 20, y: 40, number: 3, team: 'home' },
+                      { x: 20, y: 60, number: 15, team: 'home' },
+                      { x: 20, y: 80, number: 2, team: 'home' },
+                      { x: 45, y: 30, number: 8, team: 'home' },
+                      { x: 45, y: 50, number: 5, team: 'home' },
+                      { x: 45, y: 70, number: 17, team: 'home' },
+                      { x: 70, y: 20, number: 19, team: 'home' },
+                      { x: 75, y: 50, number: 9, team: 'home' },
+                      { x: 70, y: 80, number: 11, team: 'home' },
+                    ]}
+                  />
+                </CardContent>
+              </Card>
+
+              <Card variant="tactical">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle>{selectedMatch?.away_team?.name || 'Time Visitante'}</CardTitle>
+                    <Badge variant="arena">{tacticalAnalysis?.formation?.away || '4-4-2'}</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <FootballField 
+                    players={[
+                      { x: 95, y: 50, number: 1, team: 'away' },
+                      { x: 80, y: 20, number: 2, team: 'away' },
+                      { x: 80, y: 40, number: 4, team: 'away' },
+                      { x: 80, y: 60, number: 5, team: 'away' },
+                      { x: 80, y: 80, number: 23, team: 'away' },
+                      { x: 60, y: 25, number: 8, team: 'away' },
+                      { x: 60, y: 50, number: 10, team: 'away' },
+                      { x: 60, y: 75, number: 15, team: 'away' },
+                      { x: 35, y: 30, number: 11, team: 'away' },
+                      { x: 30, y: 50, number: 9, team: 'away' },
+                      { x: 35, y: 70, number: 7, team: 'away' },
+                    ]}
+                  />
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Stats Comparison */}
+            <Card variant="glass">
+              <CardHeader>
+                <CardTitle>Comparativo de Estatísticas</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-4">
+                  {[
+                    { label: 'Posse de Bola', home: tacticalAnalysis?.possession?.home || 50, away: tacticalAnalysis?.possession?.away || 50, suffix: '%' },
+                    { label: 'Gols', home: selectedMatch?.home_score || eventCounts.goals, away: selectedMatch?.away_score || 0 },
+                    { label: 'Eventos Táticos', home: eventCounts.tactical, away: 0 },
+                    { label: 'Faltas/Cartões', home: eventCounts.fouls, away: 0 },
+                  ].map((stat, index) => (
+                    <div key={index} className="grid grid-cols-[1fr,2fr,1fr] items-center gap-4">
+                      <div className="text-right">
+                        <span className="text-lg font-bold">
+                          {stat.home}{stat.suffix || ''}
+                        </span>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex h-2 overflow-hidden rounded-full bg-muted">
+                          <div 
+                            className="bg-gradient-arena transition-all"
+                            style={{ width: `${(stat.home / (stat.home + stat.away || 1)) * 100}%` }}
+                          />
+                        </div>
+                        <p className="text-center text-xs text-muted-foreground">{stat.label}</p>
+                      </div>
+                      <div className="text-left">
+                        <span className="text-lg font-bold">
+                          {stat.away}{stat.suffix || ''}
+                        </span>
+                      </div>
                     </div>
-                    <p className="text-center text-xs text-muted-foreground">{stat.label}</p>
-                  </div>
-                  <div className="text-left">
-                    <span className="text-lg font-bold">
-                      {stat.decimal ? stat.away.toFixed(2) : stat.away}{stat.suffix || ''}
-                    </span>
-                  </div>
+                  ))}
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
+              </CardContent>
+            </Card>
 
-        {/* Tactical Patterns */}
-        <Tabs defaultValue="insights" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="insights">Insights</TabsTrigger>
-            <TabsTrigger value="patterns">Padrões</TabsTrigger>
-            <TabsTrigger value="predictions">Previsões</TabsTrigger>
-            <TabsTrigger value="heatmaps">Mapas de Calor</TabsTrigger>
-          </TabsList>
+            {/* Tactical Patterns */}
+            <Tabs defaultValue="insights" className="space-y-6">
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="insights">Insights</TabsTrigger>
+                <TabsTrigger value="patterns">Padrões Táticos</TabsTrigger>
+                <TabsTrigger value="events">Eventos ({events.length})</TabsTrigger>
+              </TabsList>
 
-          <TabsContent value="insights" className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {mockTacticalAnalysis.insights.map(insight => (
-                <InsightCard key={insight.id} insight={insight} />
-              ))}
-            </div>
-          </TabsContent>
+              <TabsContent value="insights" className="space-y-4">
+                {tacticalAnalysis?.insights && tacticalAnalysis.insights.length > 0 ? (
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {tacticalAnalysis.insights.map((insight, index) => (
+                      <Card key={index} variant="glow">
+                        <CardContent className="pt-6">
+                          <div className="flex items-start gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 shrink-0">
+                              <Zap className="h-5 w-5 text-primary" />
+                            </div>
+                            <p className="text-sm leading-relaxed">{insight}</p>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <Card variant="glass">
+                    <CardContent className="py-8 text-center text-muted-foreground">
+                      Nenhum insight disponível
+                    </CardContent>
+                  </Card>
+                )}
+              </TabsContent>
 
-          <TabsContent value="patterns" className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {mockTacticalAnalysis.patterns.map(pattern => (
-                <Card key={pattern.id} variant="glow">
-                  <CardContent className="pt-6">
-                    <div className="mb-4 flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                        {pattern.type === 'pressing' ? <Zap className="h-5 w-5 text-primary" /> :
-                         pattern.type === 'buildup' ? <Swords className="h-5 w-5 text-primary" /> :
-                         <Shield className="h-5 w-5 text-primary" />}
-                      </div>
-                      <div>
-                        <Badge variant="outline" className="capitalize">{pattern.type.replace('_', ' ')}</Badge>
-                      </div>
-                    </div>
-                    <p className="text-sm">{pattern.description}</p>
-                    <div className="mt-4 flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">
-                        {pattern.occurrences} ocorrências
-                      </span>
-                      <span className="font-medium text-primary">
-                        {Math.round(pattern.effectiveness * 100)}% eficácia
-                      </span>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </TabsContent>
+              <TabsContent value="patterns" className="space-y-4">
+                {tacticalAnalysis?.patterns && tacticalAnalysis.patterns.length > 0 ? (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {tacticalAnalysis.patterns.map((pattern, index) => (
+                      <Card key={index} variant="glow">
+                        <CardContent className="pt-6">
+                          <div className="mb-4 flex items-center gap-3">
+                            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                              {pattern.type === 'defensive_scheme' ? <Shield className="h-5 w-5 text-primary" /> :
+                               pattern.type === 'attacking_scheme' ? <Swords className="h-5 w-5 text-primary" /> :
+                               <Target className="h-5 w-5 text-primary" />}
+                            </div>
+                            <div>
+                              <Badge variant="outline" className="capitalize">
+                                {pattern.type.replace(/_/g, ' ')}
+                              </Badge>
+                            </div>
+                          </div>
+                          <p className="text-sm">{pattern.description}</p>
+                          <div className="mt-4 flex items-center justify-end text-sm">
+                            <span className="font-medium text-primary">
+                              {Math.round(pattern.effectiveness * 100)}% eficácia
+                            </span>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <Card variant="glass">
+                    <CardContent className="py-8 text-center text-muted-foreground">
+                      Nenhum padrão tático identificado
+                    </CardContent>
+                  </Card>
+                )}
+              </TabsContent>
 
-          <TabsContent value="predictions" className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {mockTacticalAnalysis.predictions.map(prediction => (
-                <Card key={prediction.id} variant="glow">
-                  <CardContent className="pt-6">
-                    <div className="mb-3 flex items-center justify-between">
-                      <Badge 
-                        variant={
-                          prediction.impact === 'high' ? 'destructive' : 
-                          prediction.impact === 'medium' ? 'warning' : 'secondary'
-                        }
-                      >
-                        {prediction.impact === 'high' ? 'Alto Impacto' : 
-                         prediction.impact === 'medium' ? 'Médio Impacto' : 'Baixo Impacto'}
-                      </Badge>
-                      <span className="text-3xl font-bold text-primary">
-                        {Math.round(prediction.probability * 100)}%
-                      </span>
-                    </div>
-                    <h3 className="font-medium">{prediction.scenario}</h3>
-                    <p className="mt-2 text-sm text-muted-foreground">
-                      {prediction.recommendation}
-                    </p>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </TabsContent>
-
-          <TabsContent value="heatmaps" className="space-y-4">
-            <div className="grid gap-6 md:grid-cols-2">
-              <Card variant="tactical">
-                <CardHeader>
-                  <CardTitle>Lewandowski - Zonas de Atuação</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <FootballField 
-                    heatmap={mockPlayerStats[0]?.heatmap}
-                    showGrid
-                  />
-                </CardContent>
-              </Card>
-              <Card variant="tactical">
-                <CardHeader>
-                  <CardTitle>Time da Casa - Ocupação de Espaço</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <FootballField 
-                    heatmap={{
-                      zones: [
-                        { x: 50, y: 50, intensity: 0.7 },
-                        { x: 70, y: 40, intensity: 0.9 },
-                        { x: 70, y: 60, intensity: 0.85 },
-                        { x: 30, y: 50, intensity: 0.5 },
-                        { x: 85, y: 50, intensity: 0.6 },
-                      ]
-                    }}
-                    showGrid
-                  />
-                </CardContent>
-              </Card>
-            </div>
-          </TabsContent>
-        </Tabs>
+              <TabsContent value="events" className="space-y-4">
+                {events.length > 0 ? (
+                  <div className="space-y-2">
+                    {events.map((event) => (
+                      <Card key={event.id} variant="glass">
+                        <CardContent className="py-3 px-4">
+                          <div className="flex items-center gap-4">
+                            <Badge variant={
+                              event.event_type === 'goal' ? 'success' :
+                              event.event_type.includes('card') ? 'destructive' :
+                              event.event_type === 'foul' ? 'warning' : 'outline'
+                            }>
+                              {event.minute ? `${event.minute}'` : '—'}
+                            </Badge>
+                            <div className="flex-1">
+                              <p className="font-medium capitalize">{event.event_type.replace(/_/g, ' ')}</p>
+                              {event.description && (
+                                <p className="text-sm text-muted-foreground">{event.description}</p>
+                              )}
+                            </div>
+                            {event.metadata?.team && (
+                              <Badge variant="outline">{event.metadata.team}</Badge>
+                            )}
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <Card variant="glass">
+                    <CardContent className="py-8 text-center text-muted-foreground">
+                      Nenhum evento registrado
+                    </CardContent>
+                  </Card>
+                )}
+              </TabsContent>
+            </Tabs>
+          </>
+        )}
       </div>
     </AppLayout>
   );
