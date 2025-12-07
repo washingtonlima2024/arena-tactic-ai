@@ -15,10 +15,12 @@ import {
   Sparkles,
   Clock,
   Users,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useAllCompletedMatches, useMatchEvents, useMatchAnalysis } from '@/hooks/useMatchDetails';
+import { useNarrationGeneration } from '@/hooks/useNarrationGeneration';
 import {
   Select,
   SelectContent,
@@ -27,8 +29,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 
+type VoiceType = 'narrator' | 'commentator' | 'dynamic';
+
 export default function Audio() {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTime, setCurrentTime] = useState(0);
+  const [duration, setDuration] = useState(0);
+  const [selectedVoice, setSelectedVoice] = useState<VoiceType>('narrator');
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  
   const { data: matches, isLoading: matchesLoading } = useAllCompletedMatches();
   const [selectedMatchId, setSelectedMatchId] = useState<string>('');
   
@@ -37,6 +46,7 @@ export default function Audio() {
   
   const { data: events } = useMatchEvents(matchId);
   const { data: analysis } = useMatchAnalysis(matchId);
+  const { isGenerating, narration, generateNarration, downloadAudio } = useNarrationGeneration();
 
   // Get highlights from events (goals, saves, etc.)
   const highlights = events?.filter(e => 
@@ -45,6 +55,81 @@ export default function Audio() {
     time: `${e.minute}'`,
     event: e.description || e.event_type
   })) || [];
+
+  // Audio player controls
+  useEffect(() => {
+    if (narration?.audioContent && !audioRef.current) {
+      const audio = document.createElement('audio') as HTMLAudioElement;
+      audio.src = `data:audio/mp3;base64,${narration.audioContent}`;
+      audioRef.current = audio;
+      
+      audio.addEventListener('loadedmetadata', () => {
+        setDuration(audio.duration);
+      });
+      
+      audio.addEventListener('timeupdate', () => {
+        setCurrentTime(audio.currentTime);
+      });
+      
+      audio.addEventListener('ended', () => {
+        setIsPlaying(false);
+        setCurrentTime(0);
+      });
+    }
+    
+    return () => {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+    };
+  }, [narration?.audioContent]);
+
+  const togglePlay = () => {
+    if (!audioRef.current) return;
+    
+    if (isPlaying) {
+      audioRef.current.pause();
+    } else {
+      audioRef.current.play();
+    }
+    setIsPlaying(!isPlaying);
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const handleGenerateNarration = async () => {
+    if (!selectedMatch || !events?.length) return;
+    
+    // Clean up previous audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+
+    await generateNarration(
+      matchId,
+      events,
+      selectedMatch.home_team?.name || 'Time Casa',
+      selectedMatch.away_team?.name || 'Time Fora',
+      selectedMatch.home_score || 0,
+      selectedMatch.away_score || 0,
+      selectedVoice
+    );
+  };
+
+  const handleDownload = () => {
+    if (!narration?.audioContent) return;
+    const filename = `narracao-${selectedMatch?.home_team?.short_name || 'home'}-vs-${selectedMatch?.away_team?.short_name || 'away'}.mp3`;
+    downloadAudio(narration.audioContent, filename);
+  };
 
   if (matchesLoading) {
     return (
@@ -73,6 +158,12 @@ export default function Audio() {
   const homeTeamShort = selectedMatch?.home_team?.short_name || homeTeamName.slice(0, 3).toUpperCase();
   const awayTeamShort = selectedMatch?.away_team?.short_name || awayTeamName.slice(0, 3).toUpperCase();
 
+  const voiceOptions = [
+    { id: 'narrator', name: 'Narrador Clássico', description: 'Estilo tradicional brasileiro' },
+    { id: 'commentator', name: 'Comentarista Técnico', description: 'Análise tática detalhada' },
+    { id: 'dynamic', name: 'Locutor Dinâmico', description: 'Alta energia e emoção' },
+  ];
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -97,9 +188,22 @@ export default function Audio() {
                 ))}
               </SelectContent>
             </Select>
-            <Button variant="arena">
-              <Sparkles className="mr-2 h-4 w-4" />
-              Gerar Áudio
+            <Button 
+              variant="arena" 
+              onClick={handleGenerateNarration}
+              disabled={isGenerating || !events?.length}
+            >
+              {isGenerating ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Gerando...
+                </>
+              ) : (
+                <>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  Gerar Áudio
+                </>
+              )}
             </Button>
           </div>
         </div>
@@ -160,7 +264,11 @@ export default function Audio() {
                           {homeTeamName} vs {awayTeamName}
                         </CardDescription>
                       </div>
-                      <Badge variant="arena">Em breve</Badge>
+                      {narration ? (
+                        <Badge variant="success">Pronto</Badge>
+                      ) : (
+                        <Badge variant="arena">Aguardando geração</Badge>
+                      )}
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-6">
@@ -173,15 +281,17 @@ export default function Audio() {
                             className="w-1 rounded-full bg-primary/30"
                             style={{ 
                               height: `${20 + Math.random() * 60}%`,
-                              opacity: i < 35 ? 1 : 0.3
+                              opacity: duration > 0 && i < (currentTime / duration) * 100 ? 1 : 0.3
                             }}
                           />
                         ))}
                       </div>
-                      <div 
-                        className="absolute left-0 top-0 h-full bg-gradient-to-r from-primary/20 to-transparent"
-                        style={{ width: '35%' }}
-                      />
+                      {duration > 0 && (
+                        <div 
+                          className="absolute left-0 top-0 h-full bg-gradient-to-r from-primary/20 to-transparent transition-all"
+                          style={{ width: `${(currentTime / duration) * 100}%` }}
+                        />
+                      )}
                     </div>
 
                     {/* Controls */}
@@ -189,8 +299,8 @@ export default function Audio() {
                       <Button 
                         variant="arena" 
                         size="icon-lg"
-                        onClick={() => setIsPlaying(!isPlaying)}
-                        disabled
+                        onClick={togglePlay}
+                        disabled={!narration}
                       >
                         {isPlaying ? (
                           <Pause className="h-6 w-6" />
@@ -199,25 +309,35 @@ export default function Audio() {
                         )}
                       </Button>
                       <div className="flex-1">
-                        <Progress value={0} className="h-2" />
+                        <Progress value={duration > 0 ? (currentTime / duration) * 100 : 0} className="h-2" />
                         <div className="mt-1 flex justify-between text-xs text-muted-foreground">
-                          <span>00:00</span>
-                          <span>--:--</span>
+                          <span>{formatTime(currentTime)}</span>
+                          <span>{duration > 0 ? formatTime(duration) : '--:--'}</span>
                         </div>
                       </div>
-                      <Button variant="ghost" size="icon" disabled>
+                      <Button variant="ghost" size="icon" disabled={!narration}>
                         <Volume2 className="h-5 w-5" />
                       </Button>
-                      <Button variant="outline" disabled>
+                      <Button variant="outline" onClick={handleDownload} disabled={!narration}>
                         <Download className="mr-2 h-4 w-4" />
                         Download
                       </Button>
                     </div>
 
+                    {/* Script Preview */}
+                    {narration?.script && (
+                      <div className="rounded-lg bg-muted/50 p-4 max-h-40 overflow-y-auto">
+                        <p className="text-sm font-medium mb-2">Script da Narração:</p>
+                        <p className="text-sm text-muted-foreground whitespace-pre-wrap">
+                          {narration.script}
+                        </p>
+                      </div>
+                    )}
+
                     {/* Info */}
                     <div className="grid grid-cols-3 gap-4 rounded-lg bg-muted/50 p-4">
                       <div className="text-center">
-                        <p className="text-2xl font-bold">--:--</p>
+                        <p className="text-2xl font-bold">{duration > 0 ? formatTime(duration) : '--:--'}</p>
                         <p className="text-xs text-muted-foreground">Duração</p>
                       </div>
                       <div className="text-center">
@@ -240,15 +360,12 @@ export default function Audio() {
                     <CardTitle className="text-lg">Vozes Disponíveis</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    {[
-                      { name: 'Narrador Clássico', description: 'Estilo tradicional brasileiro' },
-                      { name: 'Comentarista Técnico', description: 'Análise tática detalhada' },
-                      { name: 'Locutor Dinâmico', description: 'Alta energia e emoção' },
-                    ].map((voice, i) => (
+                    {voiceOptions.map((voice) => (
                       <div 
-                        key={i}
+                        key={voice.id}
+                        onClick={() => setSelectedVoice(voice.id as VoiceType)}
                         className={`flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
-                          i === 0 ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'
+                          selectedVoice === voice.id ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'
                         }`}
                       >
                         <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
@@ -258,7 +375,7 @@ export default function Audio() {
                           <p className="text-sm font-medium">{voice.name}</p>
                           <p className="text-xs text-muted-foreground">{voice.description}</p>
                         </div>
-                        {i === 0 && <Badge variant="arena">Ativo</Badge>}
+                        {selectedVoice === voice.id && <Badge variant="arena">Ativo</Badge>}
                       </div>
                     ))}
                   </CardContent>
