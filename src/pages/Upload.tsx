@@ -24,7 +24,7 @@ import {
   Brain,
   BarChart3
 } from 'lucide-react';
-import { mockTeams } from '@/data/mockData';
+import { useTeams } from '@/hooks/useTeams';
 import { toast } from '@/hooks/use-toast';
 
 interface UploadedFile {
@@ -39,6 +39,7 @@ export default function VideoUpload() {
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const { data: teams = [], isLoading: teamsLoading } = useTeams();
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -246,12 +247,12 @@ export default function VideoUpload() {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Time da Casa</Label>
-                  <Select>
+                  <Select disabled={teamsLoading}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecione o time" />
+                      <SelectValue placeholder={teamsLoading ? "Carregando..." : "Selecione o time"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {mockTeams.map(team => (
+                      {teams.map(team => (
                         <SelectItem key={team.id} value={team.id}>
                           {team.name}
                         </SelectItem>
@@ -262,12 +263,12 @@ export default function VideoUpload() {
 
                 <div className="space-y-2">
                   <Label>Time Visitante</Label>
-                  <Select>
+                  <Select disabled={teamsLoading}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Selecione o time" />
+                      <SelectValue placeholder={teamsLoading ? "Carregando..." : "Selecione o time"} />
                     </SelectTrigger>
                     <SelectContent>
-                      {mockTeams.map(team => (
+                      {teams.map(team => (
                         <SelectItem key={team.id} value={team.id}>
                           {team.name}
                         </SelectItem>
