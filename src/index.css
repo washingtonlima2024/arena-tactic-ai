@@ -2,95 +2,107 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Definition of the design system. All colors, gradients, fonts, etc should be defined here. 
-All colors MUST be HSL.
-*/
+@import url('https://fonts.googleapis.com/css2?family=Manrope:wght@300;400;500;600;700;800&family=Outfit:wght@300;400;500;600;700&display=swap');
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* Arena Play Brand Colors - Emerald Sports Theme */
+    --background: 160 30% 4%;
+    --foreground: 150 20% 95%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 160 25% 8%;
+    --card-foreground: 150 20% 95%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover: 160 25% 6%;
+    --popover-foreground: 150 20% 95%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 158 72% 32%;
+    --primary-foreground: 150 20% 98%;
+    --primary-glow: 158 80% 45%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 160 20% 15%;
+    --secondary-foreground: 150 20% 90%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 160 15% 12%;
+    --muted-foreground: 160 10% 55%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 158 65% 40%;
+    --accent-foreground: 150 20% 98%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --success: 142 76% 36%;
+    --success-foreground: 0 0% 100%;
 
-    --radius: 0.5rem;
+    --warning: 38 92% 50%;
+    --warning-foreground: 0 0% 0%;
 
-    --sidebar-background: 0 0% 98%;
+    --border: 160 20% 18%;
+    --input: 160 20% 15%;
+    --ring: 158 72% 32%;
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+    --radius: 0.75rem;
 
-    --sidebar-primary: 240 5.9% 10%;
+    /* Arena Play Custom Tokens */
+    --arena-emerald: 158 72% 32%;
+    --arena-teal: 173 58% 39%;
+    --arena-dark: 160 30% 4%;
+    --arena-surface: 160 25% 8%;
+    --arena-glow: 158 100% 50%;
+    --arena-cream: 45 33% 94%;
 
-    --sidebar-primary-foreground: 0 0% 98%;
+    /* Gradients */
+    --gradient-arena: linear-gradient(135deg, hsl(158 72% 32%) 0%, hsl(173 58% 39%) 100%);
+    --gradient-dark: linear-gradient(180deg, hsl(160 30% 4%) 0%, hsl(160 25% 8%) 100%);
+    --gradient-card: linear-gradient(145deg, hsl(160 25% 10%) 0%, hsl(160 25% 6%) 100%);
+    --gradient-glow: radial-gradient(ellipse at center, hsl(158 100% 50% / 0.15) 0%, transparent 70%);
 
-    --sidebar-accent: 240 4.8% 95.9%;
+    /* Shadows */
+    --shadow-arena: 0 4px 30px hsl(158 72% 32% / 0.15);
+    --shadow-glow: 0 0 40px hsl(158 100% 50% / 0.3);
+    --shadow-card: 0 8px 32px hsl(0 0% 0% / 0.4);
 
-    --sidebar-accent-foreground: 240 5.9% 10%;
+    /* Animations */
+    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-smooth: 300ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-spring: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
 
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 160 25% 6%;
+    --sidebar-foreground: 150 20% 90%;
+    --sidebar-primary: 158 72% 32%;
+    --sidebar-primary-foreground: 150 20% 98%;
+    --sidebar-accent: 160 20% 12%;
+    --sidebar-accent-foreground: 150 20% 90%;
+    --sidebar-border: 160 20% 15%;
+    --sidebar-ring: 158 72% 32%;
   }
 
-  .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
+  .light {
+    --background: 45 33% 97%;
+    --foreground: 160 30% 10%;
 
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
+    --card: 0 0% 100%;
+    --card-foreground: 160 30% 10%;
 
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 160 30% 10%;
 
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
+    --primary: 158 72% 28%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
+    --secondary: 160 15% 90%;
+    --secondary-foreground: 160 30% 15%;
 
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
+    --muted: 160 15% 92%;
+    --muted-foreground: 160 20% 40%;
 
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
+    --accent: 158 65% 35%;
+    --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
-    --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --border: 160 20% 85%;
+    --input: 160 20% 90%;
+    --ring: 158 72% 28%;
   }
 }
 
@@ -99,7 +111,194 @@ All colors MUST be HSL.
     @apply border-border;
   }
 
+  html {
+    scroll-behavior: smooth;
+  }
+
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+    font-family: 'Manrope', system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Outfit', 'Manrope', system-ui, sans-serif;
+    @apply font-semibold tracking-tight;
   }
 }
+
+@layer components {
+  /* Glass Effect */
+  .glass {
+    @apply bg-card/60 backdrop-blur-xl border border-border/50;
+  }
+
+  .glass-strong {
+    @apply bg-card/80 backdrop-blur-2xl border border-border/60;
+  }
+
+  /* Arena Glow Effects */
+  .arena-glow {
+    box-shadow: 0 0 40px hsl(var(--arena-glow) / 0.2),
+                0 0 80px hsl(var(--arena-glow) / 0.1),
+                inset 0 1px 0 hsl(var(--arena-glow) / 0.1);
+  }
+
+  .arena-glow-subtle {
+    box-shadow: 0 0 20px hsl(var(--arena-glow) / 0.1);
+  }
+
+  /* Gradient Text */
+  .gradient-text {
+    @apply bg-clip-text text-transparent;
+    background-image: var(--gradient-arena);
+  }
+
+  /* Tactical Grid Pattern */
+  .tactical-grid {
+    background-image: 
+      linear-gradient(hsl(var(--border) / 0.3) 1px, transparent 1px),
+      linear-gradient(90deg, hsl(var(--border) / 0.3) 1px, transparent 1px);
+    background-size: 40px 40px;
+  }
+
+  .tactical-lines {
+    background-image: 
+      linear-gradient(45deg, transparent 48%, hsl(var(--primary) / 0.1) 49%, hsl(var(--primary) / 0.1) 51%, transparent 52%),
+      linear-gradient(-45deg, transparent 48%, hsl(var(--primary) / 0.1) 49%, hsl(var(--primary) / 0.1) 51%, transparent 52%);
+    background-size: 60px 60px;
+  }
+
+  /* Field Pattern */
+  .field-pattern {
+    background: 
+      repeating-linear-gradient(
+        0deg,
+        hsl(var(--primary) / 0.03) 0px,
+        hsl(var(--primary) / 0.03) 2px,
+        transparent 2px,
+        transparent 40px
+      );
+  }
+
+  /* Stat Card */
+  .stat-card {
+    @apply relative overflow-hidden rounded-xl p-5 glass;
+    background: linear-gradient(145deg, hsl(var(--card)) 0%, hsl(var(--card) / 0.8) 100%);
+  }
+
+  .stat-card::before {
+    content: '';
+    @apply absolute inset-0 opacity-0 transition-opacity duration-300;
+    background: var(--gradient-glow);
+  }
+
+  .stat-card:hover::before {
+    @apply opacity-100;
+  }
+
+  /* Pulse Animation */
+  .pulse-arena {
+    animation: pulse-arena 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  }
+
+  @keyframes pulse-arena {
+    0%, 100% {
+      box-shadow: 0 0 0 0 hsl(var(--primary) / 0.4);
+    }
+    50% {
+      box-shadow: 0 0 0 12px hsl(var(--primary) / 0);
+    }
+  }
+
+  /* Heatmap Gradient */
+  .heatmap-cold { @apply bg-blue-500; }
+  .heatmap-cool { @apply bg-cyan-400; }
+  .heatmap-warm { @apply bg-yellow-400; }
+  .heatmap-hot { @apply bg-orange-500; }
+  .heatmap-intense { @apply bg-red-500; }
+
+  /* Event Type Colors */
+  .event-goal { @apply text-green-400 bg-green-400/10 border-green-400/30; }
+  .event-assist { @apply text-cyan-400 bg-cyan-400/10 border-cyan-400/30; }
+  .event-shot { @apply text-yellow-400 bg-yellow-400/10 border-yellow-400/30; }
+  .event-save { @apply text-blue-400 bg-blue-400/10 border-blue-400/30; }
+  .event-foul { @apply text-orange-400 bg-orange-400/10 border-orange-400/30; }
+  .event-card-yellow { @apply text-yellow-500 bg-yellow-500/10 border-yellow-500/30; }
+  .event-card-red { @apply text-red-500 bg-red-500/10 border-red-500/30; }
+  .event-offside { @apply text-purple-400 bg-purple-400/10 border-purple-400/30; }
+}
+
+@layer utilities {
+  /* Scrollbar Styling */
+  .scrollbar-arena {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--primary)) hsl(var(--muted));
+  }
+
+  .scrollbar-arena::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+
+  .scrollbar-arena::-webkit-scrollbar-track {
+    background: hsl(var(--muted));
+    border-radius: 3px;
+  }
+
+  .scrollbar-arena::-webkit-scrollbar-thumb {
+    background: hsl(var(--primary));
+    border-radius: 3px;
+  }
+
+  /* Fade Edges */
+  .fade-bottom {
+    mask-image: linear-gradient(to bottom, black 80%, transparent 100%);
+  }
+
+  .fade-right {
+    mask-image: linear-gradient(to right, black 80%, transparent 100%);
+  }
+
+  /* Animation Delays */
+  .delay-100 { animation-delay: 100ms; }
+  .delay-200 { animation-delay: 200ms; }
+  .delay-300 { animation-delay: 300ms; }
+  .delay-400 { animation-delay: 400ms; }
+  .delay-500 { animation-delay: 500ms; }
+}
+
+/* Custom Animations */
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.95); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+.animate-float { animation: float 3s ease-in-out infinite; }
+.animate-shimmer { 
+  animation: shimmer 2s linear infinite;
+  background: linear-gradient(90deg, transparent 0%, hsl(var(--primary) / 0.1) 50%, transparent 100%);
+  background-size: 200% 100%;
+}
+.animate-slide-up { animation: slide-up 0.5s ease-out forwards; }
+.animate-slide-in-right { animation: slide-in-right 0.5s ease-out forwards; }
+.animate-scale-in { animation: scale-in 0.3s ease-out forwards; }
