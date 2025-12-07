@@ -12,12 +12,62 @@ import {
   Video,
   Image,
   ListVideo,
-  Sparkles
+  Sparkles,
+  AlertCircle
 } from 'lucide-react';
-import { mockVideoClips, mockMatches } from '@/data/mockData';
+import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
+import { useState } from 'react';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export default function Media() {
-  const match = mockMatches[0];
+  const { data: matches, isLoading: matchesLoading } = useAllCompletedMatches();
+  const [selectedMatchId, setSelectedMatchId] = useState<string>('');
+  
+  const selectedMatch = matches?.find(m => m.id === selectedMatchId) || matches?.[0];
+  const matchId = selectedMatch?.id || '';
+  
+  const { data: events } = useMatchEvents(matchId);
+
+  // Generate clips from events
+  const clips = events?.map((event, index) => ({
+    id: event.id,
+    title: event.description || `${event.event_type} - ${event.minute}'`,
+    type: event.event_type,
+    startTime: (event.minute || 0) * 60,
+    endTime: ((event.minute || 0) * 60) + 15,
+    description: `Minuto ${event.minute}' - ${event.event_type}`
+  })) || [];
+
+  const goalClips = clips.filter(c => c.type === 'goal');
+  const shotClips = clips.filter(c => c.type === 'shot' || c.type === 'shot_on_target');
+
+  if (matchesLoading) {
+    return (
+      <AppLayout>
+        <div className="flex items-center justify-center h-64">
+          <div className="text-muted-foreground">Carregando partidas...</div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  if (!matches?.length) {
+    return (
+      <AppLayout>
+        <div className="flex flex-col items-center justify-center h-64 gap-4">
+          <AlertCircle className="h-12 w-12 text-muted-foreground" />
+          <p className="text-muted-foreground">Nenhuma partida analisada encontrada</p>
+          <p className="text-sm text-muted-foreground">Faça upload e analise uma partida primeiro</p>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>
@@ -30,11 +80,47 @@ export default function Media() {
               Gerencie highlights, cortes e conteúdo para redes sociais
             </p>
           </div>
-          <Button variant="arena">
-            <Sparkles className="mr-2 h-4 w-4" />
-            Gerar Cortes Automáticos
-          </Button>
+          <div className="flex gap-3">
+            <Select value={matchId} onValueChange={setSelectedMatchId}>
+              <SelectTrigger className="w-[280px]">
+                <SelectValue placeholder="Selecione uma partida" />
+              </SelectTrigger>
+              <SelectContent>
+                {matches?.map((match) => (
+                  <SelectItem key={match.id} value={match.id}>
+                    {match.home_team?.name || 'Time Casa'} vs {match.away_team?.name || 'Time Fora'}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button variant="arena">
+              <Sparkles className="mr-2 h-4 w-4" />
+              Gerar Cortes
+            </Button>
+          </div>
         </div>
+
+        {/* Match Info */}
+        {selectedMatch && (
+          <Card variant="glass">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="text-center">
+                    <p className="font-semibold">{selectedMatch.home_team?.name}</p>
+                    <p className="text-2xl font-bold">{selectedMatch.home_score || 0}</p>
+                  </div>
+                  <span className="text-muted-foreground">vs</span>
+                  <div className="text-center">
+                    <p className="font-semibold">{selectedMatch.away_team?.name}</p>
+                    <p className="text-2xl font-bold">{selectedMatch.away_score || 0}</p>
+                  </div>
+                </div>
+                <Badge variant="success">Análise Completa</Badge>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Tabs */}
         <Tabs defaultValue="clips" className="space-y-6">
@@ -61,57 +147,65 @@ export default function Media() {
           <TabsContent value="clips" className="space-y-4">
             <div className="flex items-center justify-between">
               <p className="text-sm text-muted-foreground">
-                {mockVideoClips.length} cortes disponíveis
+                {clips.length} cortes disponíveis baseados nos eventos detectados
               </p>
-              <div className="flex gap-2">
+              {clips.length > 0 && (
                 <Button variant="outline" size="sm">
                   <Download className="mr-2 h-4 w-4" />
                   Baixar Todos
                 </Button>
-              </div>
+              )}
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {mockVideoClips.map(clip => (
-                <Card key={clip.id} variant="glow" className="overflow-hidden">
-                  {/* Video Preview */}
-                  <div className="relative aspect-video bg-muted">
-                    <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-t from-background/80 to-transparent">
-                      <Button variant="arena" size="icon-lg" className="rounded-full">
-                        <Play className="h-6 w-6" />
-                      </Button>
+            {clips.length === 0 ? (
+              <Card variant="glass">
+                <CardContent className="py-12 text-center">
+                  <Video className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                  <p className="text-muted-foreground">Nenhum evento detectado para gerar cortes</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {clips.map(clip => (
+                  <Card key={clip.id} variant="glow" className="overflow-hidden">
+                    <div className="relative aspect-video bg-muted">
+                      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-t from-background/80 to-transparent">
+                        <Button variant="arena" size="icon-lg" className="rounded-full">
+                          <Play className="h-6 w-6" />
+                        </Button>
+                      </div>
+                      <div className="absolute bottom-2 right-2">
+                        <Badge variant="secondary" className="backdrop-blur">
+                          <Clock className="mr-1 h-3 w-3" />
+                          {Math.round((clip.endTime - clip.startTime))}s
+                        </Badge>
+                      </div>
+                      <div className="absolute left-2 top-2">
+                        <Badge variant="arena">{clip.type}</Badge>
+                      </div>
                     </div>
-                    <div className="absolute bottom-2 right-2">
-                      <Badge variant="secondary" className="backdrop-blur">
-                        <Clock className="mr-1 h-3 w-3" />
-                        {Math.round((clip.endTime - clip.startTime))}s
-                      </Badge>
-                    </div>
-                    <div className="absolute left-2 top-2">
-                      <Badge variant="arena">{clip.type}</Badge>
-                    </div>
-                  </div>
-                  <CardContent className="pt-4">
-                    <h3 className="font-medium">{clip.title}</h3>
-                    {clip.description && (
-                      <p className="mt-1 text-sm text-muted-foreground line-clamp-2">
-                        {clip.description}
-                      </p>
-                    )}
-                    <div className="mt-4 flex gap-2">
-                      <Button variant="outline" size="sm" className="flex-1">
-                        <Download className="mr-1 h-3 w-3" />
-                        Download
-                      </Button>
-                      <Button variant="outline" size="sm" className="flex-1">
-                        <Share2 className="mr-1 h-3 w-3" />
-                        Compartilhar
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                    <CardContent className="pt-4">
+                      <h3 className="font-medium">{clip.title}</h3>
+                      {clip.description && (
+                        <p className="mt-1 text-sm text-muted-foreground line-clamp-2">
+                          {clip.description}
+                        </p>
+                      )}
+                      <div className="mt-4 flex gap-2">
+                        <Button variant="outline" size="sm" className="flex-1">
+                          <Download className="mr-1 h-3 w-3" />
+                          Download
+                        </Button>
+                        <Button variant="outline" size="sm" className="flex-1">
+                          <Share2 className="mr-1 h-3 w-3" />
+                          Compartilhar
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </TabsContent>
 
           {/* Playlists Tab */}
@@ -123,33 +217,36 @@ export default function Media() {
                     <div>
                       <CardTitle className="flex items-center gap-2">
                         <div 
-                          className="h-4 w-4 rounded-full"
-                          style={{ backgroundColor: match.homeTeam.primaryColor }}
+                          className="h-4 w-4 rounded-full bg-primary"
                         />
-                        Playlist {match.homeTeam.name}
+                        Playlist {selectedMatch?.home_team?.name || 'Time Casa'}
                       </CardTitle>
                       <CardDescription>Melhores momentos do time</CardDescription>
                     </div>
-                    <Badge variant="arena">3 clipes</Badge>
+                    <Badge variant="arena">{goalClips.length} gols</Badge>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {mockVideoClips.filter((_, i) => i < 2).map(clip => (
-                    <div key={clip.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
-                      <div className="flex h-12 w-16 items-center justify-center rounded bg-muted">
-                        <Video className="h-5 w-5 text-muted-foreground" />
+                  {goalClips.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-4 text-center">Nenhum gol registrado</p>
+                  ) : (
+                    goalClips.slice(0, 3).map(clip => (
+                      <div key={clip.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
+                        <div className="flex h-12 w-16 items-center justify-center rounded bg-muted">
+                          <Video className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="truncate text-sm font-medium">{clip.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {Math.round((clip.endTime - clip.startTime))} segundos
+                          </p>
+                        </div>
+                        <Button variant="ghost" size="icon-sm">
+                          <Play className="h-4 w-4" />
+                        </Button>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="truncate text-sm font-medium">{clip.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {Math.round((clip.endTime - clip.startTime))} segundos
-                        </p>
-                      </div>
-                      <Button variant="ghost" size="icon-sm">
-                        <Play className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
+                    ))
+                  )}
                   <Button variant="arena-outline" className="w-full">
                     <Download className="mr-2 h-4 w-4" />
                     Exportar Playlist
@@ -162,34 +259,35 @@ export default function Media() {
                   <div className="flex items-start justify-between">
                     <div>
                       <CardTitle className="flex items-center gap-2">
-                        <div 
-                          className="h-4 w-4 rounded-full"
-                          style={{ backgroundColor: match.awayTeam.primaryColor === '#FFFFFF' ? '#00529F' : match.awayTeam.primaryColor }}
-                        />
-                        Playlist {match.awayTeam.name}
+                        <div className="h-4 w-4 rounded-full bg-secondary" />
+                        Playlist {selectedMatch?.away_team?.name || 'Time Fora'}
                       </CardTitle>
                       <CardDescription>Melhores momentos do time</CardDescription>
                     </div>
-                    <Badge variant="arena">2 clipes</Badge>
+                    <Badge variant="arena">{shotClips.length} finalizações</Badge>
                   </div>
                 </CardHeader>
                 <CardContent className="space-y-3">
-                  {mockVideoClips.filter((_, i) => i >= 1).map(clip => (
-                    <div key={clip.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
-                      <div className="flex h-12 w-16 items-center justify-center rounded bg-muted">
-                        <Video className="h-5 w-5 text-muted-foreground" />
+                  {shotClips.length === 0 ? (
+                    <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma finalização registrada</p>
+                  ) : (
+                    shotClips.slice(0, 3).map(clip => (
+                      <div key={clip.id} className="flex items-center gap-3 rounded-lg border border-border p-3">
+                        <div className="flex h-12 w-16 items-center justify-center rounded bg-muted">
+                          <Video className="h-5 w-5 text-muted-foreground" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="truncate text-sm font-medium">{clip.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {Math.round((clip.endTime - clip.startTime))} segundos
+                          </p>
+                        </div>
+                        <Button variant="ghost" size="icon-sm">
+                          <Play className="h-4 w-4" />
+                        </Button>
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="truncate text-sm font-medium">{clip.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {Math.round((clip.endTime - clip.startTime))} segundos
-                        </p>
-                      </div>
-                      <Button variant="ghost" size="icon-sm">
-                        <Play className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  ))}
+                    ))
+                  )}
                   <Button variant="arena-outline" className="w-full">
                     <Download className="mr-2 h-4 w-4" />
                     Exportar Playlist
@@ -201,23 +299,35 @@ export default function Media() {
 
           {/* Thumbnails Tab */}
           <TabsContent value="thumbnails" className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
-              {Array.from({ length: 6 }).map((_, i) => (
-                <Card key={i} variant="glass" className="overflow-hidden">
-                  <div className="aspect-video bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
-                    <Image className="h-8 w-8 text-muted-foreground" />
-                  </div>
-                  <CardContent className="pt-3">
-                    <p className="text-sm font-medium">Thumbnail {i + 1}</p>
-                    <div className="mt-2 flex gap-2">
-                      <Button variant="outline" size="sm" className="flex-1">
-                        Download
-                      </Button>
+            {goalClips.length === 0 ? (
+              <Card variant="glass">
+                <CardContent className="py-12 text-center">
+                  <Image className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
+                  <p className="text-muted-foreground">Nenhum evento para gerar thumbnails</p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
+                {clips.slice(0, 6).map((clip, i) => (
+                  <Card key={clip.id} variant="glass" className="overflow-hidden">
+                    <div className="aspect-video bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
+                      <div className="text-center">
+                        <Image className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                        <p className="text-xs text-muted-foreground">{clip.type}</p>
+                      </div>
                     </div>
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
+                    <CardContent className="pt-3">
+                      <p className="text-sm font-medium truncate">{clip.title}</p>
+                      <div className="mt-2 flex gap-2">
+                        <Button variant="outline" size="sm" className="flex-1">
+                          Download
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
           </TabsContent>
 
           {/* Social Tab */}
@@ -236,9 +346,9 @@ export default function Media() {
                       </div>
                     </div>
                     <p className="text-sm text-muted-foreground mb-4">
-                      Gere conteúdo otimizado para {platform} com legendas e efeitos automáticos.
+                      Gere conteúdo de {selectedMatch?.home_team?.name} vs {selectedMatch?.away_team?.name} otimizado para {platform}.
                     </p>
-                    <Button variant="arena-outline" className="w-full">
+                    <Button variant="arena-outline" className="w-full" disabled={clips.length === 0}>
                       <Sparkles className="mr-2 h-4 w-4" />
                       Gerar Conteúdo
                     </Button>
