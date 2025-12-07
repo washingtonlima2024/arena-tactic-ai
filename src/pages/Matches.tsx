@@ -1,5 +1,5 @@
 import { AppLayout } from '@/components/layout/AppLayout';
-import { MatchCard } from '@/components/matches/MatchCard';
+import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -10,11 +10,19 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
-import { Search, Filter, Plus, Calendar, Trophy } from 'lucide-react';
-import { mockMatches } from '@/data/mockData';
+import { Search, Filter, Plus, Calendar, Trophy, Loader2, Video } from 'lucide-react';
+import { useMatches } from '@/hooks/useMatches';
 import { Link } from 'react-router-dom';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
 
 export default function Matches() {
+  const { data: matches = [], isLoading } = useMatches();
+
+  const completedMatches = matches.filter(m => m.status === 'completed').length;
+  const analyzingMatches = matches.filter(m => m.status === 'analyzing').length;
+  const pendingMatches = matches.filter(m => m.status === 'pending').length;
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -76,28 +84,108 @@ export default function Matches() {
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div className="rounded-lg border border-border bg-card p-4">
             <p className="text-sm text-muted-foreground">Total</p>
-            <p className="font-display text-2xl font-bold">47</p>
+            <p className="font-display text-2xl font-bold">{matches.length}</p>
           </div>
           <div className="rounded-lg border border-border bg-card p-4">
             <p className="text-sm text-muted-foreground">Analisadas</p>
-            <p className="font-display text-2xl font-bold text-success">42</p>
+            <p className="font-display text-2xl font-bold text-success">{completedMatches}</p>
           </div>
           <div className="rounded-lg border border-border bg-card p-4">
             <p className="text-sm text-muted-foreground">Em análise</p>
-            <p className="font-display text-2xl font-bold text-primary">3</p>
+            <p className="font-display text-2xl font-bold text-primary">{analyzingMatches}</p>
           </div>
           <div className="rounded-lg border border-border bg-card p-4">
-            <p className="text-sm text-muted-foreground">Agendadas</p>
-            <p className="font-display text-2xl font-bold text-muted-foreground">2</p>
+            <p className="text-sm text-muted-foreground">Pendentes</p>
+            <p className="font-display text-2xl font-bold text-muted-foreground">{pendingMatches}</p>
           </div>
         </div>
 
         {/* Matches Grid */}
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {mockMatches.map(match => (
-            <MatchCard key={match.id} match={match} />
-          ))}
-        </div>
+        {isLoading ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          </div>
+        ) : matches.length === 0 ? (
+          <Card variant="glass">
+            <CardContent className="flex flex-col items-center justify-center py-12">
+              <Video className="h-12 w-12 text-muted-foreground mb-4" />
+              <h3 className="text-lg font-semibold mb-2">Nenhuma partida encontrada</h3>
+              <p className="text-muted-foreground text-center mb-4">
+                Importe um vídeo para começar a análise tática
+              </p>
+              <Button variant="arena" asChild>
+                <Link to="/upload">
+                  <Plus className="mr-2 h-4 w-4" />
+                  Importar Partida
+                </Link>
+              </Button>
+            </CardContent>
+          </Card>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {matches.map(match => (
+              <Card key={match.id} variant="glass" className="overflow-hidden hover:border-primary/50 transition-colors">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between mb-4">
+                    <Badge variant={
+                      match.status === 'completed' ? 'success' :
+                      match.status === 'analyzing' ? 'arena' : 'secondary'
+                    }>
+                      {match.status === 'completed' ? 'Analisada' :
+                       match.status === 'analyzing' ? 'Analisando' : 'Pendente'}
+                    </Badge>
+                    {match.competition && (
+                      <span className="text-xs text-muted-foreground">{match.competition}</span>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between gap-4 mb-4">
+                    {/* Home Team */}
+                    <div className="flex-1 text-center">
+                      <div 
+                        className="w-12 h-12 mx-auto mb-2 rounded-full flex items-center justify-center text-white font-bold"
+                        style={{ backgroundColor: match.home_team?.primary_color || '#10b981' }}
+                      >
+                        {match.home_team?.short_name?.slice(0, 2) || 'HM'}
+                      </div>
+                      <p className="text-sm font-medium truncate">{match.home_team?.name || 'Time Casa'}</p>
+                    </div>
+
+                    {/* Score */}
+                    <div className="text-center">
+                      <div className="text-2xl font-bold">
+                        {match.home_score ?? 0} - {match.away_score ?? 0}
+                      </div>
+                    </div>
+
+                    {/* Away Team */}
+                    <div className="flex-1 text-center">
+                      <div 
+                        className="w-12 h-12 mx-auto mb-2 rounded-full flex items-center justify-center text-white font-bold"
+                        style={{ backgroundColor: match.away_team?.primary_color || '#3b82f6' }}
+                      >
+                        {match.away_team?.short_name?.slice(0, 2) || 'AW'}
+                      </div>
+                      <p className="text-sm font-medium truncate">{match.away_team?.name || 'Time Visitante'}</p>
+                    </div>
+                  </div>
+
+                  {match.match_date && (
+                    <p className="text-xs text-center text-muted-foreground">
+                      {format(new Date(match.match_date), "d 'de' MMMM 'de' yyyy", { locale: ptBR })}
+                    </p>
+                  )}
+
+                  {match.status === 'completed' && (
+                    <Button variant="arena-outline" size="sm" className="w-full mt-4" asChild>
+                      <Link to="/analysis">Ver Análise</Link>
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        )}
       </div>
     </AppLayout>
   );

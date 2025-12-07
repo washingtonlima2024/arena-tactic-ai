@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,22 +27,39 @@ import {
   FileText
 } from 'lucide-react';
 import { useTeams } from '@/hooks/useTeams';
+import { useCreateMatch } from '@/hooks/useMatches';
+import { useStartAnalysis, useAnalysisJob } from '@/hooks/useAnalysisJob';
+import { AnalysisProgress } from '@/components/analysis/AnalysisProgress';
 import { toast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 
 interface UploadedFile {
+  file: File;
   name: string;
   size: number;
   type: string;
   progress: number;
   status: 'uploading' | 'processing' | 'complete' | 'error';
+  url?: string;
 }
 
 export default function VideoUpload() {
+  const navigate = useNavigate();
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [srtFile, setSrtFile] = useState<File | null>(null);
+  const [srtContent, setSrtContent] = useState<string>('');
+  const [homeTeamId, setHomeTeamId] = useState<string>('');
+  const [awayTeamId, setAwayTeamId] = useState<string>('');
+  const [competition, setCompetition] = useState<string>('');
+  const [matchDate, setMatchDate] = useState<string>('');
+  const [videoPeriod, setVideoPeriod] = useState<string>('full');
+  const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+
   const { data: teams = [], isLoading: teamsLoading } = useTeams();
+  const createMatch = useCreateMatch();
+  const { startAnalysis, isLoading: isStartingAnalysis } = useStartAnalysis();
+  const analysisJob = useAnalysisJob(currentJobId);
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -53,8 +71,9 @@ export default function VideoUpload() {
     setIsDragging(false);
   }, []);
 
-  const simulateUpload = (file: File) => {
+  const uploadFile = async (file: File) => {
     const newFile: UploadedFile = {
+      file,
       name: file.name,
       size: file.size,
       type: file.type,
@@ -64,30 +83,62 @@ export default function VideoUpload() {
 
     setFiles(prev => [...prev, newFile]);
 
-    // Simulate upload progress
-    let progress = 0;
-    const interval = setInterval(() => {
-      progress += Math.random() * 15;
-      if (progress >= 100) {
-        progress = 100;
-        clearInterval(interval);
+    try {
+      const fileName = `${Date.now()}-${file.name}`;
+      
+      // Simulate progress
+      const progressInterval = setInterval(() => {
         setFiles(prev => 
           prev.map(f => 
-            f.name === file.name 
-              ? { ...f, progress: 100, status: 'complete' }
+            f.name === file.name && f.status === 'uploading'
+              ? { ...f, progress: Math.min(f.progress + 20, 90) }
               : f
           )
         );
-      } else {
-        setFiles(prev => 
-          prev.map(f => 
-            f.name === file.name 
-              ? { ...f, progress }
-              : f
-          )
-        );
-      }
-    }, 200);
+      }, 300);
+
+      // Upload to Supabase Storage
+      const { data, error } = await supabase.storage
+        .from('match-videos')
+        .upload(fileName, file);
+
+      clearInterval(progressInterval);
+
+      if (error) throw error;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('match-videos')
+        .getPublicUrl(fileName);
+
+      setFiles(prev => 
+        prev.map(f => 
+          f.name === file.name 
+            ? { ...f, progress: 100, status: 'complete', url: urlData.publicUrl }
+            : f
+        )
+      );
+
+      toast({
+        title: "Upload concluído",
+        description: `${file.name} foi enviado com sucesso.`
+      });
+
+    } catch (error: any) {
+      console.error('Upload error:', error);
+      setFiles(prev => 
+        prev.map(f => 
+          f.name === file.name 
+            ? { ...f, status: 'error' }
+            : f
+        )
+      );
+      toast({
+        title: "Erro no upload",
+        description: error.message,
+        variant: "destructive"
+      });
+    }
   };
 
   const handleDrop = useCallback((e: React.DragEvent) => {
@@ -107,12 +158,28 @@ export default function VideoUpload() {
       return;
     }
 
-    droppedFiles.forEach(simulateUpload);
+    droppedFiles.forEach(uploadFile);
   }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      Array.from(e.target.files).forEach(simulateUpload);
+      Array.from(e.target.files).forEach(uploadFile);
+    }
+  };
+
+  const handleSrtUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files?.[0]) {
+      const file = e.target.files[0];
+      setSrtFile(file);
+      
+      // Read SRT content
+      const text = await file.text();
+      setSrtContent(text);
+      
+      toast({
+        title: "Arquivo SRT carregado",
+        description: file.name
+      });
     }
   };
 
@@ -120,12 +187,52 @@ export default function VideoUpload() {
     setFiles(prev => prev.filter(f => f.name !== fileName));
   };
 
-  const startAnalysis = () => {
-    setIsAnalyzing(true);
-    toast({
-      title: "Análise iniciada",
-      description: "O processamento do vídeo foi iniciado. Você será notificado quando concluir."
-    });
+  const handleStartAnalysis = async () => {
+    if (!homeTeamId || !awayTeamId) {
+      toast({
+        title: "Selecione os times",
+        description: "É necessário selecionar os dois times para iniciar a análise.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (homeTeamId === awayTeamId) {
+      toast({
+        title: "Times inválidos",
+        description: "O time da casa e visitante devem ser diferentes.",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    try {
+      // Create match
+      const match = await createMatch.mutateAsync({
+        home_team_id: homeTeamId,
+        away_team_id: awayTeamId,
+        competition: competition || undefined,
+        match_date: matchDate ? new Date(matchDate).toISOString() : undefined,
+      });
+
+      // Get video URL from first uploaded file
+      const videoUrl = files.find(f => f.status === 'complete')?.url || '';
+
+      // Start analysis
+      const result = await startAnalysis({
+        matchId: match.id,
+        videoUrl,
+        homeTeamId,
+        awayTeamId,
+        competition,
+        srtContent: srtContent || undefined,
+      });
+
+      setCurrentJobId(result.jobId);
+
+    } catch (error) {
+      console.error('Error starting analysis:', error);
+    }
   };
 
   const formatFileSize = (bytes: number) => {
@@ -135,6 +242,48 @@ export default function VideoUpload() {
   };
 
   const allFilesComplete = files.length > 0 && files.every(f => f.status === 'complete');
+  const isAnalyzing = !!currentJobId && analysisJob?.status === 'processing';
+  const analysisCompleted = analysisJob?.status === 'completed';
+
+  // Show analysis progress if job is active
+  if (currentJobId && analysisJob) {
+    return (
+      <AppLayout>
+        <div className="space-y-6">
+          <div>
+            <h1 className="font-display text-3xl font-bold">Análise em Andamento</h1>
+            <p className="text-muted-foreground">
+              Acompanhe o progresso da análise do vídeo
+            </p>
+          </div>
+
+          <div className="max-w-2xl">
+            <AnalysisProgress job={analysisJob} />
+
+            {analysisCompleted && (
+              <div className="mt-6 flex gap-4">
+                <Button variant="arena" onClick={() => navigate('/matches')}>
+                  Ver Partidas
+                </Button>
+                <Button variant="arena-outline" onClick={() => {
+                  setCurrentJobId(null);
+                  setFiles([]);
+                  setHomeTeamId('');
+                  setAwayTeamId('');
+                  setCompetition('');
+                  setMatchDate('');
+                  setSrtFile(null);
+                  setSrtContent('');
+                }}>
+                  Nova Análise
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout>
@@ -205,15 +354,7 @@ export default function VideoUpload() {
                     <Input
                       type="file"
                       accept=".srt,.vtt"
-                      onChange={(e) => {
-                        if (e.target.files?.[0]) {
-                          setSrtFile(e.target.files[0]);
-                          toast({
-                            title: "Arquivo SRT carregado",
-                            description: e.target.files[0].name
-                          });
-                        }
-                      }}
+                      onChange={handleSrtUpload}
                       className="cursor-pointer"
                     />
                   </div>
@@ -226,7 +367,10 @@ export default function VideoUpload() {
                       <Button
                         variant="ghost"
                         size="icon-sm"
-                        onClick={() => setSrtFile(null)}
+                        onClick={() => {
+                          setSrtFile(null);
+                          setSrtContent('');
+                        }}
                       >
                         <X className="h-4 w-4" />
                       </Button>
@@ -274,6 +418,9 @@ export default function VideoUpload() {
                           {Math.round(file.progress)}%
                         </span>
                       )}
+                      {file.status === 'error' && (
+                        <Badge variant="destructive">Erro</Badge>
+                      )}
                       <Button
                         variant="ghost"
                         size="icon-sm"
@@ -299,8 +446,12 @@ export default function VideoUpload() {
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
-                  <Label>Time da Casa</Label>
-                  <Select disabled={teamsLoading}>
+                  <Label>Time da Casa *</Label>
+                  <Select 
+                    disabled={teamsLoading} 
+                    value={homeTeamId} 
+                    onValueChange={setHomeTeamId}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder={teamsLoading ? "Carregando..." : "Selecione o time"} />
                     </SelectTrigger>
@@ -315,8 +466,12 @@ export default function VideoUpload() {
                 </div>
 
                 <div className="space-y-2">
-                  <Label>Time Visitante</Label>
-                  <Select disabled={teamsLoading}>
+                  <Label>Time Visitante *</Label>
+                  <Select 
+                    disabled={teamsLoading}
+                    value={awayTeamId}
+                    onValueChange={setAwayTeamId}
+                  >
                     <SelectTrigger>
                       <SelectValue placeholder={teamsLoading ? "Carregando..." : "Selecione o time"} />
                     </SelectTrigger>
@@ -332,17 +487,25 @@ export default function VideoUpload() {
 
                 <div className="space-y-2">
                   <Label>Competição</Label>
-                  <Input placeholder="Ex: La Liga, Champions League" />
+                  <Input 
+                    placeholder="Ex: La Liga, Champions League" 
+                    value={competition}
+                    onChange={(e) => setCompetition(e.target.value)}
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label>Data da Partida</Label>
-                  <Input type="date" />
+                  <Input 
+                    type="date" 
+                    value={matchDate}
+                    onChange={(e) => setMatchDate(e.target.value)}
+                  />
                 </div>
 
                 <div className="space-y-2">
                   <Label>Período do Vídeo</Label>
-                  <Select defaultValue="full">
+                  <Select value={videoPeriod} onValueChange={setVideoPeriod}>
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
@@ -403,13 +566,13 @@ export default function VideoUpload() {
               variant="arena" 
               size="xl" 
               className="w-full"
-              disabled={!allFilesComplete || isAnalyzing}
-              onClick={startAnalysis}
+              disabled={!allFilesComplete || isAnalyzing || isStartingAnalysis || !homeTeamId || !awayTeamId}
+              onClick={handleStartAnalysis}
             >
-              {isAnalyzing ? (
+              {isStartingAnalysis ? (
                 <>
                   <Loader2 className="mr-2 h-5 w-5 animate-spin" />
-                  Analisando...
+                  Iniciando...
                 </>
               ) : (
                 <>
@@ -418,6 +581,12 @@ export default function VideoUpload() {
                 </>
               )}
             </Button>
+
+            {teams.length === 0 && !teamsLoading && (
+              <p className="text-center text-sm text-muted-foreground">
+                Cadastre times em Configurações antes de iniciar uma análise.
+              </p>
+            )}
           </div>
         </div>
       </div>
