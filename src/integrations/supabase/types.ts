@@ -14,7 +14,325 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      analysis_jobs: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          current_step: string | null
+          error_message: string | null
+          id: string
+          match_id: string
+          progress: number | null
+          result: Json | null
+          started_at: string | null
+          status: string | null
+          video_id: string | null
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          current_step?: string | null
+          error_message?: string | null
+          id?: string
+          match_id: string
+          progress?: number | null
+          result?: Json | null
+          started_at?: string | null
+          status?: string | null
+          video_id?: string | null
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          current_step?: string | null
+          error_message?: string | null
+          id?: string
+          match_id?: string
+          progress?: number | null
+          result?: Json | null
+          started_at?: string | null
+          status?: string | null
+          video_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "analysis_jobs_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "analysis_jobs_video_id_fkey"
+            columns: ["video_id"]
+            isOneToOne: false
+            referencedRelation: "videos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      api_settings: {
+        Row: {
+          created_at: string
+          id: string
+          is_encrypted: boolean | null
+          setting_key: string
+          setting_value: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_encrypted?: boolean | null
+          setting_key: string
+          setting_value?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_encrypted?: boolean | null
+          setting_key?: string
+          setting_value?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      match_events: {
+        Row: {
+          created_at: string
+          description: string | null
+          event_type: string
+          id: string
+          match_id: string
+          metadata: Json | null
+          minute: number | null
+          player_id: string | null
+          position_x: number | null
+          position_y: number | null
+          second: number | null
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          event_type: string
+          id?: string
+          match_id: string
+          metadata?: Json | null
+          minute?: number | null
+          player_id?: string | null
+          position_x?: number | null
+          position_y?: number | null
+          second?: number | null
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          event_type?: string
+          id?: string
+          match_id?: string
+          metadata?: Json | null
+          minute?: number | null
+          player_id?: string | null
+          position_x?: number | null
+          position_y?: number | null
+          second?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "match_events_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_events_player_id_fkey"
+            columns: ["player_id"]
+            isOneToOne: false
+            referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      matches: {
+        Row: {
+          away_score: number | null
+          away_team_id: string | null
+          competition: string | null
+          created_at: string
+          home_score: number | null
+          home_team_id: string | null
+          id: string
+          match_date: string | null
+          status: string | null
+          updated_at: string
+          venue: string | null
+        }
+        Insert: {
+          away_score?: number | null
+          away_team_id?: string | null
+          competition?: string | null
+          created_at?: string
+          home_score?: number | null
+          home_team_id?: string | null
+          id?: string
+          match_date?: string | null
+          status?: string | null
+          updated_at?: string
+          venue?: string | null
+        }
+        Update: {
+          away_score?: number | null
+          away_team_id?: string | null
+          competition?: string | null
+          created_at?: string
+          home_score?: number | null
+          home_team_id?: string | null
+          id?: string
+          match_date?: string | null
+          status?: string | null
+          updated_at?: string
+          venue?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "matches_away_team_id_fkey"
+            columns: ["away_team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "matches_home_team_id_fkey"
+            columns: ["home_team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      players: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          number: number | null
+          photo_url: string | null
+          position: string | null
+          team_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          number?: number | null
+          photo_url?: string | null
+          position?: string | null
+          team_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          number?: number | null
+          photo_url?: string | null
+          position?: string | null
+          team_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "players_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      teams: {
+        Row: {
+          created_at: string
+          id: string
+          logo_url: string | null
+          name: string
+          primary_color: string | null
+          secondary_color: string | null
+          short_name: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          name: string
+          primary_color?: string | null
+          secondary_color?: string | null
+          short_name?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          name?: string
+          primary_color?: string | null
+          secondary_color?: string | null
+          short_name?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      videos: {
+        Row: {
+          created_at: string
+          duration_seconds: number | null
+          end_minute: number | null
+          file_name: string | null
+          file_url: string
+          id: string
+          match_id: string | null
+          start_minute: number | null
+          status: string | null
+          video_type: string | null
+        }
+        Insert: {
+          created_at?: string
+          duration_seconds?: number | null
+          end_minute?: number | null
+          file_name?: string | null
+          file_url: string
+          id?: string
+          match_id?: string | null
+          start_minute?: number | null
+          status?: string | null
+          video_type?: string | null
+        }
+        Update: {
+          created_at?: string
+          duration_seconds?: number | null
+          end_minute?: number | null
+          file_name?: string | null
+          file_url?: string
+          id?: string
+          match_id?: string | null
+          start_minute?: number | null
+          status?: string | null
+          video_type?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "videos_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       [_ in never]: never

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,11 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { TeamFormDialog } from '@/components/teams/TeamFormDialog';
+import { TeamCard } from '@/components/teams/TeamCard';
+import { useTeams, useCreateTeam, useUpdateTeam, useDeleteTeam, type Team } from '@/hooks/useTeams';
+import { useApiSettings, useUpsertApiSetting } from '@/hooks/useApiSettings';
+import { toast } from 'sonner';
 import { 
   Settings as SettingsIcon, 
   User,
@@ -14,10 +20,73 @@ import {
   Database,
   Key,
   Globe,
-  Zap
+  Zap,
+  Plus,
+  Shield,
+  CheckCircle2,
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 
 export default function Settings() {
+  const [teamDialogOpen, setTeamDialogOpen] = useState(false);
+  const [editingTeam, setEditingTeam] = useState<Team | null>(null);
+  const [deleteConfirmTeam, setDeleteConfirmTeam] = useState<Team | null>(null);
+
+  // Teams
+  const { data: teams, isLoading: teamsLoading } = useTeams();
+  const createTeam = useCreateTeam();
+  const updateTeam = useUpdateTeam();
+  const deleteTeam = useDeleteTeam();
+
+  // API Settings
+  const { data: apiSettings } = useApiSettings();
+  const upsertApiSetting = useUpsertApiSetting();
+
+  const getSetting = (key: string) => {
+    return apiSettings?.find(s => s.setting_key === key)?.setting_value || '';
+  };
+
+  const handleSaveSetting = async (key: string, value: string) => {
+    try {
+      await upsertApiSetting.mutateAsync({ key, value });
+      toast.success('Configuração salva!');
+    } catch (error) {
+      toast.error('Erro ao salvar configuração');
+    }
+  };
+
+  const handleCreateTeam = async (data: any) => {
+    try {
+      await createTeam.mutateAsync(data);
+      toast.success('Time criado com sucesso!');
+      setTeamDialogOpen(false);
+    } catch (error) {
+      toast.error('Erro ao criar time');
+    }
+  };
+
+  const handleUpdateTeam = async (data: any) => {
+    try {
+      await updateTeam.mutateAsync(data);
+      toast.success('Time atualizado!');
+      setTeamDialogOpen(false);
+      setEditingTeam(null);
+    } catch (error) {
+      toast.error('Erro ao atualizar time');
+    }
+  };
+
+  const handleDeleteTeam = async (team: Team) => {
+    try {
+      await deleteTeam.mutateAsync(team.id);
+      toast.success('Time removido!');
+      setDeleteConfirmTeam(null);
+    } catch (error) {
+      toast.error('Erro ao remover time');
+    }
+  };
+
   return (
     <AppLayout>
       <div className="space-y-6">
@@ -25,12 +94,16 @@ export default function Settings() {
         <div>
           <h1 className="font-display text-3xl font-bold">Configurações</h1>
           <p className="text-muted-foreground">
-            Gerencie suas preferências e configurações do sistema
+            Gerencie times, preferências e configurações do sistema
           </p>
         </div>
 
-        <Tabs defaultValue="general" className="space-y-6">
+        <Tabs defaultValue="teams" className="space-y-6">
           <TabsList>
+            <TabsTrigger value="teams">
+              <Shield className="mr-2 h-4 w-4" />
+              Times
+            </TabsTrigger>
             <TabsTrigger value="general">
               <SettingsIcon className="mr-2 h-4 w-4" />
               Geral
@@ -44,6 +117,103 @@ export default function Settings() {
               Notificações
             </TabsTrigger>
           </TabsList>
+
+          {/* Teams Tab */}
+          <TabsContent value="teams" className="space-y-6">
+            <Card variant="glow">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Shield className="h-5 w-5 text-primary" />
+                      Gerenciar Times
+                    </CardTitle>
+                    <CardDescription>
+                      Cadastre e gerencie os times para análise
+                    </CardDescription>
+                  </div>
+                  <Button 
+                    variant="arena" 
+                    onClick={() => {
+                      setEditingTeam(null);
+                      setTeamDialogOpen(true);
+                    }}
+                  >
+                    <Plus className="mr-2 h-4 w-4" />
+                    Novo Time
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                {teamsLoading ? (
+                  <div className="flex items-center justify-center py-12">
+                    <Loader2 className="h-8 w-8 animate-spin text-primary" />
+                  </div>
+                ) : teams && teams.length > 0 ? (
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {teams.map((team) => (
+                      <TeamCard
+                        key={team.id}
+                        team={team}
+                        onEdit={(t) => {
+                          setEditingTeam(t);
+                          setTeamDialogOpen(true);
+                        }}
+                        onDelete={(t) => setDeleteConfirmTeam(t)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center py-12">
+                    <Shield className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
+                    <p className="text-muted-foreground mb-4">
+                      Nenhum time cadastrado ainda
+                    </p>
+                    <Button 
+                      variant="arena-outline" 
+                      onClick={() => setTeamDialogOpen(true)}
+                    >
+                      <Plus className="mr-2 h-4 w-4" />
+                      Cadastrar Primeiro Time
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Delete Confirmation */}
+            {deleteConfirmTeam && (
+              <Card variant="glass" className="border-destructive/50">
+                <CardContent className="p-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <AlertCircle className="h-5 w-5 text-destructive" />
+                      <p>
+                        Confirma a exclusão de <strong>{deleteConfirmTeam.name}</strong>?
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button 
+                        variant="outline" 
+                        size="sm"
+                        onClick={() => setDeleteConfirmTeam(null)}
+                      >
+                        Cancelar
+                      </Button>
+                      <Button 
+                        variant="destructive" 
+                        size="sm"
+                        onClick={() => handleDeleteTeam(deleteConfirmTeam)}
+                        disabled={deleteTeam.isPending}
+                      >
+                        {deleteTeam.isPending ? 'Removendo...' : 'Confirmar'}
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
 
           {/* General Tab */}
           <TabsContent value="general" className="space-y-6">
@@ -135,47 +305,42 @@ export default function Settings() {
                   Integrações de IA
                 </CardTitle>
                 <CardDescription>
-                  Configure as APIs de inteligência artificial
+                  A análise de vídeo e áudio utiliza IA integrada do Lovable Cloud
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
-                <div className="space-y-4">
-                  <div className="rounded-lg border border-border p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                          <Zap className="h-5 w-5 text-primary" />
-                        </div>
-                        <div>
-                          <p className="font-medium">OpenAI GPT-4</p>
-                          <p className="text-xs text-muted-foreground">Transcrição e análise de áudio</p>
-                        </div>
-                      </div>
-                      <Switch defaultChecked />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>API Key</Label>
-                      <Input type="password" defaultValue="sk-...xxxx" />
-                    </div>
+                <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+                  <div className="flex items-center gap-3 mb-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary" />
+                    <p className="font-medium text-primary">Lovable AI Ativo</p>
                   </div>
+                  <p className="text-sm text-muted-foreground">
+                    O sistema utiliza modelos avançados (Gemini 2.5 Flash) para análise de vídeo 
+                    e transcrição de áudio, sem necessidade de configuração adicional.
+                  </p>
+                </div>
 
-                  <div className="rounded-lg border border-border p-4">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-3">
-                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
-                          <Database className="h-5 w-5 text-blue-500" />
-                        </div>
+                <Separator />
+
+                <div className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    Funcionalidades disponíveis:
+                  </p>
+                  <div className="grid gap-3 md:grid-cols-2">
+                    {[
+                      { name: 'Análise de Vídeo', desc: 'Detecção de jogadores, bola e jogadas' },
+                      { name: 'Transcrição de Áudio', desc: 'Conversão de narração em texto' },
+                      { name: 'Geração de Insights', desc: 'Análise tática automatizada' },
+                      { name: 'Extração de Eventos', desc: 'Identificação automática de gols, faltas, etc.' },
+                    ].map((feature) => (
+                      <div key={feature.name} className="flex items-start gap-2 p-3 rounded-lg bg-muted/30">
+                        <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 shrink-0" />
                         <div>
-                          <p className="font-medium">Google Gemini</p>
-                          <p className="text-xs text-muted-foreground">Análise de vídeo e visão computacional</p>
+                          <p className="text-sm font-medium">{feature.name}</p>
+                          <p className="text-xs text-muted-foreground">{feature.desc}</p>
                         </div>
                       </div>
-                      <Switch defaultChecked />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>API Key</Label>
-                      <Input type="password" defaultValue="AIza...xxxx" />
-                    </div>
+                    ))}
                   </div>
                 </div>
               </CardContent>
@@ -188,17 +353,18 @@ export default function Settings() {
                   Banco de Dados
                 </CardTitle>
                 <CardDescription>
-                  Configurações de armazenamento
+                  Status do armazenamento
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>URL do Banco de Dados</Label>
-                  <Input defaultValue="postgresql://localhost:5432/arenaplay" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline">Testar Conexão</Button>
-                  <Button variant="arena-outline">Sincronizar</Button>
+                <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+                  <div className="flex items-center gap-3 mb-2">
+                    <CheckCircle2 className="h-5 w-5 text-primary" />
+                    <p className="font-medium text-primary">Lovable Cloud Conectado</p>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Times, partidas e análises são salvos automaticamente no banco de dados.
+                  </p>
                 </div>
               </CardContent>
             </Card>
@@ -238,6 +404,14 @@ export default function Settings() {
           <Button variant="arena">Salvar Alterações</Button>
         </div>
       </div>
+
+      <TeamFormDialog
+        open={teamDialogOpen}
+        onOpenChange={setTeamDialogOpen}
+        team={editingTeam}
+        onSubmit={editingTeam ? handleUpdateTeam : handleCreateTeam}
+        isLoading={createTeam.isPending || updateTeam.isPending}
+      />
     </AppLayout>
   );
 }
