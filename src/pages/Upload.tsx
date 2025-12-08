@@ -367,7 +367,9 @@ export default function VideoUpload() {
     return (bytes / 1024).toFixed(2) + ' KB';
   };
 
+  // Video is optional when using embed links - analysis can be done from embed
   const hasVideos = videoLinks.length > 0 || files.some(f => f.status === 'complete');
+  const hasEmbed = videoLinks.length > 0;
   const isAnalyzing = !!currentJobId && analysisJob?.status === 'processing';
   const analysisCompleted = analysisJob?.status === 'completed';
 
@@ -642,7 +644,7 @@ export default function VideoUpload() {
                   Arquivo de Legendas (SRT)
                 </CardTitle>
                 <CardDescription>
-                  Importe um arquivo SRT com a narração ou legendas da partida
+                  Opcional: Importe um arquivo SRT ou deixe em branco para extração automática do áudio
                 </CardDescription>
               </CardHeader>
               <CardContent>
@@ -675,7 +677,7 @@ export default function VideoUpload() {
                   )}
                 </div>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Formatos aceitos: .srt, .vtt
+                  Formatos aceitos: .srt, .vtt • Sem arquivo? O sistema extrairá o áudio automaticamente
                 </p>
               </CardContent>
             </Card>
@@ -815,7 +817,13 @@ export default function VideoUpload() {
 
             {!hasVideos && (
               <p className="text-center text-sm text-muted-foreground">
-                Adicione pelo menos um vídeo para iniciar a análise.
+                Adicione pelo menos um vídeo ou link embed para iniciar a análise.
+              </p>
+            )}
+
+            {hasEmbed && !srtFile && (
+              <p className="text-center text-xs text-muted-foreground">
+                💡 Sem arquivo SRT? O sistema irá extrair o áudio automaticamente.
               </p>
             )}
 
