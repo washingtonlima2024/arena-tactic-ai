@@ -3,6 +3,7 @@ import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { SidebarProvider } from "./contexts/SidebarContext";
 import Index from "./pages/Index";
 import Matches from "./pages/Matches";
 import Upload from "./pages/Upload";
@@ -21,23 +22,25 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
-      <Toaster />
-      <Sonner />
-      <BrowserRouter>
-        <Routes>
-          <Route path="/auth" element={<Auth />} />
-          <Route path="/" element={<RequireAuth><Index /></RequireAuth>} />
-          <Route path="/matches" element={<RequireAuth><Matches /></RequireAuth>} />
-          <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
-          <Route path="/analysis" element={<RequireAuth><Analysis /></RequireAuth>} />
-          <Route path="/events" element={<RequireAuth><Events /></RequireAuth>} />
-          <Route path="/media" element={<RequireAuth><Media /></RequireAuth>} />
-          <Route path="/audio" element={<RequireAuth><Audio /></RequireAuth>} />
-          <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
-          <Route path="*" element={<NotFound />} />
-        </Routes>
-        <ArenaChatbot />
-      </BrowserRouter>
+      <SidebarProvider>
+        <Toaster />
+        <Sonner />
+        <BrowserRouter>
+          <Routes>
+            <Route path="/auth" element={<Auth />} />
+            <Route path="/" element={<RequireAuth><Index /></RequireAuth>} />
+            <Route path="/matches" element={<RequireAuth><Matches /></RequireAuth>} />
+            <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
+            <Route path="/analysis" element={<RequireAuth><Analysis /></RequireAuth>} />
+            <Route path="/events" element={<RequireAuth><Events /></RequireAuth>} />
+            <Route path="/media" element={<RequireAuth><Media /></RequireAuth>} />
+            <Route path="/audio" element={<RequireAuth><Audio /></RequireAuth>} />
+            <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
+            <Route path="*" element={<NotFound />} />
+          </Routes>
+          <ArenaChatbot />
+        </BrowserRouter>
+      </SidebarProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );
