@@ -48,7 +48,7 @@ export function MatchCard({ match }: MatchCardProps) {
         .single();
       return data;
     },
-    enabled: match.status === 'completed',
+    enabled: match.status === 'completed' || match.status === 'analyzing',
   });
 
   const formattedDate = new Date(match.date).toLocaleDateString('pt-BR', {
@@ -76,9 +76,85 @@ export function MatchCard({ match }: MatchCardProps) {
     queryClient.invalidateQueries({ queryKey: ['matches'] });
   };
 
+  // Check if video URL is embeddable (iframe) or direct file
+  const isEmbedUrl = matchVideo?.file_url && (
+    matchVideo.file_url.includes('youtube') ||
+    matchVideo.file_url.includes('vimeo') ||
+    matchVideo.file_url.includes('embed') ||
+    matchVideo.file_url.includes('player')
+  );
+
+  // Generate thumbnail from video or use placeholder
+  const getVideoThumbnail = () => {
+    if (!matchVideo?.file_url) return null;
+    
+    // For YouTube videos, extract thumbnail
+    if (matchVideo.file_url.includes('youtube') || matchVideo.file_url.includes('youtu.be')) {
+      const videoId = matchVideo.file_url.match(/(?:youtube\.com\/(?:[^\/]+\/.+\/|(?:v|e(?:mbed)?)\/|.*[?&]v=)|youtu\.be\/)([^"&?\/\s]{11})/)?.[1];
+      if (videoId) {
+        return `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+      }
+    }
+    
+    return null;
+  };
+
+  const thumbnailUrl = getVideoThumbnail();
+
   return (
     <>
       <Card variant="glow" className="overflow-hidden">
+        {/* Video Preview Thumbnail */}
+        {matchVideo && (
+          <div 
+            className="relative aspect-video w-full cursor-pointer overflow-hidden bg-gradient-to-br from-arena/20 to-arena-dark/40"
+            onClick={handleOpenVideo}
+          >
+            {thumbnailUrl ? (
+              <img 
+                src={thumbnailUrl} 
+                alt={`${match.homeTeam.name} vs ${match.awayTeam.name}`}
+                className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
+              />
+            ) : (
+              <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-arena/10 via-background to-arena-dark/20">
+                <div className="text-center">
+                  <div className="mb-2 flex items-center justify-center gap-4">
+                    <div 
+                      className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold"
+                      style={{ backgroundColor: match.homeTeam.primaryColor + '30', color: match.homeTeam.primaryColor }}
+                    >
+                      {match.homeTeam.shortName.slice(0, 2)}
+                    </div>
+                    <span className="text-xl font-bold text-foreground">
+                      {match.score.home} - {match.score.away}
+                    </span>
+                    <div 
+                      className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold"
+                      style={{ backgroundColor: match.awayTeam.primaryColor + '30', color: match.awayTeam.primaryColor }}
+                    >
+                      {match.awayTeam.shortName.slice(0, 2)}
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">{match.competition}</p>
+                </div>
+              </div>
+            )}
+            {/* Play overlay */}
+            <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition-opacity duration-300 hover:opacity-100">
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-arena/90 text-white shadow-lg shadow-arena/50">
+                <Play className="h-8 w-8 fill-current" />
+              </div>
+            </div>
+            {/* Duration badge */}
+            {matchVideo.duration_seconds && (
+              <div className="absolute bottom-2 right-2 rounded bg-black/70 px-2 py-0.5 text-xs font-medium text-white">
+                {Math.floor(matchVideo.duration_seconds / 60)}:{String(matchVideo.duration_seconds % 60).padStart(2, '0')}
+              </div>
+            )}
+          </div>
+        )}
+        
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <Badge variant={statusColors[match.status]}>
@@ -102,32 +178,18 @@ export function MatchCard({ match }: MatchCardProps) {
 
             <div className="flex flex-col items-center">
               {match.status === 'completed' || match.status === 'analyzing' ? (
-                <div className="group relative flex flex-col items-center gap-1">
-                  <div className="flex items-center gap-2 text-2xl font-bold">
-                    <span>{match.score.home}</span>
-                    <span className="text-muted-foreground">-</span>
-                    <span>{match.score.away}</span>
-                    {isAdmin && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="absolute -right-8 h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
-                        onClick={() => setShowEditDialog(true)}
-                      >
-                        <Pencil className="h-3 w-3" />
-                      </Button>
-                    )}
-                  </div>
-                  {/* Preview button */}
-                  {matchVideo && (
+                <div className="group relative flex items-center gap-2 text-2xl font-bold">
+                  <span>{match.score.home}</span>
+                  <span className="text-muted-foreground">-</span>
+                  <span>{match.score.away}</span>
+                  {isAdmin && (
                     <Button
                       variant="ghost"
-                      size="sm"
-                      className="mt-1 h-7 gap-1 text-xs text-arena hover:bg-arena/10 hover:text-arena"
-                      onClick={handleOpenVideo}
+                      size="icon"
+                      className="absolute -right-8 h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
+                      onClick={() => setShowEditDialog(true)}
                     >
-                      <Play className="h-3 w-3" />
-                      Preview
+                      <Pencil className="h-3 w-3" />
                     </Button>
                   )}
                 </div>
