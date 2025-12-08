@@ -44,7 +44,7 @@ export function Sidebar() {
             <img 
               src={arenaLogo} 
               alt="Arena Play Logo" 
-              className="h-10 w-10 rounded-lg object-contain"
+              className="h-12 w-12 rounded-lg object-contain"
             />
             <div>
               <h1 className="font-neon text-lg font-bold tracking-wide neon-text-blue">
@@ -58,7 +58,7 @@ export function Sidebar() {
           <img 
             src={arenaLogo} 
             alt="Arena Play Logo" 
-            className="mx-auto h-10 w-10 rounded-lg object-contain"
+            className="mx-auto h-12 w-12 rounded-lg object-contain"
           />
         )}
       </div>
