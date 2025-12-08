@@ -1,5 +1,6 @@
 import { Progress } from '@/components/ui/progress';
 import { Button } from '@/components/ui/button';
+import { SoccerBallLoader } from '@/components/ui/SoccerBallLoader';
 import { 
   Loader2, 
   CheckCircle2, 
@@ -27,16 +28,16 @@ export function VideoGenerationProgress({
   onPreview,
   onReset
 }: VideoGenerationProgressProps) {
-  const getStageIcon = () => {
-    switch (progress.stage) {
-      case 'complete':
-        return <CheckCircle2 className="h-8 w-8 text-success" />;
-      case 'error':
-        return <XCircle className="h-8 w-8 text-destructive" />;
-      default:
-        return <Loader2 className="h-8 w-8 text-primary animate-spin" />;
-    }
-  };
+  // Show soccer ball loader during processing
+  if (progress.stage !== 'complete' && progress.stage !== 'error') {
+    return (
+      <SoccerBallLoader
+        message={progress.message}
+        progress={progress.progress}
+        showProgress={true}
+      />
+    );
+  }
 
   const getStageColor = () => {
     switch (progress.stage) {
@@ -49,25 +50,27 @@ export function VideoGenerationProgress({
     }
   };
 
+  // For complete/error states, show the result
+  const getStageIcon = () => {
+    if (progress.stage === 'complete') {
+      return <CheckCircle2 className="h-8 w-8 text-success" />;
+    }
+    return <XCircle className="h-8 w-8 text-destructive" />;
+  };
+
   return (
     <div className="space-y-6 py-4">
       {/* Progress Header */}
       <div className="flex flex-col items-center gap-4">
         <div className={cn(
           "flex h-16 w-16 items-center justify-center rounded-full",
-          progress.stage === 'complete' ? "bg-success/20" :
-          progress.stage === 'error' ? "bg-destructive/20" :
-          "bg-primary/20"
+          progress.stage === 'complete' ? "bg-success/20" : "bg-destructive/20"
         )}>
           {getStageIcon()}
         </div>
         
         <div className="text-center">
           <h3 className={cn("font-semibold text-lg", getStageColor())}>
-            {progress.stage === 'loading' && 'Inicializando...'}
-            {progress.stage === 'processing' && 'Processando Clipes'}
-            {progress.stage === 'encoding' && 'Codificando Vídeo'}
-            {progress.stage === 'finalizing' && 'Finalizando'}
             {progress.stage === 'complete' && 'Vídeo Pronto!'}
             {progress.stage === 'error' && 'Erro na Geração'}
           </h3>
@@ -76,38 +79,6 @@ export function VideoGenerationProgress({
           </p>
         </div>
       </div>
-
-      {/* Progress Bar */}
-      {progress.stage !== 'complete' && progress.stage !== 'error' && (
-        <div className="space-y-2">
-          <Progress value={progress.progress} className="h-3" />
-          <div className="flex justify-between text-xs text-muted-foreground">
-            <span>
-              {progress.currentClip && progress.totalClips && (
-                <>Clipe {progress.currentClip}/{progress.totalClips}</>
-              )}
-            </span>
-            <span>{Math.round(progress.progress)}%</span>
-          </div>
-        </div>
-      )}
-
-      {/* Clip Progress Indicator */}
-      {progress.currentClip && progress.totalClips && progress.stage !== 'complete' && (
-        <div className="flex justify-center gap-2">
-          {Array.from({ length: progress.totalClips }).map((_, i) => (
-            <div
-              key={i}
-              className={cn(
-                "h-2 w-8 rounded-full transition-colors",
-                i < (progress.currentClip || 0) ? "bg-primary" :
-                i === (progress.currentClip || 0) - 1 ? "bg-primary animate-pulse" :
-                "bg-muted"
-              )}
-            />
-          ))}
-        </div>
-      )}
 
       {/* Video Preview */}
       {progress.stage === 'complete' && videoUrl && (
@@ -166,20 +137,6 @@ export function VideoGenerationProgress({
           >
             Tentar Novamente
           </Button>
-        </div>
-      )}
-
-      {/* Processing Tips */}
-      {progress.stage !== 'complete' && progress.stage !== 'error' && (
-        <div className="flex items-start gap-3 p-3 bg-muted/50 rounded-lg">
-          <Film className="h-5 w-5 text-primary mt-0.5" />
-          <div className="text-xs text-muted-foreground">
-            <p className="font-medium text-foreground mb-1">Processamento no navegador</p>
-            <p>
-              O vídeo está sendo processado localmente usando FFmpeg WebAssembly. 
-              Isso pode levar alguns minutos dependendo do número de clipes.
-            </p>
-          </div>
         </div>
       )}
     </div>
