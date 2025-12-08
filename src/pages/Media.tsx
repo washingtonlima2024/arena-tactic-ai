@@ -688,20 +688,20 @@ export default function Media() {
                   <Button 
                     variant="arena" 
                     size="lg"
-                    disabled={clips.length === 0 || !matchVideo}
+                    disabled={clips.length === 0}
                     onClick={() => {
                       setSelectedPlatform('Vídeo Personalizado');
                       setSocialDialogOpen(true);
                     }}
                   >
                     <Download className="mr-2 h-5 w-5" />
-                    Exportar Vídeo
+                    {matchVideo ? 'Exportar Vídeo' : 'Exportar Imagem'}
                   </Button>
                 </div>
                 {!matchVideo && (
-                  <p className="text-xs text-warning mt-3 flex items-center gap-1">
-                    <AlertCircle className="h-3 w-3" />
-                    Faça upload do vídeo da partida para habilitar a exportação
+                  <p className="text-xs text-muted-foreground mt-3 flex items-center gap-1">
+                    <Sparkles className="h-3 w-3 text-primary" />
+                    Sem vídeo: será gerada uma imagem collage com os clipes selecionados
                   </p>
                 )}
               </CardContent>
