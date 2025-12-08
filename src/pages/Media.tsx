@@ -30,6 +30,7 @@ import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { ClipVignette } from '@/components/media/ClipVignette';
+import { TeamPlaylist } from '@/components/media/TeamPlaylist';
 import { toast } from '@/hooks/use-toast';
 
 export default function Media() {
@@ -491,370 +492,53 @@ export default function Media() {
           {/* Playlists Tab */}
           <TabsContent value="playlists" className="space-y-6">
             <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">
-                Organize os melhores momentos por time para publicação nas redes sociais
-              </p>
-              <Button 
-                variant="arena" 
-                size="sm"
-                onClick={() => {
-                  // Export all playlists
-                  toast({
-                    title: "Exportando playlists",
-                    description: "Em breve disponível para download"
-                  });
-                }}
-              >
-                <Download className="mr-2 h-4 w-4" />
-                Exportar Todas
-              </Button>
+              <div>
+                <p className="text-sm text-muted-foreground">
+                  Organize os clipes por time e marque a sequência de publicação nas redes sociais
+                </p>
+              </div>
             </div>
 
+            {/* Team Playlists Grid */}
             <div className="grid gap-6 lg:grid-cols-2">
               {/* Home Team Playlist */}
-              <Card variant="glow" className="overflow-hidden">
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div 
-                        className="h-10 w-10 rounded-full flex items-center justify-center text-white font-bold text-sm"
-                        style={{ backgroundColor: selectedMatch?.home_team?.primary_color || '#10b981' }}
-                      >
-                        {selectedMatch?.home_team?.short_name?.slice(0, 2) || 'HM'}
-                      </div>
-                      <div>
-                        <CardTitle className="text-lg">
-                          {selectedMatch?.home_team?.name || 'Time Casa'}
-                        </CardTitle>
-                        <CardDescription>Melhores momentos</CardDescription>
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <Badge variant="arena">{goalClips.length} gols</Badge>
-                      <Badge variant="outline">{clips.length} eventos</Badge>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {/* Goals Section */}
-                  {goalClips.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">⚽ Gols</p>
-                      {goalClips.map(clip => {
-                        const thumbnail = getThumbnail(clip.id);
-                        return (
-                          <div 
-                            key={clip.id} 
-                            className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted/50 transition-colors cursor-pointer"
-                            onClick={() => {
-                              if (matchVideo) {
-                                if (thumbnail?.imageUrl) setShowingVignette(true);
-                                setPlayingClipId(clip.id);
-                              }
-                            }}
-                          >
-                            <div className="flex h-12 w-16 items-center justify-center rounded bg-muted overflow-hidden">
-                              {thumbnail?.imageUrl ? (
-                                <img src={thumbnail.imageUrl} alt={clip.title} className="w-full h-full object-cover" />
-                              ) : (
-                                <Video className="h-5 w-5 text-muted-foreground" />
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="truncate text-sm font-medium">{clip.title}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {clip.minute}' • 15 segundos
-                              </p>
-                            </div>
-                            <Button 
-                              variant="ghost" 
-                              size="icon-sm"
-                              disabled={!matchVideo}
-                            >
-                              <Play className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Shots Section */}
-                  {shotClips.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">🎯 Finalizações</p>
-                      {shotClips.slice(0, 5).map(clip => {
-                        const thumbnail = getThumbnail(clip.id);
-                        return (
-                          <div 
-                            key={clip.id} 
-                            className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted/50 transition-colors cursor-pointer"
-                            onClick={() => {
-                              if (matchVideo) {
-                                if (thumbnail?.imageUrl) setShowingVignette(true);
-                                setPlayingClipId(clip.id);
-                              }
-                            }}
-                          >
-                            <div className="flex h-12 w-16 items-center justify-center rounded bg-muted overflow-hidden">
-                              {thumbnail?.imageUrl ? (
-                                <img src={thumbnail.imageUrl} alt={clip.title} className="w-full h-full object-cover" />
-                              ) : (
-                                <Video className="h-5 w-5 text-muted-foreground" />
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="truncate text-sm font-medium">{clip.title}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {clip.minute}' • 15 segundos
-                              </p>
-                            </div>
-                            <Button 
-                              variant="ghost" 
-                              size="icon-sm"
-                              disabled={!matchVideo}
-                            >
-                              <Play className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        );
-                      })}
-                      {shotClips.length > 5 && (
-                        <p className="text-xs text-center text-muted-foreground">
-                          + {shotClips.length - 5} finalizações
-                        </p>
-                      )}
-                    </div>
-                  )}
-
-                  {goalClips.length === 0 && shotClips.length === 0 && (
-                    <div className="py-8 text-center">
-                      <Video className="mx-auto h-10 w-10 text-muted-foreground mb-2" />
-                      <p className="text-sm text-muted-foreground">Nenhum evento registrado</p>
-                    </div>
-                  )}
-
-                  <div className="pt-2 flex gap-2">
-                    <Button variant="arena-outline" className="flex-1" size="sm">
-                      <Download className="mr-2 h-4 w-4" />
-                      Exportar
-                    </Button>
-                    <Button variant="outline" className="flex-1" size="sm">
-                      <Share2 className="mr-2 h-4 w-4" />
-                      Compartilhar
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+              <TeamPlaylist
+                team={{
+                  id: selectedMatch?.home_team?.id || '',
+                  name: selectedMatch?.home_team?.name || 'Time Casa',
+                  short_name: selectedMatch?.home_team?.short_name,
+                  primary_color: selectedMatch?.home_team?.primary_color
+                }}
+                teamType="home"
+                clips={clips}
+                getThumbnail={getThumbnail}
+                onPlayClip={(clipId) => {
+                  const thumbnail = getThumbnail(clipId);
+                  if (thumbnail?.imageUrl) setShowingVignette(true);
+                  setPlayingClipId(clipId);
+                }}
+                hasVideo={!!matchVideo}
+              />
 
               {/* Away Team Playlist */}
-              <Card variant="glow" className="overflow-hidden">
-                <CardHeader className="pb-3">
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-3">
-                      <div 
-                        className="h-10 w-10 rounded-full flex items-center justify-center text-white font-bold text-sm"
-                        style={{ backgroundColor: selectedMatch?.away_team?.primary_color || '#3b82f6' }}
-                      >
-                        {selectedMatch?.away_team?.short_name?.slice(0, 2) || 'AW'}
-                      </div>
-                      <div>
-                        <CardTitle className="text-lg">
-                          {selectedMatch?.away_team?.name || 'Time Visitante'}
-                        </CardTitle>
-                        <CardDescription>Melhores momentos</CardDescription>
-                      </div>
-                    </div>
-                    <div className="flex flex-col items-end gap-1">
-                      <Badge variant="secondary">{shotClips.length} finalizações</Badge>
-                      <Badge variant="outline">{clips.length} eventos</Badge>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {/* Defensive Plays */}
-                  {clips.filter(c => c.type === 'foul' || c.type === 'interception' || c.type === 'tackle').length > 0 ? (
-                    <div className="space-y-2">
-                      <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">🛡️ Jogadas Defensivas</p>
-                      {clips.filter(c => c.type === 'foul' || c.type === 'interception' || c.type === 'tackle').slice(0, 5).map(clip => {
-                        const thumbnail = getThumbnail(clip.id);
-                        return (
-                          <div 
-                            key={clip.id} 
-                            className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted/50 transition-colors cursor-pointer"
-                            onClick={() => {
-                              if (matchVideo) {
-                                if (thumbnail?.imageUrl) setShowingVignette(true);
-                                setPlayingClipId(clip.id);
-                              }
-                            }}
-                          >
-                            <div className="flex h-12 w-16 items-center justify-center rounded bg-muted overflow-hidden">
-                              {thumbnail?.imageUrl ? (
-                                <img src={thumbnail.imageUrl} alt={clip.title} className="w-full h-full object-cover" />
-                              ) : (
-                                <Video className="h-5 w-5 text-muted-foreground" />
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="truncate text-sm font-medium">{clip.title}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {clip.minute}' • 15 segundos
-                              </p>
-                            </div>
-                            <Button 
-                              variant="ghost" 
-                              size="icon-sm"
-                              disabled={!matchVideo}
-                            >
-                              <Play className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ) : null}
-
-                  {/* Key Moments */}
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">⭐ Momentos-Chave</p>
-                    {clips.filter(c => c.type === 'corner' || c.type === 'freekick' || c.type === 'offside').length > 0 ? (
-                      clips.filter(c => c.type === 'corner' || c.type === 'freekick' || c.type === 'offside').slice(0, 5).map(clip => {
-                        const thumbnail = getThumbnail(clip.id);
-                        return (
-                          <div 
-                            key={clip.id} 
-                            className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted/50 transition-colors cursor-pointer"
-                            onClick={() => {
-                              if (matchVideo) {
-                                if (thumbnail?.imageUrl) setShowingVignette(true);
-                                setPlayingClipId(clip.id);
-                              }
-                            }}
-                          >
-                            <div className="flex h-12 w-16 items-center justify-center rounded bg-muted overflow-hidden">
-                              {thumbnail?.imageUrl ? (
-                                <img src={thumbnail.imageUrl} alt={clip.title} className="w-full h-full object-cover" />
-                              ) : (
-                                <Video className="h-5 w-5 text-muted-foreground" />
-                              )}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="truncate text-sm font-medium">{clip.title}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {clip.minute}' • 15 segundos
-                              </p>
-                            </div>
-                            <Button 
-                              variant="ghost" 
-                              size="icon-sm"
-                              disabled={!matchVideo}
-                            >
-                              <Play className="h-4 w-4" />
-                            </Button>
-                          </div>
-                        );
-                      })
-                    ) : (
-                      <p className="text-sm text-muted-foreground py-4 text-center">Nenhum momento registrado</p>
-                    )}
-                  </div>
-
-                  <div className="pt-2 flex gap-2">
-                    <Button variant="arena-outline" className="flex-1" size="sm">
-                      <Download className="mr-2 h-4 w-4" />
-                      Exportar
-                    </Button>
-                    <Button variant="outline" className="flex-1" size="sm">
-                      <Share2 className="mr-2 h-4 w-4" />
-                      Compartilhar
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+              <TeamPlaylist
+                team={{
+                  id: selectedMatch?.away_team?.id || '',
+                  name: selectedMatch?.away_team?.name || 'Time Visitante',
+                  short_name: selectedMatch?.away_team?.short_name,
+                  primary_color: selectedMatch?.away_team?.primary_color
+                }}
+                teamType="away"
+                clips={clips}
+                getThumbnail={getThumbnail}
+                onPlayClip={(clipId) => {
+                  const thumbnail = getThumbnail(clipId);
+                  if (thumbnail?.imageUrl) setShowingVignette(true);
+                  setPlayingClipId(clipId);
+                }}
+                hasVideo={!!matchVideo}
+              />
             </div>
-
-            {/* Combined Highlights Playlist */}
-            <Card variant="glass">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <div>
-                    <CardTitle className="flex items-center gap-2">
-                      <ListVideo className="h-5 w-5 text-primary" />
-                      Playlist Completa da Partida
-                    </CardTitle>
-                    <CardDescription>
-                      Todos os momentos importantes em ordem cronológica
-                    </CardDescription>
-                  </div>
-                  <Badge variant="arena">{clips.length} clipes</Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                {clips.length === 0 ? (
-                  <div className="py-8 text-center">
-                    <Video className="mx-auto h-10 w-10 text-muted-foreground mb-2" />
-                    <p className="text-sm text-muted-foreground">Nenhum evento registrado na partida</p>
-                  </div>
-                ) : (
-                  <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
-                    {clips.sort((a, b) => a.minute - b.minute).map((clip, index) => {
-                      const thumbnail = getThumbnail(clip.id);
-                      return (
-                        <div 
-                          key={clip.id} 
-                          className="flex items-center gap-3 rounded-lg border border-border p-3 hover:bg-muted/50 transition-colors cursor-pointer group"
-                          onClick={() => {
-                            if (matchVideo) {
-                              if (thumbnail?.imageUrl) setShowingVignette(true);
-                              setPlayingClipId(clip.id);
-                            }
-                          }}
-                        >
-                          <span className="text-xs text-muted-foreground w-6 text-center">{index + 1}</span>
-                          <div className="flex h-10 w-14 items-center justify-center rounded bg-muted overflow-hidden flex-shrink-0">
-                            {thumbnail?.imageUrl ? (
-                              <img src={thumbnail.imageUrl} alt={clip.title} className="w-full h-full object-cover" />
-                            ) : (
-                              <Video className="h-4 w-4 text-muted-foreground" />
-                            )}
-                          </div>
-                          <Badge variant="outline" className="text-xs shrink-0">{clip.minute}'</Badge>
-                          <Badge 
-                            variant={clip.type === 'goal' ? 'arena' : clip.type === 'shot' ? 'secondary' : 'outline'}
-                            className="text-xs shrink-0"
-                          >
-                            {clip.type}
-                          </Badge>
-                          <div className="flex-1 min-w-0">
-                            <p className="truncate text-sm">{clip.title}</p>
-                          </div>
-                          <Button 
-                            variant="ghost" 
-                            size="icon-sm"
-                            className="opacity-0 group-hover:opacity-100 transition-opacity"
-                            disabled={!matchVideo}
-                          >
-                            <Play className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-                
-                <div className="pt-4 flex gap-2">
-                  <Button variant="arena" className="flex-1">
-                    <Download className="mr-2 h-4 w-4" />
-                    Exportar Playlist Completa
-                  </Button>
-                  <Button variant="outline">
-                    <Share2 className="mr-2 h-4 w-4" />
-                    Compartilhar
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
           </TabsContent>
 
           {/* Thumbnails Tab */}
