@@ -68,7 +68,7 @@ export function useNarrationGeneration() {
       });
 
       if (error) {
-        throw new Error(error.message || 'Failed to generate narration');
+        throw new Error(error.message || 'Falha ao gerar narração');
       }
 
       if (data.error) {

@@ -86,7 +86,7 @@ export function usePodcastGeneration() {
       });
 
       if (error) {
-        throw new Error(error.message || 'Failed to generate podcast');
+        throw new Error(error.message || 'Falha ao gerar podcast');
       }
 
       if (data.error) {
