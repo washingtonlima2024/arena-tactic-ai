@@ -147,7 +147,8 @@ export function useAllCompletedMatches() {
   return useQuery({
     queryKey: ['completed-matches'],
     queryFn: async () => {
-      const { data, error } = await supabase
+      // Fetch matches with teams
+      const { data: matches, error: matchError } = await supabase
         .from('matches')
         .select(`
           *,
@@ -157,8 +158,52 @@ export function useAllCompletedMatches() {
         .eq('status', 'completed')
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      return data as MatchWithDetails[];
+      if (matchError) throw matchError;
+      
+      // Fetch all events to calculate goals if scores are 0
+      const { data: allEvents } = await supabase
+        .from('match_events')
+        .select('match_id, event_type, metadata');
+      
+      // Calculate scores from goals if database scores are 0
+      const matchesWithCalculatedScores = matches?.map(match => {
+        const matchEvents = allEvents?.filter(e => e.match_id === match.id) || [];
+        const goalEvents = matchEvents.filter(e => e.event_type === 'goal');
+        
+        // If database has 0-0 but there are goal events, calculate from events
+        if ((match.home_score === 0 && match.away_score === 0) && goalEvents.length > 0) {
+          let homeGoals = 0;
+          let awayGoals = 0;
+          
+          goalEvents.forEach(goal => {
+            const metadata = goal.metadata as Record<string, any> | null;
+            const team = metadata?.team || metadata?.scoring_team;
+            if (team === 'home' || team === match.home_team?.name) {
+              homeGoals++;
+            } else if (team === 'away' || team === match.away_team?.name) {
+              awayGoals++;
+            } else {
+              // Default: alternate goals (fallback)
+              if (homeGoals <= awayGoals) {
+                homeGoals++;
+              } else {
+                awayGoals++;
+              }
+            }
+          });
+          
+          return {
+            ...match,
+            home_score: homeGoals,
+            away_score: awayGoals,
+            _calculated: true
+          };
+        }
+        
+        return match;
+      }) || [];
+
+      return matchesWithCalculatedScores as MatchWithDetails[];
     },
   });
 }
