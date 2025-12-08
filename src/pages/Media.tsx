@@ -181,12 +181,43 @@ export default function Media() {
                   <Badge variant="outline">Sem vídeo vinculado</Badge>
                 )}
               </div>
-              {clips.length > 0 && matchVideo && (
-                <Button variant="outline" size="sm">
-                  <Download className="mr-2 h-4 w-4" />
-                  Baixar Todos
-                </Button>
-              )}
+              <div className="flex gap-2">
+                {clips.length > 0 && clips.some(c => !getThumbnail(c.id)) && (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => {
+                      const eventsToGenerate = clips
+                        .filter(c => !getThumbnail(c.id))
+                        .map(c => ({
+                          eventId: c.id,
+                          eventType: c.type,
+                          minute: c.minute,
+                          homeTeam: selectedMatch?.home_team?.name || 'Time Casa',
+                          awayTeam: selectedMatch?.away_team?.name || 'Time Fora',
+                          homeScore: selectedMatch?.home_score || 0,
+                          awayScore: selectedMatch?.away_score || 0,
+                          description: c.description
+                        }));
+                      generateAllThumbnails(eventsToGenerate);
+                    }}
+                    disabled={generatingIds.size > 0}
+                  >
+                    {generatingIds.size > 0 ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Image className="mr-2 h-4 w-4" />
+                    )}
+                    Gerar Capas
+                  </Button>
+                )}
+                {clips.length > 0 && matchVideo && (
+                  <Button variant="outline" size="sm">
+                    <Download className="mr-2 h-4 w-4" />
+                    Baixar Todos
+                  </Button>
+                )}
+              </div>
             </div>
 
             {/* Video Player (hidden, used for playback) */}
@@ -211,6 +242,7 @@ export default function Media() {
                 {clips.map(clip => {
                   const thumbnail = getThumbnail(clip.id);
                   const isPlaying = playingClipId === clip.id;
+                  const isGeneratingThumbnail = isGenerating(clip.id);
                   
                   const handlePlayClip = () => {
                     if (!matchVideo || !videoRef.current) return;
@@ -219,7 +251,6 @@ export default function Media() {
                       videoRef.current.pause();
                       setPlayingClipId(null);
                     } else {
-                      // Calculate start time based on video type
                       const videoStartMinute = matchVideo.start_minute || 0;
                       const clipStartSeconds = (clip.minute - videoStartMinute) * 60;
                       
@@ -227,14 +258,26 @@ export default function Media() {
                       videoRef.current.play();
                       setPlayingClipId(clip.id);
                       
-                      // Stop after clip duration
                       setTimeout(() => {
                         if (videoRef.current) {
                           videoRef.current.pause();
                           setPlayingClipId(null);
                         }
-                      }, 15000); // 15 seconds clip
+                      }, 15000);
                     }
+                  };
+
+                  const handleGenerateThumbnail = () => {
+                    generateThumbnail({
+                      eventId: clip.id,
+                      eventType: clip.type,
+                      minute: clip.minute,
+                      homeTeam: selectedMatch?.home_team?.name || 'Time Casa',
+                      awayTeam: selectedMatch?.away_team?.name || 'Time Fora',
+                      homeScore: selectedMatch?.home_score || 0,
+                      awayScore: selectedMatch?.away_score || 0,
+                      description: clip.description
+                    });
                   };
                   
                   return (
@@ -246,15 +289,26 @@ export default function Media() {
                             alt={clip.title}
                             className="w-full h-full object-cover"
                           />
+                        ) : isGeneratingThumbnail ? (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
+                            <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
+                            <p className="text-xs text-muted-foreground">Gerando capa...</p>
+                          </div>
                         ) : (
-                          <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-primary/5" />
+                          <div 
+                            className="absolute inset-0 bg-gradient-to-br from-primary/20 to-primary/5 cursor-pointer hover:from-primary/30 hover:to-primary/10 transition-colors flex flex-col items-center justify-center"
+                            onClick={handleGenerateThumbnail}
+                          >
+                            <Sparkles className="h-8 w-8 text-primary/60 mb-2" />
+                            <p className="text-xs text-muted-foreground">Clique para gerar capa</p>
+                          </div>
                         )}
-                        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-t from-background/80 to-transparent">
-                          {matchVideo ? (
+                        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-t from-background/80 to-transparent pointer-events-none">
+                          {matchVideo && thumbnail?.imageUrl && (
                             <Button 
                               variant="arena" 
                               size="icon-lg" 
-                              className="rounded-full"
+                              className="rounded-full pointer-events-auto"
                               onClick={handlePlayClip}
                             >
                               {isPlaying ? (
@@ -263,11 +317,6 @@ export default function Media() {
                                 <Play className="h-6 w-6" />
                               )}
                             </Button>
-                          ) : (
-                            <div className="text-center p-4">
-                              <Video className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                              <p className="text-xs text-muted-foreground">Vídeo não disponível</p>
-                            </div>
                           )}
                         </div>
                         <div className="absolute bottom-2 right-2">
@@ -293,7 +342,18 @@ export default function Media() {
                           </p>
                         )}
                         <div className="mt-4 flex gap-2">
-                          {matchVideo && (
+                          {!thumbnail?.imageUrl && !isGeneratingThumbnail && (
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="flex-1"
+                              onClick={handleGenerateThumbnail}
+                            >
+                              <Sparkles className="mr-1 h-3 w-3" />
+                              Gerar Capa
+                            </Button>
+                          )}
+                          {matchVideo && thumbnail?.imageUrl && (
                             <Button 
                               variant="outline" 
                               size="sm" 
