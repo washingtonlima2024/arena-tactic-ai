@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -37,15 +38,26 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
 
 export default function Analysis() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const matchIdFromUrl = searchParams.get('match');
+  
   const { data: matches = [], isLoading: matchesLoading } = useAllCompletedMatches();
-  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(matchIdFromUrl);
   const [selectedEventForPlay, setSelectedEventForPlay] = useState<string | null>(null);
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [playingEventId, setPlayingEventId] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Auto-select first match if none selected
-  const currentMatchId = selectedMatchId || matches[0]?.id || null;
+  // Sync URL param with state when URL changes
+  useEffect(() => {
+    if (matchIdFromUrl && matchIdFromUrl !== selectedMatchId) {
+      setSelectedMatchId(matchIdFromUrl);
+      setSelectedEventForPlay(null); // Reset event selection when match changes
+    }
+  }, [matchIdFromUrl]);
+
+  // Use URL param first, then state, then first match as fallback
+  const currentMatchId = matchIdFromUrl || selectedMatchId || matches[0]?.id || null;
   const selectedMatch = matches.find(m => m.id === currentMatchId);
   
   const { data: analysis, isLoading: analysisLoading } = useMatchAnalysis(currentMatchId);
@@ -156,7 +168,15 @@ export default function Analysis() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Select value={currentMatchId || ''} onValueChange={setSelectedMatchId}>
+            <Select 
+              value={currentMatchId || ''} 
+              onValueChange={(value) => {
+                setSelectedMatchId(value);
+                setSelectedEventForPlay(null); // Reset event selection
+                // Update URL to reflect the selected match
+                setSearchParams({ match: value });
+              }}
+            >
               <SelectTrigger className="w-64">
                 <SelectValue placeholder="Selecionar partida" />
               </SelectTrigger>

@@ -21,6 +21,7 @@ import {
 } from 'lucide-react';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
 import { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   Select,
   SelectContent,
@@ -57,16 +58,28 @@ const socialPlatforms = [
 ];
 
 export default function Media() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const matchIdFromUrl = searchParams.get('match');
+  
   const { data: matches, isLoading: matchesLoading } = useAllCompletedMatches();
-  const [selectedMatchId, setSelectedMatchId] = useState<string>('');
+  const [selectedMatchId, setSelectedMatchId] = useState<string>(matchIdFromUrl || '');
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   const [showingVignette, setShowingVignette] = useState(false);
   const [socialDialogOpen, setSocialDialogOpen] = useState(false);
   const [selectedPlatform, setSelectedPlatform] = useState<string>('');
   const [isGeneratingSocial, setIsGeneratingSocial] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Sync URL param with state when URL changes
+  useEffect(() => {
+    if (matchIdFromUrl && matchIdFromUrl !== selectedMatchId) {
+      setSelectedMatchId(matchIdFromUrl);
+      setPlayingClipId(null);
+    }
+  }, [matchIdFromUrl]);
   
-  const selectedMatch = matches?.find(m => m.id === selectedMatchId) || matches?.[0];
+  // Use URL param first, then state, then first match as fallback
+  const selectedMatch = matches?.find(m => m.id === (matchIdFromUrl || selectedMatchId)) || matches?.[0];
   const matchId = selectedMatch?.id || '';
   const queryClient = useQueryClient();
   
@@ -147,7 +160,14 @@ export default function Media() {
             </p>
           </div>
           <div className="flex gap-3">
-            <Select value={matchId} onValueChange={setSelectedMatchId}>
+            <Select 
+              value={matchId} 
+              onValueChange={(value) => {
+                setSelectedMatchId(value);
+                setPlayingClipId(null);
+                setSearchParams({ match: value });
+              }}
+            >
               <SelectTrigger className="w-[280px]">
                 <SelectValue placeholder="Selecione uma partida" />
               </SelectTrigger>

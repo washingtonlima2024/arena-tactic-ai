@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -35,10 +36,13 @@ import { useAuth } from '@/hooks/useAuth';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
 
 export default function Events() {
+  const [searchParams, setSearchParams] = useSearchParams();
+  const matchIdFromUrl = searchParams.get('match');
+  
   const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const { data: matches = [], isLoading: matchesLoading } = useAllCompletedMatches();
-  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(matchIdFromUrl);
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [approvalFilter, setApprovalFilter] = useState<string>('all');
   const [editingEvent, setEditingEvent] = useState<any>(null);
@@ -46,8 +50,15 @@ export default function Events() {
   const [showVignette, setShowVignette] = useState(true);
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
 
-  // Auto-select first match if none selected
-  const currentMatchId = selectedMatchId || matches[0]?.id || null;
+  // Sync URL param with state when URL changes
+  useEffect(() => {
+    if (matchIdFromUrl && matchIdFromUrl !== selectedMatchId) {
+      setSelectedMatchId(matchIdFromUrl);
+    }
+  }, [matchIdFromUrl]);
+
+  // Use URL param first, then state, then first match as fallback
+  const currentMatchId = matchIdFromUrl || selectedMatchId || matches[0]?.id || null;
   const selectedMatch = matches.find(m => m.id === currentMatchId);
   
   const { data: events = [], isLoading: eventsLoading } = useMatchEvents(currentMatchId);
@@ -213,7 +224,13 @@ export default function Events() {
             )}
           </div>
           <div className="flex gap-2">
-            <Select value={currentMatchId || ''} onValueChange={setSelectedMatchId}>
+            <Select 
+              value={currentMatchId || ''} 
+              onValueChange={(value) => {
+                setSelectedMatchId(value);
+                setSearchParams({ match: value });
+              }}
+            >
               <SelectTrigger className="w-64">
                 <SelectValue placeholder="Selecionar partida" />
               </SelectTrigger>
