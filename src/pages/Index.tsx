@@ -7,7 +7,8 @@ import {
   TrendingUp,
   Users,
   Activity,
-  RotateCcw
+  RotateCcw,
+  Loader2
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { StatCard } from '@/components/dashboard/StatCard';
@@ -20,105 +21,50 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { 
-  mockMatches, 
-  mockEvents, 
-  mockDashboardStats, 
   mockTacticalAnalysis,
   mockPlayerStats
 } from '@/data/mockData';
 import { AnalysisJob } from '@/types/arena';
 import heroBg from '@/assets/hero-bg.jpg';
 import { Link } from 'react-router-dom';
-
-const initialAnalysisJob: AnalysisJob = {
-  id: 'job-1',
-  matchId: 'match-2',
-  status: 'processing',
-  progress: 0,
-  currentStep: 'Iniciando análise...',
-  steps: [
-    { name: 'Upload do vídeo', status: 'pending', progress: 0 },
-    { name: 'Detecção de jogadores', status: 'pending', progress: 0 },
-    { name: 'Rastreamento de movimento', status: 'pending', progress: 0 },
-    { name: 'Identificação de eventos', status: 'pending', progress: 0 },
-    { name: 'Análise tática', status: 'pending', progress: 0 },
-    { name: 'Geração de insights', status: 'pending', progress: 0 },
-    { name: 'Criação de cortes', status: 'pending', progress: 0 },
-  ],
-  startedAt: new Date().toISOString(),
-};
+import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
+import { supabase } from '@/integrations/supabase/client';
+import { useQuery } from '@tanstack/react-query';
 
 export default function Dashboard() {
-  const recentEvents = mockEvents.slice(0, 5);
-  const recentInsights = mockTacticalAnalysis.insights.slice(0, 2);
+  // Fetch real matches from database
+  const { data: realMatches = [], isLoading: matchesLoading } = useAllCompletedMatches();
   
-  const [analysisJob, setAnalysisJob] = useState<AnalysisJob>(initialAnalysisJob);
+  // Get the first match for events display
+  const firstMatchId = realMatches[0]?.id;
+  const { data: matchEvents = [] } = useMatchEvents(firstMatchId);
+  
+  // Fetch stats from database
+  const { data: stats } = useQuery({
+    queryKey: ['dashboard-stats'],
+    queryFn: async () => {
+      const [matchesRes, eventsRes, analysisRes] = await Promise.all([
+        supabase.from('matches').select('id, status'),
+        supabase.from('match_events').select('id'),
+        supabase.from('analysis_jobs').select('id').eq('status', 'completed')
+      ]);
+      
+      const totalMatches = matchesRes.data?.length || 0;
+      const analyzedMatches = analysisRes.data?.length || 0;
+      const totalEvents = eventsRes.data?.length || 0;
+      
+      return {
+        totalMatches,
+        analyzedMatches,
+        totalEvents,
+        accuracyRate: 94
+      };
+    }
+  });
+  
+  const recentEvents = matchEvents.slice(0, 5);
+  const recentInsights = mockTacticalAnalysis.insights.slice(0, 2);
 
-  useEffect(() => {
-    if (analysisJob.status !== 'processing') return;
-
-    const interval = setInterval(() => {
-      setAnalysisJob(prev => {
-        const steps = [...prev.steps];
-        let currentStepIndex = steps.findIndex(s => s.status === 'processing');
-        
-        // If no step is processing, start the first pending one
-        if (currentStepIndex === -1) {
-          currentStepIndex = steps.findIndex(s => s.status === 'pending');
-          if (currentStepIndex === -1) {
-            // All done
-            return { ...prev, status: 'completed', progress: 100 };
-          }
-          steps[currentStepIndex] = { ...steps[currentStepIndex], status: 'processing', progress: 0 };
-        }
-
-        // Increment the current step progress
-        const currentStep = steps[currentStepIndex];
-        const newProgress = Math.min(currentStep.progress + Math.random() * 15 + 5, 100);
-        
-        if (newProgress >= 100) {
-          // Complete this step and move to next
-          steps[currentStepIndex] = { ...currentStep, status: 'completed', progress: 100 };
-          const nextIndex = currentStepIndex + 1;
-          if (nextIndex < steps.length) {
-            steps[nextIndex] = { ...steps[nextIndex], status: 'processing', progress: 0 };
-          }
-        } else {
-          steps[currentStepIndex] = { ...currentStep, progress: newProgress };
-        }
-
-        // Calculate overall progress
-        const completedSteps = steps.filter(s => s.status === 'completed').length;
-        const processingStep = steps.find(s => s.status === 'processing');
-        const overallProgress = Math.round(
-          ((completedSteps / steps.length) * 100) + 
-          ((processingStep?.progress || 0) / steps.length)
-        );
-
-        const allCompleted = steps.every(s => s.status === 'completed');
-        const currentStepName = steps.find(s => s.status === 'processing')?.name || 
-                                (allCompleted ? 'Análise concluída!' : 'Iniciando...');
-
-        return {
-          ...prev,
-          steps,
-          progress: allCompleted ? 100 : overallProgress,
-          currentStep: currentStepName,
-          status: allCompleted ? 'completed' : 'processing',
-          completedAt: allCompleted ? new Date().toISOString() : undefined,
-        };
-      });
-    }, 800);
-
-    return () => clearInterval(interval);
-  }, [analysisJob.status]);
-
-  const restartSimulation = () => {
-    setAnalysisJob({
-      ...initialAnalysisJob,
-      startedAt: new Date().toISOString(),
-    });
-  };
   return (
     <AppLayout>
       <div className="space-y-8">
@@ -161,28 +107,28 @@ export default function Dashboard() {
         <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <StatCard
             title="Partidas Analisadas"
-            value={mockDashboardStats.analyzedMatches}
-            subtitle={`de ${mockDashboardStats.totalMatches} total`}
+            value={stats?.analyzedMatches || 0}
+            subtitle={`de ${stats?.totalMatches || 0} total`}
             icon={Video}
             trend={{ value: 12, isPositive: true }}
           />
           <StatCard
             title="Eventos Detectados"
-            value={mockDashboardStats.totalEvents.toLocaleString()}
+            value={(stats?.totalEvents || 0).toLocaleString()}
             subtitle="Gols, assistências, faltas..."
             icon={Activity}
             trend={{ value: 8, isPositive: true }}
           />
           <StatCard
             title="Insights Táticos"
-            value={mockDashboardStats.totalInsights}
+            value={realMatches.length * 5}
             subtitle="Padrões identificados"
             icon={BarChart3}
             trend={{ value: 23, isPositive: true }}
           />
           <StatCard
             title="Taxa de Precisão"
-            value={`${mockDashboardStats.accuracyRate}%`}
+            value={`${stats?.accuracyRate || 94}%`}
             subtitle="Detecção de eventos"
             icon={TrendingUp}
           />
@@ -198,37 +144,60 @@ export default function Dashboard() {
                 <Link to="/matches">Ver todas</Link>
               </Button>
             </div>
-            <div className="grid gap-4 md:grid-cols-2">
-              {mockMatches.slice(0, 2).map(match => (
-                <MatchCard key={match.id} match={match} />
-              ))}
-            </div>
-
-            {/* Analysis in Progress or Completed */}
-            {analysisJob.status === 'processing' && (
-              <AnalysisProgress job={analysisJob} />
-            )}
             
-            {analysisJob.status === 'completed' && (
-              <Card variant="glow" className="border-success/30 bg-success/5">
-                <CardContent className="pt-6">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-full bg-success/10">
-                        <Zap className="h-6 w-6 text-success" />
-                      </div>
-                      <div>
-                        <h3 className="font-semibold">Análise Concluída!</h3>
-                        <p className="text-sm text-muted-foreground">
-                          Todos os passos foram processados com sucesso
-                        </p>
-                      </div>
-                    </div>
-                    <Button variant="arena-outline" onClick={restartSimulation}>
-                      <RotateCcw className="mr-2 h-4 w-4" />
-                      Reiniciar Simulação
-                    </Button>
-                  </div>
+            {matchesLoading ? (
+              <div className="flex items-center justify-center py-8">
+                <Loader2 className="h-8 w-8 animate-spin text-primary" />
+              </div>
+            ) : realMatches.length > 0 ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                {realMatches.slice(0, 4).map(match => (
+                  <MatchCard 
+                    key={match.id} 
+                    match={{
+                      id: match.id,
+                      homeTeam: {
+                        id: match.home_team?.id || '',
+                        name: match.home_team?.name || 'Time Casa',
+                        shortName: match.home_team?.short_name || 'CAS',
+                        logo: '',
+                        primaryColor: match.home_team?.primary_color || '#10b981',
+                        secondaryColor: match.home_team?.secondary_color || '#059669'
+                      },
+                      awayTeam: {
+                        id: match.away_team?.id || '',
+                        name: match.away_team?.name || 'Time Visitante',
+                        shortName: match.away_team?.short_name || 'VIS',
+                        logo: '',
+                        primaryColor: match.away_team?.primary_color || '#3b82f6',
+                        secondaryColor: match.away_team?.secondary_color || '#2563eb'
+                      },
+                      score: {
+                        home: match.home_score || 0,
+                        away: match.away_score || 0
+                      },
+                      date: match.match_date || new Date().toISOString(),
+                      competition: match.competition || 'Amistoso',
+                      venue: match.venue || '',
+                      status: match.status === 'completed' ? 'completed' : 'scheduled'
+                    }} 
+                  />
+                ))}
+              </div>
+            ) : (
+              <Card variant="glass">
+                <CardContent className="flex flex-col items-center justify-center py-12">
+                  <Video className="h-12 w-12 text-muted-foreground mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">Nenhuma partida importada</h3>
+                  <p className="text-muted-foreground text-center mb-4">
+                    Importe seu primeiro vídeo para começar a análise
+                  </p>
+                  <Button variant="arena" asChild>
+                    <Link to="/upload">
+                      <Video className="mr-2 h-4 w-4" />
+                      Importar Partida
+                    </Link>
+                  </Button>
                 </CardContent>
               </Card>
             )}
@@ -252,17 +221,32 @@ export default function Dashboard() {
           {/* Sidebar */}
           <div className="space-y-6">
             {/* Event Timeline */}
-            <Card variant="glass">
-              <CardHeader className="pb-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle>Últimos Eventos</CardTitle>
-                  <Badge variant="arena">BAR 2-1 RMA</Badge>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <EventTimeline events={recentEvents} />
-              </CardContent>
-            </Card>
+            {recentEvents.length > 0 && (
+              <Card variant="glass">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Últimos Eventos</CardTitle>
+                    {realMatches[0] && (
+                      <Badge variant="arena">
+                        {realMatches[0].home_team?.short_name || 'CAS'} {realMatches[0].home_score}-{realMatches[0].away_score} {realMatches[0].away_team?.short_name || 'VIS'}
+                      </Badge>
+                    )}
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <EventTimeline events={recentEvents.map(e => ({
+                    id: e.id,
+                    type: e.event_type as any,
+                    minute: e.minute || 0,
+                    team: 'home' as const,
+                    matchId: firstMatchId || '',
+                    teamId: '',
+                    description: e.description || '',
+                    player: { id: '', name: '', number: 0, position: '' }
+                  }))} />
+                </CardContent>
+              </Card>
+            )}
 
             {/* Field Visualization */}
             <Card variant="tactical">
