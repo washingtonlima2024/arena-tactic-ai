@@ -14,10 +14,11 @@ import {
   ListVideo,
   Sparkles,
   AlertCircle,
-  Loader2
+  Loader2,
+  Pause
 } from 'lucide-react';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Select,
   SelectContent,
@@ -26,25 +27,46 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
+import { supabase } from '@/integrations/supabase/client';
+import { useQuery } from '@tanstack/react-query';
 
 export default function Media() {
   const { data: matches, isLoading: matchesLoading } = useAllCompletedMatches();
   const [selectedMatchId, setSelectedMatchId] = useState<string>('');
+  const [playingClipId, setPlayingClipId] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const { thumbnails, generateThumbnail, generateAllThumbnails, isGenerating, getThumbnail, generatingIds } = useThumbnailGeneration();
   
   const selectedMatch = matches?.find(m => m.id === selectedMatchId) || matches?.[0];
   const matchId = selectedMatch?.id || '';
   
   const { data: events } = useMatchEvents(matchId);
+  
+  // Fetch video for the match
+  const { data: matchVideo } = useQuery({
+    queryKey: ['match-video', matchId],
+    queryFn: async () => {
+      if (!matchId) return null;
+      const { data, error } = await supabase
+        .from('videos')
+        .select('*')
+        .eq('match_id', matchId)
+        .single();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!matchId
+  });
 
   // Generate clips from events
-  const clips = events?.map((event, index) => ({
+  const clips = events?.map((event) => ({
     id: event.id,
     title: event.description || `${event.event_type} - ${event.minute}'`,
     type: event.event_type,
     startTime: (event.minute || 0) * 60,
     endTime: ((event.minute || 0) * 60) + 15,
-    description: `Minuto ${event.minute}' - ${event.event_type}`
+    description: `Minuto ${event.minute}' - ${event.event_type}`,
+    minute: event.minute || 0
   })) || [];
 
   const goalClips = clips.filter(c => c.type === 'goal');
@@ -149,16 +171,33 @@ export default function Media() {
           {/* Clips Tab */}
           <TabsContent value="clips" className="space-y-4">
             <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">
-                {clips.length} cortes disponíveis baseados nos eventos detectados
-              </p>
-              {clips.length > 0 && (
+              <div className="flex items-center gap-3">
+                <p className="text-sm text-muted-foreground">
+                  {clips.length} cortes disponíveis baseados nos eventos detectados
+                </p>
+                {matchVideo ? (
+                  <Badge variant="success">Vídeo disponível</Badge>
+                ) : (
+                  <Badge variant="outline">Sem vídeo vinculado</Badge>
+                )}
+              </div>
+              {clips.length > 0 && matchVideo && (
                 <Button variant="outline" size="sm">
                   <Download className="mr-2 h-4 w-4" />
                   Baixar Todos
                 </Button>
               )}
             </div>
+
+            {/* Video Player (hidden, used for playback) */}
+            {matchVideo && (
+              <video 
+                ref={videoRef} 
+                src={matchVideo.file_url}
+                className="hidden"
+                onEnded={() => setPlayingClipId(null)}
+              />
+            )}
 
             {clips.length === 0 ? (
               <Card variant="glass">
@@ -169,44 +208,120 @@ export default function Media() {
               </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {clips.map(clip => (
-                  <Card key={clip.id} variant="glow" className="overflow-hidden">
-                    <div className="relative aspect-video bg-muted">
-                      <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-t from-background/80 to-transparent">
-                        <Button variant="arena" size="icon-lg" className="rounded-full">
-                          <Play className="h-6 w-6" />
-                        </Button>
+                {clips.map(clip => {
+                  const thumbnail = getThumbnail(clip.id);
+                  const isPlaying = playingClipId === clip.id;
+                  
+                  const handlePlayClip = () => {
+                    if (!matchVideo || !videoRef.current) return;
+                    
+                    if (isPlaying) {
+                      videoRef.current.pause();
+                      setPlayingClipId(null);
+                    } else {
+                      // Calculate start time based on video type
+                      const videoStartMinute = matchVideo.start_minute || 0;
+                      const clipStartSeconds = (clip.minute - videoStartMinute) * 60;
+                      
+                      videoRef.current.currentTime = Math.max(0, clipStartSeconds);
+                      videoRef.current.play();
+                      setPlayingClipId(clip.id);
+                      
+                      // Stop after clip duration
+                      setTimeout(() => {
+                        if (videoRef.current) {
+                          videoRef.current.pause();
+                          setPlayingClipId(null);
+                        }
+                      }, 15000); // 15 seconds clip
+                    }
+                  };
+                  
+                  return (
+                    <Card key={clip.id} variant="glow" className="overflow-hidden">
+                      <div className="relative aspect-video bg-muted">
+                        {thumbnail?.imageUrl ? (
+                          <img 
+                            src={thumbnail.imageUrl} 
+                            alt={clip.title}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : (
+                          <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-primary/5" />
+                        )}
+                        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-t from-background/80 to-transparent">
+                          {matchVideo ? (
+                            <Button 
+                              variant="arena" 
+                              size="icon-lg" 
+                              className="rounded-full"
+                              onClick={handlePlayClip}
+                            >
+                              {isPlaying ? (
+                                <Pause className="h-6 w-6" />
+                              ) : (
+                                <Play className="h-6 w-6" />
+                              )}
+                            </Button>
+                          ) : (
+                            <div className="text-center p-4">
+                              <Video className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                              <p className="text-xs text-muted-foreground">Vídeo não disponível</p>
+                            </div>
+                          )}
+                        </div>
+                        <div className="absolute bottom-2 right-2">
+                          <Badge variant="secondary" className="backdrop-blur">
+                            <Clock className="mr-1 h-3 w-3" />
+                            15s
+                          </Badge>
+                        </div>
+                        <div className="absolute left-2 top-2">
+                          <Badge variant="arena">{clip.type}</Badge>
+                        </div>
+                        <div className="absolute left-2 bottom-2">
+                          <Badge variant="outline" className="backdrop-blur">
+                            {clip.minute}'
+                          </Badge>
+                        </div>
                       </div>
-                      <div className="absolute bottom-2 right-2">
-                        <Badge variant="secondary" className="backdrop-blur">
-                          <Clock className="mr-1 h-3 w-3" />
-                          {Math.round((clip.endTime - clip.startTime))}s
-                        </Badge>
-                      </div>
-                      <div className="absolute left-2 top-2">
-                        <Badge variant="arena">{clip.type}</Badge>
-                      </div>
-                    </div>
-                    <CardContent className="pt-4">
-                      <h3 className="font-medium">{clip.title}</h3>
-                      {clip.description && (
-                        <p className="mt-1 text-sm text-muted-foreground line-clamp-2">
-                          {clip.description}
-                        </p>
-                      )}
-                      <div className="mt-4 flex gap-2">
-                        <Button variant="outline" size="sm" className="flex-1">
-                          <Download className="mr-1 h-3 w-3" />
-                          Download
-                        </Button>
-                        <Button variant="outline" size="sm" className="flex-1">
-                          <Share2 className="mr-1 h-3 w-3" />
-                          Compartilhar
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                      <CardContent className="pt-4">
+                        <h3 className="font-medium">{clip.title}</h3>
+                        {clip.description && (
+                          <p className="mt-1 text-sm text-muted-foreground line-clamp-2">
+                            {clip.description}
+                          </p>
+                        )}
+                        <div className="mt-4 flex gap-2">
+                          {matchVideo && (
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="flex-1"
+                              onClick={handlePlayClip}
+                            >
+                              {isPlaying ? (
+                                <>
+                                  <Pause className="mr-1 h-3 w-3" />
+                                  Pausar
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="mr-1 h-3 w-3" />
+                                  Reproduzir
+                                </>
+                              )}
+                            </Button>
+                          )}
+                          <Button variant="outline" size="sm" className="flex-1">
+                            <Share2 className="mr-1 h-3 w-3" />
+                            Compartilhar
+                          </Button>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             )}
           </TabsContent>
