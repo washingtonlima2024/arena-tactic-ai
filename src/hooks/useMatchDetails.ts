@@ -102,13 +102,41 @@ export function useMatchEvents(matchId: string | null) {
     queryFn: async () => {
       if (!matchId) return [];
 
-      const { data, error } = await supabase
+      // First get the video time range for this match
+      const { data: videos } = await supabase
+        .from('videos')
+        .select('start_minute, end_minute')
+        .eq('match_id', matchId)
+        .not('start_minute', 'is', null)
+        .not('end_minute', 'is', null);
+
+      // Get all events for this match
+      let query = supabase
         .from('match_events')
         .select('*')
         .eq('match_id', matchId)
         .order('minute', { ascending: true });
 
+      const { data, error } = await query;
+
       if (error) throw error;
+
+      // Filter events to only those within video time range if videos exist
+      if (videos && videos.length > 0) {
+        const videoRanges = videos.map(v => ({
+          start: v.start_minute ?? 0,
+          end: v.end_minute ?? 90
+        }));
+
+        // Keep events that fall within any video segment
+        return (data as MatchEvent[]).filter(event => {
+          if (event.minute === null) return true; // Keep events without minute
+          return videoRanges.some(range => 
+            event.minute! >= range.start && event.minute! <= range.end
+          );
+        });
+      }
+
       return data as MatchEvent[];
     },
     enabled: !!matchId,
