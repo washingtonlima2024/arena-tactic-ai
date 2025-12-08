@@ -40,6 +40,7 @@ import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import soccerBall from '@/assets/soccer-ball.png';
+import arenaPlayWordmark from '@/assets/arena-play-wordmark.png';
 
 interface VideoLink {
   id: string;
@@ -445,13 +446,13 @@ export default function VideoUpload() {
       {/* Ambient Glow */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-primary/5 blur-[100px] rounded-full" />
 
-      {/* Title with Soccer Ball */}
+      {/* Title with Arena Play Wordmark */}
       <div className="relative text-center mb-6 pt-4">
-        <h1 className="text-5xl md:text-6xl lg:text-7xl neon-text-blue flex items-center justify-center gap-1">
-          <span className="text-6xl md:text-7xl lg:text-8xl">A</span>rena Visi
-          <img src={soccerBall} alt="" className="h-12 w-12 md:h-14 md:w-14 lg:h-16 lg:w-16 inline-block animate-spin-slow" />
-          n
-        </h1>
+        <img 
+          src={arenaPlayWordmark} 
+          alt="Arena Play" 
+          className="h-16 md:h-20 lg:h-24 mx-auto"
+        />
         <p className="text-muted-foreground mt-2">
           Análise Inteligente de Futebol
         </p>
