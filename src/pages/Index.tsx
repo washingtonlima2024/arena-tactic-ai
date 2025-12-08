@@ -212,6 +212,8 @@ export default function Dashboard() {
                   <Heatmap3D
                     homeTeam={realMatches[0]?.home_team?.name || 'Time Casa'}
                     awayTeam={realMatches[0]?.away_team?.name || 'Time Visitante'}
+                    homeColor={realMatches[0]?.home_team?.primary_color || '#10b981'}
+                    awayColor={realMatches[0]?.away_team?.primary_color || '#3b82f6'}
                     homePlayers={[
                       { x: 5, y: 50, number: 1, team: 'home', intensity: 0.3 },
                       { x: 20, y: 20, number: 4, team: 'home', intensity: 0.7 },
