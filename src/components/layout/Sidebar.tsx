@@ -13,7 +13,7 @@ import {
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
-import { useState } from 'react';
+import { useSidebarContext } from '@/contexts/SidebarContext';
 import arenaLogo from '@/assets/arena-play-logo.png';
 import kakttusLogo from '@/assets/logo-kakttus.png';
 
@@ -29,7 +29,7 @@ const navItems = [
 ];
 
 export function Sidebar() {
-  const [collapsed, setCollapsed] = useState(false);
+  const { collapsed, toggle } = useSidebarContext();
 
   return (
     <aside
@@ -117,7 +117,7 @@ export function Sidebar() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setCollapsed(!collapsed)}
+          onClick={toggle}
           className="w-full justify-center"
         >
           {collapsed ? (
