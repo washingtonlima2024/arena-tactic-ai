@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Clock, Play } from 'lucide-react';
 
@@ -14,6 +14,79 @@ interface ClipVignetteProps {
   onComplete: () => void;
   duration?: number; // in milliseconds
 }
+
+// Generate synthetic swoosh sound using Web Audio API
+const playSwooshSound = () => {
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    
+    // Create noise buffer for swoosh texture
+    const bufferSize = audioContext.sampleRate * 0.15;
+    const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+    const output = noiseBuffer.getChannelData(0);
+    
+    for (let i = 0; i < bufferSize; i++) {
+      output[i] = Math.random() * 2 - 1;
+    }
+    
+    // Noise source
+    const noise = audioContext.createBufferSource();
+    noise.buffer = noiseBuffer;
+    
+    // Filter for swoosh character
+    const filter = audioContext.createBiquadFilter();
+    filter.type = 'bandpass';
+    filter.frequency.setValueAtTime(1000, audioContext.currentTime);
+    filter.frequency.exponentialRampToValueAtTime(200, audioContext.currentTime + 0.15);
+    filter.Q.value = 1;
+    
+    // Gain envelope
+    const gainNode = audioContext.createGain();
+    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+    
+    // Connect nodes
+    noise.connect(filter);
+    filter.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    noise.start();
+    noise.stop(audioContext.currentTime + 0.15);
+    
+    // Cleanup
+    setTimeout(() => audioContext.close(), 200);
+  } catch (e) {
+    console.log('Audio not available');
+  }
+};
+
+// Play impact sound for exit phase
+const playImpactSound = () => {
+  try {
+    const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+    
+    // Low frequency oscillator for impact
+    const oscillator = audioContext.createOscillator();
+    oscillator.type = 'sine';
+    oscillator.frequency.setValueAtTime(150, audioContext.currentTime);
+    oscillator.frequency.exponentialRampToValueAtTime(40, audioContext.currentTime + 0.1);
+    
+    // Gain envelope
+    const gainNode = audioContext.createGain();
+    gainNode.gain.setValueAtTime(0.4, audioContext.currentTime);
+    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+    
+    oscillator.connect(gainNode);
+    gainNode.connect(audioContext.destination);
+    
+    oscillator.start();
+    oscillator.stop(audioContext.currentTime + 0.15);
+    
+    setTimeout(() => audioContext.close(), 200);
+  } catch (e) {
+    console.log('Audio not available');
+  }
+};
 
 // Generate random particles for the animation
 const generateParticles = (count: number) => {
@@ -45,7 +118,15 @@ export function ClipVignette({
   
   const particles = useMemo(() => generateParticles(20), []);
 
+  const soundPlayedRef = useRef({ enter: false, exit: false });
+
   useEffect(() => {
+    // Play swoosh on mount (enter)
+    if (!soundPlayedRef.current.enter) {
+      playSwooshSound();
+      soundPlayedRef.current.enter = true;
+    }
+
     // Enter phase (0.5s)
     const enterTimer = setTimeout(() => {
       setPhase('hold');
@@ -59,6 +140,11 @@ export function ClipVignette({
     // Exit phase
     const exitTimer = setTimeout(() => {
       setPhase('exit');
+      // Play impact sound on exit
+      if (!soundPlayedRef.current.exit) {
+        playImpactSound();
+        soundPlayedRef.current.exit = true;
+      }
     }, duration - 400);
 
     // Complete
