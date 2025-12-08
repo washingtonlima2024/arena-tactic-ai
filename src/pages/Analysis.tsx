@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -42,6 +42,7 @@ export default function Analysis() {
   const [selectedEventForPlay, setSelectedEventForPlay] = useState<string | null>(null);
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [playingEventId, setPlayingEventId] = useState<string | null>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
 
   // Auto-select first match if none selected
   const currentMatchId = selectedMatchId || matches[0]?.id || null;
@@ -535,28 +536,24 @@ export default function Analysis() {
             <DialogHeader>
               <DialogTitle className="flex items-center justify-between">
                 <span>Reproduzindo Evento - {getEventMinute(playingEventId || '')}'</span>
-                {playingEventId && (
+                {playingEventId && matchVideo && (
                   <Button
                     variant="arena"
                     size="sm"
                     onClick={() => {
                       const eventMinute = getEventMinute(playingEventId);
-                      const videoStartMinute = matchVideo?.start_minute || 0;
+                      const videoStartMinute = matchVideo.start_minute || 0;
                       const eventSeconds = (eventMinute - videoStartMinute) * 60;
                       const startSeconds = Math.max(0, eventSeconds - 10);
                       
-                      // For video element
-                      const videoEl = document.querySelector('dialog video') as HTMLVideoElement;
-                      if (videoEl) {
-                        videoEl.currentTime = startSeconds;
-                        videoEl.play();
-                      }
-                      
-                      // For iframe - reload with timestamp
-                      const iframeEl = document.querySelector('dialog iframe') as HTMLIFrameElement;
-                      if (iframeEl && matchVideo) {
-                        const separator = matchVideo.file_url.includes('?') ? '&' : '?';
-                        iframeEl.src = `${matchVideo.file_url}${separator}t=${startSeconds}&autoplay=1`;
+                      // Use the ref directly
+                      if (videoRef.current) {
+                        videoRef.current.currentTime = startSeconds;
+                        videoRef.current.play();
+                        toast({
+                          title: "Navegando para evento",
+                          description: `Indo para ${Math.floor(startSeconds / 60)}:${String(Math.floor(startSeconds % 60)).padStart(2, '0')}`,
+                        });
                       }
                     }}
                   >
@@ -587,6 +584,7 @@ export default function Analysis() {
                     />
                   ) : (
                     <video
+                      ref={videoRef}
                       src={matchVideo.file_url}
                       controls
                       autoPlay
