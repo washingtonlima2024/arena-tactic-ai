@@ -30,9 +30,7 @@ import {
   Plus,
   Trash2,
   Clock,
-  FolderOpen,
-  Share2,
-  Settings
+  FolderOpen
 } from 'lucide-react';
 import { useTeams } from '@/hooks/useTeams';
 import { useCreateMatch } from '@/hooks/useMatches';
@@ -41,7 +39,6 @@ import { AnalysisProgress } from '@/components/analysis/AnalysisProgress';
 import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import logoKakttus from '@/assets/logo-kakttus.png';
 import soccerBall from '@/assets/soccer-ball.png';
 
 interface VideoLink {
@@ -440,39 +437,16 @@ export default function VideoUpload() {
 
   // Landing-style hero section for Upload
   const HeroSection = () => (
-    <div className="relative mb-8">
+    <div className="relative mb-6">
       {/* Background Grid Effect */}
       <div className="absolute inset-0 tactical-grid opacity-20" />
       <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background" />
       
       {/* Ambient Glow */}
       <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-primary/5 blur-[100px] rounded-full" />
-      
-      {/* Header Bar */}
-      <div className="relative flex items-center justify-between px-4 py-3 border-b border-border/30 mb-8">
-        <div className="flex items-center gap-3">
-          <img src={logoKakttus} alt="Kakttus Solutions" className="h-8 w-8 object-contain" />
-          <div>
-            <h1 className="font-semibold text-foreground text-sm">Kakttus Solutions</h1>
-            <p className="text-xs text-muted-foreground">Tecnologia com Inteligência</p>
-          </div>
-        </div>
-        
-        <div className="flex items-center gap-3">
-          <Link to="/matches" className="text-muted-foreground hover:text-foreground transition-colors">
-            <BarChart3 className="h-4 w-4" />
-          </Link>
-          <Link to="/settings" className="text-muted-foreground hover:text-foreground transition-colors">
-            <Share2 className="h-4 w-4" />
-          </Link>
-          <Link to="/settings" className="text-muted-foreground hover:text-foreground transition-colors">
-            <Settings className="h-4 w-4" />
-          </Link>
-        </div>
-      </div>
 
       {/* Title with Soccer Ball */}
-      <div className="relative text-center mb-6">
+      <div className="relative text-center mb-6 pt-4">
         <h1 className="font-display text-4xl md:text-5xl font-bold neon-text-blue tracking-wide flex items-center justify-center gap-2">
           Arena Visi
           <img src={soccerBall} alt="" className="h-10 w-10 md:h-12 md:w-12 inline-block animate-spin-slow" />
@@ -496,6 +470,49 @@ export default function VideoUpload() {
             Ver Galeria de Partidas
           </Link>
         </Button>
+      </div>
+
+      {/* Upload Mode Tabs - Visual Only */}
+      <div className="relative flex justify-center mb-6">
+        <div className="flex rounded-lg overflow-hidden border border-border/50 max-w-md w-full">
+          <button
+            onClick={() => setUploadMode('file')}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 transition-colors ${
+              uploadMode === 'file' 
+                ? 'bg-secondary/50 text-foreground' 
+                : 'bg-transparent text-muted-foreground hover:bg-secondary/30 hover:text-foreground'
+            }`}
+          >
+            <UploadIcon className="h-4 w-4" />
+            Upload de Arquivo
+          </button>
+          <button
+            onClick={() => setUploadMode('link')}
+            className={`flex-1 flex items-center justify-center gap-2 py-3 transition-colors ${
+              uploadMode === 'link' 
+                ? 'bg-secondary/50 text-foreground' 
+                : 'bg-transparent text-muted-foreground hover:bg-secondary/30 hover:text-foreground'
+            }`}
+          >
+            <LinkIcon className="h-4 w-4" />
+            Link + Legenda
+          </button>
+        </div>
+      </div>
+
+      {/* Upload Icon Circle */}
+      <div className="relative flex flex-col items-center text-center">
+        <div className="w-16 h-16 rounded-full bg-primary/20 flex items-center justify-center mb-4 arena-glow">
+          <UploadIcon className="h-8 w-8 text-primary" />
+        </div>
+        
+        <h2 className="text-xl font-semibold text-foreground mb-2">
+          Enviar Vídeo para Análise
+        </h2>
+        <p className="text-muted-foreground text-sm max-w-md mb-4">
+          Faça upload de um vídeo de futebol para análise tática em tempo real com IA. 
+          Formatos suportados: MP4, WebM, MOV, MKV, AVI (até 500MB - compressão automática para 80MB)
+        </p>
       </div>
 
       <style>{`
