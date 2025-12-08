@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { SidebarProvider } from "./contexts/SidebarContext";
+import Landing from "./pages/Landing";
 import Index from "./pages/Index";
 import Matches from "./pages/Matches";
 import Upload from "./pages/Upload";
@@ -28,6 +29,7 @@ const App = () => (
         <Sonner />
         <BrowserRouter>
           <Routes>
+            <Route path="/welcome" element={<Landing />} />
             <Route path="/auth" element={<Auth />} />
             <Route path="/" element={<RequireAuth><Index /></RequireAuth>} />
             <Route path="/matches" element={<RequireAuth><Matches /></RequireAuth>} />
