@@ -16,7 +16,8 @@ import {
   AlertCircle,
   Loader2,
   Pause,
-  Film
+  Film,
+  CheckCircle
 } from 'lucide-react';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
 import { useState, useRef, useEffect } from 'react';
@@ -28,8 +29,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
+import { useClipGeneration } from '@/hooks/useClipGeneration';
 import { supabase } from '@/integrations/supabase/client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipVignette } from '@/components/media/ClipVignette';
 import { TeamPlaylist } from '@/components/media/TeamPlaylist';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
@@ -66,10 +68,18 @@ export default function Media() {
   
   const selectedMatch = matches?.find(m => m.id === selectedMatchId) || matches?.[0];
   const matchId = selectedMatch?.id || '';
+  const queryClient = useQueryClient();
   
   const { thumbnails, generateThumbnail, generateAllThumbnails, isGenerating, getThumbnail, generatingIds } = useThumbnailGeneration(matchId);
+  const { 
+    generateClip, 
+    generateAllClips, 
+    isGenerating: isGeneratingClips, 
+    isGeneratingEvent: isGeneratingClip,
+    progress: clipProgress 
+  } = useClipGeneration();
   
-  const { data: events } = useMatchEvents(matchId);
+  const { data: events, refetch: refetchEvents } = useMatchEvents(matchId);
   
   // Fetch video for the match
   const { data: matchVideo } = useQuery({
@@ -87,7 +97,7 @@ export default function Media() {
     enabled: !!matchId
   });
 
-  // Generate clips from events
+  // Generate clips from events (include clip_url from database)
   const clips = events?.map((event) => ({
     id: event.id,
     title: event.description || `${event.event_type} - ${event.minute}'`,
@@ -95,7 +105,9 @@ export default function Media() {
     startTime: (event.minute || 0) * 60,
     endTime: ((event.minute || 0) * 60) + 15,
     description: `Minuto ${event.minute}' - ${event.event_type}`,
-    minute: event.minute || 0
+    minute: event.minute || 0,
+    second: event.second || 0,
+    clipUrl: (event as any).clip_url as string | null
   })) || [];
 
   const goalClips = clips.filter(c => c.type === 'goal');
@@ -217,6 +229,56 @@ export default function Media() {
                 )}
               </div>
               <div className="flex gap-2">
+                {/* Generate Clips Button */}
+                {clips.length > 0 && matchVideo && clips.some(c => !c.clipUrl) && (
+                  <Button 
+                    variant="arena" 
+                    size="sm"
+                    onClick={async () => {
+                      if (!matchVideo.file_url || !matchVideo.start_minute || !matchVideo.end_minute || !matchVideo.duration_seconds) {
+                        toast({
+                          title: "Dados de sincronização ausentes",
+                          description: "Configure os tempos de sincronização do vídeo na página de Upload",
+                          variant: "destructive"
+                        });
+                        return;
+                      }
+                      const clipsToGenerate = clips
+                        .filter(c => !c.clipUrl)
+                        .map(c => ({
+                          eventId: c.id,
+                          eventMinute: c.minute,
+                          eventSecond: c.second,
+                          videoUrl: matchVideo.file_url,
+                          videoStartMinute: matchVideo.start_minute || 0,
+                          videoEndMinute: matchVideo.end_minute || 90,
+                          videoDurationSeconds: matchVideo.duration_seconds || 5400,
+                          matchId: matchId
+                        }));
+                      await generateAllClips(clipsToGenerate);
+                      refetchEvents();
+                    }}
+                    disabled={isGeneratingClips}
+                  >
+                    {isGeneratingClips ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        {clipProgress.message}
+                      </>
+                    ) : (
+                      <>
+                        <Scissors className="mr-2 h-4 w-4" />
+                        Extrair Clips ({clips.filter(c => !c.clipUrl).length})
+                      </>
+                    )}
+                  </Button>
+                )}
+                {clips.length > 0 && clips.every(c => c.clipUrl) && (
+                  <Badge variant="success" className="gap-1">
+                    <CheckCircle className="h-3 w-3" />
+                    Todos clips extraídos
+                  </Badge>
+                )}
                 {clips.length > 0 && clips.some(c => !getThumbnail(c.id)) && (
                   <Button 
                     variant="outline" 
@@ -247,7 +309,7 @@ export default function Media() {
                     Gerar Capas
                   </Button>
                 )}
-                {clips.length > 0 && matchVideo && (
+                {clips.length > 0 && clips.some(c => c.clipUrl) && (
                   <Button variant="outline" size="sm">
                     <Download className="mr-2 h-4 w-4" />
                     Baixar Todos
@@ -258,7 +320,7 @@ export default function Media() {
 
             {/* Video Player Modal */}
             <VideoPlayerModal
-              isOpen={!!playingClipId && !!matchVideo}
+              isOpen={!!playingClipId && (!!matchVideo || !!clips.find(c => c.id === playingClipId)?.clipUrl)}
               onClose={() => {
                 setPlayingClipId(null);
                 setShowingVignette(false);
@@ -312,12 +374,16 @@ export default function Media() {
                   const thumbnail = getThumbnail(clip.id);
                   const isPlaying = playingClipId === clip.id;
                   const isGeneratingThumbnail = isGenerating(clip.id);
+                  const isExtractingClip = isGeneratingClip(clip.id);
                   
                   const handlePlayClip = () => {
-                    if (!matchVideo) {
+                    // Se tem clipUrl extraído, pode reproduzir direto
+                    const hasClipUrl = !!clip.clipUrl;
+                    
+                    if (!matchVideo && !hasClipUrl) {
                       toast({
                         title: "Vídeo não disponível",
-                        description: "Faça upload do vídeo da partida para reproduzir os cortes",
+                        description: "Extraia o clip ou faça upload do vídeo da partida",
                         variant: "destructive"
                       });
                       return;
@@ -347,6 +413,28 @@ export default function Media() {
                       matchId: matchId,
                       description: clip.description
                     });
+                  };
+
+                  const handleExtractClip = async () => {
+                    if (!matchVideo?.file_url || !matchVideo.start_minute || !matchVideo.end_minute || !matchVideo.duration_seconds) {
+                      toast({
+                        title: "Dados de sincronização ausentes",
+                        description: "Configure os tempos de sincronização do vídeo na página de Upload",
+                        variant: "destructive"
+                      });
+                      return;
+                    }
+                    await generateClip({
+                      eventId: clip.id,
+                      eventMinute: clip.minute,
+                      eventSecond: clip.second,
+                      videoUrl: matchVideo.file_url,
+                      videoStartMinute: matchVideo.start_minute,
+                      videoEndMinute: matchVideo.end_minute,
+                      videoDurationSeconds: matchVideo.duration_seconds,
+                      matchId: matchId
+                    });
+                    refetchEvents();
                   };
                   
                   return (
@@ -386,10 +474,16 @@ export default function Media() {
                             )}
                           </Button>
                         </div>
-                        <div className="absolute bottom-2 right-2">
+                        <div className="absolute bottom-2 right-2 flex gap-1">
+                          {clip.clipUrl && (
+                            <Badge variant="success" className="backdrop-blur gap-1">
+                              <CheckCircle className="h-3 w-3" />
+                              Extraído
+                            </Badge>
+                          )}
                           <Badge variant="secondary" className="backdrop-blur">
                             <Clock className="mr-1 h-3 w-3" />
-                            15s
+                            20s
                           </Badge>
                         </div>
                         <div className="absolute left-2 top-2">
@@ -420,7 +514,26 @@ export default function Media() {
                               Gerar Capa
                             </Button>
                           )}
-                          {matchVideo && thumbnail?.imageUrl && (
+                          {/* Botão Extrair Clip */}
+                          {matchVideo && !clip.clipUrl && !isExtractingClip && (
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="flex-1"
+                              onClick={handleExtractClip}
+                            >
+                              <Scissors className="mr-1 h-3 w-3" />
+                              Extrair
+                            </Button>
+                          )}
+                          {isExtractingClip && (
+                            <Button variant="outline" size="sm" className="flex-1" disabled>
+                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                              Extraindo...
+                            </Button>
+                          )}
+                          {/* Botão Reproduzir */}
+                          {(clip.clipUrl || matchVideo) && (
                             <Button 
                               variant="outline" 
                               size="sm" 
