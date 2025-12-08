@@ -21,14 +21,14 @@ serve(async (req) => {
     console.log(`Generating narration for match ${matchId} with ${events.length} events`);
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    const GOOGLE_CLOUD_API_KEY = Deno.env.get('GOOGLE_CLOUD_API_KEY');
+    const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY');
 
     if (!LOVABLE_API_KEY) {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
-    if (!GOOGLE_CLOUD_API_KEY) {
-      throw new Error('GOOGLE_CLOUD_API_KEY is not configured');
+    if (!ELEVENLABS_API_KEY) {
+      throw new Error('ELEVENLABS_API_KEY is not configured');
     }
 
     // Step 1: Generate narration script using Lovable AI
@@ -95,49 +95,47 @@ INSTRUÇÕES:
 
     console.log('Script generated successfully, length:', narrationScript.length);
 
-    // Step 2: Convert script to audio using Google Cloud TTS
-    const voiceOptions: Record<string, { name: string; ssmlGender: string }> = {
-      'narrator': { name: 'pt-BR-Wavenet-B', ssmlGender: 'MALE' },
-      'commentator': { name: 'pt-BR-Wavenet-C', ssmlGender: 'FEMALE' },
-      'dynamic': { name: 'pt-BR-Wavenet-A', ssmlGender: 'FEMALE' },
+    // Step 2: Convert script to audio using ElevenLabs TTS
+    // Voice mapping - using Brazilian Portuguese compatible voices
+    const voiceOptions: Record<string, string> = {
+      'narrator': 'onwK4e9ZLuTAKqWW03F9', // Daniel - clear male voice
+      'commentator': 'EXAVITQu4vr4xnSDxMaL', // Sarah - female voice
+      'dynamic': 'CwhRBWXzGAHq8TQ4Fs17', // Roger - energetic male voice
     };
     const selectedVoice = voice || 'narrator';
-    const voiceConfig = voiceOptions[selectedVoice] || voiceOptions['narrator'];
+    const voiceId = voiceOptions[selectedVoice] || voiceOptions['narrator'];
 
-    console.log('Converting to audio with Google TTS...');
+    console.log('Converting to audio with ElevenLabs TTS...');
 
-    const ttsResponse = await fetch(`https://texttospeech.googleapis.com/v1/text:synthesize?key=${GOOGLE_CLOUD_API_KEY}`, {
+    const ttsResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
       method: 'POST',
       headers: {
+        'xi-api-key': ELEVENLABS_API_KEY,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        input: { text: narrationScript },
-        voice: {
-          languageCode: 'pt-BR',
-          name: voiceConfig.name,
-          ssmlGender: voiceConfig.ssmlGender,
-        },
-        audioConfig: {
-          audioEncoding: 'MP3',
-          speakingRate: 1.1,
-          pitch: 0,
+        text: narrationScript,
+        model_id: 'eleven_multilingual_v2',
+        voice_settings: {
+          stability: 0.5,
+          similarity_boost: 0.75,
+          style: 0.5,
+          use_speaker_boost: true,
         },
       }),
     });
 
     if (!ttsResponse.ok) {
       const errorText = await ttsResponse.text();
-      console.error('Google TTS error:', ttsResponse.status, errorText);
+      console.error('ElevenLabs TTS error:', ttsResponse.status, errorText);
       throw new Error(`TTS generation failed: ${errorText}`);
     }
 
-    const ttsData = await ttsResponse.json();
-    const audioContent = ttsData.audioContent;
-
-    if (!audioContent) {
-      throw new Error('Failed to generate audio');
-    }
+    // Convert audio buffer to base64
+    const audioBuffer = await ttsResponse.arrayBuffer();
+    const audioContent = btoa(
+      String.fromCharCode(...new Uint8Array(audioBuffer))
+    );
 
     console.log('Audio generated successfully');
 
@@ -145,7 +143,7 @@ INSTRUÇÕES:
       success: true,
       script: narrationScript,
       audioContent,
-      voice: voiceConfig.name,
+      voice: voiceId,
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
