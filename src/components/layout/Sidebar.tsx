@@ -41,16 +41,16 @@ export function Sidebar() {
       )}
     >
       {/* Logo */}
-      <div className="flex h-16 items-center justify-between border-b border-border px-4">
+      <div className="flex h-20 items-center justify-between border-b border-border px-4">
         {!collapsed && (
           <div className="flex items-center gap-3">
             <img 
               src={arenaLogo} 
               alt="Arena Play Logo" 
-              className="h-12 w-12 rounded-lg object-contain"
+              className="h-14 w-14 rounded-lg object-contain"
             />
             <div>
-              <h1 className="font-neon text-lg font-bold tracking-wide neon-text-blue">
+              <h1 className="text-xl neon-text-blue">
                 ARENA PLAY
               </h1>
               <p className="text-[10px] text-muted-foreground">by Kakttus Solutions</p>
@@ -61,7 +61,7 @@ export function Sidebar() {
           <img 
             src={arenaLogo} 
             alt="Arena Play Logo" 
-            className="mx-auto h-12 w-12 rounded-lg object-contain"
+            className="mx-auto h-14 w-14 rounded-lg object-contain"
           />
         )}
       </div>
