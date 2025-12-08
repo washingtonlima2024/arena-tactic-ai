@@ -20,6 +20,7 @@ interface TeamChatbotCardProps {
   teamName: string;
   teamShort: string;
   teamType: 'home' | 'away';
+  matchId: string;
   matchContext: {
     homeTeam: string;
     awayTeam: string;
@@ -34,6 +35,7 @@ export function TeamChatbotCard({
   teamName, 
   teamShort, 
   teamType,
+  matchId,
   matchContext 
 }: TeamChatbotCardProps) {
   const [inputValue, setInputValue] = useState('');
@@ -44,13 +46,14 @@ export function TeamChatbotCard({
     isLoading,
     isRecording,
     isPlayingAudio,
+    isSaving,
     sendMessage,
     startRecording,
     stopRecording,
     playAudio,
     stopAudio,
     clearMessages,
-  } = useTeamChatbot(teamName, teamType);
+  } = useTeamChatbot(teamName, teamType, matchId);
 
   const handleSend = async () => {
     if (!inputValue.trim() || isLoading) return;

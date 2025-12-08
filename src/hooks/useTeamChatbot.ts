@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 
@@ -6,6 +6,7 @@ interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   audioContent?: string;
+  timestamp?: string;
 }
 
 interface MatchContext {
@@ -17,15 +18,85 @@ interface MatchContext {
   tacticalAnalysis?: string;
 }
 
-export function useTeamChatbot(teamName: string, teamType: 'home' | 'away') {
+export function useTeamChatbot(teamName: string, teamType: 'home' | 'away', matchId?: string) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [isPlayingAudio, setIsPlayingAudio] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const { toast } = useToast();
+
+  // Load conversation from database
+  const loadConversation = useCallback(async () => {
+    if (!matchId) return;
+
+    try {
+      const { data, error } = await supabase
+        .from('chatbot_conversations')
+        .select('*')
+        .eq('match_id', matchId)
+        .eq('team_type', teamType)
+        .maybeSingle();
+
+      if (error) {
+        console.error('Error loading conversation:', error);
+        return;
+      }
+
+      if (data?.messages) {
+        // Parse the messages from JSON
+        const rawMessages = data.messages as unknown;
+        const loadedMessages = Array.isArray(rawMessages) 
+          ? (rawMessages as ChatMessage[])
+          : [];
+        setMessages(loadedMessages);
+        console.log(`Loaded ${loadedMessages.length} messages for ${teamType} team`);
+      }
+    } catch (error) {
+      console.error('Error loading conversation:', error);
+    }
+  }, [matchId, teamType]);
+
+  // Save conversation to database
+  const saveConversation = useCallback(async (messagesToSave: ChatMessage[]) => {
+    if (!matchId) return;
+
+    setIsSaving(true);
+    try {
+      // Remove audioContent from messages to save space (we don't persist audio)
+      const messagesWithoutAudio = messagesToSave.map(({ audioContent, ...msg }) => ({
+        ...msg,
+        timestamp: msg.timestamp || new Date().toISOString()
+      }));
+
+      const { error } = await supabase
+        .from('chatbot_conversations')
+        .upsert({
+          match_id: matchId,
+          team_name: teamName,
+          team_type: teamType,
+          messages: messagesWithoutAudio,
+        }, {
+          onConflict: 'match_id,team_type'
+        });
+
+      if (error) {
+        console.error('Error saving conversation:', error);
+      }
+    } catch (error) {
+      console.error('Error saving conversation:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  }, [matchId, teamName, teamType]);
+
+  // Load conversation on mount
+  useEffect(() => {
+    loadConversation();
+  }, [loadConversation]);
 
   const sendMessage = async (message: string, matchContext?: MatchContext) => {
     if (!message.trim()) return;
@@ -33,8 +104,13 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away') {
     setIsLoading(true);
     
     // Add user message immediately
-    const userMessage: ChatMessage = { role: 'user', content: message };
-    setMessages(prev => [...prev, userMessage]);
+    const userMessage: ChatMessage = { 
+      role: 'user', 
+      content: message,
+      timestamp: new Date().toISOString()
+    };
+    const updatedMessages = [...messages, userMessage];
+    setMessages(updatedMessages);
 
     try {
       const { data, error } = await supabase.functions.invoke('team-chatbot', {
@@ -54,9 +130,14 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away') {
         role: 'assistant',
         content: data.text,
         audioContent: data.audioContent,
+        timestamp: new Date().toISOString()
       };
 
-      setMessages(prev => [...prev, assistantMessage]);
+      const finalMessages = [...updatedMessages, assistantMessage];
+      setMessages(finalMessages);
+
+      // Save to database
+      await saveConversation(finalMessages);
 
       // Auto-play audio response
       if (data.audioContent) {
@@ -72,7 +153,7 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away') {
         variant: "destructive",
       });
       // Remove the user message on error
-      setMessages(prev => prev.slice(0, -1));
+      setMessages(messages);
     } finally {
       setIsLoading(false);
     }
@@ -193,8 +274,21 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away') {
     }
   };
 
-  const clearMessages = () => {
+  const clearMessages = async () => {
     setMessages([]);
+    
+    // Also clear from database
+    if (matchId) {
+      try {
+        await supabase
+          .from('chatbot_conversations')
+          .delete()
+          .eq('match_id', matchId)
+          .eq('team_type', teamType);
+      } catch (error) {
+        console.error('Error clearing conversation:', error);
+      }
+    }
   };
 
   return {
@@ -202,11 +296,13 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away') {
     isLoading,
     isRecording,
     isPlayingAudio,
+    isSaving,
     sendMessage,
     startRecording,
     stopRecording,
     playAudio,
     stopAudio,
     clearMessages,
+    reloadConversation: loadConversation,
   };
 }
