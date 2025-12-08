@@ -15,76 +15,156 @@ interface ClipVignetteProps {
   duration?: number; // in milliseconds
 }
 
-// Generate synthetic swoosh sound using Web Audio API
-const playSwooshSound = () => {
+// Play whoosh/swoosh sound using Web Audio API
+const playSwooshSound = async () => {
   try {
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
     
-    // Create noise buffer for swoosh texture
-    const bufferSize = audioContext.sampleRate * 0.15;
-    const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
-    const output = noiseBuffer.getChannelData(0);
-    
-    for (let i = 0; i < bufferSize; i++) {
-      output[i] = Math.random() * 2 - 1;
+    // Resume if suspended (browser autoplay policy)
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
     }
     
-    // Noise source
+    // Create multiple oscillators for richer swoosh sound
+    const osc1 = audioContext.createOscillator();
+    const osc2 = audioContext.createOscillator();
+    
+    osc1.type = 'sine';
+    osc2.type = 'triangle';
+    
+    // Frequency sweep for swoosh effect
+    osc1.frequency.setValueAtTime(800, audioContext.currentTime);
+    osc1.frequency.exponentialRampToValueAtTime(150, audioContext.currentTime + 0.2);
+    
+    osc2.frequency.setValueAtTime(600, audioContext.currentTime);
+    osc2.frequency.exponentialRampToValueAtTime(100, audioContext.currentTime + 0.25);
+    
+    // Create noise for texture
+    const bufferSize = audioContext.sampleRate * 0.3;
+    const noiseBuffer = audioContext.createBuffer(1, bufferSize, audioContext.sampleRate);
+    const output = noiseBuffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      output[i] = (Math.random() * 2 - 1) * 0.3;
+    }
+    
     const noise = audioContext.createBufferSource();
     noise.buffer = noiseBuffer;
     
-    // Filter for swoosh character
+    // Filter for the noise
     const filter = audioContext.createBiquadFilter();
-    filter.type = 'bandpass';
-    filter.frequency.setValueAtTime(1000, audioContext.currentTime);
-    filter.frequency.exponentialRampToValueAtTime(200, audioContext.currentTime + 0.15);
-    filter.Q.value = 1;
+    filter.type = 'highpass';
+    filter.frequency.setValueAtTime(2000, audioContext.currentTime);
+    filter.frequency.exponentialRampToValueAtTime(500, audioContext.currentTime + 0.2);
     
-    // Gain envelope
-    const gainNode = audioContext.createGain();
-    gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+    // Gain envelopes
+    const gain1 = audioContext.createGain();
+    const gain2 = audioContext.createGain();
+    const noiseGain = audioContext.createGain();
+    const masterGain = audioContext.createGain();
     
-    // Connect nodes
+    gain1.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gain1.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.25);
+    
+    gain2.gain.setValueAtTime(0.2, audioContext.currentTime);
+    gain2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.3);
+    
+    noiseGain.gain.setValueAtTime(0.15, audioContext.currentTime);
+    noiseGain.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+    
+    masterGain.gain.value = 0.8;
+    
+    // Connect
+    osc1.connect(gain1);
+    osc2.connect(gain2);
     noise.connect(filter);
-    filter.connect(gainNode);
-    gainNode.connect(audioContext.destination);
+    filter.connect(noiseGain);
     
+    gain1.connect(masterGain);
+    gain2.connect(masterGain);
+    noiseGain.connect(masterGain);
+    masterGain.connect(audioContext.destination);
+    
+    // Play
+    osc1.start();
+    osc2.start();
     noise.start();
-    noise.stop(audioContext.currentTime + 0.15);
     
-    // Cleanup
-    setTimeout(() => audioContext.close(), 200);
+    osc1.stop(audioContext.currentTime + 0.3);
+    osc2.stop(audioContext.currentTime + 0.35);
+    noise.stop(audioContext.currentTime + 0.3);
+    
+    setTimeout(() => audioContext.close(), 500);
+    console.log('[ClipVignette] Swoosh sound played');
   } catch (e) {
-    console.log('Audio not available');
+    console.log('[ClipVignette] Swoosh audio not available:', e);
   }
 };
 
-// Play impact sound for exit phase
-const playImpactSound = () => {
+// Play dramatic impact sound
+const playImpactSound = async () => {
   try {
     const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
     
-    // Low frequency oscillator for impact
-    const oscillator = audioContext.createOscillator();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(150, audioContext.currentTime);
-    oscillator.frequency.exponentialRampToValueAtTime(40, audioContext.currentTime + 0.1);
+    if (audioContext.state === 'suspended') {
+      await audioContext.resume();
+    }
     
-    // Gain envelope
-    const gainNode = audioContext.createGain();
-    gainNode.gain.setValueAtTime(0.4, audioContext.currentTime);
-    gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+    // Low bass hit
+    const osc1 = audioContext.createOscillator();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(120, audioContext.currentTime);
+    osc1.frequency.exponentialRampToValueAtTime(30, audioContext.currentTime + 0.15);
     
-    oscillator.connect(gainNode);
-    gainNode.connect(audioContext.destination);
+    // Mid punch
+    const osc2 = audioContext.createOscillator();
+    osc2.type = 'triangle';
+    osc2.frequency.setValueAtTime(200, audioContext.currentTime);
+    osc2.frequency.exponentialRampToValueAtTime(50, audioContext.currentTime + 0.1);
     
-    oscillator.start();
-    oscillator.stop(audioContext.currentTime + 0.15);
+    // Click/attack transient
+    const osc3 = audioContext.createOscillator();
+    osc3.type = 'square';
+    osc3.frequency.setValueAtTime(1000, audioContext.currentTime);
+    osc3.frequency.exponentialRampToValueAtTime(100, audioContext.currentTime + 0.02);
     
-    setTimeout(() => audioContext.close(), 200);
+    // Gains
+    const gain1 = audioContext.createGain();
+    const gain2 = audioContext.createGain();
+    const gain3 = audioContext.createGain();
+    const masterGain = audioContext.createGain();
+    
+    gain1.gain.setValueAtTime(0.5, audioContext.currentTime);
+    gain1.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.2);
+    
+    gain2.gain.setValueAtTime(0.3, audioContext.currentTime);
+    gain2.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.15);
+    
+    gain3.gain.setValueAtTime(0.15, audioContext.currentTime);
+    gain3.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.03);
+    
+    masterGain.gain.value = 0.9;
+    
+    osc1.connect(gain1);
+    osc2.connect(gain2);
+    osc3.connect(gain3);
+    
+    gain1.connect(masterGain);
+    gain2.connect(masterGain);
+    gain3.connect(masterGain);
+    masterGain.connect(audioContext.destination);
+    
+    osc1.start();
+    osc2.start();
+    osc3.start();
+    
+    osc1.stop(audioContext.currentTime + 0.25);
+    osc2.stop(audioContext.currentTime + 0.2);
+    osc3.stop(audioContext.currentTime + 0.05);
+    
+    setTimeout(() => audioContext.close(), 400);
+    console.log('[ClipVignette] Impact sound played');
   } catch (e) {
-    console.log('Audio not available');
+    console.log('[ClipVignette] Impact audio not available:', e);
   }
 };
 
