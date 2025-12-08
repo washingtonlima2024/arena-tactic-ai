@@ -1,4 +1,5 @@
 import { cn } from '@/lib/utils';
+import soccerBallImg from '@/assets/soccer-ball.png';
 
 interface SoccerBallLoaderProps {
   message?: string;
@@ -43,60 +44,16 @@ export function SoccerBallLoader({
         {/* Shadow on ground */}
         <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-12 h-3 bg-black/30 rounded-full blur-md animate-ball-shadow" />
         
-        {/* Ball */}
+        {/* Ball Image */}
         <div className="relative animate-ball-bounce">
-          <svg
-            viewBox="0 0 100 100"
-            className="w-16 h-16 drop-shadow-xl animate-ball-spin"
+          <img 
+            src={soccerBallImg} 
+            alt="Soccer Ball" 
+            className="w-16 h-16 animate-ball-spin drop-shadow-xl"
             style={{
               filter: 'drop-shadow(0 0 15px hsl(var(--primary)/0.5))'
             }}
-          >
-            {/* Ball base */}
-            <defs>
-              <radialGradient id="ballGradient" cx="30%" cy="30%">
-                <stop offset="0%" stopColor="#ffffff" />
-                <stop offset="50%" stopColor="#f0f0f0" />
-                <stop offset="100%" stopColor="#d0d0d0" />
-              </radialGradient>
-              <radialGradient id="pentagonGradient" cx="50%" cy="50%">
-                <stop offset="0%" stopColor="#333333" />
-                <stop offset="100%" stopColor="#1a1a1a" />
-              </radialGradient>
-            </defs>
-            
-            {/* Main circle */}
-            <circle cx="50" cy="50" r="48" fill="url(#ballGradient)" stroke="#ccc" strokeWidth="1" />
-            
-            {/* Pentagon patterns */}
-            <polygon 
-              points="50,20 62,32 58,48 42,48 38,32" 
-              fill="url(#pentagonGradient)"
-            />
-            <polygon 
-              points="25,40 30,28 42,32 42,48 30,52" 
-              fill="url(#pentagonGradient)"
-            />
-            <polygon 
-              points="75,40 70,28 58,32 58,48 70,52" 
-              fill="url(#pentagonGradient)"
-            />
-            <polygon 
-              points="35,65 42,52 58,52 65,65 50,75" 
-              fill="url(#pentagonGradient)"
-            />
-            <polygon 
-              points="20,55 30,52 35,65 28,78 18,68" 
-              fill="url(#pentagonGradient)"
-            />
-            <polygon 
-              points="80,55 70,52 65,65 72,78 82,68" 
-              fill="url(#pentagonGradient)"
-            />
-            
-            {/* Highlight */}
-            <ellipse cx="35" cy="35" rx="12" ry="8" fill="white" opacity="0.4" />
-          </svg>
+          />
         </div>
       </div>
 
