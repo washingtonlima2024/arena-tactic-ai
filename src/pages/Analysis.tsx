@@ -479,7 +479,7 @@ export default function Analysis() {
           </>
         )}
 
-        {/* Video Dialog */}
+        {/* Video Dialog with Embed */}
         <Dialog open={videoDialogOpen} onOpenChange={setVideoDialogOpen}>
           <DialogContent className="max-w-4xl">
             <DialogHeader>
@@ -488,20 +488,31 @@ export default function Analysis() {
               </DialogTitle>
             </DialogHeader>
             {matchVideo && playingEventId && (
-              <div className="aspect-video">
-                <video
-                  src={matchVideo.file_url}
-                  controls
-                  autoPlay
-                  className="w-full h-full rounded-lg"
-                  onLoadedMetadata={(e) => {
-                    const video = e.currentTarget;
-                    const eventMinute = getEventMinute(playingEventId);
-                    const videoStartMinute = matchVideo.start_minute || 0;
-                    const seekTo = Math.max(0, (eventMinute - videoStartMinute) * 60 - 5);
-                    video.currentTime = seekTo;
-                  }}
-                />
+              <div className="aspect-video relative">
+                {/* Check if it's an embed URL or regular video */}
+                {matchVideo.file_url.includes('/embed/') || matchVideo.file_url.includes('iframe') ? (
+                  <iframe
+                    src={matchVideo.file_url}
+                    className="absolute inset-0 w-full h-full rounded-lg"
+                    frameBorder="0"
+                    allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
+                    title={`Evento ${getEventMinute(playingEventId)}'`}
+                  />
+                ) : (
+                  <video
+                    src={matchVideo.file_url}
+                    controls
+                    autoPlay
+                    className="w-full h-full rounded-lg"
+                    onLoadedMetadata={(e) => {
+                      const video = e.currentTarget;
+                      const eventMinute = getEventMinute(playingEventId);
+                      const videoStartMinute = matchVideo.start_minute || 0;
+                      const seekTo = Math.max(0, (eventMinute - videoStartMinute) * 60 - 5);
+                      video.currentTime = seekTo;
+                    }}
+                  />
+                )}
               </div>
             )}
           </DialogContent>
