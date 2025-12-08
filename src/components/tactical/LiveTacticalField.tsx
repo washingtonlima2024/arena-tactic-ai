@@ -99,22 +99,38 @@ function getEventIcon(eventType: string): string {
 export function LiveTacticalField({ events, homeTeam, awayTeam, className }: LiveTacticalFieldProps) {
   const [activeEvent, setActiveEvent] = useState<string | null>(null);
   const [animatedEvents, setAnimatedEvents] = useState<string[]>([]);
+  const [currentIndex, setCurrentIndex] = useState(0);
   
   // Animate events one by one
   useEffect(() => {
-    if (events.length === 0) return;
+    if (!events || events.length === 0) return;
     
-    let index = 0;
+    // Reset when events change
+    setAnimatedEvents([]);
+    setCurrentIndex(0);
+    setActiveEvent(null);
+  }, [events]);
+
+  useEffect(() => {
+    if (!events || events.length === 0) return;
+    
     const interval = setInterval(() => {
-      if (index < events.length) {
-        setAnimatedEvents(prev => [...prev, events[index].id]);
-        setActiveEvent(events[index].id);
-        index++;
-      } else {
-        // Reset and start over
-        index = 0;
-        setAnimatedEvents([]);
-      }
+      setCurrentIndex(prev => {
+        const nextIndex = prev + 1;
+        if (nextIndex > events.length) {
+          // Reset
+          setAnimatedEvents([]);
+          setActiveEvent(null);
+          return 0;
+        }
+        
+        const event = events[prev];
+        if (event) {
+          setAnimatedEvents(prevEvents => [...prevEvents, event.id]);
+          setActiveEvent(event.id);
+        }
+        return nextIndex;
+      });
     }, 2000);
     
     return () => clearInterval(interval);
