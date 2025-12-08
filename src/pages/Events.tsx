@@ -19,15 +19,20 @@ import {
   Zap,
   Loader2,
   Video,
-  Plus
+  Plus,
+  Pencil
 } from 'lucide-react';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
 import { Link } from 'react-router-dom';
+import { EventEditDialog } from '@/components/events/EventEditDialog';
+import { useQueryClient } from '@tanstack/react-query';
 
 export default function Events() {
+  const queryClient = useQueryClient();
   const { data: matches = [], isLoading: matchesLoading } = useAllCompletedMatches();
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [editingEvent, setEditingEvent] = useState<any>(null);
 
   // Auto-select first match if none selected
   const currentMatchId = selectedMatchId || matches[0]?.id || null;
@@ -215,7 +220,8 @@ export default function Events() {
                     {filteredEvents.map((event) => (
                       <div 
                         key={event.id}
-                        className="flex items-center gap-4 rounded-lg border border-border bg-muted/30 p-3 hover:bg-muted/50 transition-colors"
+                        className="flex items-center gap-4 rounded-lg border border-border bg-muted/30 p-3 hover:bg-muted/50 transition-colors group cursor-pointer"
+                        onClick={() => setEditingEvent(event)}
                       >
                         <Badge 
                           variant={
@@ -242,6 +248,22 @@ export default function Events() {
                             {event.metadata.team}
                           </Badge>
                         )}
+                        {event.metadata?.edited && (
+                          <Badge variant="secondary" className="shrink-0 text-xs">
+                            Editado
+                          </Badge>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingEvent(event);
+                          }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
                       </div>
                     ))}
                   </div>
@@ -353,6 +375,18 @@ export default function Events() {
             </Card>
           </div>
         </div>
+
+        {/* Edit Dialog */}
+        <EventEditDialog
+          isOpen={!!editingEvent}
+          onClose={() => setEditingEvent(null)}
+          event={editingEvent}
+          homeTeam={selectedMatch?.home_team?.name}
+          awayTeam={selectedMatch?.away_team?.name}
+          onSave={() => {
+            queryClient.invalidateQueries({ queryKey: ['match-events', currentMatchId] });
+          }}
+        />
       </div>
     </AppLayout>
   );
