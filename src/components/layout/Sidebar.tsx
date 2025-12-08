@@ -48,6 +48,7 @@ export function Sidebar() {
               src={arenaLogo} 
               alt="Arena Play Logo" 
               className="h-14 w-14 rounded-lg object-contain"
+              style={{ filter: 'hue-rotate(180deg) saturate(1.2)' }}
             />
             <div>
               <h1 className="text-xl neon-text-blue">
@@ -62,6 +63,7 @@ export function Sidebar() {
             src={arenaLogo} 
             alt="Arena Play Logo" 
             className="mx-auto h-14 w-14 rounded-lg object-contain"
+            style={{ filter: 'hue-rotate(180deg) saturate(1.2)' }}
           />
         )}
       </div>
