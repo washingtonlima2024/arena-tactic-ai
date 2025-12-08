@@ -533,8 +533,37 @@ export default function Analysis() {
         <Dialog open={videoDialogOpen} onOpenChange={setVideoDialogOpen}>
           <DialogContent className="max-w-4xl">
             <DialogHeader>
-              <DialogTitle>
-                Reproduzindo Evento - {getEventMinute(playingEventId || '')}'
+              <DialogTitle className="flex items-center justify-between">
+                <span>Reproduzindo Evento - {getEventMinute(playingEventId || '')}'</span>
+                {playingEventId && (
+                  <Button
+                    variant="arena"
+                    size="sm"
+                    onClick={() => {
+                      const eventMinute = getEventMinute(playingEventId);
+                      const videoStartMinute = matchVideo?.start_minute || 0;
+                      const eventSeconds = (eventMinute - videoStartMinute) * 60;
+                      const startSeconds = Math.max(0, eventSeconds - 10);
+                      
+                      // For video element
+                      const videoEl = document.querySelector('dialog video') as HTMLVideoElement;
+                      if (videoEl) {
+                        videoEl.currentTime = startSeconds;
+                        videoEl.play();
+                      }
+                      
+                      // For iframe - reload with timestamp
+                      const iframeEl = document.querySelector('dialog iframe') as HTMLIFrameElement;
+                      if (iframeEl && matchVideo) {
+                        const separator = matchVideo.file_url.includes('?') ? '&' : '?';
+                        iframeEl.src = `${matchVideo.file_url}${separator}t=${startSeconds}&autoplay=1`;
+                      }
+                    }}
+                  >
+                    <Play className="h-4 w-4 mr-1" />
+                    Ir para {getEventMinute(playingEventId)}'
+                  </Button>
+                )}
               </DialogTitle>
             </DialogHeader>
             {matchVideo && playingEventId && (() => {
@@ -544,7 +573,7 @@ export default function Analysis() {
               const startSeconds = Math.max(0, eventSeconds - 10);
               const isEmbed = matchVideo.file_url.includes('/embed/') || matchVideo.file_url.includes('iframe') || matchVideo.file_url.includes('xtream');
               const separator = matchVideo.file_url.includes('?') ? '&' : '?';
-              const embedUrl = `${matchVideo.file_url}${separator}t=${startSeconds}`;
+              const embedUrl = `${matchVideo.file_url}${separator}t=${startSeconds}&autoplay=1`;
               
               return (
                 <div className="aspect-video relative">
