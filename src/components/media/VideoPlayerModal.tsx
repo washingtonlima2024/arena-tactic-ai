@@ -63,6 +63,7 @@ export function VideoPlayerModal({
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
       <DialogContent 
+        hideCloseButton
         className="max-w-[95vw] w-[1200px] max-h-[95vh] p-0 border-0 bg-transparent overflow-hidden"
         style={{
           background: 'transparent',
