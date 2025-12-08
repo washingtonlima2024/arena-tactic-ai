@@ -153,8 +153,12 @@ export default function Media() {
         )}
 
         {/* Tabs */}
-        <Tabs defaultValue="clips" className="space-y-6">
+        <Tabs defaultValue="thumbnails" className="space-y-6">
           <TabsList className="grid w-full grid-cols-4">
+            <TabsTrigger value="thumbnails">
+              <Image className="mr-2 h-4 w-4" />
+              Thumbnails
+            </TabsTrigger>
             <TabsTrigger value="clips">
               <Scissors className="mr-2 h-4 w-4" />
               Cortes
@@ -162,10 +166,6 @@ export default function Media() {
             <TabsTrigger value="playlists">
               <ListVideo className="mr-2 h-4 w-4" />
               Playlists
-            </TabsTrigger>
-            <TabsTrigger value="thumbnails">
-              <Image className="mr-2 h-4 w-4" />
-              Thumbnails
             </TabsTrigger>
             <TabsTrigger value="social">
               <Share2 className="mr-2 h-4 w-4" />
@@ -596,14 +596,31 @@ export default function Media() {
                   const generating = isGenerating(clip.id);
                   
                   return (
-                    <Card key={clip.id} variant="glass" className="overflow-hidden">
-                      <div className="aspect-video bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center relative">
+                    <Card key={clip.id} variant="glass" className="overflow-hidden group">
+                      <div 
+                        className="aspect-video bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center relative cursor-pointer"
+                        onClick={() => {
+                          if (thumbnail?.imageUrl && matchVideo) {
+                            setShowingVignette(true);
+                            setPlayingClipId(clip.id);
+                          }
+                        }}
+                      >
                         {thumbnail?.imageUrl ? (
-                          <img 
-                            src={thumbnail.imageUrl} 
-                            alt={clip.title}
-                            className="w-full h-full object-cover"
-                          />
+                          <>
+                            <img 
+                              src={thumbnail.imageUrl} 
+                              alt={clip.title}
+                              className="w-full h-full object-cover transition-transform group-hover:scale-105"
+                            />
+                            {matchVideo && (
+                              <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg">
+                                  <Play className="h-6 w-6" />
+                                </div>
+                              </div>
+                            )}
+                          </>
                         ) : generating ? (
                           <div className="text-center">
                             <Loader2 className="h-8 w-8 text-primary mx-auto mb-2 animate-spin" />
@@ -626,20 +643,35 @@ export default function Media() {
                         </p>
                         <div className="mt-2 flex gap-2">
                           {thumbnail?.imageUrl ? (
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              className="flex-1"
-                              onClick={() => {
-                                const link = document.createElement('a');
-                                link.href = thumbnail.imageUrl;
-                                link.download = `thumbnail-${clip.type}-${clip.id}.png`;
-                                link.click();
-                              }}
-                            >
-                              <Download className="mr-1 h-3 w-3" />
-                              Download
-                            </Button>
+                            <>
+                              <Button 
+                                variant="outline" 
+                                size="sm" 
+                                className="flex-1"
+                                onClick={() => {
+                                  const link = document.createElement('a');
+                                  link.href = thumbnail.imageUrl;
+                                  link.download = `thumbnail-${clip.type}-${clip.id}.png`;
+                                  link.click();
+                                }}
+                              >
+                                <Download className="mr-1 h-3 w-3" />
+                                Download
+                              </Button>
+                              {matchVideo && (
+                                <Button 
+                                  variant="arena" 
+                                  size="sm"
+                                  onClick={() => {
+                                    setShowingVignette(true);
+                                    setPlayingClipId(clip.id);
+                                  }}
+                                >
+                                  <Play className="mr-1 h-3 w-3" />
+                                  Corte
+                                </Button>
+                              )}
+                            </>
                           ) : (
                             <Button 
                               variant="arena-outline" 
