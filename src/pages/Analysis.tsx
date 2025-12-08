@@ -33,6 +33,7 @@ import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from '@/hooks/use-toast';
 
 export default function Analysis() {
   const { data: matches = [], isLoading: matchesLoading } = useAllCompletedMatches();
@@ -84,6 +85,12 @@ export default function Analysis() {
     if (matchVideo) {
       setPlayingEventId(eventId);
       setVideoDialogOpen(true);
+    } else {
+      toast({
+        title: "Vídeo não disponível",
+        description: "Faça upload do vídeo da partida na página de Upload para visualizar os cortes.",
+        variant: "destructive"
+      });
     }
   };
 
