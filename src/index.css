@@ -51,6 +51,10 @@
     --arena-surface: 160 25% 8%;
     --arena-glow: 158 100% 50%;
     --arena-cream: 45 33% 94%;
+    
+    /* Neon Blue */
+    --neon-blue: 210 100% 56%;
+    --neon-blue-glow: 210 100% 65%;
 
     /* Gradients */
     --gradient-arena: linear-gradient(135deg, hsl(158 72% 32%) 0%, hsl(173 58% 39%) 100%);
@@ -352,4 +356,24 @@
 .scrollbar-hidden {
   -ms-overflow-style: none;
   scrollbar-width: none;
+}
+
+/* Neon Text Effect - Blue */
+.neon-text-blue {
+  color: hsl(var(--neon-blue));
+  text-shadow: 
+    0 0 5px hsl(var(--neon-blue) / 0.8),
+    0 0 10px hsl(var(--neon-blue) / 0.6),
+    0 0 20px hsl(var(--neon-blue) / 0.4),
+    0 0 40px hsl(var(--neon-blue) / 0.2);
+  -webkit-text-stroke: 0.5px hsl(var(--neon-blue-glow) / 0.6);
+  letter-spacing: 0.05em;
+}
+
+.neon-text-blue:hover {
+  text-shadow: 
+    0 0 5px hsl(var(--neon-blue) / 1),
+    0 0 15px hsl(var(--neon-blue) / 0.8),
+    0 0 30px hsl(var(--neon-blue) / 0.6),
+    0 0 50px hsl(var(--neon-blue) / 0.4);
 }
