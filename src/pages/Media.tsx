@@ -13,7 +13,8 @@ import {
   Image,
   ListVideo,
   Sparkles,
-  AlertCircle
+  AlertCircle,
+  Loader2
 } from 'lucide-react';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
 import { useState } from 'react';
@@ -24,10 +25,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
 
 export default function Media() {
   const { data: matches, isLoading: matchesLoading } = useAllCompletedMatches();
   const [selectedMatchId, setSelectedMatchId] = useState<string>('');
+  const { thumbnails, generateThumbnail, generateAllThumbnails, isGenerating, getThumbnail, generatingIds } = useThumbnailGeneration();
   
   const selectedMatch = matches?.find(m => m.id === selectedMatchId) || matches?.[0];
   const matchId = selectedMatch?.id || '';
@@ -299,7 +302,45 @@ export default function Media() {
 
           {/* Thumbnails Tab */}
           <TabsContent value="thumbnails" className="space-y-4">
-            {goalClips.length === 0 ? (
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-muted-foreground">
+                Gere thumbnails personalizadas baseadas nos eventos da partida
+              </p>
+              {clips.length > 0 && (
+                <Button 
+                  variant="arena" 
+                  size="sm"
+                  disabled={generatingIds.size > 0}
+                  onClick={() => {
+                    const thumbnailParams = clips.slice(0, 6).map(clip => ({
+                      eventId: clip.id,
+                      eventType: clip.type,
+                      minute: Math.floor(clip.startTime / 60),
+                      homeTeam: selectedMatch?.home_team?.name || 'Time Casa',
+                      awayTeam: selectedMatch?.away_team?.name || 'Time Fora',
+                      homeScore: selectedMatch?.home_score || 0,
+                      awayScore: selectedMatch?.away_score || 0,
+                      description: clip.description
+                    }));
+                    generateAllThumbnails(thumbnailParams);
+                  }}
+                >
+                  {generatingIds.size > 0 ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Gerando...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="mr-2 h-4 w-4" />
+                      Gerar Todas
+                    </>
+                  )}
+                </Button>
+              )}
+            </div>
+            
+            {clips.length === 0 ? (
               <Card variant="glass">
                 <CardContent className="py-12 text-center">
                   <Image className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
@@ -308,24 +349,87 @@ export default function Media() {
               </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
-                {clips.slice(0, 6).map((clip, i) => (
-                  <Card key={clip.id} variant="glass" className="overflow-hidden">
-                    <div className="aspect-video bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center">
-                      <div className="text-center">
-                        <Image className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                        <p className="text-xs text-muted-foreground">{clip.type}</p>
+                {clips.slice(0, 8).map((clip) => {
+                  const thumbnail = getThumbnail(clip.id);
+                  const generating = isGenerating(clip.id);
+                  
+                  return (
+                    <Card key={clip.id} variant="glass" className="overflow-hidden">
+                      <div className="aspect-video bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center relative">
+                        {thumbnail?.imageUrl ? (
+                          <img 
+                            src={thumbnail.imageUrl} 
+                            alt={clip.title}
+                            className="w-full h-full object-cover"
+                          />
+                        ) : generating ? (
+                          <div className="text-center">
+                            <Loader2 className="h-8 w-8 text-primary mx-auto mb-2 animate-spin" />
+                            <p className="text-xs text-muted-foreground">Gerando...</p>
+                          </div>
+                        ) : (
+                          <div className="text-center">
+                            <Image className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
+                            <Badge variant="outline" className="text-xs">{clip.type}</Badge>
+                            <p className="text-xs text-muted-foreground mt-1">
+                              {Math.floor(clip.startTime / 60)}'
+                            </p>
+                          </div>
+                        )}
                       </div>
-                    </div>
-                    <CardContent className="pt-3">
-                      <p className="text-sm font-medium truncate">{clip.title}</p>
-                      <div className="mt-2 flex gap-2">
-                        <Button variant="outline" size="sm" className="flex-1">
-                          Download
-                        </Button>
-                      </div>
-                    </CardContent>
-                  </Card>
-                ))}
+                      <CardContent className="pt-3">
+                        <p className="text-sm font-medium truncate">{clip.title}</p>
+                        <p className="text-xs text-muted-foreground truncate">
+                          {selectedMatch?.home_team?.name} vs {selectedMatch?.away_team?.name}
+                        </p>
+                        <div className="mt-2 flex gap-2">
+                          {thumbnail?.imageUrl ? (
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="flex-1"
+                              onClick={() => {
+                                const link = document.createElement('a');
+                                link.href = thumbnail.imageUrl;
+                                link.download = `thumbnail-${clip.type}-${clip.id}.png`;
+                                link.click();
+                              }}
+                            >
+                              <Download className="mr-1 h-3 w-3" />
+                              Download
+                            </Button>
+                          ) : (
+                            <Button 
+                              variant="arena-outline" 
+                              size="sm" 
+                              className="flex-1"
+                              disabled={generating}
+                              onClick={() => generateThumbnail({
+                                eventId: clip.id,
+                                eventType: clip.type,
+                                minute: Math.floor(clip.startTime / 60),
+                                homeTeam: selectedMatch?.home_team?.name || 'Time Casa',
+                                awayTeam: selectedMatch?.away_team?.name || 'Time Fora',
+                                homeScore: selectedMatch?.home_score || 0,
+                                awayScore: selectedMatch?.away_score || 0,
+                                description: clip.description
+                              })}
+                            >
+                              {generating ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <>
+                                  <Sparkles className="mr-1 h-3 w-3" />
+                                  Gerar
+                                </>
+                              )}
+                            </Button>
+                          )}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  );
+                })}
               </div>
             )}
           </TabsContent>
