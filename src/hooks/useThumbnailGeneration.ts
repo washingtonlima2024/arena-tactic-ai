@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -17,15 +17,57 @@ interface GenerateThumbnailParams {
   awayTeam: string;
   homeScore: number;
   awayScore: number;
+  matchId: string;
   description?: string;
 }
 
-export function useThumbnailGeneration() {
+export function useThumbnailGeneration(matchId?: string) {
   const [thumbnails, setThumbnails] = useState<Record<string, ThumbnailData>>({});
   const [generatingIds, setGeneratingIds] = useState<Set<string>>(new Set());
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Load existing thumbnails from database
+  const loadThumbnails = useCallback(async () => {
+    if (!matchId) return;
+
+    setIsLoading(true);
+    try {
+      const { data, error } = await supabase
+        .from('thumbnails')
+        .select('*')
+        .eq('match_id', matchId);
+
+      if (error) {
+        console.error('Error loading thumbnails:', error);
+        return;
+      }
+
+      if (data && data.length > 0) {
+        const loaded: Record<string, ThumbnailData> = {};
+        data.forEach((thumb) => {
+          loaded[thumb.event_id] = {
+            eventId: thumb.event_id,
+            imageUrl: thumb.image_url,
+            eventType: thumb.event_type,
+            title: thumb.title || ''
+          };
+        });
+        setThumbnails(loaded);
+        console.log(`Loaded ${data.length} thumbnails from database`);
+      }
+    } catch (error) {
+      console.error('Error loading thumbnails:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  }, [matchId]);
+
+  useEffect(() => {
+    loadThumbnails();
+  }, [loadThumbnails]);
 
   const generateThumbnail = async (params: GenerateThumbnailParams) => {
-    const { eventId, eventType, minute, homeTeam, awayTeam, homeScore, awayScore, description } = params;
+    const { eventId, eventType, minute, homeTeam, awayTeam, homeScore, awayScore, matchId: eventMatchId, description } = params;
 
     if (generatingIds.has(eventId)) return;
 
@@ -47,7 +89,6 @@ export function useThumbnailGeneration() {
 
       const eventLabel = eventLabels[eventType] || eventType.toUpperCase();
 
-      // Create a sports-themed prompt for the thumbnail
       const prompt = `Create a dynamic sports thumbnail for a soccer match moment:
 Event: ${eventLabel} at minute ${minute}'
 Match: ${homeTeam} ${homeScore} vs ${awayScore} ${awayTeam}
@@ -56,7 +97,13 @@ ${description ? `Description: ${description}` : ''}
 Style: Professional sports broadcast graphic, dramatic lighting, soccer field background, bold typography showing "${eventLabel}" and "${minute}'" prominently. Use green and teal color scheme. 16:9 aspect ratio. Modern, clean design with energy and motion effects.`;
 
       const { data, error } = await supabase.functions.invoke('generate-thumbnail', {
-        body: { prompt, eventType, matchInfo: `${homeTeam} vs ${awayTeam}` }
+        body: { 
+          prompt, 
+          eventType, 
+          matchInfo: `${homeTeam} vs ${awayTeam}`,
+          eventId,
+          matchId: eventMatchId
+        }
       });
 
       if (error) throw error;
@@ -92,11 +139,9 @@ Style: Professional sports broadcast graphic, dramatic lighting, soccer field ba
   const generateAllThumbnails = async (events: GenerateThumbnailParams[]) => {
     toast.info(`Gerando ${events.length} thumbnails...`);
     
-    // Generate thumbnails sequentially to avoid rate limits
     for (const event of events) {
       if (!thumbnails[event.eventId]) {
         await generateThumbnail(event);
-        // Small delay between requests
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
     }
@@ -115,6 +160,8 @@ Style: Professional sports broadcast graphic, dramatic lighting, soccer field ba
     isGenerating,
     hasThumbnail,
     getThumbnail,
-    generatingIds
+    generatingIds,
+    isLoading,
+    reload: loadThumbnails
   };
 }

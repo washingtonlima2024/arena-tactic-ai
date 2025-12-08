@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.7.1';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -11,7 +12,7 @@ serve(async (req) => {
   }
 
   try {
-    const { prompt, eventType, matchInfo } = await req.json();
+    const { prompt, eventType, matchInfo, eventId, matchId } = await req.json();
 
     if (!prompt) {
       return new Response(
@@ -25,8 +26,11 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY não configurada');
     }
 
+    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
+    const supabaseServiceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
+    const supabase = createClient(supabaseUrl, supabaseServiceKey);
+
     console.log('Generating thumbnail for:', eventType, matchInfo);
-    console.log('Prompt:', prompt);
 
     const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
@@ -69,18 +73,83 @@ serve(async (req) => {
     const data = await response.json();
     console.log('AI response received');
 
-    const imageUrl = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
+    const base64Image = data.choices?.[0]?.message?.images?.[0]?.image_url?.url;
 
-    if (!imageUrl) {
+    if (!base64Image) {
       console.error('No image in response:', JSON.stringify(data));
       throw new Error('Nenhuma imagem gerada');
+    }
+
+    // Extract base64 data and convert to binary
+    const base64Data = base64Image.replace(/^data:image\/\w+;base64,/, '');
+    const binaryData = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
+
+    // Generate unique filename
+    const fileName = `${matchId || 'unknown'}/${eventId || crypto.randomUUID()}.png`;
+
+    // Upload to Supabase Storage
+    const { data: uploadData, error: uploadError } = await supabase.storage
+      .from('thumbnails')
+      .upload(fileName, binaryData, {
+        contentType: 'image/png',
+        upsert: true
+      });
+
+    if (uploadError) {
+      console.error('Storage upload error:', uploadError);
+      throw new Error('Erro ao salvar imagem no storage');
+    }
+
+    // Get public URL
+    const { data: urlData } = supabase.storage
+      .from('thumbnails')
+      .getPublicUrl(fileName);
+
+    const imageUrl = urlData.publicUrl;
+    console.log('Image saved to storage:', imageUrl);
+
+    // Save to database if we have eventId and matchId
+    if (eventId && matchId) {
+      const eventLabels: Record<string, string> = {
+        goal: 'GOL',
+        shot: 'FINALIZAÇÃO',
+        shot_on_target: 'CHUTE NO GOL',
+        save: 'DEFESA',
+        foul: 'FALTA',
+        yellow_card: 'CARTÃO AMARELO',
+        red_card: 'CARTÃO VERMELHO',
+        corner: 'ESCANTEIO',
+        penalty: 'PÊNALTI',
+        offside: 'IMPEDIMENTO',
+      };
+
+      const title = eventLabels[eventType] || eventType.toUpperCase();
+
+      const { error: dbError } = await supabase
+        .from('thumbnails')
+        .upsert({
+          event_id: eventId,
+          match_id: matchId,
+          image_url: imageUrl,
+          event_type: eventType,
+          title: title
+        }, { onConflict: 'event_id' });
+
+      if (dbError) {
+        console.error('Database error:', dbError);
+        // Don't throw, we still have the image
+      } else {
+        console.log('Thumbnail saved to database');
+      }
     }
 
     return new Response(
       JSON.stringify({ 
         imageUrl,
         eventType,
-        matchInfo
+        matchInfo,
+        eventId,
+        matchId
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );

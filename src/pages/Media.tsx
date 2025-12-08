@@ -35,10 +35,11 @@ export default function Media() {
   const [selectedMatchId, setSelectedMatchId] = useState<string>('');
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
-  const { thumbnails, generateThumbnail, generateAllThumbnails, isGenerating, getThumbnail, generatingIds } = useThumbnailGeneration();
   
   const selectedMatch = matches?.find(m => m.id === selectedMatchId) || matches?.[0];
   const matchId = selectedMatch?.id || '';
+  
+  const { thumbnails, generateThumbnail, generateAllThumbnails, isGenerating, getThumbnail, generatingIds } = useThumbnailGeneration(matchId);
   
   const { data: events } = useMatchEvents(matchId);
   
@@ -197,6 +198,7 @@ export default function Media() {
                           awayTeam: selectedMatch?.away_team?.name || 'Time Fora',
                           homeScore: selectedMatch?.home_score || 0,
                           awayScore: selectedMatch?.away_score || 0,
+                          matchId: matchId,
                           description: c.description
                         }));
                       generateAllThumbnails(eventsToGenerate);
@@ -276,6 +278,7 @@ export default function Media() {
                       awayTeam: selectedMatch?.away_team?.name || 'Time Fora',
                       homeScore: selectedMatch?.home_score || 0,
                       awayScore: selectedMatch?.away_score || 0,
+                      matchId: matchId,
                       description: clip.description
                     });
                   };
@@ -495,6 +498,7 @@ export default function Media() {
                       awayTeam: selectedMatch?.away_team?.name || 'Time Fora',
                       homeScore: selectedMatch?.home_score || 0,
                       awayScore: selectedMatch?.away_score || 0,
+                      matchId: matchId,
                       description: clip.description
                     }));
                     generateAllThumbnails(thumbnailParams);
@@ -587,6 +591,7 @@ export default function Media() {
                                 awayTeam: selectedMatch?.away_team?.name || 'Time Fora',
                                 homeScore: selectedMatch?.home_score || 0,
                                 awayScore: selectedMatch?.away_score || 0,
+                                matchId: matchId,
                                 description: clip.description
                               })}
                             >
