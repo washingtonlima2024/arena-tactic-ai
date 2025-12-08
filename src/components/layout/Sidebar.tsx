@@ -98,7 +98,7 @@ export function Sidebar() {
               alt="Kakttus Solutions" 
               className="h-8 w-8 rounded object-contain"
             />
-            <span className="text-xs font-medium text-muted-foreground">
+            <span className="text-lg font-bold text-white tracking-wide">
               Kakttus Solutions
             </span>
           </div>
