@@ -21,14 +21,14 @@ serve(async (req) => {
     console.log(`Generating narration for match ${matchId} with ${events.length} events`);
 
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-    const ELEVENLABS_API_KEY = Deno.env.get('ELEVENLABS_API_KEY');
+    const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
 
     if (!LOVABLE_API_KEY) {
       throw new Error('LOVABLE_API_KEY is not configured');
     }
 
-    if (!ELEVENLABS_API_KEY) {
-      throw new Error('ELEVENLABS_API_KEY is not configured');
+    if (!OPENAI_API_KEY) {
+      throw new Error('OPENAI_API_KEY is not configured');
     }
 
     // Step 1: Generate narration script using Lovable AI
@@ -95,39 +95,35 @@ INSTRUÇÕES:
 
     console.log('Script generated successfully, length:', narrationScript.length);
 
-    // Step 2: Convert script to audio using ElevenLabs TTS
-    // Voice mapping - using Brazilian Portuguese compatible voices
+    // Step 2: Convert script to audio using OpenAI TTS
+    // Voice mapping - OpenAI TTS voices
     const voiceOptions: Record<string, string> = {
-      'narrator': 'onwK4e9ZLuTAKqWW03F9', // Daniel - clear male voice
-      'commentator': 'EXAVITQu4vr4xnSDxMaL', // Sarah - female voice
-      'dynamic': 'CwhRBWXzGAHq8TQ4Fs17', // Roger - energetic male voice
+      'narrator': 'onyx',      // Deep male voice - great for narration
+      'commentator': 'nova',   // Female voice - clear and professional
+      'dynamic': 'echo',       // Male voice - energetic
     };
     const selectedVoice = voice || 'narrator';
     const voiceId = voiceOptions[selectedVoice] || voiceOptions['narrator'];
 
-    console.log('Converting to audio with ElevenLabs TTS...');
+    console.log('Converting to audio with OpenAI TTS, voice:', voiceId);
 
-    const ttsResponse = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`, {
+    const ttsResponse = await fetch('https://api.openai.com/v1/audio/speech', {
       method: 'POST',
       headers: {
-        'xi-api-key': ELEVENLABS_API_KEY,
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        text: narrationScript,
-        model_id: 'eleven_multilingual_v2',
-        voice_settings: {
-          stability: 0.5,
-          similarity_boost: 0.75,
-          style: 0.5,
-          use_speaker_boost: true,
-        },
+        model: 'tts-1',
+        input: narrationScript,
+        voice: voiceId,
+        response_format: 'mp3',
       }),
     });
 
     if (!ttsResponse.ok) {
       const errorText = await ttsResponse.text();
-      console.error('ElevenLabs TTS error:', ttsResponse.status, errorText);
+      console.error('OpenAI TTS error:', ttsResponse.status, errorText);
       throw new Error(`TTS generation failed: ${errorText}`);
     }
 
