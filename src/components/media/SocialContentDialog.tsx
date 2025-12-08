@@ -30,6 +30,7 @@ import {
 import { cn } from '@/lib/utils';
 import { useVideoGeneration } from '@/hooks/useVideoGeneration';
 import { VideoGenerationProgress } from './VideoGenerationProgress';
+import { toast } from 'sonner';
 
 interface VideoFormat {
   id: string;
@@ -182,14 +183,121 @@ export function SocialContentDialog({
     }
   };
 
+  const generateCollageImage = async () => {
+    if (!selectedFormat) return;
+    
+    const allClips = [...homeTeamPlaylist.clips, ...awayTeamPlaylist.clips];
+    const selectedClipData = selectedClips.map(id => allClips.find(c => c.id === id)).filter(Boolean);
+    
+    // Create canvas for collage
+    const canvas = document.createElement('canvas');
+    canvas.width = selectedFormat.width;
+    canvas.height = selectedFormat.height;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    
+    // Background gradient
+    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+    gradient.addColorStop(0, '#0a1628');
+    gradient.addColorStop(1, '#1a2f4a');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Calculate grid layout
+    const cols = Math.ceil(Math.sqrt(selectedClipData.length));
+    const rows = Math.ceil(selectedClipData.length / cols);
+    const padding = 20;
+    const cellWidth = (canvas.width - padding * (cols + 1)) / cols;
+    const cellHeight = (canvas.height - padding * (rows + 1) - 120) / rows;
+    
+    // Draw title
+    ctx.fillStyle = '#10b981';
+    ctx.font = 'bold 48px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('⚽ MELHORES MOMENTOS', canvas.width / 2, 60);
+    
+    // Draw clip thumbnails
+    for (let i = 0; i < selectedClipData.length; i++) {
+      const clip = selectedClipData[i];
+      if (!clip) continue;
+      
+      const col = i % cols;
+      const row = Math.floor(i / cols);
+      const x = padding + col * (cellWidth + padding);
+      const y = 100 + padding + row * (cellHeight + padding);
+      
+      // Draw cell background
+      ctx.fillStyle = 'rgba(16, 185, 129, 0.2)';
+      ctx.strokeStyle = '#10b981';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.roundRect(x, y, cellWidth, cellHeight, 8);
+      ctx.fill();
+      ctx.stroke();
+      
+      // If thumbnail exists, draw it
+      if (clip.thumbnail) {
+        try {
+          const img = new Image();
+          img.crossOrigin = 'anonymous';
+          await new Promise((resolve, reject) => {
+            img.onload = resolve;
+            img.onerror = reject;
+            img.src = clip.thumbnail!;
+          });
+          ctx.drawImage(img, x + 4, y + 4, cellWidth - 8, cellHeight - 40);
+        } catch {
+          // Draw placeholder
+          ctx.fillStyle = 'rgba(255,255,255,0.1)';
+          ctx.fillRect(x + 4, y + 4, cellWidth - 8, cellHeight - 40);
+        }
+      } else {
+        ctx.fillStyle = 'rgba(255,255,255,0.1)';
+        ctx.fillRect(x + 4, y + 4, cellWidth - 8, cellHeight - 40);
+      }
+      
+      // Draw clip title
+      ctx.fillStyle = '#ffffff';
+      ctx.font = 'bold 16px Arial';
+      ctx.textAlign = 'left';
+      const title = clip.title.length > 20 ? clip.title.substring(0, 20) + '...' : clip.title;
+      ctx.fillText(title, x + 8, y + cellHeight - 12);
+      
+      // Draw minute badge
+      ctx.fillStyle = '#10b981';
+      ctx.font = 'bold 14px Arial';
+      ctx.fillText(`${clip.minute}'`, x + cellWidth - 30, y + 24);
+    }
+    
+    // Draw footer
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.font = '14px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${platform} • ${selectedFormat.ratio}`, canvas.width / 2, canvas.height - 20);
+    
+    // Convert to blob and download
+    canvas.toBlob((blob) => {
+      if (blob) {
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `collage_${platform.replace(/\s+/g, '_').toLowerCase()}.png`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(url);
+        toast.success('Imagem de collage gerada com sucesso!');
+      }
+    }, 'image/png');
+  };
+
   const handleGenerate = async () => {
     if (!selectedFormat || selectedClips.length === 0) return;
     
-    // If we have a video URL, use FFmpeg to generate
+    // If we have a video URL, use FFmpeg to generate video
     if (matchVideoUrl) {
       setStep('generating');
       
-      // Get selected clips with their data
       const allClips = [...homeTeamPlaylist.clips, ...awayTeamPlaylist.clips];
       const clipsToProcess = selectedClips.map(id => {
         const clip = allClips.find(c => c.id === id);
@@ -212,8 +320,12 @@ export function SocialContentDialog({
         includeVignettes,
         outputName: `highlights_${platform.replace(/\s+/g, '_').toLowerCase()}`
       });
-    } else if (onGenerate) {
-      // Fallback to external handler
+    } else {
+      // No video - generate image collage instead
+      await generateCollageImage();
+    }
+    
+    if (onGenerate) {
       onGenerate({
         format: selectedFormat,
         selectedClips,
@@ -486,12 +598,12 @@ export function SocialContentDialog({
               </Button>
             </div>
 
-            {/* No video warning */}
+            {/* No video info */}
             {!matchVideoUrl && selectedClips.length > 0 && (
-              <div className="p-3 bg-warning/10 border border-warning/30 rounded-lg">
-                <p className="text-xs text-warning flex items-center gap-2">
-                  <Film className="h-4 w-4" />
-                  Faça upload do vídeo da partida para gerar vídeo real. Será gerada uma prévia simulada.
+              <div className="p-3 bg-primary/10 border border-primary/30 rounded-lg">
+                <p className="text-xs text-primary flex items-center gap-2">
+                  <Sparkles className="h-4 w-4" />
+                  Sem vídeo: será gerada uma imagem collage com os thumbnails dos clipes selecionados.
                 </p>
               </div>
             )}
