@@ -15,6 +15,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
 import arenaLogo from '@/assets/arena-play-logo.png';
+import kakttusLogo from '@/assets/logo-kakttus.png';
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
@@ -88,8 +89,31 @@ export function Sidebar() {
         </ul>
       </nav>
 
-      {/* Collapse Button */}
+      {/* Kakttus Solutions Branding */}
       <div className="border-t border-border p-3">
+        {!collapsed && (
+          <div className="flex items-center gap-2 mb-3 px-2">
+            <img 
+              src={kakttusLogo} 
+              alt="Kakttus Solutions" 
+              className="h-8 w-8 rounded object-contain"
+            />
+            <span className="text-xs font-medium text-muted-foreground">
+              Kakttus Solutions
+            </span>
+          </div>
+        )}
+        {collapsed && (
+          <div className="flex justify-center mb-3">
+            <img 
+              src={kakttusLogo} 
+              alt="Kakttus Solutions" 
+              className="h-8 w-8 rounded object-contain"
+            />
+          </div>
+        )}
+
+        {/* Collapse Button */}
         <Button
           variant="ghost"
           size="sm"
