@@ -4,7 +4,7 @@ import { useToast } from '@/hooks/use-toast';
 
 interface PodcastResult {
   script: string;
-  audioContent: string;
+  audioUrl: string;
   podcastType: string;
   voice: string;
 }
@@ -20,6 +20,43 @@ export function usePodcastGeneration() {
     debate: null,
   });
   const { toast } = useToast();
+
+  // Load saved podcasts for a match
+  const loadPodcasts = async (matchId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('generated_audio')
+        .select('*')
+        .eq('match_id', matchId)
+        .like('audio_type', 'podcast_%');
+
+      if (error) throw error;
+
+      const loadedPodcasts: Record<PodcastType, PodcastResult | null> = {
+        tactical: null,
+        summary: null,
+        debate: null,
+      };
+
+      data?.forEach((item) => {
+        const type = item.audio_type.replace('podcast_', '') as PodcastType;
+        if (type in loadedPodcasts) {
+          loadedPodcasts[type] = {
+            script: item.script || '',
+            audioUrl: item.audio_url || '',
+            podcastType: type,
+            voice: item.voice || '',
+          };
+        }
+      });
+
+      setPodcasts(loadedPodcasts);
+      return loadedPodcasts;
+    } catch (error) {
+      console.error('Error loading podcasts:', error);
+      return null;
+    }
+  };
 
   const generatePodcast = async (
     matchId: string,
@@ -56,17 +93,60 @@ export function usePodcastGeneration() {
         throw new Error(data.error);
       }
 
+      // Upload audio to storage
+      const audioBlob = base64ToBlob(data.audioContent, 'audio/mp3');
+      const fileName = `podcast-${podcastType}-${matchId}-${Date.now()}.mp3`;
+      
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('generated-audio')
+        .upload(fileName, audioBlob, {
+          contentType: 'audio/mp3',
+          upsert: true,
+        });
+
+      if (uploadError) throw uploadError;
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('generated-audio')
+        .getPublicUrl(fileName);
+
+      const audioUrl = urlData.publicUrl;
+
+      // Save to database (upsert)
+      const audioType = `podcast_${podcastType}`;
+      const { error: dbError } = await supabase
+        .from('generated_audio')
+        .upsert({
+          match_id: matchId,
+          audio_type: audioType,
+          voice: data.voice,
+          script: data.script,
+          audio_url: audioUrl,
+        }, {
+          onConflict: 'match_id,audio_type,voice',
+        });
+
+      if (dbError) throw dbError;
+
+      const result: PodcastResult = {
+        script: data.script,
+        audioUrl: audioUrl,
+        podcastType: podcastType,
+        voice: data.voice,
+      };
+
       setPodcasts(prev => ({
         ...prev,
-        [podcastType]: data,
+        [podcastType]: result,
       }));
       
       toast({
         title: "Podcast gerado!",
-        description: `O podcast "${getPodcastTitle(podcastType)}" foi criado com sucesso.`,
+        description: `O podcast "${getPodcastTitle(podcastType)}" foi criado e salvo com sucesso.`,
       });
 
-      return data;
+      return result;
     } catch (error) {
       console.error('Podcast generation error:', error);
       
@@ -83,21 +163,14 @@ export function usePodcastGeneration() {
     }
   };
 
-  const playPodcast = (podcastType: PodcastType) => {
-    const podcast = podcasts[podcastType];
-    if (!podcast?.audioContent) return null;
-    
-    const audio = new Audio(`data:audio/mp3;base64,${podcast.audioContent}`);
-    return audio;
-  };
-
   const downloadPodcast = (podcastType: PodcastType, filename: string) => {
     const podcast = podcasts[podcastType];
-    if (!podcast?.audioContent) return;
+    if (!podcast?.audioUrl) return;
     
     const link = document.createElement('a');
-    link.href = `data:audio/mp3;base64,${podcast.audioContent}`;
+    link.href = podcast.audioUrl;
     link.download = filename;
+    link.target = '_blank';
     link.click();
   };
 
@@ -106,7 +179,7 @@ export function usePodcastGeneration() {
     generatingType,
     podcasts,
     generatePodcast,
-    playPodcast,
+    loadPodcasts,
     downloadPodcast,
   };
 }
@@ -118,4 +191,16 @@ function getPodcastTitle(type: PodcastType): string {
     debate: 'Debate de Torcedores',
   };
   return titles[type];
+}
+
+function base64ToBlob(base64: string, mimeType: string): Blob {
+  const byteCharacters = atob(base64);
+  const byteNumbers = new Array(byteCharacters.length);
+  
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i);
+  }
+  
+  const byteArray = new Uint8Array(byteNumbers);
+  return new Blob([byteArray], { type: mimeType });
 }
