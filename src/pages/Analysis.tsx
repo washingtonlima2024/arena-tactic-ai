@@ -557,8 +557,14 @@ export default function Analysis() {
                     onClick={() => {
                       const eventMinute = getEventMinute(playingEventId);
                       const videoStartMinute = matchVideo.start_minute || 0;
-                      const eventSeconds = (eventMinute - videoStartMinute) * 60;
-                      const startSeconds = Math.max(0, eventSeconds - 5); // 5 seconds before
+                      const videoEndMinute = matchVideo.end_minute || (videoStartMinute + 45);
+                      const videoDuration = matchVideo.duration_seconds || ((videoEndMinute - videoStartMinute) * 60);
+                      
+                      // Cálculo proporcional: posição relativa do evento no span de minutos da partida
+                      const matchMinutesSpan = videoEndMinute - videoStartMinute;
+                      const relativePosition = (eventMinute - videoStartMinute) / matchMinutesSpan;
+                      const eventVideoSeconds = relativePosition * videoDuration;
+                      const startSeconds = Math.max(0, eventVideoSeconds - 5); // 5 seconds before
                       
                       if (videoRef.current) {
                         videoRef.current.currentTime = startSeconds;
@@ -579,11 +585,29 @@ export default function Analysis() {
             {matchVideo && playingEventId && (() => {
               const eventMinute = getEventMinute(playingEventId);
               const videoStartMinute = matchVideo.start_minute || 0;
-              const eventSeconds = (eventMinute - videoStartMinute) * 60;
-              const startSeconds = Math.max(0, eventSeconds - 5); // 5 seconds before event
+              const videoEndMinute = matchVideo.end_minute || (videoStartMinute + 45);
+              const videoDuration = matchVideo.duration_seconds || ((videoEndMinute - videoStartMinute) * 60);
+              
+              // Cálculo proporcional: posição relativa do evento no span de minutos da partida
+              const matchMinutesSpan = videoEndMinute - videoStartMinute;
+              const relativePosition = (eventMinute - videoStartMinute) / matchMinutesSpan;
+              const eventVideoSeconds = relativePosition * videoDuration;
+              const startSeconds = Math.max(0, eventVideoSeconds - 5); // 5 seconds before event
+              
               const isEmbed = matchVideo.file_url.includes('/embed/') || matchVideo.file_url.includes('iframe') || matchVideo.file_url.includes('xtream');
               const separator = matchVideo.file_url.includes('?') ? '&' : '?';
-              const embedUrl = `${matchVideo.file_url}${separator}t=${startSeconds}&autoplay=1`;
+              const embedUrl = `${matchVideo.file_url}${separator}t=${Math.round(startSeconds)}&autoplay=1`;
+              
+              console.log('Analysis video sync:', {
+                eventMinute,
+                videoStartMinute,
+                videoEndMinute,
+                videoDuration,
+                relativePosition,
+                eventVideoSeconds,
+                startSeconds,
+                videoUrl: matchVideo.file_url
+              });
               
               return (
                 <div className="space-y-4">
