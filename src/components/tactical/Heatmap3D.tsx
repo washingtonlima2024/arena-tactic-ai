@@ -29,93 +29,194 @@ interface Heatmap3DProps {
   editable?: boolean;
 }
 
-// Lightweight 3D heat cloud with soft glow
-function LightHeatCloud({ 
+// Volumetric 3D heat cloud - White for cold areas, Red for hot areas
+function VolumetricHeatCloud({ 
   position, 
   intensity = 0.7, 
-  color,
   isHot = true
 }: { 
   position: [number, number, number]; 
   intensity?: number; 
-  color: string;
   isHot?: boolean;
 }) {
   const groupRef = useRef<THREE.Group>(null);
-  const innerRef = useRef<THREE.Mesh>(null);
-  const outerRef = useRef<THREE.Mesh>(null);
+  const cloudsRef = useRef<THREE.Group>(null);
+  const particlesRef = useRef<THREE.Points>(null);
   
+  // Create particle system for volumetric effect
+  const particles = useMemo(() => {
+    const count = 80;
+    const positions = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+    const opacities = new Float32Array(count);
+    
+    for (let i = 0; i < count; i++) {
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.random() * Math.PI;
+      const r = Math.random() * 0.6 * intensity;
+      
+      positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
+      positions[i * 3 + 1] = Math.random() * 0.4 * intensity;
+      positions[i * 3 + 2] = r * Math.sin(phi) * Math.sin(theta);
+      
+      sizes[i] = Math.random() * 0.15 + 0.05;
+      opacities[i] = Math.random() * 0.5 + 0.3;
+    }
+    
+    return { positions, sizes, opacities };
+  }, [intensity]);
+
   useFrame((state) => {
     const time = state.clock.elapsedTime;
+    
     if (groupRef.current) {
       // Gentle floating animation
-      groupRef.current.position.y = position[1] + Math.sin(time * 0.8 + position[0]) * 0.05;
+      groupRef.current.position.y = position[1] + Math.sin(time * 0.5 + position[0]) * 0.03;
     }
-    if (innerRef.current) {
-      const pulse = Math.sin(time * 1.5 + position[0]) * 0.1 + 1;
-      innerRef.current.scale.setScalar(pulse * 0.5);
-      const mat = innerRef.current.material as THREE.MeshBasicMaterial;
-      mat.opacity = 0.15 + Math.sin(time * 1.2) * 0.05;
+    
+    if (cloudsRef.current) {
+      // Rotate cloud layers slowly
+      cloudsRef.current.rotation.y = time * 0.1;
+      
+      // Animate each cloud sphere
+      cloudsRef.current.children.forEach((child, idx) => {
+        if (child instanceof THREE.Mesh) {
+          const offset = idx * 0.5;
+          const scale = 1 + Math.sin(time * 0.8 + offset) * 0.15;
+          child.scale.setScalar(scale);
+          const mat = child.material as THREE.MeshBasicMaterial;
+          mat.opacity = (isHot ? 0.12 : 0.18) + Math.sin(time * 1.2 + offset) * 0.04;
+        }
+      });
     }
-    if (outerRef.current) {
-      const pulse = Math.sin(time * 1.2 + position[0] * 0.5) * 0.08 + 1;
-      outerRef.current.scale.setScalar(pulse);
-      outerRef.current.rotation.y += 0.002;
+    
+    if (particlesRef.current) {
+      particlesRef.current.rotation.y = time * 0.2;
+      const positions = particlesRef.current.geometry.attributes.position.array as Float32Array;
+      for (let i = 0; i < positions.length / 3; i++) {
+        positions[i * 3 + 1] += Math.sin(time * 2 + i) * 0.001;
+      }
+      particlesRef.current.geometry.attributes.position.needsUpdate = true;
     }
   });
 
-  const coreColor = isHot ? "#ff6b35" : "#4dc9ff";
-  const glowColor = isHot ? "#ff4500" : "#00bfff";
+  // Colors based on hot/cold
+  const coreColor = isHot ? "#ff3333" : "#ffffff";
+  const midColor = isHot ? "#ff6600" : "#e8e8ff";
+  const outerColor = isHot ? "#ff9933" : "#d0d0ff";
+  const glowColor = isHot ? "#ff4400" : "#aaaaff";
 
   return (
     <group ref={groupRef} position={position}>
       {/* Ground glow disc */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-        <circleGeometry args={[0.8 * intensity, 32]} />
+        <circleGeometry args={[0.9 * intensity, 32]} />
         <meshBasicMaterial 
           color={glowColor}
-          transparent
-          opacity={0.12}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-        />
-      </mesh>
-
-      {/* Soft outer glow sphere */}
-      <mesh ref={outerRef}>
-        <sphereGeometry args={[0.6 * intensity, 16, 16]} />
-        <meshBasicMaterial 
-          color={color}
-          transparent
-          opacity={0.08}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-        />
-      </mesh>
-      
-      {/* Inner bright core */}
-      <mesh ref={innerRef}>
-        <sphereGeometry args={[0.3 * intensity, 12, 12]} />
-        <meshBasicMaterial 
-          color={coreColor}
-          transparent
-          opacity={0.2}
-          blending={THREE.AdditiveBlending}
-          depthWrite={false}
-        />
-      </mesh>
-
-      {/* Vertical light beam */}
-      <mesh position={[0, 0.2 * intensity, 0]}>
-        <cylinderGeometry args={[0.02, 0.15 * intensity, 0.4 * intensity, 8]} />
-        <meshBasicMaterial 
-          color={coreColor}
           transparent
           opacity={0.15}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
         />
       </mesh>
+
+      {/* Volumetric cloud layers */}
+      <group ref={cloudsRef}>
+        {/* Core - brightest */}
+        <mesh position={[0, 0.15 * intensity, 0]}>
+          <sphereGeometry args={[0.25 * intensity, 16, 16]} />
+          <meshBasicMaterial 
+            color={coreColor}
+            transparent
+            opacity={0.2}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+          />
+        </mesh>
+
+        {/* Inner layer */}
+        <mesh position={[0.08, 0.2 * intensity, 0.05]}>
+          <sphereGeometry args={[0.35 * intensity, 14, 14]} />
+          <meshBasicMaterial 
+            color={midColor}
+            transparent
+            opacity={0.12}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+          />
+        </mesh>
+
+        {/* Middle layer */}
+        <mesh position={[-0.1, 0.18 * intensity, -0.05]}>
+          <sphereGeometry args={[0.4 * intensity, 12, 12]} />
+          <meshBasicMaterial 
+            color={midColor}
+            transparent
+            opacity={0.1}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+          />
+        </mesh>
+
+        {/* Outer layer */}
+        <mesh position={[0, 0.12 * intensity, 0]}>
+          <sphereGeometry args={[0.55 * intensity, 10, 10]} />
+          <meshBasicMaterial 
+            color={outerColor}
+            transparent
+            opacity={0.08}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+          />
+        </mesh>
+
+        {/* Extended glow */}
+        <mesh position={[0, 0.1 * intensity, 0]}>
+          <sphereGeometry args={[0.7 * intensity, 8, 8]} />
+          <meshBasicMaterial 
+            color={outerColor}
+            transparent
+            opacity={0.05}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+          />
+        </mesh>
+      </group>
+
+      {/* Particle cloud for volume */}
+      <points ref={particlesRef}>
+        <bufferGeometry>
+          <bufferAttribute
+            attach="attributes-position"
+            count={particles.positions.length / 3}
+            array={particles.positions}
+            itemSize={3}
+          />
+        </bufferGeometry>
+        <pointsMaterial 
+          color={coreColor}
+          size={0.04}
+          transparent
+          opacity={0.4}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+          sizeAttenuation
+        />
+      </points>
+
+      {/* Vertical light beam for hot zones */}
+      {isHot && (
+        <mesh position={[0, 0.3 * intensity, 0]}>
+          <cylinderGeometry args={[0.02, 0.2 * intensity, 0.5 * intensity, 8]} />
+          <meshBasicMaterial 
+            color="#ff6600"
+            transparent
+            opacity={0.12}
+            blending={THREE.AdditiveBlending}
+            depthWrite={false}
+          />
+        </mesh>
+      )}
     </group>
   );
 }
@@ -346,19 +447,30 @@ function LinesmanFigure({ position, side }: { position: [number, number, number]
   );
 }
 
-// Detailed goal posts with net
+// Detailed goal posts with full net (front, back, sides, top)
 function GoalPost({ position, side }: { position: [number, number, number]; side: 'left' | 'right' }) {
-  const netRef = useRef<THREE.Mesh>(null);
+  const backNetRef = useRef<THREE.Mesh>(null);
+  const topNetRef = useRef<THREE.Mesh>(null);
   
   useFrame((state) => {
-    if (netRef.current) {
-      const time = state.clock.elapsedTime;
-      // Subtle net movement
-      const positions = netRef.current.geometry.attributes.position.array as Float32Array;
+    const time = state.clock.elapsedTime;
+    
+    // Animate back net
+    if (backNetRef.current) {
+      const positions = backNetRef.current.geometry.attributes.position.array as Float32Array;
       for (let i = 0; i < positions.length; i += 3) {
-        positions[i + 2] = Math.sin(time * 2 + positions[i] * 3 + positions[i + 1] * 2) * 0.02;
+        positions[i + 2] = Math.sin(time * 2 + positions[i] * 3 + positions[i + 1] * 2) * 0.015;
       }
-      netRef.current.geometry.attributes.position.needsUpdate = true;
+      backNetRef.current.geometry.attributes.position.needsUpdate = true;
+    }
+    
+    // Animate top net
+    if (topNetRef.current) {
+      const positions = topNetRef.current.geometry.attributes.position.array as Float32Array;
+      for (let i = 0; i < positions.length; i += 3) {
+        positions[i + 1] = Math.sin(time * 1.8 + positions[i] * 2 + positions[i + 2] * 3) * 0.01;
+      }
+      topNetRef.current.geometry.attributes.position.needsUpdate = true;
     }
   });
 
@@ -366,6 +478,7 @@ function GoalPost({ position, side }: { position: [number, number, number]; side
   const goalHeight = 0.45;
   const goalDepth = 0.35;
   const postRadius = 0.03;
+  const netOpacity = 0.2;
 
   return (
     <group position={position}>
@@ -403,38 +516,84 @@ function GoalPost({ position, side }: { position: [number, number, number]; side
         <meshStandardMaterial color="#cccccc" metalness={0.7} roughness={0.3} />
       </mesh>
 
-      {/* Net - back */}
+      {/* Bottom back bar */}
+      <mesh position={[side === 'left' ? -goalDepth : goalDepth, 0.02, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[postRadius * 0.5, postRadius * 0.5, goalWidth, 8]} />
+        <meshStandardMaterial color="#cccccc" metalness={0.7} roughness={0.3} />
+      </mesh>
+
+      {/* ===== NET PANELS ===== */}
+      
+      {/* Back net (vertical, behind goal line) */}
       <mesh 
-        ref={netRef}
-        position={[side === 'left' ? -goalDepth / 2 : goalDepth / 2, goalHeight / 2, 0]}
+        ref={backNetRef}
+        position={[side === 'left' ? -goalDepth : goalDepth, goalHeight / 2, 0]}
+        rotation={[0, Math.PI / 2, 0]}
       >
-        <planeGeometry args={[goalDepth, goalHeight, 8, 8]} />
+        <planeGeometry args={[goalWidth, goalHeight, 14, 8]} />
         <meshBasicMaterial 
           color="#ffffff"
           transparent
-          opacity={0.15}
+          opacity={netOpacity}
           side={THREE.DoubleSide}
           wireframe
         />
       </mesh>
 
-      {/* Net - sides */}
-      <mesh position={[side === 'left' ? -goalDepth / 2 : goalDepth / 2, goalHeight / 2, -goalWidth / 2]}>
-        <planeGeometry args={[goalDepth, goalHeight, 4, 8]} />
+      {/* Top net (horizontal, connecting crossbar to back) */}
+      <mesh 
+        ref={topNetRef}
+        position={[side === 'left' ? -goalDepth / 2 : goalDepth / 2, goalHeight, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
+        <planeGeometry args={[goalDepth, goalWidth, 6, 14]} />
         <meshBasicMaterial 
           color="#ffffff"
           transparent
-          opacity={0.1}
+          opacity={netOpacity}
           side={THREE.DoubleSide}
           wireframe
         />
       </mesh>
-      <mesh position={[side === 'left' ? -goalDepth / 2 : goalDepth / 2, goalHeight / 2, goalWidth / 2]}>
-        <planeGeometry args={[goalDepth, goalHeight, 4, 8]} />
+
+      {/* Left side net (vertical, left side panel) */}
+      <mesh 
+        position={[side === 'left' ? -goalDepth / 2 : goalDepth / 2, goalHeight / 2, -goalWidth / 2]}
+      >
+        <planeGeometry args={[goalDepth, goalHeight, 6, 8]} />
         <meshBasicMaterial 
           color="#ffffff"
           transparent
-          opacity={0.1}
+          opacity={netOpacity * 0.8}
+          side={THREE.DoubleSide}
+          wireframe
+        />
+      </mesh>
+
+      {/* Right side net (vertical, right side panel) */}
+      <mesh 
+        position={[side === 'left' ? -goalDepth / 2 : goalDepth / 2, goalHeight / 2, goalWidth / 2]}
+      >
+        <planeGeometry args={[goalDepth, goalHeight, 6, 8]} />
+        <meshBasicMaterial 
+          color="#ffffff"
+          transparent
+          opacity={netOpacity * 0.8}
+          side={THREE.DoubleSide}
+          wireframe
+        />
+      </mesh>
+
+      {/* Bottom net (horizontal, ground level from goal line to back) */}
+      <mesh 
+        position={[side === 'left' ? -goalDepth / 2 : goalDepth / 2, 0.01, 0]}
+        rotation={[-Math.PI / 2, 0, 0]}
+      >
+        <planeGeometry args={[goalDepth, goalWidth, 6, 14]} />
+        <meshBasicMaterial 
+          color="#ffffff"
+          transparent
+          opacity={netOpacity * 0.5}
           side={THREE.DoubleSide}
           wireframe
         />
@@ -894,13 +1053,12 @@ function FieldScene({
       <LinesmanFigure position={[0, 0, -3.4]} side="left" />
       <LinesmanFigure position={[0, 0, 3.4]} side="right" />
 
-      {/* Heat zones */}
+      {/* Heat zones - Volumetric 3D clouds */}
       {heatZones.map((zone, idx) => (
-        <LightHeatCloud
+        <VolumetricHeatCloud
           key={`zone-${idx}`}
           position={convertPosition(zone.x, zone.y)}
           intensity={zone.intensity}
-          color={zone.team === 'home' ? homeColor : awayColor}
           isHot={zone.intensity > 0.6}
         />
       ))}
