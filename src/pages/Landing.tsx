@@ -41,9 +41,9 @@ export default function Landing() {
       <main className="relative z-10 flex flex-col items-center justify-center px-6 py-16">
         {/* Title with Soccer Ball */}
         <div className="text-center mb-8">
-          <h1 className="font-display text-5xl md:text-7xl font-bold neon-text-blue tracking-wide flex items-center justify-center gap-2">
+          <h1 className="text-6xl md:text-7xl lg:text-8xl neon-text-blue flex items-center justify-center gap-1">
             Arena Visi
-            <img src={soccerBall} alt="" className="h-12 w-12 md:h-16 md:w-16 inline-block animate-spin-slow" />
+            <img src={soccerBall} alt="" className="h-14 w-14 md:h-18 md:w-18 lg:h-20 lg:w-20 inline-block animate-spin-slow" />
             n
           </h1>
           <p className="text-muted-foreground mt-3 text-lg">

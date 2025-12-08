@@ -360,15 +360,18 @@
 
 /* Neon Text Effect - Blue */
 .neon-text-blue {
+  font-family: 'Orbitron', sans-serif;
+  font-weight: 700;
+  font-style: italic;
   color: hsl(var(--neon-blue));
   text-shadow: 
     0 0 5px hsl(var(--neon-blue) / 0.8),
     0 0 10px hsl(var(--neon-blue) / 0.6),
     0 0 20px hsl(var(--neon-blue) / 0.4),
     0 0 40px hsl(var(--neon-blue) / 0.2);
-  -webkit-text-stroke: 1px white;
+  -webkit-text-stroke: 2px rgba(255, 255, 255, 0.9);
   paint-order: stroke fill;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
 }
 
 .neon-text-blue:hover {
