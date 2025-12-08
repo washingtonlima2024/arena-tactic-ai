@@ -3,6 +3,12 @@ project_id = "wtpvajxekyfekdmypcok"
 [functions.analyze-video]
 verify_jwt = false
 
+[functions.arena-chatbot]
+verify_jwt = false
+
+[functions.arena-tts]
+verify_jwt = false
+
 [functions.extract-audio-srt]
 verify_jwt = false
 

@@ -12,6 +12,7 @@ import Media from "./pages/Media";
 import Audio from "./pages/Audio";
 import Settings from "./pages/Settings";
 import NotFound from "./pages/NotFound";
+import { ArenaChatbot } from "./components/chatbot/ArenaChatbot";
 
 const queryClient = new QueryClient();
 
@@ -32,6 +33,7 @@ const App = () => (
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<NotFound />} />
         </Routes>
+        <ArenaChatbot />
       </BrowserRouter>
     </TooltipProvider>
   </QueryClientProvider>
