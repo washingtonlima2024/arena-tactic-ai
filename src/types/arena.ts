@@ -45,6 +45,9 @@ export interface MatchEvent {
   position?: { x: number; y: number };
   details?: Record<string, any>;
   videoTimestamp?: number;
+  description?: string;
+  isHighlight?: boolean;
+  clipUrl?: string;
 }
 
 export type EventType = 

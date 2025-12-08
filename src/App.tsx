@@ -11,8 +11,10 @@ import Events from "./pages/Events";
 import Media from "./pages/Media";
 import Audio from "./pages/Audio";
 import Settings from "./pages/Settings";
+import Auth from "./pages/Auth";
 import NotFound from "./pages/NotFound";
 import { ArenaChatbot } from "./components/chatbot/ArenaChatbot";
+import { RequireAuth } from "./components/auth/RequireAuth";
 
 const queryClient = new QueryClient();
 
@@ -23,14 +25,15 @@ const App = () => (
       <Sonner />
       <BrowserRouter>
         <Routes>
-          <Route path="/" element={<Index />} />
-          <Route path="/matches" element={<Matches />} />
-          <Route path="/upload" element={<Upload />} />
-          <Route path="/analysis" element={<Analysis />} />
-          <Route path="/events" element={<Events />} />
-          <Route path="/media" element={<Media />} />
-          <Route path="/audio" element={<Audio />} />
-          <Route path="/settings" element={<Settings />} />
+          <Route path="/auth" element={<Auth />} />
+          <Route path="/" element={<RequireAuth><Index /></RequireAuth>} />
+          <Route path="/matches" element={<RequireAuth><Matches /></RequireAuth>} />
+          <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
+          <Route path="/analysis" element={<RequireAuth><Analysis /></RequireAuth>} />
+          <Route path="/events" element={<RequireAuth><Events /></RequireAuth>} />
+          <Route path="/media" element={<RequireAuth><Media /></RequireAuth>} />
+          <Route path="/audio" element={<RequireAuth><Audio /></RequireAuth>} />
+          <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
           <Route path="*" element={<NotFound />} />
         </Routes>
         <ArenaChatbot />

@@ -23,6 +23,8 @@ const badgeVariants = cva(
         "card-yellow": "event-card-yellow border",
         "card-red": "event-card-red border",
         offside: "event-offside border",
+        // Highlight badge for featured events (goals)
+        highlight: "border-yellow-500/50 bg-gradient-to-r from-yellow-500/20 to-amber-500/20 text-yellow-500 shadow-[0_0_12px_rgba(234,179,8,0.3)]",
       },
     },
     defaultVariants: {
