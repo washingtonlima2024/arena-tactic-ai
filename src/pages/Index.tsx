@@ -14,17 +14,10 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { MatchCard } from '@/components/matches/MatchCard';
 import { EventTimeline } from '@/components/events/EventTimeline';
-import { AnalysisProgress } from '@/components/analysis/AnalysisProgress';
-import { InsightCard } from '@/components/tactical/InsightCard';
 import { FootballField } from '@/components/tactical/FootballField';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { 
-  mockTacticalAnalysis,
-  mockPlayerStats
-} from '@/data/mockData';
-import { AnalysisJob } from '@/types/arena';
 import heroBg from '@/assets/hero-bg.jpg';
 import { Link } from 'react-router-dom';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
@@ -63,7 +56,6 @@ export default function Dashboard() {
   });
   
   const recentEvents = matchEvents.slice(0, 5);
-  const recentInsights = mockTacticalAnalysis.insights.slice(0, 2);
 
   return (
     <AppLayout>
@@ -202,20 +194,6 @@ export default function Dashboard() {
               </Card>
             )}
 
-            {/* Tactical Insights */}
-            <div className="space-y-4">
-              <div className="flex items-center justify-between">
-                <h2 className="font-display text-2xl font-semibold">Insights Táticos</h2>
-                <Button variant="ghost" asChild>
-                  <Link to="/analysis">Ver todos</Link>
-                </Button>
-              </div>
-              <div className="grid gap-4 md:grid-cols-2">
-                {recentInsights.map(insight => (
-                  <InsightCard key={insight.id} insight={insight} />
-                ))}
-              </div>
-            </div>
           </div>
 
           {/* Sidebar */}
@@ -248,60 +226,23 @@ export default function Dashboard() {
               </Card>
             )}
 
-            {/* Field Visualization */}
-            <Card variant="tactical">
-              <CardHeader className="pb-3">
-                <CardTitle>Mapa de Calor</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <FootballField 
-                  heatmap={mockPlayerStats[0]?.heatmap}
-                  showGrid
-                />
-                <p className="mt-3 text-center text-sm text-muted-foreground">
-                  Robert Lewandowski - Zonas de atuação
-                </p>
-              </CardContent>
-            </Card>
-          </div>
-        </div>
-
-        {/* Bottom Section - Predictions */}
-        <section className="space-y-4">
-          <h2 className="font-display text-2xl font-semibold">Previsões Táticas</h2>
-          <div className="grid gap-4 md:grid-cols-3">
-            {mockTacticalAnalysis.predictions.map(prediction => (
-              <Card key={prediction.id} variant="glow" className="relative overflow-hidden">
-                <div 
-                  className="absolute right-0 top-0 h-full w-24 opacity-10"
-                  style={{
-                    background: `linear-gradient(to left, hsl(var(--primary)), transparent)`
-                  }}
-                />
-                <CardContent className="pt-6">
-                  <div className="mb-3 flex items-center justify-between">
-                    <Badge 
-                      variant={
-                        prediction.impact === 'high' ? 'destructive' : 
-                        prediction.impact === 'medium' ? 'warning' : 'secondary'
-                      }
-                    >
-                      {prediction.impact === 'high' ? 'Alto Impacto' : 
-                       prediction.impact === 'medium' ? 'Médio Impacto' : 'Baixo Impacto'}
-                    </Badge>
-                    <span className="text-3xl font-bold text-primary">
-                      {Math.round(prediction.probability * 100)}%
-                    </span>
-                  </div>
-                  <h3 className="font-medium">{prediction.scenario}</h3>
-                  <p className="mt-2 text-sm text-muted-foreground">
-                    {prediction.recommendation}
+            {/* Field Visualization - only show if we have matches */}
+            {realMatches.length > 0 && (
+              <Card variant="tactical">
+                <CardHeader className="pb-3">
+                  <CardTitle>Campo Tático</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <FootballField showGrid />
+                  <p className="mt-3 text-center text-sm text-muted-foreground">
+                    Selecione uma partida para ver detalhes
                   </p>
                 </CardContent>
               </Card>
-            ))}
+            )}
           </div>
-        </section>
+        </div>
+
       </div>
     </AppLayout>
   );
