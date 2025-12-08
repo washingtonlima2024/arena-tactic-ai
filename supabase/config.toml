@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.generate-narration]
 verify_jwt = false
+
+[functions.generate-podcast]
+verify_jwt = false
