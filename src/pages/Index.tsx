@@ -16,6 +16,7 @@ import { MatchCard } from '@/components/matches/MatchCard';
 import { EventTimeline } from '@/components/events/EventTimeline';
 import { LiveTacticalField } from '@/components/tactical/LiveTacticalField';
 import { FootballField } from '@/components/tactical/FootballField';
+import { Heatmap3D } from '@/components/tactical/Heatmap3D';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -191,6 +192,56 @@ export default function Dashboard() {
                       Importar Partida
                     </Link>
                   </Button>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* 3D Visualization */}
+            {realMatches.length > 0 && (
+              <Card variant="glow" className="mt-6">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2">
+                      <BarChart3 className="h-5 w-5 text-primary" />
+                      Mapa de Calor 3D
+                    </CardTitle>
+                    <Badge variant="arena">Visualização Interativa</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <Heatmap3D
+                    homeTeam={realMatches[0]?.home_team?.name || 'Time Casa'}
+                    awayTeam={realMatches[0]?.away_team?.name || 'Time Visitante'}
+                    homePlayers={[
+                      { x: 5, y: 50, number: 1, team: 'home', intensity: 0.3 },
+                      { x: 20, y: 20, number: 4, team: 'home', intensity: 0.7 },
+                      { x: 20, y: 40, number: 3, team: 'home', intensity: 0.6 },
+                      { x: 20, y: 60, number: 15, team: 'home', intensity: 0.65 },
+                      { x: 20, y: 80, number: 2, team: 'home', intensity: 0.75 },
+                      { x: 45, y: 30, number: 8, team: 'home', intensity: 0.85 },
+                      { x: 45, y: 50, number: 5, team: 'home', intensity: 0.9 },
+                      { x: 45, y: 70, number: 17, team: 'home', intensity: 0.8 },
+                      { x: 70, y: 20, number: 19, team: 'home', intensity: 0.95 },
+                      { x: 75, y: 50, number: 9, team: 'home', intensity: 1 },
+                      { x: 70, y: 80, number: 11, team: 'home', intensity: 0.9 },
+                    ]}
+                    awayPlayers={[
+                      { x: 95, y: 50, number: 1, team: 'away', intensity: 0.3 },
+                      { x: 80, y: 20, number: 2, team: 'away', intensity: 0.7 },
+                      { x: 80, y: 40, number: 4, team: 'away', intensity: 0.65 },
+                      { x: 80, y: 60, number: 5, team: 'away', intensity: 0.6 },
+                      { x: 80, y: 80, number: 23, team: 'away', intensity: 0.75 },
+                      { x: 60, y: 25, number: 8, team: 'away', intensity: 0.8 },
+                      { x: 60, y: 50, number: 10, team: 'away', intensity: 0.95 },
+                      { x: 60, y: 75, number: 15, team: 'away', intensity: 0.85 },
+                      { x: 35, y: 30, number: 11, team: 'away', intensity: 0.9 },
+                      { x: 30, y: 50, number: 9, team: 'away', intensity: 1 },
+                      { x: 35, y: 70, number: 7, team: 'away', intensity: 0.88 },
+                    ]}
+                  />
+                  <p className="mt-3 text-center text-sm text-muted-foreground">
+                    Arraste para rotacionar • Scroll para zoom
+                  </p>
                 </CardContent>
               </Card>
             )}
