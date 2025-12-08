@@ -3,6 +3,9 @@ project_id = "wtpvajxekyfekdmypcok"
 [functions.analyze-video]
 verify_jwt = false
 
+[functions.extract-audio-srt]
+verify_jwt = false
+
 [functions.generate-narration]
 verify_jwt = false
 
