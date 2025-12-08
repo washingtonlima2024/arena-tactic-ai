@@ -330,6 +330,36 @@ export type Database = {
         }
         Relationships: []
       }
+      thumbnails: {
+        Row: {
+          created_at: string
+          event_id: string
+          event_type: string
+          id: string
+          image_url: string
+          match_id: string
+          title: string | null
+        }
+        Insert: {
+          created_at?: string
+          event_id: string
+          event_type: string
+          id?: string
+          image_url: string
+          match_id: string
+          title?: string | null
+        }
+        Update: {
+          created_at?: string
+          event_id?: string
+          event_type?: string
+          id?: string
+          image_url?: string
+          match_id?: string
+          title?: string | null
+        }
+        Relationships: []
+      }
       videos: {
         Row: {
           created_at: string
