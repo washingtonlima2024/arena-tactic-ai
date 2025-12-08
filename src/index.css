@@ -366,8 +366,9 @@
     0 0 10px hsl(var(--neon-blue) / 0.6),
     0 0 20px hsl(var(--neon-blue) / 0.4),
     0 0 40px hsl(var(--neon-blue) / 0.2);
-  -webkit-text-stroke: 0.5px hsl(var(--neon-blue-glow) / 0.6);
-  letter-spacing: 0.05em;
+  -webkit-text-stroke: 1px white;
+  paint-order: stroke fill;
+  letter-spacing: 0.08em;
 }
 
 .neon-text-blue:hover {
