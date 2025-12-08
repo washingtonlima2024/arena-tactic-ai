@@ -1,6 +1,7 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Clock, Play } from 'lucide-react';
+import { useVignetteAudio } from '@/hooks/useVignetteAudio';
 
 interface ClipVignetteProps {
   thumbnailUrl: string;
@@ -197,15 +198,19 @@ export function ClipVignette({
   const [imageLoaded, setImageLoaded] = useState(false);
   
   const particles = useMemo(() => generateParticles(20), []);
-
+  const { playSwoosh, playImpact, initAudio } = useVignetteAudio();
   const soundPlayedRef = useRef({ enter: false, exit: false });
 
   useEffect(() => {
-    // Play swoosh on mount (enter)
-    if (!soundPlayedRef.current.enter) {
-      playSwooshSound();
-      soundPlayedRef.current.enter = true;
-    }
+    // Initialize and play swoosh on mount
+    const playEnterSound = async () => {
+      if (!soundPlayedRef.current.enter) {
+        await initAudio();
+        await playSwoosh();
+        soundPlayedRef.current.enter = true;
+      }
+    };
+    playEnterSound();
 
     // Enter phase (0.5s)
     const enterTimer = setTimeout(() => {
@@ -222,7 +227,7 @@ export function ClipVignette({
       setPhase('exit');
       // Play impact sound on exit
       if (!soundPlayedRef.current.exit) {
-        playImpactSound();
+        playImpact();
         soundPlayedRef.current.exit = true;
       }
     }, duration - 400);
@@ -238,7 +243,7 @@ export function ClipVignette({
       clearTimeout(completeTimer);
       clearInterval(countdownInterval);
     };
-  }, [duration, onComplete]);
+  }, [duration, onComplete, playSwoosh, playImpact, initAudio]);
 
   return (
     <div className="relative w-full h-full bg-black overflow-hidden">
