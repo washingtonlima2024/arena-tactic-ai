@@ -276,16 +276,19 @@ export function AnimatedTacticalPlay({
               Thumbnail
             </Button>
           )}
-          {hasVideo && (
-            <Button
-              variant="arena"
-              size="sm"
-              onClick={() => onPlayVideo?.(event.id)}
-            >
-              <Video className="h-4 w-4 mr-1" />
-              Ver Vídeo
-            </Button>
-          )}
+          {/* Always show video button - 5s before/after */}
+          <Button
+            variant="arena"
+            size="sm"
+            onClick={() => onPlayVideo?.(event.id)}
+            className="gap-2"
+          >
+            <Video className="h-4 w-4" />
+            Ver Vídeo
+            <Badge variant="outline" className="ml-1 text-[10px] py-0 px-1">
+              5s±
+            </Badge>
+          </Button>
         </div>
       </div>
 
