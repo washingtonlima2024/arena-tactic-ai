@@ -448,7 +448,7 @@ export default function VideoUpload() {
       {/* Title with Soccer Ball */}
       <div className="relative text-center mb-6 pt-4">
         <h1 className="text-5xl md:text-6xl lg:text-7xl neon-text-blue flex items-center justify-center gap-1">
-          Arena Visi
+          <span className="text-6xl md:text-7xl lg:text-8xl">A</span>rena Visi
           <img src={soccerBall} alt="" className="h-12 w-12 md:h-14 md:w-14 lg:h-16 lg:w-16 inline-block animate-spin-slow" />
           n
         </h1>

@@ -42,7 +42,7 @@ export default function Landing() {
         {/* Title with Soccer Ball */}
         <div className="text-center mb-8">
           <h1 className="text-6xl md:text-7xl lg:text-8xl neon-text-blue flex items-center justify-center gap-1">
-            Arena Visi
+            <span className="text-7xl md:text-8xl lg:text-9xl">A</span>rena Visi
             <img src={soccerBall} alt="" className="h-14 w-14 md:h-18 md:w-18 lg:h-20 lg:w-20 inline-block animate-spin-slow" />
             n
           </h1>
