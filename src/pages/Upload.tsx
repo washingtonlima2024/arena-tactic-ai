@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,7 +29,10 @@ import {
   Link as LinkIcon,
   Plus,
   Trash2,
-  Clock
+  Clock,
+  FolderOpen,
+  Share2,
+  Settings
 } from 'lucide-react';
 import { useTeams } from '@/hooks/useTeams';
 import { useCreateMatch } from '@/hooks/useMatches';
@@ -38,6 +41,8 @@ import { AnalysisProgress } from '@/components/analysis/AnalysisProgress';
 import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import logoKakttus from '@/assets/logo-kakttus.png';
+import soccerBall from '@/assets/soccer-ball.png';
 
 interface VideoLink {
   id: string;
@@ -79,6 +84,9 @@ const extractEmbedUrl = (input: string): string => {
 
 export default function VideoUpload() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialMode = searchParams.get('mode') === 'file' ? 'file' : 'link';
+  
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [srtFile, setSrtFile] = useState<File | null>(null);
@@ -88,7 +96,7 @@ export default function VideoUpload() {
   const [competition, setCompetition] = useState<string>('');
   const [matchDate, setMatchDate] = useState<string>('');
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
-  const [uploadMode, setUploadMode] = useState<'link' | 'file'>('link');
+  const [uploadMode, setUploadMode] = useState<'link' | 'file'>(initialMode);
   
   // Video links state
   const [videoLinks, setVideoLinks] = useState<VideoLink[]>([]);
@@ -430,16 +438,83 @@ export default function VideoUpload() {
     );
   }
 
+  // Landing-style hero section for Upload
+  const HeroSection = () => (
+    <div className="relative mb-8">
+      {/* Background Grid Effect */}
+      <div className="absolute inset-0 tactical-grid opacity-20" />
+      <div className="absolute inset-0 bg-gradient-to-b from-transparent via-transparent to-background" />
+      
+      {/* Ambient Glow */}
+      <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] h-[300px] bg-primary/5 blur-[100px] rounded-full" />
+      
+      {/* Header Bar */}
+      <div className="relative flex items-center justify-between px-4 py-3 border-b border-border/30 mb-8">
+        <div className="flex items-center gap-3">
+          <img src={logoKakttus} alt="Kakttus Solutions" className="h-8 w-8 object-contain" />
+          <div>
+            <h1 className="font-semibold text-foreground text-sm">Kakttus Solutions</h1>
+            <p className="text-xs text-muted-foreground">Tecnologia com Inteligência</p>
+          </div>
+        </div>
+        
+        <div className="flex items-center gap-3">
+          <Link to="/matches" className="text-muted-foreground hover:text-foreground transition-colors">
+            <BarChart3 className="h-4 w-4" />
+          </Link>
+          <Link to="/settings" className="text-muted-foreground hover:text-foreground transition-colors">
+            <Share2 className="h-4 w-4" />
+          </Link>
+          <Link to="/settings" className="text-muted-foreground hover:text-foreground transition-colors">
+            <Settings className="h-4 w-4" />
+          </Link>
+        </div>
+      </div>
+
+      {/* Title with Soccer Ball */}
+      <div className="relative text-center mb-6">
+        <h1 className="font-display text-4xl md:text-5xl font-bold neon-text-blue tracking-wide flex items-center justify-center gap-2">
+          Arena Visi
+          <img src={soccerBall} alt="" className="h-10 w-10 md:h-12 md:w-12 inline-block animate-spin-slow" />
+          n
+        </h1>
+        <p className="text-muted-foreground mt-2">
+          Análise Inteligente de Futebol
+        </p>
+      </div>
+
+      {/* Gallery Button */}
+      <div className="relative flex justify-center mb-6">
+        <Button 
+          asChild 
+          variant="outline" 
+          size="sm" 
+          className="gap-2 border-border/50 hover:border-primary/50 hover:bg-primary/5"
+        >
+          <Link to="/matches">
+            <FolderOpen className="h-4 w-4" />
+            Ver Galeria de Partidas
+          </Link>
+        </Button>
+      </div>
+
+      <style>{`
+        @keyframes spin-slow {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        .animate-spin-slow {
+          animation: spin-slow 8s linear infinite;
+        }
+      `}</style>
+    </div>
+  );
+
   return (
     <AppLayout>
       <div className="space-y-6">
-        {/* Header */}
-        <div>
-          <h1 className="font-display text-3xl font-bold">Importar Vídeo</h1>
-          <p className="text-muted-foreground">
-            Adicione links de vídeo ou faça upload para análise automática
-          </p>
-        </div>
+        {/* Landing-style Hero */}
+        <HeroSection />
 
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Upload Area */}
