@@ -23,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import heroBg from '@/assets/hero-bg.jpg';
+import arenaWordmark from '@/assets/arena-play-wordmark.png';
 import { Link } from 'react-router-dom';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
 import { supabase } from '@/integrations/supabase/client';
@@ -132,9 +133,11 @@ export default function Dashboard() {
               <Zap className="mr-1 h-3 w-3" />
               Powered by AI
             </Badge>
-            <h1 className="font-display text-4xl font-bold tracking-tight md:text-5xl">
-              Arena Play
-            </h1>
+            <img 
+              src={arenaWordmark} 
+              alt="Arena Play" 
+              className="h-10 md:h-12 object-contain"
+            />
             <p className="mt-2 max-w-xl text-lg text-muted-foreground">
               A Inteligência Artificial que Transforma Dados em Vantagem Competitiva. 
               Análise tática automatizada e insights preditivos.
