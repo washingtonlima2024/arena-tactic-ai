@@ -189,7 +189,14 @@ export function AnimatedTacticalPlay({
 }: AnimatedTacticalPlayProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [playSteps] = useState(() => generatePlaySteps(event));
+  const [playSteps, setPlaySteps] = useState(() => generatePlaySteps(event));
+
+  // Regenerate steps when event changes
+  useEffect(() => {
+    setPlaySteps(generatePlaySteps(event));
+    setCurrentStep(0);
+    setIsPlaying(false);
+  }, [event.id, event.event_type]);
 
   const currentPlay = playSteps[currentStep];
 
