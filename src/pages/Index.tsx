@@ -40,18 +40,26 @@ export default function Dashboard() {
     queryFn: async () => {
       const [matchesRes, eventsRes, analysisRes] = await Promise.all([
         supabase.from('matches').select('id, status'),
-        supabase.from('match_events').select('id'),
+        supabase.from('match_events').select('id, event_type'),
         supabase.from('analysis_jobs').select('id').eq('status', 'completed')
       ]);
       
       const totalMatches = matchesRes.data?.length || 0;
       const analyzedMatches = analysisRes.data?.length || 0;
       const totalEvents = eventsRes.data?.length || 0;
+      const totalGoals = eventsRes.data?.filter(e => e.event_type === 'goal').length || 0;
+      const totalShots = eventsRes.data?.filter(e => 
+        e.event_type === 'shot' || 
+        e.event_type === 'shot_on_target' || 
+        e.event_type === 'Finalização'
+      ).length || 0;
       
       return {
         totalMatches,
         analyzedMatches,
         totalEvents,
+        totalGoals,
+        totalShots,
         accuracyRate: 94
       };
     }
@@ -107,16 +115,16 @@ export default function Dashboard() {
             trend={{ value: 12, isPositive: true }}
           />
           <StatCard
-            title="Eventos Detectados"
-            value={(stats?.totalEvents || 0).toLocaleString()}
-            subtitle="Gols, assistências, faltas..."
+            title="Gols Registrados"
+            value={stats?.totalGoals || 0}
+            subtitle={`${stats?.totalShots || 0} finalizações`}
             icon={Activity}
             trend={{ value: 8, isPositive: true }}
           />
           <StatCard
-            title="Insights Táticos"
-            value={realMatches.length * 5}
-            subtitle="Padrões identificados"
+            title="Eventos Detectados"
+            value={(stats?.totalEvents || 0).toLocaleString()}
+            subtitle="Faltas, cartões, escanteios..."
             icon={BarChart3}
             trend={{ value: 23, isPositive: true }}
           />
