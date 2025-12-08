@@ -8,13 +8,13 @@ import {
   Mic, 
   Settings, 
   ChevronLeft,
-  ChevronRight,
-  Zap
+  ChevronRight
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
+import arenaLogo from '@/assets/arena-play-logo.png';
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
@@ -40,20 +40,26 @@ export function Sidebar() {
       {/* Logo */}
       <div className="flex h-16 items-center justify-between border-b border-border px-4">
         {!collapsed && (
-          <div className="flex items-center gap-2">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-arena">
-              <Zap className="h-5 w-5 text-primary-foreground" />
-            </div>
+          <div className="flex items-center gap-3">
+            <img 
+              src={arenaLogo} 
+              alt="Arena Play Logo" 
+              className="h-10 w-10 rounded-lg object-contain"
+            />
             <div>
-              <h1 className="font-display text-lg font-bold gradient-text">Arena Play</h1>
+              <h1 className="font-neon text-lg font-bold tracking-wide neon-text-blue">
+                ARENA PLAY
+              </h1>
               <p className="text-[10px] text-muted-foreground">by Kakttus Solutions</p>
             </div>
           </div>
         )}
         {collapsed && (
-          <div className="mx-auto flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-arena">
-            <Zap className="h-5 w-5 text-primary-foreground" />
-          </div>
+          <img 
+            src={arenaLogo} 
+            alt="Arena Play Logo" 
+            className="mx-auto h-10 w-10 rounded-lg object-contain"
+          />
         )}
       </div>
 

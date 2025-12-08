@@ -16,6 +16,7 @@ export default {
       fontFamily: {
         sans: ['Manrope', 'system-ui', 'sans-serif'],
         display: ['Outfit', 'Manrope', 'system-ui', 'sans-serif'],
+        neon: ['Orbitron', 'system-ui', 'sans-serif'],
       },
       colors: {
         border: "hsl(var(--border))",
