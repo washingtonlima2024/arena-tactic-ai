@@ -70,8 +70,16 @@ export default function Events() {
     }
   }, [matchIdFromUrl]);
 
-  // Use URL param first, then state, then first match as fallback
+  // Determine the current match ID - URL takes priority
   const currentMatchId = matchIdFromUrl || selectedMatchId || matches[0]?.id || null;
+  
+  // Auto-set URL when no match param is present but we have matches
+  useEffect(() => {
+    if (!matchIdFromUrl && matches.length > 0 && currentMatchId) {
+      setSearchParams({ match: currentMatchId }, { replace: true });
+    }
+  }, [matchIdFromUrl, matches, currentMatchId, setSearchParams]);
+  
   const selectedMatch = matches.find(m => m.id === currentMatchId);
   
   const { data: events = [], isLoading: eventsLoading } = useMatchEvents(currentMatchId);
