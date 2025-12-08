@@ -308,7 +308,7 @@ export default function VideoUpload() {
             video_type: link.type,
             start_minute: link.startMinute,
             end_minute: link.endMinute,
-            status: 'uploaded'
+            status: 'pending'
           });
 
           if (videoError) {
@@ -332,7 +332,7 @@ export default function VideoUpload() {
           video_type: 'full',
           start_minute: 0,
           end_minute: null,
-          status: 'uploaded'
+          status: 'pending'
         });
       }
 
