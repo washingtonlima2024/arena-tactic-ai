@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -10,18 +11,38 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
-import { Search, Filter, Plus, Calendar, Trophy, Loader2, Video } from 'lucide-react';
-import { useMatches } from '@/hooks/useMatches';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { Search, Filter, Plus, Calendar, Trophy, Loader2, Video, Trash2 } from 'lucide-react';
+import { useMatches, Match } from '@/hooks/useMatches';
+import { useDeleteMatch } from '@/hooks/useDeleteMatch';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 export default function Matches() {
   const { data: matches = [], isLoading } = useMatches();
+  const deleteMatch = useDeleteMatch();
+  const [matchToDelete, setMatchToDelete] = useState<Match | null>(null);
 
   const completedMatches = matches.filter(m => m.status === 'completed').length;
   const analyzingMatches = matches.filter(m => m.status === 'analyzing').length;
   const pendingMatches = matches.filter(m => m.status === 'pending').length;
+
+  const handleDeleteConfirm = () => {
+    if (matchToDelete) {
+      deleteMatch.mutate(matchToDelete.id);
+      setMatchToDelete(null);
+    }
+  };
 
   return (
     <AppLayout>
@@ -176,16 +197,64 @@ export default function Matches() {
                     </p>
                   )}
 
-                  {match.status === 'completed' && (
-                    <Button variant="arena-outline" size="sm" className="w-full mt-4" asChild>
-                      <Link to="/analysis">Ver Análise</Link>
+                  <div className="flex gap-2 mt-4">
+                    {match.status === 'completed' && (
+                      <Button variant="arena-outline" size="sm" className="flex-1" asChild>
+                        <Link to="/analysis">Ver Análise</Link>
+                      </Button>
+                    )}
+                    <Button 
+                      variant="ghost" 
+                      size="sm" 
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      onClick={() => setMatchToDelete(match)}
+                    >
+                      <Trash2 className="h-4 w-4" />
                     </Button>
-                  )}
+                  </div>
                 </CardContent>
               </Card>
             ))}
           </div>
         )}
+
+        {/* Delete Confirmation Dialog */}
+        <AlertDialog open={!!matchToDelete} onOpenChange={(open) => !open && setMatchToDelete(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Deletar Partida</AlertDialogTitle>
+              <AlertDialogDescription>
+                Esta ação irá remover permanentemente a partida 
+                <strong> {matchToDelete?.home_team?.name || 'Time Casa'} vs {matchToDelete?.away_team?.name || 'Time Visitante'}</strong> e todos os dados relacionados:
+                <ul className="list-disc list-inside mt-2 space-y-1 text-left">
+                  <li>Eventos da partida</li>
+                  <li>Áudios gerados (narrações e podcasts)</li>
+                  <li>Vídeos importados</li>
+                  <li>Análises táticas</li>
+                  <li>Thumbnails geradas</li>
+                  <li>Conversas do chatbot</li>
+                </ul>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleDeleteConfirm}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                disabled={deleteMatch.isPending}
+              >
+                {deleteMatch.isPending ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Deletando...
+                  </>
+                ) : (
+                  'Deletar'
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </AppLayout>
   );
