@@ -11,7 +11,8 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
 import { Loader2, Shield } from 'lucide-react';
-import arenaLogo from '@/assets/arena-play-logo.png';
+import arenaIcon from '@/assets/arena-play-icon.png';
+import arenaWordmark from '@/assets/arena-play-wordmark.png';
 
 const authSchema = z.object({
   email: z.string().email('Email inválido'),
@@ -89,10 +90,10 @@ export default function Auth() {
     <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 p-4">
       <Card className="w-full max-w-md border-primary/20 bg-card/80 backdrop-blur-sm">
         <CardHeader className="text-center">
-          <div className="mx-auto mb-4 flex h-20 w-20 items-center justify-center">
-            <img src={arenaLogo} alt="Arena Play" className="h-16 w-16 object-contain" />
+          <div className="mx-auto mb-4 flex flex-col items-center gap-2">
+            <img src={arenaIcon} alt="Arena Play" className="h-14 w-14 object-contain" />
+            <img src={arenaWordmark} alt="Arena Play" className="h-8 object-contain" />
           </div>
-          <CardTitle className="text-2xl font-bold text-primary">Arena Play</CardTitle>
           <CardDescription>
             Plataforma de análise tática de futebol
           </CardDescription>

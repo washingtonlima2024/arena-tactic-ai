@@ -15,7 +15,8 @@ import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useSidebarContext } from '@/contexts/SidebarContext';
-import arenaLogo from '@/assets/arena-play-logo.png';
+import arenaIcon from '@/assets/arena-play-icon.png';
+import arenaWordmark from '@/assets/arena-play-wordmark.png';
 import kakttusLogo from '@/assets/logo-kakttus.png';
 
 const navItems = [
@@ -43,27 +44,24 @@ export function Sidebar() {
       {/* Logo */}
       <div className="flex h-20 items-center justify-between border-b border-border px-4">
         {!collapsed && (
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
             <img 
-              src={arenaLogo} 
-              alt="Arena Play Logo" 
-              className="h-14 w-14 rounded-lg object-contain"
-              style={{ filter: 'hue-rotate(180deg) saturate(1.2)' }}
+              src={arenaIcon} 
+              alt="Arena Play" 
+              className="h-10 w-10 object-contain"
             />
-            <div>
-              <h1 className="text-xl neon-text-blue">
-                ARENA PLAY
-              </h1>
-              <p className="text-[10px] text-muted-foreground">by Kakttus Solutions</p>
-            </div>
+            <img 
+              src={arenaWordmark} 
+              alt="Arena Play" 
+              className="h-8 object-contain"
+            />
           </div>
         )}
         {collapsed && (
           <img 
-            src={arenaLogo} 
-            alt="Arena Play Logo" 
-            className="mx-auto h-14 w-14 rounded-lg object-contain"
-            style={{ filter: 'hue-rotate(180deg) saturate(1.2)' }}
+            src={arenaIcon} 
+            alt="Arena Play" 
+            className="mx-auto h-10 w-10 object-contain"
           />
         )}
       </div>
