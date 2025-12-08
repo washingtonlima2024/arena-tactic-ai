@@ -19,7 +19,7 @@ import arenaLogo from '@/assets/arena-play-logo.png';
 import kakttusLogo from '@/assets/logo-kakttus.png';
 
 const navItems = [
-  { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
+  { icon: LayoutDashboard, label: 'Início', path: '/' },
   { icon: Video, label: 'Partidas', path: '/matches' },
   { icon: Upload, label: 'Importar Vídeo', path: '/upload' },
   { icon: Radio, label: 'Ao Vivo', path: '/live' },
