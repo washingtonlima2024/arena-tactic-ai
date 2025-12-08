@@ -20,18 +20,25 @@ import {
   Loader2,
   Video,
   Plus,
-  Pencil
+  Pencil,
+  CheckCircle,
+  Clock,
+  XCircle
 } from 'lucide-react';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
 import { Link } from 'react-router-dom';
 import { EventEditDialog } from '@/components/events/EventEditDialog';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQueryClient, useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 
 export default function Events() {
+  const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const { data: matches = [], isLoading: matchesLoading } = useAllCompletedMatches();
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string>('all');
+  const [approvalFilter, setApprovalFilter] = useState<string>('all');
   const [editingEvent, setEditingEvent] = useState<any>(null);
 
   // Auto-select first match if none selected
@@ -40,14 +47,37 @@ export default function Events() {
   
   const { data: events = [], isLoading: eventsLoading } = useMatchEvents(currentMatchId);
 
-  // Filter events by type
+  // Fetch match video
+  const { data: matchVideo } = useQuery({
+    queryKey: ['match-video', currentMatchId],
+    queryFn: async () => {
+      if (!currentMatchId) return null;
+      const { data } = await supabase
+        .from('videos')
+        .select('*')
+        .eq('match_id', currentMatchId)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!currentMatchId
+  });
+
+  // Filter events by type and approval status
   const filteredEvents = events.filter(event => {
-    if (typeFilter === 'all') return true;
-    if (typeFilter === 'goals') return event.event_type === 'goal';
-    if (typeFilter === 'shots') return event.event_type.includes('shot');
-    if (typeFilter === 'fouls') return event.event_type === 'foul' || event.event_type.includes('card');
-    if (typeFilter === 'tactical') return ['high_press', 'transition', 'ball_recovery', 'substitution'].includes(event.event_type);
-    return true;
+    // Type filter
+    let typeMatch = true;
+    if (typeFilter === 'goals') typeMatch = event.event_type === 'goal';
+    else if (typeFilter === 'shots') typeMatch = event.event_type.includes('shot');
+    else if (typeFilter === 'fouls') typeMatch = event.event_type === 'foul' || event.event_type.includes('card');
+    else if (typeFilter === 'tactical') typeMatch = ['high_press', 'transition', 'ball_recovery', 'substitution'].includes(event.event_type);
+    
+    // Approval filter
+    let approvalMatch = true;
+    if (approvalFilter === 'pending') approvalMatch = event.approval_status === 'pending' || !event.approval_status;
+    else if (approvalFilter === 'approved') approvalMatch = event.approval_status === 'approved';
+    else if (approvalFilter === 'rejected') approvalMatch = event.approval_status === 'rejected';
+    
+    return typeMatch && approvalMatch;
   });
 
   // Calculate counts
@@ -56,11 +86,24 @@ export default function Events() {
     shots: events.filter(e => e.event_type.includes('shot')).length,
     fouls: events.filter(e => e.event_type === 'foul' || e.event_type.includes('card')).length,
     tactical: events.filter(e => ['high_press', 'transition', 'ball_recovery', 'substitution'].includes(e.event_type)).length,
+    pending: events.filter(e => e.approval_status === 'pending' || !e.approval_status).length,
+    approved: events.filter(e => e.approval_status === 'approved').length,
   };
 
   // Group events by half
   const firstHalfEvents = filteredEvents.filter(e => (e.minute || 0) <= 45);
   const secondHalfEvents = filteredEvents.filter(e => (e.minute || 0) > 45);
+
+  const getApprovalIcon = (status: string | null) => {
+    switch (status) {
+      case 'approved':
+        return <CheckCircle className="h-4 w-4 text-green-500" />;
+      case 'rejected':
+        return <XCircle className="h-4 w-4 text-red-500" />;
+      default:
+        return <Clock className="h-4 w-4 text-yellow-500" />;
+    }
+  };
 
   if (matchesLoading) {
     return (
@@ -134,7 +177,7 @@ export default function Events() {
         </div>
 
         {/* Stats Overview */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
           <Card variant="glow">
             <CardContent className="flex items-center gap-4 pt-6">
               <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-green-500/10">
@@ -165,7 +208,7 @@ export default function Events() {
                 <AlertTriangle className="h-6 w-6 text-orange-500" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Faltas/Cartões</p>
+                <p className="text-sm text-muted-foreground">Faltas</p>
                 <p className="font-display text-3xl font-bold">{eventCounts.fouls}</p>
               </div>
             </CardContent>
@@ -177,11 +220,40 @@ export default function Events() {
                 <Shield className="h-6 w-6 text-primary" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Eventos Táticos</p>
+                <p className="text-sm text-muted-foreground">Táticos</p>
                 <p className="font-display text-3xl font-bold">{eventCounts.tactical}</p>
               </div>
             </CardContent>
           </Card>
+
+          {/* Admin: Pending approval count */}
+          {isAdmin && (
+            <>
+              <Card variant="glow" className="border-yellow-500/30">
+                <CardContent className="flex items-center gap-4 pt-6">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-yellow-500/10">
+                    <Clock className="h-6 w-6 text-yellow-500" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Pendentes</p>
+                    <p className="font-display text-3xl font-bold">{eventCounts.pending}</p>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card variant="glow" className="border-green-500/30">
+                <CardContent className="flex items-center gap-4 pt-6">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-green-500/10">
+                    <CheckCircle className="h-6 w-6 text-green-500" />
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Aprovados</p>
+                    <p className="font-display text-3xl font-bold">{eventCounts.approved}</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
 
         <div className="grid gap-6 lg:grid-cols-3">
@@ -192,7 +264,7 @@ export default function Events() {
                 <CardTitle>Timeline de Eventos ({filteredEvents.length})</CardTitle>
                 <div className="flex gap-2">
                   <Select value={typeFilter} onValueChange={setTypeFilter}>
-                    <SelectTrigger className="w-40">
+                    <SelectTrigger className="w-36">
                       <Filter className="mr-2 h-4 w-4" />
                       <SelectValue placeholder="Tipo" />
                     </SelectTrigger>
@@ -204,6 +276,20 @@ export default function Events() {
                       <SelectItem value="tactical">Táticos</SelectItem>
                     </SelectContent>
                   </Select>
+                  {isAdmin && (
+                    <Select value={approvalFilter} onValueChange={setApprovalFilter}>
+                      <SelectTrigger className="w-36">
+                        <CheckCircle className="mr-2 h-4 w-4" />
+                        <SelectValue placeholder="Status" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">Todos</SelectItem>
+                        <SelectItem value="pending">Pendentes</SelectItem>
+                        <SelectItem value="approved">Aprovados</SelectItem>
+                        <SelectItem value="rejected">Rejeitados</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
               </CardHeader>
               <CardContent>
@@ -220,9 +306,18 @@ export default function Events() {
                     {filteredEvents.map((event) => (
                       <div 
                         key={event.id}
-                        className="flex items-center gap-4 rounded-lg border border-border bg-muted/30 p-3 hover:bg-muted/50 transition-colors group cursor-pointer"
+                        className={`flex items-center gap-4 rounded-lg border p-3 transition-colors group cursor-pointer ${
+                          event.approval_status === 'pending' || !event.approval_status
+                            ? 'border-yellow-500/30 bg-yellow-500/5 hover:bg-yellow-500/10'
+                            : event.approval_status === 'approved'
+                            ? 'border-green-500/20 bg-muted/30 hover:bg-muted/50'
+                            : 'border-red-500/20 bg-red-500/5 hover:bg-red-500/10'
+                        }`}
                         onClick={() => setEditingEvent(event)}
                       >
+                        {/* Approval status icon */}
+                        {getApprovalIcon(event.approval_status)}
+                        
                         <Badge 
                           variant={
                             event.event_type === 'goal' ? 'success' :
@@ -310,6 +405,44 @@ export default function Events() {
               </CardContent>
             </Card>
 
+            {/* Approval Summary for Admin */}
+            {isAdmin && (
+              <Card variant="glow" className="border-primary/30">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <CheckCircle className="h-5 w-5 text-primary" />
+                    Aprovações
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Clock className="h-4 w-4 text-yellow-500" />
+                      <span className="text-sm">Pendentes</span>
+                    </div>
+                    <Badge variant="warning">{eventCounts.pending}</Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="text-sm">Aprovados</span>
+                    </div>
+                    <Badge variant="success">{eventCounts.approved}</Badge>
+                  </div>
+                  {eventCounts.pending > 0 && (
+                    <Button
+                      variant="arena"
+                      size="sm"
+                      className="w-full mt-2"
+                      onClick={() => setApprovalFilter('pending')}
+                    >
+                      Ver Pendentes
+                    </Button>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
             <Card variant="glass">
               <CardHeader>
                 <CardTitle>Por Time</CardTitle>
@@ -376,13 +509,17 @@ export default function Events() {
           </div>
         </div>
 
-        {/* Edit Dialog */}
+        {/* Edit Dialog with Video Preview */}
         <EventEditDialog
           isOpen={!!editingEvent}
           onClose={() => setEditingEvent(null)}
           event={editingEvent}
           homeTeam={selectedMatch?.home_team?.name}
           awayTeam={selectedMatch?.away_team?.name}
+          matchVideo={matchVideo ? {
+            file_url: matchVideo.file_url,
+            start_minute: matchVideo.start_minute || 0
+          } : null}
           onSave={() => {
             queryClient.invalidateQueries({ queryKey: ['match-events', currentMatchId] });
           }}

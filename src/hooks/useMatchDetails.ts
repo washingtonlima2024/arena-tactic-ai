@@ -39,6 +39,11 @@ export interface MatchEvent {
   position_y: number | null;
   metadata: Record<string, any> | null;
   created_at: string;
+  clip_url: string | null;
+  is_highlight: boolean | null;
+  approval_status: string | null;
+  approved_by: string | null;
+  approved_at: string | null;
 }
 
 export interface TacticalAnalysis {

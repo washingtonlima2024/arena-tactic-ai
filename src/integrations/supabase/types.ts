@@ -174,6 +174,9 @@ export type Database = {
       }
       match_events: {
         Row: {
+          approval_status: string | null
+          approved_at: string | null
+          approved_by: string | null
           clip_url: string | null
           created_at: string
           description: string | null
@@ -189,6 +192,9 @@ export type Database = {
           second: number | null
         }
         Insert: {
+          approval_status?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
           clip_url?: string | null
           created_at?: string
           description?: string | null
@@ -204,6 +210,9 @@ export type Database = {
           second?: number | null
         }
         Update: {
+          approval_status?: string | null
+          approved_at?: string | null
+          approved_by?: string | null
           clip_url?: string | null
           created_at?: string
           description?: string | null
