@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { 
   Video, 
   BarChart3, 
@@ -8,7 +8,8 @@ import {
   Users,
   Activity,
   RotateCcw,
-  Loader2
+  Loader2,
+  Play
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { StatCard } from '@/components/dashboard/StatCard';
@@ -20,11 +21,13 @@ import { Heatmap3D } from '@/components/tactical/Heatmap3D';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import heroBg from '@/assets/hero-bg.jpg';
 import { Link } from 'react-router-dom';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
+import { toast } from '@/hooks/use-toast';
 
 export default function Dashboard() {
   // Fetch real matches from database
@@ -33,6 +36,27 @@ export default function Dashboard() {
   // Get the first match for events display
   const firstMatchId = realMatches[0]?.id;
   const { data: matchEvents = [] } = useMatchEvents(firstMatchId);
+  
+  // Video player state
+  const [videoDialogOpen, setVideoDialogOpen] = useState(false);
+  const [playingEventMinute, setPlayingEventMinute] = useState<number>(0);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  
+  // Fetch video for the first match
+  const { data: matchVideo } = useQuery({
+    queryKey: ['match-video', firstMatchId],
+    queryFn: async () => {
+      if (!firstMatchId) return null;
+      const { data, error } = await supabase
+        .from('videos')
+        .select('*')
+        .eq('match_id', firstMatchId)
+        .maybeSingle();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!firstMatchId
+  });
   
   // Fetch stats from database
   const { data: stats } = useQuery({
@@ -66,6 +90,32 @@ export default function Dashboard() {
   });
   
   const recentEvents = matchEvents.slice(0, 5);
+  
+  const handlePlayVideo = (eventId: string, eventMinute: number) => {
+    if (!matchVideo) {
+      toast({
+        title: "Vídeo não disponível",
+        description: "Faça upload do vídeo da partida na página de Upload",
+        variant: "destructive"
+      });
+      return;
+    }
+    setPlayingEventMinute(eventMinute);
+    setVideoDialogOpen(true);
+  };
+  
+  // Calculate video start seconds
+  const getVideoStartSeconds = (eventMinute: number) => {
+    if (!matchVideo) return 0;
+    const videoStartMinute = matchVideo.start_minute || 0;
+    const videoEndMinute = matchVideo.end_minute || (videoStartMinute + 45);
+    const videoDuration = matchVideo.duration_seconds || ((videoEndMinute - videoStartMinute) * 60);
+    
+    const matchMinutesSpan = videoEndMinute - videoStartMinute;
+    const relativePosition = (eventMinute - videoStartMinute) / matchMinutesSpan;
+    const eventVideoSeconds = relativePosition * videoDuration;
+    return Math.max(0, eventVideoSeconds - 5);
+  };
 
   return (
     <AppLayout>
@@ -274,16 +324,20 @@ export default function Dashboard() {
                   </div>
                 </CardHeader>
                 <CardContent>
-                  <EventTimeline events={recentEvents.map(e => ({
-                    id: e.id,
-                    type: e.event_type as any,
-                    minute: e.minute || 0,
-                    team: 'home' as const,
-                    matchId: firstMatchId || '',
-                    teamId: '',
-                    description: e.description || '',
-                    player: { id: '', name: '', number: 0, position: '' }
-                  }))} />
+                  <EventTimeline 
+                    events={recentEvents.map(e => ({
+                      id: e.id,
+                      type: e.event_type as any,
+                      minute: e.minute || 0,
+                      team: 'home' as const,
+                      matchId: firstMatchId || '',
+                      teamId: '',
+                      description: e.description || '',
+                      player: { id: '', name: '', number: 0, position: '' }
+                    }))} 
+                    hasVideo={!!matchVideo}
+                    onPlayVideo={handlePlayVideo}
+                  />
                 </CardContent>
               </Card>
             )}
@@ -333,6 +387,70 @@ export default function Dashboard() {
             )}
           </div>
         </div>
+
+        {/* Video Player Dialog */}
+        <Dialog open={videoDialogOpen} onOpenChange={setVideoDialogOpen}>
+          <DialogContent className="max-w-4xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-3">
+                <Play className="h-5 w-5 text-primary" />
+                <span>Evento - {playingEventMinute}'</span>
+                <Badge variant="arena">5s antes</Badge>
+              </DialogTitle>
+            </DialogHeader>
+            {matchVideo && (() => {
+              const startSeconds = getVideoStartSeconds(playingEventMinute);
+              const isEmbed = matchVideo.file_url.includes('/embed/') || matchVideo.file_url.includes('iframe') || matchVideo.file_url.includes('xtream');
+              const separator = matchVideo.file_url.includes('?') ? '&' : '?';
+              const embedUrl = `${matchVideo.file_url}${separator}t=${Math.round(startSeconds)}&autoplay=1`;
+              
+              return (
+                <div className="space-y-4">
+                  <div className="aspect-video relative">
+                    {isEmbed ? (
+                      <iframe
+                        src={embedUrl}
+                        className="absolute inset-0 w-full h-full rounded-lg"
+                        frameBorder="0"
+                        allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
+                        title={`Evento ${playingEventMinute}'`}
+                      />
+                    ) : (
+                      <video
+                        ref={videoRef}
+                        src={matchVideo.file_url}
+                        controls
+                        autoPlay
+                        className="w-full h-full rounded-lg"
+                        onLoadedMetadata={(e) => {
+                          const video = e.currentTarget;
+                          video.currentTime = startSeconds;
+                        }}
+                      />
+                    )}
+                  </div>
+                  
+                  <div className="flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 p-3">
+                    <div className="flex items-center gap-3">
+                      <Badge variant="outline" className="gap-1">
+                        <Play className="h-3 w-3" />
+                        {playingEventMinute}'
+                      </Badge>
+                      <span className="text-sm text-muted-foreground">
+                        {realMatches[0]?.home_team?.name} vs {realMatches[0]?.away_team?.name}
+                      </span>
+                    </div>
+                    <Button variant="outline" size="sm" asChild>
+                      <Link to={`/analysis?match=${firstMatchId}`}>
+                        Ver Análise Completa
+                      </Link>
+                    </Button>
+                  </div>
+                </div>
+              );
+            })()}
+          </DialogContent>
+        </Dialog>
 
       </div>
     </AppLayout>

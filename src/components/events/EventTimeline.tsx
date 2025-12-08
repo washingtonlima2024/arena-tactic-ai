@@ -3,13 +3,15 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { mockPlayers, mockTeams } from '@/data/mockData';
-import { Star, Pencil } from 'lucide-react';
+import { Star, Pencil, Play } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 
 interface EventTimelineProps {
   events: MatchEvent[];
   className?: string;
   onEditEvent?: (event: MatchEvent) => void;
+  onPlayVideo?: (eventId: string, eventMinute: number) => void;
+  hasVideo?: boolean;
 }
 
 const eventIcons: Record<string, string> = {
@@ -65,7 +67,7 @@ const eventBadgeVariants: Record<string, any> = {
 // Events that should be highlighted
 const highlightEventTypes = ['goal', 'penalty'];
 
-export function EventTimeline({ events, className, onEditEvent }: EventTimelineProps) {
+export function EventTimeline({ events, className, onEditEvent, onPlayVideo, hasVideo }: EventTimelineProps) {
   const { isAdmin } = useAuth();
 
   const getPlayer = (playerId?: string) => {
@@ -99,6 +101,19 @@ export function EventTimeline({ events, className, onEditEvent }: EventTimelineP
             )}
             style={{ animationDelay: `${index * 50}ms` }}
           >
+            {/* Play Button */}
+            {hasVideo && onPlayVideo && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8 shrink-0 hover:bg-primary/20"
+                onClick={() => onPlayVideo(event.id, event.minute)}
+                title="Reproduzir vídeo"
+              >
+                <Play className="h-4 w-4 text-primary" />
+              </Button>
+            )}
+
             {/* Time */}
             <div className="flex w-12 flex-col items-center">
               <span className={cn(
