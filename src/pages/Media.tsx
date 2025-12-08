@@ -29,11 +29,13 @@ import {
 import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
+import { ClipVignette } from '@/components/media/ClipVignette';
 
 export default function Media() {
   const { data: matches, isLoading: matchesLoading } = useAllCompletedMatches();
   const [selectedMatchId, setSelectedMatchId] = useState<string>('');
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
+  const [showingVignette, setShowingVignette] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   
   const selectedMatch = matches?.find(m => m.id === selectedMatchId) || matches?.[0];
@@ -228,9 +230,10 @@ export default function Media() {
               </div>
             </div>
 
-            {/* Video Player - usando iframe para embeds */}
+            {/* Video Player - com vinheta animada */}
             {matchVideo && playingClipId && (() => {
               const playingClip = clips.find(c => c.id === playingClipId);
+              const thumbnail = getThumbnail(playingClip?.id || '');
               const videoStartMinute = matchVideo.start_minute || 0;
               const eventSeconds = ((playingClip?.minute || 0) - videoStartMinute) * 60;
               const startSeconds = Math.max(0, eventSeconds - 10);
@@ -255,7 +258,10 @@ export default function Media() {
                         <Button 
                           variant="outline" 
                           size="sm"
-                          onClick={() => setPlayingClipId(null)}
+                          onClick={() => {
+                            setPlayingClipId(null);
+                            setShowingVignette(false);
+                          }}
                         >
                           Fechar
                         </Button>
@@ -264,7 +270,21 @@ export default function Media() {
                   </CardHeader>
                   <CardContent>
                     <div className="relative aspect-video w-full overflow-hidden rounded-lg">
-                      {matchVideo.file_url.includes('xtream.tech') || matchVideo.file_url.includes('embed') ? (
+                      {/* Vinheta animada */}
+                      {showingVignette && thumbnail?.imageUrl && playingClip ? (
+                        <ClipVignette
+                          thumbnailUrl={thumbnail.imageUrl}
+                          eventType={playingClip.type}
+                          minute={playingClip.minute}
+                          title={playingClip.description || playingClip.title}
+                          homeTeam={selectedMatch?.home_team?.name || 'Time Casa'}
+                          awayTeam={selectedMatch?.away_team?.name || 'Time Fora'}
+                          homeScore={selectedMatch?.home_score || 0}
+                          awayScore={selectedMatch?.away_score || 0}
+                          onComplete={() => setShowingVignette(false)}
+                          duration={4000}
+                        />
+                      ) : matchVideo.file_url.includes('xtream.tech') || matchVideo.file_url.includes('embed') ? (
                         <iframe
                           src={embedUrl}
                           className="absolute inset-0 w-full h-full"
@@ -337,7 +357,12 @@ export default function Media() {
                     
                     if (isPlaying) {
                       setPlayingClipId(null);
+                      setShowingVignette(false);
                     } else {
+                      // Se tiver thumbnail, mostra a vinheta primeiro
+                      if (thumbnail?.imageUrl) {
+                        setShowingVignette(true);
+                      }
                       setPlayingClipId(clip.id);
                     }
                   };
