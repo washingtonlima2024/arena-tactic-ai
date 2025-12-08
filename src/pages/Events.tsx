@@ -1,5 +1,4 @@
-import { useState, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,7 +28,8 @@ import {
   Scissors,
   AlertCircle
 } from 'lucide-react';
-import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
+import { useMatchEvents } from '@/hooks/useMatchDetails';
+import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { Link } from 'react-router-dom';
 import { EventEditDialog } from '@/components/events/EventEditDialog';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
@@ -41,13 +41,12 @@ import { toast } from 'sonner';
 import { Progress } from '@/components/ui/progress';
 
 export default function Events() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const matchIdFromUrl = searchParams.get('match');
-  
   const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
-  const { data: matches = [], isLoading: matchesLoading } = useAllCompletedMatches();
-  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(matchIdFromUrl);
+  
+  // Centralized match selection
+  const { currentMatchId, selectedMatch, matches, isLoading: matchesLoading, setSelectedMatch } = useMatchSelection();
+  
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [approvalFilter, setApprovalFilter] = useState<string>('all');
   const [editingEvent, setEditingEvent] = useState<any>(null);
@@ -63,25 +62,6 @@ export default function Events() {
     isGeneratingEvent 
   } = useClipGeneration();
 
-  // Sync URL param with state when URL changes
-  useEffect(() => {
-    if (matchIdFromUrl && matchIdFromUrl !== selectedMatchId) {
-      setSelectedMatchId(matchIdFromUrl);
-    }
-  }, [matchIdFromUrl]);
-
-  // Determine the current match ID - URL takes priority
-  const currentMatchId = matchIdFromUrl || selectedMatchId || matches[0]?.id || null;
-  
-  // Auto-set URL when no match param is present but we have matches
-  useEffect(() => {
-    if (!matchIdFromUrl && matches.length > 0 && currentMatchId) {
-      setSearchParams({ match: currentMatchId }, { replace: true });
-    }
-  }, [matchIdFromUrl, matches, currentMatchId, setSearchParams]);
-  
-  const selectedMatch = matches.find(m => m.id === currentMatchId);
-  
   const { data: events = [], isLoading: eventsLoading } = useMatchEvents(currentMatchId);
 
   // Fetch match video
@@ -321,10 +301,7 @@ export default function Events() {
           <div className="flex flex-wrap gap-2">
             <Select 
               value={currentMatchId || ''} 
-              onValueChange={(value) => {
-                setSelectedMatchId(value);
-                setSearchParams({ match: value });
-              }}
+              onValueChange={(value) => setSelectedMatch(value)}
             >
               <SelectTrigger className="w-64">
                 <SelectValue placeholder="Selecionar partida" />

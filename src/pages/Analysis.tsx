@@ -1,5 +1,4 @@
-import { useState, useRef, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useState, useRef } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -29,7 +28,8 @@ import {
   Play,
   Image
 } from 'lucide-react';
-import { useAllCompletedMatches, useMatchAnalysis, useMatchEvents } from '@/hooks/useMatchDetails';
+import { useMatchAnalysis, useMatchEvents } from '@/hooks/useMatchDetails';
+import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
 import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -38,28 +38,14 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
 
 export default function Analysis() {
-  const [searchParams, setSearchParams] = useSearchParams();
-  const matchIdFromUrl = searchParams.get('match');
+  // Centralized match selection
+  const { currentMatchId, selectedMatch, matches, isLoading: matchesLoading, setSelectedMatch } = useMatchSelection();
   
-  const { data: matches = [], isLoading: matchesLoading } = useAllCompletedMatches();
-  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(matchIdFromUrl);
   const [selectedEventForPlay, setSelectedEventForPlay] = useState<string | null>(null);
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [playingEventId, setPlayingEventId] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
-  // Sync URL param with state when URL changes
-  useEffect(() => {
-    if (matchIdFromUrl && matchIdFromUrl !== selectedMatchId) {
-      setSelectedMatchId(matchIdFromUrl);
-      setSelectedEventForPlay(null); // Reset event selection when match changes
-    }
-  }, [matchIdFromUrl]);
-
-  // Use URL param first, then state, then first match as fallback
-  const currentMatchId = matchIdFromUrl || selectedMatchId || matches[0]?.id || null;
-  const selectedMatch = matches.find(m => m.id === currentMatchId);
-  
   const { data: analysis, isLoading: analysisLoading } = useMatchAnalysis(currentMatchId);
   const { data: events = [] } = useMatchEvents(currentMatchId);
   const { thumbnails, getThumbnail } = useThumbnailGeneration(currentMatchId || undefined);
@@ -171,10 +157,8 @@ export default function Analysis() {
             <Select 
               value={currentMatchId || ''} 
               onValueChange={(value) => {
-                setSelectedMatchId(value);
+                setSelectedMatch(value);
                 setSelectedEventForPlay(null); // Reset event selection
-                // Update URL to reflect the selected match
-                setSearchParams({ match: value });
               }}
             >
               <SelectTrigger className="w-64">
