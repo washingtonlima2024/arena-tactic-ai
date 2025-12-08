@@ -22,7 +22,9 @@ interface VideoPlayerModalProps {
   };
   matchVideo: {
     file_url: string;
-    start_minute?: number;
+    start_minute?: number | null;
+    end_minute?: number | null;
+    duration_seconds?: number | null;
   } | null;
   homeTeam: string;
   awayTeam: string;
@@ -50,15 +52,49 @@ export function VideoPlayerModal({
 
   if (!clip || !matchVideo) return null;
 
+  // Cálculo de sincronização de tempo:
+  // - start_minute: minuto da PARTIDA onde o vídeo começa (ex: 0 para 1º tempo, 45 para 2º tempo)
+  // - end_minute: minuto da PARTIDA onde o vídeo termina
+  // - duration_seconds: duração REAL do arquivo de vídeo em segundos
+  // 
+  // Exemplo: Vídeo do 2º tempo
+  // - start_minute = 45, end_minute = 90
+  // - duration_seconds = 2700 (45 min reais de vídeo)
+  // - Evento no minuto 60 da partida
+  // - Posição no vídeo = ((60 - 45) / (90 - 45)) * 2700 = 900 segundos
+
   const videoStartMinute = matchVideo.start_minute || 0;
-  const eventSeconds = (clip.minute - videoStartMinute) * 60;
-  const startSeconds = Math.max(0, eventSeconds - 10);
+  const videoEndMinute = matchVideo.end_minute || (videoStartMinute + 45);
+  const videoDuration = matchVideo.duration_seconds || ((videoEndMinute - videoStartMinute) * 60);
+  
+  // Calcula a proporção do tempo de jogo para o tempo do vídeo
+  const matchMinutesSpan = videoEndMinute - videoStartMinute;
+  const eventMatchMinute = clip.minute;
+  
+  // Posição relativa do evento dentro do intervalo do vídeo
+  const relativePosition = (eventMatchMinute - videoStartMinute) / matchMinutesSpan;
+  
+  // Tempo no vídeo (em segundos)
+  const eventVideoSeconds = relativePosition * videoDuration;
+  
+  // Começa 10 segundos antes do evento (com limite mínimo de 0)
+  const startSeconds = Math.max(0, eventVideoSeconds - 10);
 
   // Build URL with time parameter
   const baseUrl = matchVideo.file_url;
   const separator = baseUrl.includes('?') ? '&' : '?';
-  const embedUrl = `${baseUrl}${separator}t=${startSeconds}`;
+  const embedUrl = `${baseUrl}${separator}t=${Math.round(startSeconds)}`;
   const isEmbed = baseUrl.includes('xtream.tech') || baseUrl.includes('embed');
+
+  console.log('Video sync debug:', {
+    eventMinute: clip.minute,
+    videoStartMinute,
+    videoEndMinute,
+    videoDuration,
+    relativePosition,
+    eventVideoSeconds,
+    startSeconds
+  });
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>

@@ -28,7 +28,8 @@ import {
   FileText,
   Link as LinkIcon,
   Plus,
-  Trash2
+  Trash2,
+  Clock
 } from 'lucide-react';
 import { useTeams } from '@/hooks/useTeams';
 import { useCreateMatch } from '@/hooks/useMatches';
@@ -46,6 +47,7 @@ interface VideoLink {
   title: string;
   startMinute: number;
   endMinute: number | null;
+  durationSeconds: number | null; // Duração real do arquivo de vídeo em segundos
 }
 
 interface UploadedFile {
@@ -93,6 +95,9 @@ export default function VideoUpload() {
   const [newLinkInput, setNewLinkInput] = useState('');
   const [newLinkType, setNewLinkType] = useState<VideoLink['type']>('full');
   const [newLinkTitle, setNewLinkTitle] = useState('');
+  const [newStartMinute, setNewStartMinute] = useState<string>('');
+  const [newEndMinute, setNewEndMinute] = useState<string>('');
+  const [newDuration, setNewDuration] = useState<string>('');
 
   const { data: teams = [], isLoading: teamsLoading } = useTeams();
   const createMatch = useCreateMatch();
@@ -236,8 +241,14 @@ export default function VideoUpload() {
     }
 
     const embedUrl = extractEmbedUrl(newLinkInput);
-    const startMinute = newLinkType === 'second_half' ? 45 : 0;
-    const endMinute = newLinkType === 'first_half' ? 45 : newLinkType === 'second_half' ? 90 : null;
+    
+    // Usar valores dos inputs ou defaults baseados no tipo
+    const defaultStartMinute = newLinkType === 'second_half' ? 45 : 0;
+    const defaultEndMinute = newLinkType === 'first_half' ? 45 : newLinkType === 'second_half' ? 90 : 90;
+    
+    const startMinute = newStartMinute ? parseInt(newStartMinute) : defaultStartMinute;
+    const endMinute = newEndMinute ? parseInt(newEndMinute) : defaultEndMinute;
+    const durationSeconds = newDuration ? parseInt(newDuration) : null;
     
     const typeLabels = {
       full: 'Partida Completa',
@@ -253,16 +264,20 @@ export default function VideoUpload() {
       type: newLinkType,
       title: newLinkTitle || typeLabels[newLinkType],
       startMinute,
-      endMinute
+      endMinute,
+      durationSeconds
     };
 
     setVideoLinks(prev => [...prev, newLink]);
     setNewLinkInput('');
     setNewLinkTitle('');
+    setNewStartMinute('');
+    setNewEndMinute('');
+    setNewDuration('');
     
     toast({
       title: "Vídeo adicionado",
-      description: `${newLink.title} foi adicionado à lista.`
+      description: `${newLink.title} foi adicionado à lista. Sincronização: ${startMinute}'-${endMinute}'`
     });
   };
 
@@ -308,6 +323,7 @@ export default function VideoUpload() {
             video_type: link.type,
             start_minute: link.startMinute,
             end_minute: link.endMinute,
+            duration_seconds: link.durationSeconds,
             status: 'pending'
           });
 
@@ -487,6 +503,55 @@ export default function VideoUpload() {
                           value={newLinkTitle}
                           onChange={(e) => setNewLinkTitle(e.target.value)}
                         />
+                      </div>
+                    </div>
+
+                    {/* Sincronização de Tempo - Seção Expandida */}
+                    <div className="p-4 rounded-lg bg-muted/30 border border-border/50 space-y-4">
+                      <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                        <Clock className="h-4 w-4" />
+                        Sincronização de Tempo (Importante para cortes)
+                      </div>
+                      <p className="text-xs text-muted-foreground">
+                        Configure o alinhamento entre o tempo do jogo e o tempo do vídeo. 
+                        Ex: Se o vídeo é do 2º tempo, o minuto inicial seria 45.
+                      </p>
+                      <div className="grid grid-cols-3 gap-4">
+                        <div className="space-y-2">
+                          <Label className="text-xs">Minuto Inicial (Jogo)</Label>
+                          <Input
+                            type="number"
+                            placeholder={newLinkType === 'second_half' ? '45' : '0'}
+                            min={0}
+                            max={120}
+                            value={newStartMinute}
+                            onChange={(e) => setNewStartMinute(e.target.value)}
+                          />
+                          <p className="text-xs text-muted-foreground">Em que minuto do jogo o vídeo começa</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-xs">Minuto Final (Jogo)</Label>
+                          <Input
+                            type="number"
+                            placeholder={newLinkType === 'first_half' ? '45' : newLinkType === 'second_half' ? '90' : '90'}
+                            min={0}
+                            max={120}
+                            value={newEndMinute}
+                            onChange={(e) => setNewEndMinute(e.target.value)}
+                          />
+                          <p className="text-xs text-muted-foreground">Em que minuto do jogo o vídeo termina</p>
+                        </div>
+                        <div className="space-y-2">
+                          <Label className="text-xs">Duração do Vídeo (seg)</Label>
+                          <Input
+                            type="number"
+                            placeholder="Opcional"
+                            min={0}
+                            value={newDuration}
+                            onChange={(e) => setNewDuration(e.target.value)}
+                          />
+                          <p className="text-xs text-muted-foreground">Deixe vazio para usar cálculo padrão</p>
+                        </div>
                       </div>
                     </div>
                     
