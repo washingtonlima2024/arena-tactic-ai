@@ -15,7 +15,7 @@ export function SoccerBallLoader({
 }: SoccerBallLoaderProps) {
   return (
     <div className={cn(
-      "relative flex flex-col items-center justify-center min-h-[400px] w-full overflow-hidden",
+      "relative flex flex-col items-center justify-center min-h-[200px] py-6 w-full overflow-hidden",
       className
     )}>
       {/* Grid Background */}
@@ -36,20 +36,20 @@ export function SoccerBallLoader({
       <div className="absolute inset-0 bg-gradient-radial from-primary/20 via-transparent to-transparent" />
 
       {/* Soccer Ball Container */}
-      <div className="relative z-10 mb-8">
+      <div className="relative z-10 mb-4">
         {/* Glow Effect */}
-        <div className="absolute inset-0 blur-2xl bg-primary/30 animate-pulse rounded-full scale-150" />
+        <div className="absolute inset-0 blur-xl bg-primary/30 animate-pulse rounded-full scale-125" />
         
         {/* Shadow on ground */}
-        <div className="absolute -bottom-8 left-1/2 -translate-x-1/2 w-16 h-4 bg-black/30 rounded-full blur-md animate-ball-shadow" />
+        <div className="absolute -bottom-4 left-1/2 -translate-x-1/2 w-12 h-3 bg-black/30 rounded-full blur-md animate-ball-shadow" />
         
         {/* Ball */}
         <div className="relative animate-ball-bounce">
           <svg
             viewBox="0 0 100 100"
-            className="w-24 h-24 drop-shadow-2xl animate-ball-spin"
+            className="w-16 h-16 drop-shadow-xl animate-ball-spin"
             style={{
-              filter: 'drop-shadow(0 0 20px hsl(var(--primary)/0.5))'
+              filter: 'drop-shadow(0 0 15px hsl(var(--primary)/0.5))'
             }}
           >
             {/* Ball base */}
@@ -102,19 +102,19 @@ export function SoccerBallLoader({
 
       {/* Loading Text */}
       <div className="relative z-10 text-center">
-        <h3 className="text-2xl font-display font-bold text-foreground flex items-center gap-2">
+        <h3 className="text-lg font-display font-bold text-foreground flex items-center gap-2">
           {message}
           <span className="flex gap-1">
-            <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-            <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-            <span className="w-2 h-2 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
+            <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
+            <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
+            <span className="w-1.5 h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
           </span>
         </h3>
         
         {/* Progress Bar */}
         {showProgress && progress !== undefined && (
-          <div className="mt-4 w-64 mx-auto">
-            <div className="h-2 bg-muted rounded-full overflow-hidden">
+          <div className="mt-3 w-48 mx-auto">
+            <div className="h-1.5 bg-muted rounded-full overflow-hidden">
               <div 
                 className="h-full bg-gradient-to-r from-primary to-primary/70 rounded-full transition-all duration-300 relative"
                 style={{ width: `${progress}%` }}
@@ -122,30 +122,26 @@ export function SoccerBallLoader({
                 <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/30 to-transparent animate-shimmer" />
               </div>
             </div>
-            <p className="text-sm text-muted-foreground mt-2">{Math.round(progress)}% completo</p>
+            <p className="text-xs text-muted-foreground mt-1">{Math.round(progress)}% completo</p>
           </div>
         )}
       </div>
 
-      {/* Floating Particles */}
+      {/* Floating Particles - reduced */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        {[...Array(6)].map((_, i) => (
+        {[...Array(4)].map((_, i) => (
           <div
             key={i}
-            className="absolute w-1.5 h-1.5 bg-primary rounded-full animate-float-particle"
+            className="absolute w-1 h-1 bg-primary rounded-full animate-float-particle"
             style={{
-              left: `${20 + i * 15}%`,
-              top: `${40 + (i % 3) * 20}%`,
+              left: `${25 + i * 15}%`,
+              top: `${30 + (i % 2) * 30}%`,
               animationDelay: `${i * 0.5}s`,
-              opacity: 0.6
+              opacity: 0.5
             }}
           />
         ))}
       </div>
-
-      {/* Corner sparkles */}
-      <div className="absolute top-1/3 left-1/4 w-1 h-1 bg-white rounded-full animate-ping opacity-60" />
-      <div className="absolute bottom-1/3 right-1/4 w-1 h-1 bg-primary rounded-full animate-ping opacity-60" style={{ animationDelay: '1s' }} />
     </div>
   );
 }
