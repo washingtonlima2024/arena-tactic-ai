@@ -14,6 +14,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { StatCard } from '@/components/dashboard/StatCard';
 import { MatchCard } from '@/components/matches/MatchCard';
 import { EventTimeline } from '@/components/events/EventTimeline';
+import { LiveTacticalField } from '@/components/tactical/LiveTacticalField';
 import { FootballField } from '@/components/tactical/FootballField';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -226,8 +227,37 @@ export default function Dashboard() {
               </Card>
             )}
 
-            {/* Field Visualization - only show if we have matches */}
-            {realMatches.length > 0 && (
+            {/* Live Tactical Field with Events */}
+            {recentEvents.length > 0 && (
+              <Card variant="tactical">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle>Campo Tático ao Vivo</CardTitle>
+                    <Badge variant="arena" className="animate-pulse">
+                      {recentEvents.length} eventos
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <LiveTacticalField 
+                    events={recentEvents.map(e => ({
+                      id: e.id,
+                      event_type: e.event_type,
+                      minute: e.minute,
+                      description: e.description,
+                      position_x: e.position_x,
+                      position_y: e.position_y
+                    }))}
+                    homeTeam={realMatches[0]?.home_team?.short_name}
+                    awayTeam={realMatches[0]?.away_team?.short_name}
+                    className="aspect-[3/2]"
+                  />
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Empty state */}
+            {recentEvents.length === 0 && realMatches.length > 0 && (
               <Card variant="tactical">
                 <CardHeader className="pb-3">
                   <CardTitle>Campo Tático</CardTitle>
@@ -235,7 +265,7 @@ export default function Dashboard() {
                 <CardContent>
                   <FootballField showGrid />
                   <p className="mt-3 text-center text-sm text-muted-foreground">
-                    Selecione uma partida para ver detalhes
+                    Nenhum evento registrado ainda
                   </p>
                 </CardContent>
               </Card>
