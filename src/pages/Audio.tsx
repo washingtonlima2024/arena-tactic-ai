@@ -47,12 +47,13 @@ export default function Audio() {
   
   const { data: events } = useMatchEvents(matchId);
   const { data: analysis } = useMatchAnalysis(matchId);
-  const { isGenerating, narration, generateNarration, downloadAudio } = useNarrationGeneration();
+  const { isGenerating, narration, generateNarration, loadNarration, downloadAudio } = useNarrationGeneration();
   const { 
     isGenerating: isPodcastGenerating, 
     generatingType: podcastGeneratingType,
     podcasts, 
     generatePodcast, 
+    loadPodcasts,
     downloadPodcast 
   } = usePodcastGeneration();
   
@@ -68,11 +69,19 @@ export default function Audio() {
     event: e.description || e.event_type
   })) || [];
 
+  // Load saved audio when match changes
+  useEffect(() => {
+    if (matchId && selectedVoice) {
+      loadNarration(matchId, selectedVoice);
+      loadPodcasts(matchId);
+    }
+  }, [matchId, selectedVoice]);
+
   // Audio player controls
   useEffect(() => {
-    if (narration?.audioContent && !audioRef.current) {
+    if (narration?.audioUrl && !audioRef.current) {
       const audio = document.createElement('audio') as HTMLAudioElement;
-      audio.src = `data:audio/mp3;base64,${narration.audioContent}`;
+      audio.src = narration.audioUrl;
       audioRef.current = audio;
       
       audio.addEventListener('loadedmetadata', () => {
@@ -95,7 +104,7 @@ export default function Audio() {
         audioRef.current = null;
       }
     };
-  }, [narration?.audioContent]);
+  }, [narration?.audioUrl]);
 
   const togglePlay = () => {
     if (!audioRef.current) return;
@@ -138,9 +147,9 @@ export default function Audio() {
   };
 
   const handleDownload = () => {
-    if (!narration?.audioContent) return;
+    if (!narration?.audioUrl) return;
     const filename = `narracao-${selectedMatch?.home_team?.short_name || 'home'}-vs-${selectedMatch?.away_team?.short_name || 'away'}.mp3`;
-    downloadAudio(narration.audioContent, filename);
+    downloadAudio(narration.audioUrl, filename);
   };
 
   const handleGeneratePodcast = async (podcastType: PodcastType) => {
@@ -160,7 +169,7 @@ export default function Audio() {
 
   const handlePlayPodcast = (podcastType: PodcastType) => {
     const podcast = podcasts[podcastType];
-    if (!podcast?.audioContent) return;
+    if (!podcast?.audioUrl) return;
 
     // Stop any currently playing podcast
     if (podcastAudioRef.current) {
@@ -174,7 +183,7 @@ export default function Audio() {
     }
 
     const audio = document.createElement('audio') as HTMLAudioElement;
-    audio.src = `data:audio/mp3;base64,${podcast.audioContent}`;
+    audio.src = podcast.audioUrl;
     audio.addEventListener('ended', () => setPlayingPodcast(null));
     audio.play();
     podcastAudioRef.current = audio;
@@ -485,7 +494,7 @@ export default function Audio() {
               ]).map((podcast) => {
                 const podcastData = podcasts[podcast.type];
                 const isThisGenerating = isPodcastGenerating && podcastGeneratingType === podcast.type;
-                const isReady = !!podcastData?.audioContent;
+                const isReady = !!podcastData?.audioUrl;
                 const isThisPlaying = playingPodcast === podcast.type;
                 
                 return (

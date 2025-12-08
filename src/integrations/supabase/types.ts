@@ -98,6 +98,50 @@ export type Database = {
         }
         Relationships: []
       }
+      generated_audio: {
+        Row: {
+          audio_type: string
+          audio_url: string | null
+          created_at: string
+          duration_seconds: number | null
+          id: string
+          match_id: string
+          script: string | null
+          updated_at: string
+          voice: string | null
+        }
+        Insert: {
+          audio_type: string
+          audio_url?: string | null
+          created_at?: string
+          duration_seconds?: number | null
+          id?: string
+          match_id: string
+          script?: string | null
+          updated_at?: string
+          voice?: string | null
+        }
+        Update: {
+          audio_type?: string
+          audio_url?: string | null
+          created_at?: string
+          duration_seconds?: number | null
+          id?: string
+          match_id?: string
+          script?: string | null
+          updated_at?: string
+          voice?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "generated_audio_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       match_events: {
         Row: {
           created_at: string
