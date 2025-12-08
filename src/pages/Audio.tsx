@@ -14,7 +14,6 @@ import {
   MessageSquare,
   Sparkles,
   Clock,
-  Users,
   AlertCircle,
   Loader2
 } from 'lucide-react';
@@ -22,6 +21,7 @@ import { useState, useRef, useEffect } from 'react';
 import { useAllCompletedMatches, useMatchEvents, useMatchAnalysis } from '@/hooks/useMatchDetails';
 import { useNarrationGeneration } from '@/hooks/useNarrationGeneration';
 import { usePodcastGeneration, PodcastType } from '@/hooks/usePodcastGeneration';
+import { TeamChatbotCard } from '@/components/audio/TeamChatbotCard';
 import {
   Select,
   SelectContent,
@@ -585,93 +585,32 @@ export default function Audio() {
           {/* Chatbots Tab */}
           <TabsContent value="chatbots" className="space-y-6">
             <div className="grid gap-6 md:grid-cols-2">
-              {/* Team A Chatbot */}
-              <Card variant="glow" className="overflow-hidden">
-                <div className="h-2 bg-primary" />
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/20 text-lg font-bold text-primary">
-                      {homeTeamShort.slice(0, 2)}
-                    </div>
-                    <div>
-                      <CardTitle>Torcedor {homeTeamName}</CardTitle>
-                      <CardDescription>Chatbot com perspectiva do time</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-3 rounded-lg bg-muted/50 p-4 max-h-60 overflow-y-auto">
-                    <div className="flex gap-3">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                        <Users className="h-4 w-4 text-primary" />
-                      </div>
-                      <div className="rounded-lg bg-muted p-3">
-                        <p className="text-sm">Como foi a partida do {homeTeamName}?</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-3 flex-row-reverse">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/20 text-xs font-bold text-primary">
-                        {homeTeamShort.slice(0, 2)}
-                      </div>
-                      <div className="rounded-lg p-3 bg-primary/10">
-                        <p className="text-sm">
-                          {analysis?.tacticalAnalysis?.insights?.[0] || 
-                            `A partida contra ${awayTeamName} teve ${events?.length || 0} eventos registrados. ` +
-                            `O placar final foi ${selectedMatch?.home_score || 0} x ${selectedMatch?.away_score || 0}.`}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <Button variant="arena-outline" className="w-full" disabled>
-                    <MessageSquare className="mr-2 h-4 w-4" />
-                    Iniciar Conversa (Em breve)
-                  </Button>
-                </CardContent>
-              </Card>
-
-              {/* Team B Chatbot */}
-              <Card variant="glow" className="overflow-hidden">
-                <div className="h-2 bg-secondary" />
-                <CardHeader>
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-full bg-secondary/20 text-lg font-bold text-secondary-foreground">
-                      {awayTeamShort.slice(0, 2)}
-                    </div>
-                    <div>
-                      <CardTitle>Torcedor {awayTeamName}</CardTitle>
-                      <CardDescription>Chatbot com perspectiva do time</CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="space-y-3 rounded-lg bg-muted/50 p-4 max-h-60 overflow-y-auto">
-                    <div className="flex gap-3">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary/10">
-                        <Users className="h-4 w-4 text-primary" />
-                      </div>
-                      <div className="rounded-lg bg-muted p-3">
-                        <p className="text-sm">O que aconteceu no jogo?</p>
-                      </div>
-                    </div>
-                    <div className="flex gap-3 flex-row-reverse">
-                      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-secondary/20 text-xs font-bold">
-                        {awayTeamShort.slice(0, 2)}
-                      </div>
-                      <div className="rounded-lg p-3 bg-secondary/10">
-                        <p className="text-sm">
-                          {analysis?.tacticalAnalysis?.patterns?.[0]?.description || 
-                            `Jogamos contra ${homeTeamName} e o resultado foi ${selectedMatch?.away_score || 0} x ${selectedMatch?.home_score || 0}. ` +
-                            `Foram ${events?.length || 0} eventos durante a partida.`}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                  <Button variant="arena-outline" className="w-full" disabled>
-                    <MessageSquare className="mr-2 h-4 w-4" />
-                    Iniciar Conversa (Em breve)
-                  </Button>
-                </CardContent>
-              </Card>
+              <TeamChatbotCard
+                teamName={homeTeamName}
+                teamShort={homeTeamShort}
+                teamType="home"
+                matchContext={{
+                  homeTeam: homeTeamName,
+                  awayTeam: awayTeamName,
+                  homeScore: selectedMatch?.home_score || 0,
+                  awayScore: selectedMatch?.away_score || 0,
+                  events: events || [],
+                  tacticalAnalysis: JSON.stringify(analysis?.tacticalAnalysis || {}),
+                }}
+              />
+              <TeamChatbotCard
+                teamName={awayTeamName}
+                teamShort={awayTeamShort}
+                teamType="away"
+                matchContext={{
+                  homeTeam: homeTeamName,
+                  awayTeam: awayTeamName,
+                  homeScore: selectedMatch?.home_score || 0,
+                  awayScore: selectedMatch?.away_score || 0,
+                  events: events || [],
+                  tacticalAnalysis: JSON.stringify(analysis?.tacticalAnalysis || {}),
+                }}
+              />
             </div>
           </TabsContent>
         </Tabs>
