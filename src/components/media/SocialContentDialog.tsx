@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -27,6 +27,8 @@ import {
   Check
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useVideoGeneration } from '@/hooks/useVideoGeneration';
+import { VideoGenerationProgress } from './VideoGenerationProgress';
 
 interface VideoFormat {
   id: string;
@@ -105,11 +107,12 @@ interface SocialContentDialogProps {
   platform: string;
   homeTeamPlaylist: TeamPlaylistData;
   awayTeamPlaylist: TeamPlaylistData;
-  onGenerate: (config: GenerationConfig) => void;
+  onGenerate?: (config: GenerationConfig) => void;
   isGenerating?: boolean;
+  matchVideoUrl?: string;
 }
 
-interface GenerationConfig {
+export interface GenerationConfig {
   format: VideoFormat;
   selectedClips: string[];
   includeVignettes: boolean;
@@ -123,15 +126,36 @@ export function SocialContentDialog({
   homeTeamPlaylist,
   awayTeamPlaylist,
   onGenerate,
-  isGenerating = false
+  isGenerating: externalIsGenerating = false,
+  matchVideoUrl
 }: SocialContentDialogProps) {
   const [selectedFormat, setSelectedFormat] = useState<VideoFormat | null>(null);
-  const [step, setStep] = useState<'format' | 'clips'>('format');
+  const [step, setStep] = useState<'format' | 'clips' | 'generating'>('format');
   const [selectedClips, setSelectedClips] = useState<string[]>([]);
   const [includeVignettes, setIncludeVignettes] = useState(true);
   const [activeTeam, setActiveTeam] = useState<'home' | 'away'>('home');
 
+  const { 
+    isGenerating, 
+    progress, 
+    generatedVideoUrl, 
+    generateHighlightsVideo, 
+    downloadVideo,
+    reset: resetGeneration
+  } = useVideoGeneration();
+
   const currentPlaylist = activeTeam === 'home' ? homeTeamPlaylist : awayTeamPlaylist;
+
+  // Reset when dialog closes
+  useEffect(() => {
+    if (!isOpen) {
+      setStep('format');
+      setSelectedFormat(null);
+      setSelectedClips([]);
+      setIncludeVignettes(true);
+      resetGeneration();
+    }
+  }, [isOpen, resetGeneration]);
 
   const handleFormatSelect = (format: VideoFormat) => {
     setSelectedFormat(format);
@@ -157,15 +181,45 @@ export function SocialContentDialog({
     }
   };
 
-  const handleGenerate = () => {
+  const handleGenerate = async () => {
     if (!selectedFormat || selectedClips.length === 0) return;
     
-    onGenerate({
-      format: selectedFormat,
-      selectedClips,
-      includeVignettes,
-      platform
-    });
+    // If we have a video URL, use FFmpeg to generate
+    if (matchVideoUrl) {
+      setStep('generating');
+      
+      // Get selected clips with their data
+      const allClips = [...homeTeamPlaylist.clips, ...awayTeamPlaylist.clips];
+      const clipsToProcess = selectedClips.map(id => {
+        const clip = allClips.find(c => c.id === id);
+        return clip ? {
+          id: clip.id,
+          url: matchVideoUrl,
+          startTime: clip.startTime,
+          endTime: clip.endTime,
+          title: clip.title
+        } : null;
+      }).filter(Boolean) as { id: string; url: string; startTime: number; endTime: number; title: string }[];
+
+      await generateHighlightsVideo({
+        clips: clipsToProcess,
+        format: {
+          width: selectedFormat.width,
+          height: selectedFormat.height,
+          ratio: selectedFormat.ratio
+        },
+        includeVignettes,
+        outputName: `highlights_${platform.replace(/\s+/g, '_').toLowerCase()}`
+      });
+    } else if (onGenerate) {
+      // Fallback to external handler
+      onGenerate({
+        format: selectedFormat,
+        selectedClips,
+        includeVignettes,
+        platform
+      });
+    }
   };
 
   const handleBack = () => {
@@ -205,12 +259,29 @@ export function SocialContentDialog({
           <DialogDescription>
             {step === 'format' 
               ? 'Escolha o formato de vídeo ideal para sua rede social'
+              : step === 'generating'
+              ? 'Processando seu vídeo de melhores momentos'
               : 'Selecione os clipes e configure a montagem do vídeo'
             }
           </DialogDescription>
         </DialogHeader>
 
-        {step === 'format' ? (
+        {step === 'generating' ? (
+          <VideoGenerationProgress
+            progress={progress}
+            videoUrl={generatedVideoUrl}
+            onDownload={() => generatedVideoUrl && downloadVideo(generatedVideoUrl, `${platform.replace(/\s+/g, '_')}_highlights.mp4`)}
+            onPreview={() => {
+              if (generatedVideoUrl) {
+                window.open(generatedVideoUrl, '_blank');
+              }
+            }}
+            onReset={() => {
+              resetGeneration();
+              setStep('clips');
+            }}
+          />
+        ) : step === 'format' ? (
           <div className="space-y-4">
             <p className="text-sm text-muted-foreground">
               Selecione a orientação e proporção do vídeo:
@@ -397,10 +468,10 @@ export function SocialContentDialog({
               <Button 
                 variant="arena" 
                 onClick={handleGenerate}
-                disabled={selectedClips.length === 0 || isGenerating}
+                disabled={selectedClips.length === 0 || isGenerating || externalIsGenerating}
                 className="flex-1"
               >
-                {isGenerating ? (
+                {isGenerating || externalIsGenerating ? (
                   <>
                     <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     Gerando...

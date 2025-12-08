@@ -710,6 +710,7 @@ export default function Media() {
               isOpen={socialDialogOpen}
               onClose={() => setSocialDialogOpen(false)}
               platform={selectedPlatform}
+              matchVideoUrl={matchVideo?.file_url}
               homeTeamPlaylist={{
                 teamName: selectedMatch?.home_team?.name || 'Time Casa',
                 teamType: 'home',
@@ -728,7 +729,7 @@ export default function Media() {
               }}
               onGenerate={(config) => {
                 setIsGeneratingSocial(true);
-                // Simulate generation
+                // Fallback for when no video is available
                 setTimeout(() => {
                   setIsGeneratingSocial(false);
                   setSocialDialogOpen(false);
