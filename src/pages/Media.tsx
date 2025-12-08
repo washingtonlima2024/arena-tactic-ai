@@ -15,7 +15,8 @@ import {
   Sparkles,
   AlertCircle,
   Loader2,
-  Pause
+  Pause,
+  Film
 } from 'lucide-react';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
 import { useState, useRef, useEffect } from 'react';
@@ -669,6 +670,43 @@ export default function Media() {
 
           {/* Social Tab */}
           <TabsContent value="social" className="space-y-4">
+            {/* Export Video Card */}
+            <Card variant="glow" className="border-primary/30 bg-primary/5">
+              <CardContent className="py-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary to-primary/70">
+                      <Film className="h-6 w-6 text-primary-foreground" />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-lg">Exportar Vídeo de Cortes</h3>
+                      <p className="text-sm text-muted-foreground">
+                        Gere um vídeo compilado com os melhores momentos da partida
+                      </p>
+                    </div>
+                  </div>
+                  <Button 
+                    variant="arena" 
+                    size="lg"
+                    disabled={clips.length === 0 || !matchVideo}
+                    onClick={() => {
+                      setSelectedPlatform('Vídeo Personalizado');
+                      setSocialDialogOpen(true);
+                    }}
+                  >
+                    <Download className="mr-2 h-5 w-5" />
+                    Exportar Vídeo
+                  </Button>
+                </div>
+                {!matchVideo && (
+                  <p className="text-xs text-warning mt-3 flex items-center gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    Faça upload do vídeo da partida para habilitar a exportação
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
               {socialPlatforms.map((platform, i) => {
                 const IconComponent = platform.icon;

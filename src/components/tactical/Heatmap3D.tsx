@@ -1,6 +1,6 @@
 import { useRef, useMemo, useState } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
-import { OrbitControls, Text, Grid } from '@react-three/drei';
+import { OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
 
 interface Player {
@@ -80,22 +80,79 @@ function PlayerMarker({
         />
       </mesh>
       
-      {/* Player number */}
-      <Text
+      {/* Player number - using Html instead of Text */}
+      <Html
         position={[0, 0.6, 0]}
-        fontSize={0.2}
-        color="white"
-        anchorX="center"
-        anchorY="middle"
-        font="/fonts/inter-bold.woff"
+        center
+        style={{
+          color: 'white',
+          fontSize: '12px',
+          fontWeight: 'bold',
+          textShadow: '0 0 4px rgba(0,0,0,0.8)',
+          pointerEvents: 'none',
+          userSelect: 'none',
+        }}
       >
-        {number.toString()}
-      </Text>
+        {number}
+      </Html>
     </group>
   );
 }
 
-// Rotating football field
+// Heat gradient overlay based on player density
+function HeatmapOverlay({ players }: { players: Player[] }) {
+  const texture = useMemo(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 80;
+    const ctx = canvas.getContext('2d')!;
+    
+    // Create gradient based on player positions
+    const gradient = ctx.createRadialGradient(64, 40, 0, 64, 40, 60);
+    gradient.addColorStop(0, 'rgba(16, 185, 129, 0.3)');
+    gradient.addColorStop(0.5, 'rgba(16, 185, 129, 0.1)');
+    gradient.addColorStop(1, 'rgba(16, 185, 129, 0)');
+    
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 128, 80);
+    
+    // Add heat spots for each player
+    players.forEach(player => {
+      const px = (player.x / 100) * 128;
+      const py = (player.y / 100) * 80;
+      const intensity = player.intensity || 0.7;
+      
+      const color = player.team === 'home' 
+        ? `rgba(236, 72, 153, ${intensity * 0.4})` 
+        : `rgba(96, 165, 250, ${intensity * 0.4})`;
+      
+      const spotGradient = ctx.createRadialGradient(px, py, 0, px, py, 15);
+      spotGradient.addColorStop(0, color);
+      spotGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      
+      ctx.fillStyle = spotGradient;
+      ctx.fillRect(0, 0, 128, 80);
+    });
+    
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    return tex;
+  }, [players]);
+
+  return (
+    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
+      <planeGeometry args={[11, 7]} />
+      <meshBasicMaterial 
+        map={texture}
+        transparent
+        opacity={0.6}
+        blending={THREE.AdditiveBlending}
+      />
+    </mesh>
+  );
+}
+
+// Rotating football field scene
 function FieldScene({ 
   homePlayers, 
   awayPlayers,
@@ -130,41 +187,62 @@ function FieldScene({
         />
       </mesh>
 
-      {/* Field lines */}
-      <Grid
-        position={[0, 0.01, 0]}
-        args={[11, 7]}
-        cellSize={1}
-        cellThickness={0.5}
-        cellColor="#1a6b42"
-        sectionSize={5.5}
-        sectionThickness={1}
-        sectionColor="#2a8b52"
-        fadeDistance={25}
-        fadeStrength={1}
-        followCamera={false}
-      />
-
-      {/* Center circle */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-        <ringGeometry args={[0.8, 0.85, 32]} />
-        <meshBasicMaterial color="#2a8b52" />
-      </mesh>
+      {/* Outer field lines */}
+      <lineSegments position={[0, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <edgesGeometry args={[new THREE.PlaneGeometry(10.5, 6.5)]} />
+        <lineBasicMaterial color="#2a8b52" />
+      </lineSegments>
 
       {/* Center line */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-        <planeGeometry args={[0.05, 7]} />
+        <planeGeometry args={[0.05, 6.5]} />
         <meshBasicMaterial color="#2a8b52" />
       </mesh>
 
-      {/* Goal areas */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[-4.8, 0.02, 0]}>
-        <ringGeometry args={[1.2, 1.25, 32, 1, 0, Math.PI]} />
+      {/* Center circle */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+        <ringGeometry args={[0.9, 0.95, 32]} />
         <meshBasicMaterial color="#2a8b52" />
       </mesh>
-      <mesh rotation={[-Math.PI / 2, 0, Math.PI]} position={[4.8, 0.02, 0]}>
-        <ringGeometry args={[1.2, 1.25, 32, 1, 0, Math.PI]} />
+
+      {/* Center spot */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+        <circleGeometry args={[0.08, 16]} />
         <meshBasicMaterial color="#2a8b52" />
+      </mesh>
+
+      {/* Left penalty area */}
+      <lineSegments position={[-3.75, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <edgesGeometry args={[new THREE.PlaneGeometry(2, 3.2)]} />
+        <lineBasicMaterial color="#2a8b52" />
+      </lineSegments>
+
+      {/* Right penalty area */}
+      <lineSegments position={[3.75, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <edgesGeometry args={[new THREE.PlaneGeometry(2, 3.2)]} />
+        <lineBasicMaterial color="#2a8b52" />
+      </lineSegments>
+
+      {/* Left goal area */}
+      <lineSegments position={[-4.5, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <edgesGeometry args={[new THREE.PlaneGeometry(0.8, 1.6)]} />
+        <lineBasicMaterial color="#2a8b52" />
+      </lineSegments>
+
+      {/* Right goal area */}
+      <lineSegments position={[4.5, 0.02, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <edgesGeometry args={[new THREE.PlaneGeometry(0.8, 1.6)]} />
+        <lineBasicMaterial color="#2a8b52" />
+      </lineSegments>
+
+      {/* Goals */}
+      <mesh position={[-5.35, 0.15, 0]}>
+        <boxGeometry args={[0.1, 0.3, 1.2]} />
+        <meshStandardMaterial color="#ffffff" metalness={0.8} roughness={0.2} />
+      </mesh>
+      <mesh position={[5.35, 0.15, 0]}>
+        <boxGeometry args={[0.1, 0.3, 1.2]} />
+        <meshStandardMaterial color="#ffffff" metalness={0.8} roughness={0.2} />
       </mesh>
 
       {/* Home players */}
@@ -192,65 +270,6 @@ function FieldScene({
       {/* Heatmap gradient overlay */}
       <HeatmapOverlay players={[...homePlayers, ...awayPlayers]} />
     </group>
-  );
-}
-
-// Heat gradient overlay based on player density
-function HeatmapOverlay({ players }: { players: Player[] }) {
-  const meshRef = useRef<THREE.Mesh>(null);
-  
-  const texture = useMemo(() => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 128;
-    canvas.height = 80;
-    const ctx = canvas.getContext('2d')!;
-    
-    // Create gradient based on player positions
-    const gradient = ctx.createRadialGradient(64, 40, 0, 64, 40, 60);
-    gradient.addColorStop(0, 'rgba(16, 185, 129, 0.3)');
-    gradient.addColorStop(0.5, 'rgba(16, 185, 129, 0.1)');
-    gradient.addColorStop(1, 'rgba(16, 185, 129, 0)');
-    
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 128, 80);
-    
-    // Add heat spots for each player
-    players.forEach(player => {
-      const px = (player.x / 100) * 128;
-      const py = (player.y / 100) * 80;
-      const intensity = player.intensity || 0.7;
-      
-      const color = player.team === 'home' 
-        ? `rgba(236, 72, 153, ${intensity * 0.4})` 
-        : `rgba(96, 165, 250, ${intensity * 0.4})`;
-      
-      const spotGradient = ctx.createRadialGradient(px, py, 0, px, py, 15);
-      spotGradient.addColorStop(0, color);
-      spotGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-      
-      ctx.fillStyle = spotGradient;
-      ctx.fillRect(0, 0, 128, 80);
-    });
-    
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.needsUpdate = true;
-    return texture;
-  }, [players]);
-
-  return (
-    <mesh 
-      ref={meshRef}
-      rotation={[-Math.PI / 2, 0, 0]} 
-      position={[0, 0.03, 0]}
-    >
-      <planeGeometry args={[11, 7]} />
-      <meshBasicMaterial 
-        map={texture}
-        transparent
-        opacity={0.6}
-        blending={THREE.AdditiveBlending}
-      />
-    </mesh>
   );
 }
 
@@ -315,7 +334,6 @@ export function Heatmap3D({
           position={[10, 10, 5]} 
           intensity={1} 
           castShadow 
-          shadow-mapSize={1024}
         />
         <pointLight position={[-5, 5, -5]} intensity={0.5} color="#10b981" />
         <pointLight position={[5, 5, 5]} intensity={0.3} color="#ec4899" />
