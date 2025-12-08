@@ -11,6 +11,13 @@ interface Player {
   intensity?: number;
 }
 
+interface HeatZone {
+  x: number;
+  y: number;
+  intensity: number;
+  team: 'home' | 'away';
+}
+
 interface Heatmap3DProps {
   homeTeam: string;
   awayTeam: string;
@@ -22,24 +29,25 @@ interface Heatmap3DProps {
   editable?: boolean;
 }
 
-// Heat/Cold cloud particle system
-function HeatCloud({ 
+// Volumetric heat zone cloud on the field
+function FieldHeatZone({ 
   position, 
   intensity = 0.7, 
   color,
-  isHot = true 
+  team
 }: { 
   position: [number, number, number]; 
   intensity?: number; 
   color: string;
-  isHot?: boolean;
+  team: 'home' | 'away';
 }) {
   const meshRef = useRef<THREE.Mesh>(null);
   const particlesRef = useRef<THREE.Points>(null);
+  const innerRef = useRef<THREE.Mesh>(null);
   
   // Create particle positions for volumetric cloud effect
   const { particlePositions, particleColors } = useMemo(() => {
-    const count = 50;
+    const count = 80;
     const positions = new Float32Array(count * 3);
     const colors = new Float32Array(count * 3);
     
@@ -50,18 +58,26 @@ function HeatCloud({
     
     for (let i = 0; i < count; i++) {
       const theta = Math.random() * Math.PI * 2;
-      const radius = Math.random() * 0.5 * intensity;
-      const height = (Math.random() - 0.5) * 0.4 * intensity;
+      const radius = Math.random() * 1.2 * intensity;
+      const height = Math.random() * 0.3 * intensity;
       
       positions[i * 3] = Math.cos(theta) * radius;
-      positions[i * 3 + 1] = height + 0.1;
+      positions[i * 3 + 1] = height + 0.05;
       positions[i * 3 + 2] = Math.sin(theta) * radius;
       
-      // Vary color intensity per particle
-      const colorIntensity = 0.5 + Math.random() * 0.5;
-      colors[i * 3] = r * colorIntensity;
-      colors[i * 3 + 1] = g * colorIntensity;
-      colors[i * 3 + 2] = b * colorIntensity;
+      // Vary color intensity per particle - hot zones are redder, cold zones are bluer
+      const colorIntensity = 0.6 + Math.random() * 0.4;
+      if (intensity > 0.6) {
+        // Hot zone - more red/orange
+        colors[i * 3] = Math.min(1, r * colorIntensity + 0.3);
+        colors[i * 3 + 1] = g * colorIntensity * 0.5;
+        colors[i * 3 + 2] = b * colorIntensity * 0.3;
+      } else {
+        // Cold zone - more blue
+        colors[i * 3] = r * colorIntensity * 0.3;
+        colors[i * 3 + 1] = g * colorIntensity * 0.5;
+        colors[i * 3 + 2] = Math.min(1, b * colorIntensity + 0.3);
+      }
     }
     
     return { particlePositions: positions, particleColors: colors };
@@ -70,39 +86,61 @@ function HeatCloud({
   useFrame((state) => {
     if (meshRef.current) {
       // Pulsating cloud effect
-      const pulse = Math.sin(state.clock.elapsedTime * 2) * 0.1 + 1;
+      const pulse = Math.sin(state.clock.elapsedTime * 1.5 + position[0]) * 0.15 + 1;
       meshRef.current.scale.setScalar(pulse * intensity);
       const material = meshRef.current.material as THREE.MeshBasicMaterial;
       if (material.opacity !== undefined) {
-        material.opacity = 0.2 + Math.sin(state.clock.elapsedTime * 1.5) * 0.1;
+        material.opacity = 0.15 + Math.sin(state.clock.elapsedTime * 1.2) * 0.08;
       }
     }
+    if (innerRef.current) {
+      const pulse = Math.sin(state.clock.elapsedTime * 2 + position[0] * 2) * 0.1 + 1;
+      innerRef.current.scale.setScalar(pulse * intensity * 0.6);
+    }
     if (particlesRef.current) {
-      particlesRef.current.rotation.y += 0.005;
+      particlesRef.current.rotation.y += 0.003;
     }
   });
 
+  const isHot = intensity > 0.6;
+  const coreColor = isHot ? "#ff4500" : "#00bfff";
+  const glowColor = isHot ? "#ff6b35" : "#4dc9ff";
+
   return (
     <group position={position}>
-      {/* Main cloud sphere */}
+      {/* Outer cloud sphere */}
       <mesh ref={meshRef}>
-        <sphereGeometry args={[0.4, 16, 16]} />
+        <sphereGeometry args={[1.0, 24, 24]} />
         <meshBasicMaterial 
           color={color}
           transparent
-          opacity={0.25}
+          opacity={0.18}
           blending={THREE.AdditiveBlending}
+          depthWrite={false}
         />
       </mesh>
       
-      {/* Secondary glow layer */}
-      <mesh scale={1.3}>
-        <sphereGeometry args={[0.4 * intensity, 12, 12]} />
+      {/* Inner hot/cold core */}
+      <mesh ref={innerRef}>
+        <sphereGeometry args={[0.5, 16, 16]} />
         <meshBasicMaterial 
-          color={isHot ? "#ff4500" : "#00bfff"}
+          color={coreColor}
           transparent
-          opacity={0.1}
+          opacity={0.25}
           blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
+
+      {/* Secondary glow layer */}
+      <mesh scale={1.4}>
+        <sphereGeometry args={[0.8 * intensity, 16, 16]} />
+        <meshBasicMaterial 
+          color={glowColor}
+          transparent
+          opacity={0.08}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
         />
       </mesh>
 
@@ -123,30 +161,49 @@ function HeatCloud({
           />
         </bufferGeometry>
         <pointsMaterial
-          size={0.05}
+          size={0.08}
           vertexColors
           transparent
-          opacity={0.8}
+          opacity={0.7}
           blending={THREE.AdditiveBlending}
           sizeAttenuation
+          depthWrite={false}
         />
       </points>
 
       {/* Ground glow ring */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
-        <ringGeometry args={[0.1, 0.5 * intensity, 32]} />
+        <ringGeometry args={[0.2, 1.2 * intensity, 32]} />
         <meshBasicMaterial 
-          color={color}
+          color={isHot ? "#ff6b35" : "#4dc9ff"}
           transparent
-          opacity={0.4}
+          opacity={0.35}
           blending={THREE.AdditiveBlending}
+          depthWrite={false}
         />
       </mesh>
+
+      {/* Intensity indicator */}
+      <Html
+        position={[0, 0.5 * intensity, 0]}
+        center
+        style={{
+          color: isHot ? '#ff6b35' : '#4dc9ff',
+          fontSize: '10px',
+          fontWeight: 'bold',
+          textShadow: `0 0 6px ${isHot ? '#ff4500' : '#00bfff'}`,
+          pointerEvents: 'none',
+          userSelect: 'none',
+          opacity: 0.8
+        }}
+      >
+        {Math.round(intensity * 100)}%
+      </Html>
     </group>
   );
 }
 
-// Animated running player with detailed body
+// Animated running player with detailed body (without heat cloud)
 function AnimatedPlayerFigure({ 
   position, 
   number, 
@@ -215,26 +272,25 @@ function AnimatedPlayerFigure({
   useFrame((state) => {
     if (groupRef.current) {
       const time = state.clock.elapsedTime;
-      const speed = intensity * 6; // Higher intensity = faster running
+      const speed = intensity * 6;
       
       // Body bob and lean
       const breathe = Math.sin(time * speed) * 0.03;
       groupRef.current.position.y = breathe;
       
       if (!isDragging) {
-        // Slight body rotation as if running
         groupRef.current.rotation.y = Math.sin(time * 0.8 + position[0]) * 0.15;
         groupRef.current.rotation.x = Math.sin(time * speed) * 0.02;
       }
 
-      // Leg animation - running motion
+      // Leg animation
       if (leftLegRef.current && rightLegRef.current) {
         const legSwing = Math.sin(time * speed) * 0.6;
         leftLegRef.current.rotation.x = legSwing;
         rightLegRef.current.rotation.x = -legSwing;
       }
 
-      // Arm animation - opposite to legs
+      // Arm animation
       if (leftArmRef.current && rightArmRef.current) {
         const armSwing = Math.sin(time * speed) * 0.5;
         leftArmRef.current.rotation.x = -armSwing;
@@ -282,14 +338,6 @@ function AnimatedPlayerFigure({
         <meshBasicMaterial color="#000000" transparent opacity={0.4} />
       </mesh>
 
-      {/* Heat cloud around player */}
-      <HeatCloud 
-        position={[0, 0.3, 0]} 
-        intensity={intensity * 0.8} 
-        color={teamColor}
-        isHot={intensity > 0.6}
-      />
-
       {/* Cleats/Shoes */}
       <mesh position={[-0.05, 0.03, 0]}>
         <boxGeometry args={[0.06, 0.04, 0.1]} />
@@ -302,12 +350,10 @@ function AnimatedPlayerFigure({
 
       {/* Left Leg Group */}
       <group ref={leftLegRef} position={[-0.05, legLength + 0.05, 0]}>
-        {/* Thigh */}
         <mesh position={[0, -0.05, 0]}>
           <capsuleGeometry args={[0.04, 0.12, 4, 8]} />
           <meshStandardMaterial color="#1a1a2e" metalness={0.2} roughness={0.8} />
         </mesh>
-        {/* Shin with sock */}
         <mesh position={[0, -0.15, 0]}>
           <capsuleGeometry args={[0.035, 0.1, 4, 8]} />
           <meshStandardMaterial 
@@ -322,12 +368,10 @@ function AnimatedPlayerFigure({
 
       {/* Right Leg Group */}
       <group ref={rightLegRef} position={[0.05, legLength + 0.05, 0]}>
-        {/* Thigh */}
         <mesh position={[0, -0.05, 0]}>
           <capsuleGeometry args={[0.04, 0.12, 4, 8]} />
           <meshStandardMaterial color="#1a1a2e" metalness={0.2} roughness={0.8} />
         </mesh>
-        {/* Shin with sock */}
         <mesh position={[0, -0.15, 0]}>
           <capsuleGeometry args={[0.035, 0.1, 4, 8]} />
           <meshStandardMaterial 
@@ -374,7 +418,6 @@ function AnimatedPlayerFigure({
             roughness={0.6}
           />
         </mesh>
-        {/* Hand */}
         <mesh position={[-0.02, -0.18, 0]}>
           <sphereGeometry args={[0.025, 8, 8]} />
           <meshStandardMaterial color="#f5d0c5" metalness={0.1} roughness={0.7} />
@@ -393,7 +436,6 @@ function AnimatedPlayerFigure({
             roughness={0.6}
           />
         </mesh>
-        {/* Hand */}
         <mesh position={[0.02, -0.18, 0]}>
           <sphereGeometry args={[0.025, 8, 8]} />
           <meshStandardMaterial color="#f5d0c5" metalness={0.1} roughness={0.7} />
@@ -458,75 +500,41 @@ function AnimatedPlayerFigure({
   );
 }
 
-// Enhanced heat gradient overlay with realistic heatmap colors
-function HeatmapOverlay({ players, homeColor, awayColor }: { players: Player[]; homeColor: string; awayColor: string }) {
-  const texture = useMemo(() => {
-    const canvas = document.createElement('canvas');
-    canvas.width = 256;
-    canvas.height = 160;
-    const ctx = canvas.getContext('2d')!;
-    
-    // Clear with transparent
-    ctx.clearRect(0, 0, 256, 160);
-    
-    // Draw heat spots for each player
-    players.forEach(player => {
-      const px = (player.x / 100) * 256;
-      const py = (player.y / 100) * 160;
-      const intensity = player.intensity || 0.7;
-      
-      // Get team color
-      const hexColor = player.team === 'home' ? homeColor : awayColor;
-      const r = parseInt(hexColor.slice(1, 3), 16);
-      const g = parseInt(hexColor.slice(3, 5), 16);
-      const b = parseInt(hexColor.slice(5, 7), 16);
-      
-      // Create multi-layered gradient for realistic heat effect
-      const size = 30 + intensity * 25;
-      
-      // Outer cold layer (blue tint)
-      const coldGradient = ctx.createRadialGradient(px, py, size * 0.7, px, py, size);
-      coldGradient.addColorStop(0, `rgba(0, 100, 200, 0.1)`);
-      coldGradient.addColorStop(1, 'rgba(0, 50, 150, 0)');
-      ctx.fillStyle = coldGradient;
-      ctx.fillRect(0, 0, 256, 160);
-      
-      // Middle warm layer
-      const warmGradient = ctx.createRadialGradient(px, py, size * 0.3, px, py, size * 0.7);
-      warmGradient.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${intensity * 0.4})`);
-      warmGradient.addColorStop(0.5, `rgba(255, 150, 0, ${intensity * 0.2})`);
-      warmGradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-      ctx.fillStyle = warmGradient;
-      ctx.fillRect(0, 0, 256, 160);
-      
-      // Inner hot core (bright)
-      const hotGradient = ctx.createRadialGradient(px, py, 0, px, py, size * 0.3);
-      hotGradient.addColorStop(0, `rgba(255, 255, 200, ${intensity * 0.5})`);
-      hotGradient.addColorStop(0.3, `rgba(255, 100, 0, ${intensity * 0.4})`);
-      hotGradient.addColorStop(1, `rgba(${r}, ${g}, ${b}, 0)`);
-      ctx.fillStyle = hotGradient;
-      ctx.fillRect(0, 0, 256, 160);
-    });
-    
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.needsUpdate = true;
-    return tex;
-  }, [players, homeColor, awayColor]);
+// Generate heat zones based on attack patterns
+function generateHeatZones(homePlayers: Player[], awayPlayers: Player[]): HeatZone[] {
+  const zones: HeatZone[] = [];
+  
+  // Home team attack zones (right side of field for home team - offensive half)
+  // Generate zones based on player clustering and offensive positions
+  const homeAttackZones = [
+    { x: 75, y: 50, intensity: 0.9 }, // Central attacking area
+    { x: 85, y: 35, intensity: 0.75 }, // Right wing attack
+    { x: 85, y: 65, intensity: 0.7 }, // Left wing attack
+    { x: 65, y: 25, intensity: 0.5 }, // Right midfield
+    { x: 65, y: 75, intensity: 0.45 }, // Left midfield
+  ];
 
-  return (
-    <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
-      <planeGeometry args={[11, 7]} />
-      <meshBasicMaterial 
-        map={texture}
-        transparent
-        opacity={0.7}
-        blending={THREE.AdditiveBlending}
-      />
-    </mesh>
-  );
+  // Away team attack zones (left side of field for away team - offensive half)
+  const awayAttackZones = [
+    { x: 25, y: 50, intensity: 0.85 }, // Central attacking area
+    { x: 15, y: 40, intensity: 0.65 }, // Left wing attack
+    { x: 15, y: 60, intensity: 0.6 }, // Right wing attack
+    { x: 35, y: 30, intensity: 0.4 }, // Left midfield
+    { x: 35, y: 70, intensity: 0.35 }, // Right midfield
+  ];
+
+  homeAttackZones.forEach(zone => {
+    zones.push({ ...zone, team: 'home' });
+  });
+
+  awayAttackZones.forEach(zone => {
+    zones.push({ ...zone, team: 'away' });
+  });
+
+  return zones;
 }
 
-// Field scene with draggable players
+// Field scene with draggable players and heat zones
 function FieldScene({ 
   homePlayers, 
   awayPlayers,
@@ -535,7 +543,8 @@ function FieldScene({
   autoRotate,
   onHomePlayerDrag,
   onAwayPlayerDrag,
-  editable
+  editable,
+  heatZones
 }: { 
   homePlayers: Player[];
   awayPlayers: Player[];
@@ -545,6 +554,7 @@ function FieldScene({
   onHomePlayerDrag: (index: number, position: [number, number, number]) => void;
   onAwayPlayerDrag: (index: number, position: [number, number, number]) => void;
   editable: boolean;
+  heatZones: HeatZone[];
 }) {
   const groupRef = useRef<THREE.Group>(null);
 
@@ -633,12 +643,16 @@ function FieldScene({
         </mesh>
       </group>
 
-      {/* Heatmap overlay - render before players */}
-      <HeatmapOverlay 
-        players={[...homePlayers, ...awayPlayers]} 
-        homeColor={homeColor}
-        awayColor={awayColor}
-      />
+      {/* Heat zones on the field - representing attack areas */}
+      {heatZones.map((zone, idx) => (
+        <FieldHeatZone
+          key={`zone-${idx}`}
+          position={convertPosition(zone.x, zone.y)}
+          intensity={zone.intensity}
+          color={zone.team === 'home' ? homeColor : awayColor}
+          team={zone.team}
+        />
+      ))}
 
       {/* Home players with animated figures */}
       {homePlayers.map((player, idx) => (
@@ -684,6 +698,11 @@ export function Heatmap3D({
   const [autoRotate, setAutoRotate] = useState(true);
   const [homePlayers, setHomePlayers] = useState(initialHomePlayers);
   const [awayPlayers, setAwayPlayers] = useState(initialAwayPlayers);
+
+  // Generate heat zones based on attack patterns
+  const heatZones = useMemo(() => {
+    return generateHeatZones(homePlayers, awayPlayers);
+  }, [homePlayers, awayPlayers]);
 
   // Convert 3D position back to 2D (0-100)
   const convert3DTo2D = (pos: [number, number, number]): { x: number; y: number } => {
@@ -740,11 +759,11 @@ export function Heatmap3D({
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-10 flex items-center gap-2 bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10">
         <div className="flex items-center gap-1">
           <div className="w-3 h-3 rounded-full bg-blue-500/60" />
-          <span className="text-xs text-white/70">Frio</span>
+          <span className="text-xs text-white/70">Baixa atividade</span>
         </div>
         <div className="w-12 h-2 rounded-full bg-gradient-to-r from-blue-500 via-yellow-500 to-red-500" />
         <div className="flex items-center gap-1">
-          <span className="text-xs text-white/70">Quente</span>
+          <span className="text-xs text-white/70">Alta atividade</span>
           <div className="w-3 h-3 rounded-full bg-red-500/60" />
         </div>
       </div>
@@ -799,6 +818,7 @@ export function Heatmap3D({
           onHomePlayerDrag={handleHomePlayerDrag}
           onAwayPlayerDrag={handleAwayPlayerDrag}
           editable={editable}
+          heatZones={heatZones}
         />
 
         <OrbitControls
