@@ -104,18 +104,68 @@ export function MatchCard({ match }: MatchCardProps) {
   return (
     <>
       <Card variant="glow" className="overflow-hidden">
-        {/* Video Preview Thumbnail - Always show */}
-        <div 
-          className={`relative aspect-video w-full overflow-hidden bg-gradient-to-br from-arena/20 to-arena-dark/40 ${matchVideo ? 'cursor-pointer' : ''}`}
-          onClick={matchVideo ? handleOpenVideo : undefined}
-        >
-          {thumbnailUrl ? (
-            <img 
-              src={thumbnailUrl} 
-              alt={`${match.homeTeam.name} vs ${match.awayTeam.name}`}
-              className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
-            />
+        {/* Video Preview - Shows embedded player if video exists */}
+        <div className="relative aspect-video w-full overflow-hidden bg-gradient-to-br from-arena/20 to-arena-dark/40">
+          {matchVideo ? (
+            // Embedded video player
+            <>
+              {isEmbedUrl ? (
+                <iframe
+                  src={matchVideo.file_url}
+                  className="absolute inset-0 w-full h-full"
+                  frameBorder="0"
+                  allow="autoplay; fullscreen; picture-in-picture"
+                  allowFullScreen
+                  title={`${match.homeTeam.name} vs ${match.awayTeam.name}`}
+                />
+              ) : (
+                <video
+                  src={matchVideo.file_url}
+                  className="absolute inset-0 w-full h-full object-cover"
+                  muted
+                  playsInline
+                  onMouseEnter={(e) => e.currentTarget.play()}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.pause();
+                    e.currentTarget.currentTime = 0;
+                  }}
+                />
+              )}
+              {/* Overlay with match info */}
+              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <div 
+                      className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold"
+                      style={{ backgroundColor: match.homeTeam.primaryColor + '40', color: match.homeTeam.primaryColor }}
+                    >
+                      {match.homeTeam.shortName.slice(0, 2)}
+                    </div>
+                    <span className="text-sm font-bold text-white">
+                      {match.score.home} - {match.score.away}
+                    </span>
+                    <div 
+                      className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold"
+                      style={{ backgroundColor: match.awayTeam.primaryColor + '40', color: match.awayTeam.primaryColor }}
+                    >
+                      {match.awayTeam.shortName.slice(0, 2)}
+                    </div>
+                  </div>
+                  <Badge variant="arena" className="text-[10px]">
+                    {match.status === 'completed' ? 'Finalizado' : 'Ao vivo'}
+                  </Badge>
+                </div>
+              </div>
+              {/* Expand button */}
+              <button
+                onClick={handleOpenVideo}
+                className="absolute top-2 right-2 rounded-full bg-black/50 p-1.5 text-white transition-colors hover:bg-arena"
+              >
+                <Play className="h-4 w-4 fill-current" />
+              </button>
+            </>
           ) : (
+            // Placeholder when no video
             <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-arena/10 via-background to-arena-dark/20">
               <div className="text-center">
                 <div className="mb-3 flex items-center justify-center gap-6">
@@ -148,26 +198,10 @@ export function MatchCard({ match }: MatchCardProps) {
                 </div>
                 <p className="text-xs text-muted-foreground">{match.competition}</p>
               </div>
-            </div>
-          )}
-          {/* Play overlay - only if video exists */}
-          {matchVideo && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition-opacity duration-300 hover:opacity-100">
-              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-arena/90 text-white shadow-lg shadow-arena/50">
-                <Play className="h-8 w-8 fill-current" />
+              {/* No video indicator */}
+              <div className="absolute bottom-2 right-2 rounded bg-muted/80 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                Sem vídeo
               </div>
-            </div>
-          )}
-          {/* Duration badge */}
-          {matchVideo?.duration_seconds && (
-            <div className="absolute bottom-2 right-2 rounded bg-black/70 px-2 py-0.5 text-xs font-medium text-white">
-              {Math.floor(matchVideo.duration_seconds / 60)}:{String(matchVideo.duration_seconds % 60).padStart(2, '0')}
-            </div>
-          )}
-          {/* No video indicator */}
-          {!matchVideo && (match.status === 'completed' || match.status === 'analyzing') && (
-            <div className="absolute bottom-2 right-2 rounded bg-muted/80 px-2 py-0.5 text-xs font-medium text-muted-foreground">
-              Sem vídeo
             </div>
           )}
         </div>
