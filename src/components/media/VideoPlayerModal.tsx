@@ -1,10 +1,9 @@
-import { useRef, useEffect } from 'react';
+import { useRef, useEffect, useState, useCallback } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X, Clock, Maximize2, Volume2, VolumeX } from 'lucide-react';
+import { X, Clock, Maximize2, Volume2, VolumeX, SkipBack, SkipForward, RotateCcw } from 'lucide-react';
 import { ClipVignette } from './ClipVignette';
-import { useState } from 'react';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 
 interface VideoPlayerModalProps {
@@ -16,7 +15,7 @@ interface VideoPlayerModalProps {
     type: string;
     minute: number;
     description: string;
-    clipUrl?: string | null; // Direct clip URL (extracted clip stored in storage)
+    clipUrl?: string | null;
   } | null;
   thumbnail?: {
     imageUrl: string;
@@ -50,74 +49,91 @@ export function VideoPlayerModal({
 }: VideoPlayerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isMuted, setIsMuted] = useState(false);
+  const [currentTimestamp, setCurrentTimestamp] = useState(0);
+  const [iframeKey, setIframeKey] = useState(0);
 
-  // If clip has a direct clipUrl, use it without any timestamp calculations
   const hasDirectClip = !!clip?.clipUrl;
 
-  if (!clip) return null;
-  
-  // For direct clips, we don't need matchVideo
-  if (!hasDirectClip && !matchVideo) return null;
-
-  // Cálculo de sincronização de tempo (only needed when using matchVideo, not clipUrl):
-  // - start_minute: minuto da PARTIDA onde o vídeo começa (ex: 0 para 1º tempo, 45 para 2º tempo)
-  // - end_minute: minuto da PARTIDA onde o vídeo termina
-  // - duration_seconds: duração REAL do arquivo de vídeo em segundos
-  
-  let embedUrl = '';
-  let isEmbed = false;
-  let startSeconds = 0;
-
-  if (hasDirectClip) {
-    // Direct clip - no calculations needed, clip is already extracted
-    embedUrl = clip.clipUrl!;
-    isEmbed = false;
-  } else if (matchVideo) {
+  // Calculate initial timestamp
+  const calculateInitialTimestamp = useCallback(() => {
+    if (!clip || !matchVideo || hasDirectClip) return 0;
+    
     const videoStartMinute = matchVideo.start_minute ?? 0;
     const videoEndMinute = matchVideo.end_minute ?? (videoStartMinute + 45);
-    // Use actual video duration if available, otherwise estimate from minute range
     const videoDuration = matchVideo.duration_seconds ?? ((videoEndMinute - videoStartMinute) * 60);
     
     const matchMinutesSpan = videoEndMinute - videoStartMinute;
     const eventMatchMinute = clip.minute;
     
-    // Handle edge case where event is outside video range
-    if (eventMatchMinute < videoStartMinute || eventMatchMinute > videoEndMinute) {
-      console.warn('Event minute outside video range:', { eventMatchMinute, videoStartMinute, videoEndMinute });
-      startSeconds = 0;
-    } else if (matchMinutesSpan <= 0) {
-      startSeconds = 0;
-    } else {
-      const relativePosition = (eventMatchMinute - videoStartMinute) / matchMinutesSpan;
-      const eventVideoSeconds = relativePosition * videoDuration;
-      startSeconds = Math.max(0, eventVideoSeconds - 10);
+    if (eventMatchMinute < videoStartMinute || eventMatchMinute > videoEndMinute || matchMinutesSpan <= 0) {
+      return 0;
     }
-
-    const baseUrl = matchVideo.file_url;
-    isEmbed = baseUrl.includes('xtream.tech') || baseUrl.includes('embed');
     
-    // Different embed players use different timestamp parameters
-    // Try multiple formats for better compatibility
-    if (isEmbed) {
-      const separator = baseUrl.includes('?') ? '&' : '?';
-      // Xtream and many players use 'start' parameter in seconds
-      embedUrl = `${baseUrl}${separator}start=${Math.round(startSeconds)}&t=${Math.round(startSeconds)}`;
-    } else {
-      embedUrl = baseUrl;
-    }
+    const relativePosition = (eventMatchMinute - videoStartMinute) / matchMinutesSpan;
+    const eventVideoSeconds = relativePosition * videoDuration;
+    return Math.max(0, eventVideoSeconds - 10);
+  }, [clip, matchVideo, hasDirectClip]);
 
-    console.log('Video sync debug:', {
-      eventMinute: clip.minute,
-      videoStartMinute,
-      videoEndMinute,
-      videoDuration,
-      matchMinutesSpan,
-      relativePosition: matchMinutesSpan > 0 ? (eventMatchMinute - videoStartMinute) / matchMinutesSpan : 0,
-      startSeconds,
-      isEmbed,
-      embedUrl
-    });
-  }
+  // Initialize timestamp when modal opens or clip changes
+  useEffect(() => {
+    if (isOpen && clip) {
+      const initialTs = calculateInitialTimestamp();
+      setCurrentTimestamp(initialTs);
+      setIframeKey(prev => prev + 1);
+    }
+  }, [isOpen, clip?.id, calculateInitialTimestamp]);
+
+  if (!clip) return null;
+  if (!hasDirectClip && !matchVideo) return null;
+
+  const isEmbed = matchVideo ? (matchVideo.file_url.includes('xtream.tech') || matchVideo.file_url.includes('embed')) : false;
+  
+  // Build embed URL with current timestamp
+  const buildEmbedUrl = (timestamp: number) => {
+    if (!matchVideo || hasDirectClip) return '';
+    const baseUrl = matchVideo.file_url;
+    const separator = baseUrl.includes('?') ? '&' : '?';
+    return `${baseUrl}${separator}start=${Math.round(timestamp)}&t=${Math.round(timestamp)}`;
+  };
+
+  const embedUrl = buildEmbedUrl(currentTimestamp);
+
+  // Navigation handlers
+  const handleSeek = (delta: number) => {
+    const newTimestamp = Math.max(0, currentTimestamp + delta);
+    setCurrentTimestamp(newTimestamp);
+    
+    if (videoRef.current && !isEmbed) {
+      videoRef.current.currentTime = newTimestamp;
+    } else if (isEmbed) {
+      // Reload iframe with new timestamp
+      setIframeKey(prev => prev + 1);
+    }
+  };
+
+  const handleResetToEvent = () => {
+    const initialTs = calculateInitialTimestamp();
+    setCurrentTimestamp(initialTs);
+    
+    if (videoRef.current && !isEmbed) {
+      videoRef.current.currentTime = initialTs;
+    } else if (isEmbed) {
+      setIframeKey(prev => prev + 1);
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.round(seconds % 60);
+    return `${mins}:${String(secs).padStart(2, '0')}`;
+  };
+
+  console.log('Video sync debug:', {
+    eventMinute: clip.minute,
+    currentTimestamp,
+    isEmbed,
+    embedUrl
+  });
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
@@ -191,32 +207,127 @@ export function VideoPlayerModal({
             ) : isEmbed ? (
               <div className="relative w-full h-full">
                 <iframe
+                  key={iframeKey}
                   src={embedUrl}
                   className="absolute inset-0 w-full h-full"
                   frameBorder="0"
                   allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
                   title="Match Video"
                 />
-                {/* Timestamp indicator for embeds */}
-                <div className="absolute bottom-16 left-4 bg-black/70 text-white px-3 py-1.5 rounded-lg text-sm font-medium backdrop-blur-sm z-10 pointer-events-none">
-                  Início: {Math.floor(startSeconds / 60)}:{String(Math.round(startSeconds % 60)).padStart(2, '0')} 
-                  <span className="text-primary ml-2">(min {clip.minute}')</span>
+                
+                {/* Navigation controls for embeds */}
+                <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/80 backdrop-blur-md px-4 py-2 rounded-full border border-white/20 z-20">
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="text-white/80 hover:text-white hover:bg-white/10 gap-1"
+                    onClick={() => handleSeek(-30)}
+                  >
+                    <SkipBack className="h-4 w-4" />
+                    30s
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="text-white/80 hover:text-white hover:bg-white/10 gap-1"
+                    onClick={() => handleSeek(-10)}
+                  >
+                    <SkipBack className="h-4 w-4" />
+                    10s
+                  </Button>
+                  
+                  <div className="px-3 py-1 bg-primary/20 rounded-lg text-white font-mono text-sm">
+                    {formatTime(currentTimestamp)}
+                  </div>
+                  
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="text-white/80 hover:text-white hover:bg-white/10 gap-1"
+                    onClick={() => handleSeek(10)}
+                  >
+                    10s
+                    <SkipForward className="h-4 w-4" />
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="text-white/80 hover:text-white hover:bg-white/10 gap-1"
+                    onClick={() => handleSeek(30)}
+                  >
+                    30s
+                    <SkipForward className="h-4 w-4" />
+                  </Button>
+                  
+                  <div className="w-px h-6 bg-white/20" />
+                  
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="text-primary hover:text-primary hover:bg-primary/10 gap-1"
+                    onClick={handleResetToEvent}
+                    title="Voltar ao início do evento"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Evento
+                  </Button>
+                </div>
+                
+                {/* Timestamp indicator */}
+                <div className="absolute bottom-4 left-4 bg-black/70 text-white px-3 py-1.5 rounded-lg text-sm font-medium backdrop-blur-sm z-10 pointer-events-none">
+                  Minuto do jogo: {clip.minute}'
                 </div>
               </div>
             ) : matchVideo ? (
-              <video 
-                ref={videoRef} 
-                src={matchVideo.file_url}
-                className="w-full h-full object-contain bg-black"
-                controls
-                autoPlay
-                muted={isMuted}
-                onLoadedMetadata={() => {
-                  if (videoRef.current) {
-                    videoRef.current.currentTime = startSeconds;
-                  }
-                }}
-              />
+              <div className="relative w-full h-full">
+                <video 
+                  ref={videoRef} 
+                  src={matchVideo.file_url}
+                  className="w-full h-full object-contain bg-black"
+                  controls
+                  autoPlay
+                  muted={isMuted}
+                  onLoadedMetadata={() => {
+                    if (videoRef.current) {
+                      videoRef.current.currentTime = currentTimestamp;
+                    }
+                  }}
+                />
+                
+                {/* Navigation controls for direct video */}
+                <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/80 backdrop-blur-md px-4 py-2 rounded-full border border-white/20 z-20">
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="text-white/80 hover:text-white hover:bg-white/10 gap-1"
+                    onClick={() => handleSeek(-10)}
+                  >
+                    <SkipBack className="h-4 w-4" />
+                    10s
+                  </Button>
+                  
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="text-primary hover:text-primary hover:bg-primary/10 gap-1"
+                    onClick={handleResetToEvent}
+                    title="Voltar ao início do evento"
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Min {clip.minute}'
+                  </Button>
+                  
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    className="text-white/80 hover:text-white hover:bg-white/10 gap-1"
+                    onClick={() => handleSeek(10)}
+                  >
+                    10s
+                    <SkipForward className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
             ) : null}
 
             {/* Decorative corners */}
@@ -246,7 +357,7 @@ export function VideoPlayerModal({
                 <p className="text-white/60 text-sm truncate">{clip.description}</p>
               </div>
               <div className="flex items-center gap-2 ml-4">
-                {!isEmbed && (
+                {!isEmbed && !hasDirectClip && (
                   <Button 
                     variant="ghost" 
                     size="icon"
@@ -256,18 +367,20 @@ export function VideoPlayerModal({
                     {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
                   </Button>
                 )}
-                <Button 
-                  variant="ghost" 
-                  size="icon"
-                  className="text-white/80 hover:text-white hover:bg-white/10"
-                  onClick={() => {
-                    if (videoRef.current) {
-                      videoRef.current.requestFullscreen?.();
-                    }
-                  }}
-                >
-                  <Maximize2 className="h-5 w-5" />
-                </Button>
+                {!isEmbed && (
+                  <Button 
+                    variant="ghost" 
+                    size="icon"
+                    className="text-white/80 hover:text-white hover:bg-white/10"
+                    onClick={() => {
+                      if (videoRef.current) {
+                        videoRef.current.requestFullscreen?.();
+                      }
+                    }}
+                  >
+                    <Maximize2 className="h-5 w-5" />
+                  </Button>
+                )}
               </div>
             </div>
           </div>
