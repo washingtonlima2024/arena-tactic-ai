@@ -104,56 +104,73 @@ export function MatchCard({ match }: MatchCardProps) {
   return (
     <>
       <Card variant="glow" className="overflow-hidden">
-        {/* Video Preview Thumbnail */}
-        {matchVideo && (
-          <div 
-            className="relative aspect-video w-full cursor-pointer overflow-hidden bg-gradient-to-br from-arena/20 to-arena-dark/40"
-            onClick={handleOpenVideo}
-          >
-            {thumbnailUrl ? (
-              <img 
-                src={thumbnailUrl} 
-                alt={`${match.homeTeam.name} vs ${match.awayTeam.name}`}
-                className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
-              />
-            ) : (
-              <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-arena/10 via-background to-arena-dark/20">
-                <div className="text-center">
-                  <div className="mb-2 flex items-center justify-center gap-4">
+        {/* Video Preview Thumbnail - Always show */}
+        <div 
+          className={`relative aspect-video w-full overflow-hidden bg-gradient-to-br from-arena/20 to-arena-dark/40 ${matchVideo ? 'cursor-pointer' : ''}`}
+          onClick={matchVideo ? handleOpenVideo : undefined}
+        >
+          {thumbnailUrl ? (
+            <img 
+              src={thumbnailUrl} 
+              alt={`${match.homeTeam.name} vs ${match.awayTeam.name}`}
+              className="h-full w-full object-cover transition-transform duration-300 hover:scale-105"
+            />
+          ) : (
+            <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-arena/10 via-background to-arena-dark/20">
+              <div className="text-center">
+                <div className="mb-3 flex items-center justify-center gap-6">
+                  <div className="flex flex-col items-center gap-1">
                     <div 
-                      className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold"
-                      style={{ backgroundColor: match.homeTeam.primaryColor + '30', color: match.homeTeam.primaryColor }}
+                      className="flex h-14 w-14 items-center justify-center rounded-full text-lg font-bold shadow-lg"
+                      style={{ backgroundColor: match.homeTeam.primaryColor + '30', color: match.homeTeam.primaryColor, boxShadow: `0 0 20px ${match.homeTeam.primaryColor}40` }}
                     >
                       {match.homeTeam.shortName.slice(0, 2)}
                     </div>
-                    <span className="text-xl font-bold text-foreground">
+                    <span className="text-xs font-medium text-muted-foreground">{match.homeTeam.shortName}</span>
+                  </div>
+                  <div className="flex flex-col items-center">
+                    <span className="text-3xl font-bold text-foreground">
                       {match.score.home} - {match.score.away}
                     </span>
+                    <Badge variant="arena" className="mt-1 text-[10px]">
+                      {match.status === 'completed' ? 'Finalizado' : match.status === 'analyzing' ? 'Analisando' : 'Agendado'}
+                    </Badge>
+                  </div>
+                  <div className="flex flex-col items-center gap-1">
                     <div 
-                      className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold"
-                      style={{ backgroundColor: match.awayTeam.primaryColor + '30', color: match.awayTeam.primaryColor }}
+                      className="flex h-14 w-14 items-center justify-center rounded-full text-lg font-bold shadow-lg"
+                      style={{ backgroundColor: match.awayTeam.primaryColor + '30', color: match.awayTeam.primaryColor, boxShadow: `0 0 20px ${match.awayTeam.primaryColor}40` }}
                     >
                       {match.awayTeam.shortName.slice(0, 2)}
                     </div>
+                    <span className="text-xs font-medium text-muted-foreground">{match.awayTeam.shortName}</span>
                   </div>
-                  <p className="text-xs text-muted-foreground">{match.competition}</p>
                 </div>
+                <p className="text-xs text-muted-foreground">{match.competition}</p>
               </div>
-            )}
-            {/* Play overlay */}
+            </div>
+          )}
+          {/* Play overlay - only if video exists */}
+          {matchVideo && (
             <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 transition-opacity duration-300 hover:opacity-100">
               <div className="flex h-16 w-16 items-center justify-center rounded-full bg-arena/90 text-white shadow-lg shadow-arena/50">
                 <Play className="h-8 w-8 fill-current" />
               </div>
             </div>
-            {/* Duration badge */}
-            {matchVideo.duration_seconds && (
-              <div className="absolute bottom-2 right-2 rounded bg-black/70 px-2 py-0.5 text-xs font-medium text-white">
-                {Math.floor(matchVideo.duration_seconds / 60)}:{String(matchVideo.duration_seconds % 60).padStart(2, '0')}
-              </div>
-            )}
-          </div>
-        )}
+          )}
+          {/* Duration badge */}
+          {matchVideo?.duration_seconds && (
+            <div className="absolute bottom-2 right-2 rounded bg-black/70 px-2 py-0.5 text-xs font-medium text-white">
+              {Math.floor(matchVideo.duration_seconds / 60)}:{String(matchVideo.duration_seconds % 60).padStart(2, '0')}
+            </div>
+          )}
+          {/* No video indicator */}
+          {!matchVideo && (match.status === 'completed' || match.status === 'analyzing') && (
+            <div className="absolute bottom-2 right-2 rounded bg-muted/80 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+              Sem vídeo
+            </div>
+          )}
+        </div>
         
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
