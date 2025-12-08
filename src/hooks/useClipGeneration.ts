@@ -106,8 +106,8 @@ export function useClipGeneration() {
       videoEndMinute,
       videoDurationSeconds,
       matchId,
-      bufferBefore = 5, // 5 seconds before event (default)
-      bufferAfter = 5   // 5 seconds after event (default)
+      bufferBefore = 10, // 10 seconds before event (default)
+      bufferAfter = 10   // 10 seconds after event (default)
     } = config;
 
     setGeneratingEventIds(prev => new Set(prev).add(eventId));

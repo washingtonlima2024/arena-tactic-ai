@@ -189,15 +189,11 @@ export default function Media() {
         )}
 
         {/* Tabs */}
-        <Tabs defaultValue="thumbnails" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="thumbnails">
-              <Image className="mr-2 h-4 w-4" />
-              Thumbnails
-            </TabsTrigger>
+        <Tabs defaultValue="clips" className="space-y-6">
+          <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="clips">
               <Scissors className="mr-2 h-4 w-4" />
-              Cortes
+              Cortes & Capas
             </TabsTrigger>
             <TabsTrigger value="playlists">
               <ListVideo className="mr-2 h-4 w-4" />
@@ -214,7 +210,7 @@ export default function Media() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <p className="text-sm text-muted-foreground">
-                  {clips.length} cortes disponíveis baseados nos eventos detectados
+                  {clips.length} eventos • Gere capas e extraia clips (~20s cada) para redes sociais
                 </p>
                 {matchVideo ? (
                   <Badge variant="success" className="gap-1">
@@ -483,7 +479,7 @@ export default function Media() {
                           )}
                           <Badge variant="secondary" className="backdrop-blur">
                             <Clock className="mr-1 h-3 w-3" />
-                            20s
+                            ~20s
                           </Badge>
                         </div>
                         <div className="absolute left-2 top-2">
@@ -619,172 +615,6 @@ export default function Media() {
           </TabsContent>
 
           {/* Thumbnails Tab */}
-          <TabsContent value="thumbnails" className="space-y-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm text-muted-foreground">
-                Gere thumbnails personalizadas baseadas nos eventos da partida
-              </p>
-              {clips.length > 0 && (
-                <Button 
-                  variant="arena" 
-                  size="sm"
-                  disabled={generatingIds.size > 0}
-                  onClick={() => {
-                    const thumbnailParams = clips.slice(0, 6).map(clip => ({
-                      eventId: clip.id,
-                      eventType: clip.type,
-                      minute: Math.floor(clip.startTime / 60),
-                      homeTeam: selectedMatch?.home_team?.name || 'Time Casa',
-                      awayTeam: selectedMatch?.away_team?.name || 'Time Fora',
-                      homeScore: selectedMatch?.home_score || 0,
-                      awayScore: selectedMatch?.away_score || 0,
-                      matchId: matchId,
-                      description: clip.description
-                    }));
-                    generateAllThumbnails(thumbnailParams);
-                  }}
-                >
-                  {generatingIds.size > 0 ? (
-                    <>
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Gerando...
-                    </>
-                  ) : (
-                    <>
-                      <Sparkles className="mr-2 h-4 w-4" />
-                      Gerar Todas
-                    </>
-                  )}
-                </Button>
-              )}
-            </div>
-            
-            {clips.length === 0 ? (
-              <Card variant="glass">
-                <CardContent className="py-12 text-center">
-                  <Image className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">Nenhum evento para gerar thumbnails</p>
-                </CardContent>
-              </Card>
-            ) : (
-              <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-4">
-                {clips.slice(0, 8).map((clip) => {
-                  const thumbnail = getThumbnail(clip.id);
-                  const generating = isGenerating(clip.id);
-                  
-                  return (
-                    <Card key={clip.id} variant="glass" className="overflow-hidden group">
-                      <div 
-                        className="aspect-video bg-gradient-to-br from-primary/20 to-primary/5 flex items-center justify-center relative cursor-pointer"
-                        onClick={() => {
-                          if (thumbnail?.imageUrl && matchVideo) {
-                            setShowingVignette(true);
-                            setPlayingClipId(clip.id);
-                          }
-                        }}
-                      >
-                        {thumbnail?.imageUrl ? (
-                          <>
-                            <img 
-                              src={thumbnail.imageUrl} 
-                              alt={clip.title}
-                              className="w-full h-full object-cover transition-transform group-hover:scale-105"
-                            />
-                            {matchVideo && (
-                              <div className="absolute inset-0 flex items-center justify-center bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity">
-                                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-lg">
-                                  <Play className="h-6 w-6" />
-                                </div>
-                              </div>
-                            )}
-                          </>
-                        ) : generating ? (
-                          <div className="text-center">
-                            <Loader2 className="h-8 w-8 text-primary mx-auto mb-2 animate-spin" />
-                            <p className="text-xs text-muted-foreground">Gerando...</p>
-                          </div>
-                        ) : (
-                          <div className="text-center">
-                            <Image className="h-8 w-8 text-muted-foreground mx-auto mb-2" />
-                            <Badge variant="outline" className="text-xs">{clip.type}</Badge>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              {Math.floor(clip.startTime / 60)}'
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                      <CardContent className="pt-3">
-                        <p className="text-sm font-medium truncate">{clip.title}</p>
-                        <p className="text-xs text-muted-foreground truncate">
-                          {selectedMatch?.home_team?.name} vs {selectedMatch?.away_team?.name}
-                        </p>
-                        <div className="mt-2 flex gap-2">
-                          {thumbnail?.imageUrl ? (
-                            <>
-                              <Button 
-                                variant="outline" 
-                                size="sm" 
-                                className="flex-1"
-                                onClick={() => {
-                                  const link = document.createElement('a');
-                                  link.href = thumbnail.imageUrl;
-                                  link.download = `thumbnail-${clip.type}-${clip.id}.png`;
-                                  link.click();
-                                }}
-                              >
-                                <Download className="mr-1 h-3 w-3" />
-                                Download
-                              </Button>
-                              {matchVideo && (
-                                <Button 
-                                  variant="arena" 
-                                  size="sm"
-                                  onClick={() => {
-                                    setShowingVignette(true);
-                                    setPlayingClipId(clip.id);
-                                  }}
-                                >
-                                  <Play className="mr-1 h-3 w-3" />
-                                  Corte
-                                </Button>
-                              )}
-                            </>
-                          ) : (
-                            <Button 
-                              variant="arena-outline" 
-                              size="sm" 
-                              className="flex-1"
-                              disabled={generating}
-                              onClick={() => generateThumbnail({
-                                eventId: clip.id,
-                                eventType: clip.type,
-                                minute: Math.floor(clip.startTime / 60),
-                                homeTeam: selectedMatch?.home_team?.name || 'Time Casa',
-                                awayTeam: selectedMatch?.away_team?.name || 'Time Fora',
-                                homeScore: selectedMatch?.home_score || 0,
-                                awayScore: selectedMatch?.away_score || 0,
-                                matchId: matchId,
-                                description: clip.description
-                              })}
-                            >
-                              {generating ? (
-                                <Loader2 className="h-3 w-3 animate-spin" />
-                              ) : (
-                                <>
-                                  <Sparkles className="mr-1 h-3 w-3" />
-                                  Gerar
-                                </>
-                              )}
-                            </Button>
-                          )}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  );
-                })}
-              </div>
-            )}
-          </TabsContent>
 
           {/* Social Tab */}
           <TabsContent value="social" className="space-y-4">
