@@ -21,6 +21,7 @@ import {
 import { useState, useRef, useEffect } from 'react';
 import { useAllCompletedMatches, useMatchEvents, useMatchAnalysis } from '@/hooks/useMatchDetails';
 import { useNarrationGeneration } from '@/hooks/useNarrationGeneration';
+import { usePodcastGeneration, PodcastType } from '@/hooks/usePodcastGeneration';
 import {
   Select,
   SelectContent,
@@ -47,6 +48,17 @@ export default function Audio() {
   const { data: events } = useMatchEvents(matchId);
   const { data: analysis } = useMatchAnalysis(matchId);
   const { isGenerating, narration, generateNarration, downloadAudio } = useNarrationGeneration();
+  const { 
+    isGenerating: isPodcastGenerating, 
+    generatingType: podcastGeneratingType,
+    podcasts, 
+    generatePodcast, 
+    downloadPodcast 
+  } = usePodcastGeneration();
+  
+  // State for podcast audio players
+  const [playingPodcast, setPlayingPodcast] = useState<PodcastType | null>(null);
+  const podcastAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Get highlights from events (goals, saves, etc.)
   const highlights = events?.filter(e => 
@@ -129,6 +141,49 @@ export default function Audio() {
     if (!narration?.audioContent) return;
     const filename = `narracao-${selectedMatch?.home_team?.short_name || 'home'}-vs-${selectedMatch?.away_team?.short_name || 'away'}.mp3`;
     downloadAudio(narration.audioContent, filename);
+  };
+
+  const handleGeneratePodcast = async (podcastType: PodcastType) => {
+    if (!selectedMatch || !events?.length) return;
+    
+    await generatePodcast(
+      matchId,
+      events,
+      selectedMatch.home_team?.name || 'Time Casa',
+      selectedMatch.away_team?.name || 'Time Fora',
+      selectedMatch.home_score || 0,
+      selectedMatch.away_score || 0,
+      podcastType,
+      analysis?.tacticalAnalysis
+    );
+  };
+
+  const handlePlayPodcast = (podcastType: PodcastType) => {
+    const podcast = podcasts[podcastType];
+    if (!podcast?.audioContent) return;
+
+    // Stop any currently playing podcast
+    if (podcastAudioRef.current) {
+      podcastAudioRef.current.pause();
+      podcastAudioRef.current = null;
+    }
+
+    if (playingPodcast === podcastType) {
+      setPlayingPodcast(null);
+      return;
+    }
+
+    const audio = document.createElement('audio') as HTMLAudioElement;
+    audio.src = `data:audio/mp3;base64,${podcast.audioContent}`;
+    audio.addEventListener('ended', () => setPlayingPodcast(null));
+    audio.play();
+    podcastAudioRef.current = audio;
+    setPlayingPodcast(podcastType);
+  };
+
+  const handleDownloadPodcast = (podcastType: PodcastType) => {
+    const filename = `podcast-${podcastType}-${selectedMatch?.home_team?.short_name || 'home'}-vs-${selectedMatch?.away_team?.short_name || 'away'}.mp3`;
+    downloadPodcast(podcastType, filename);
   };
 
   if (matchesLoading) {
@@ -408,66 +463,122 @@ export default function Audio() {
           {/* Podcast Tab */}
           <TabsContent value="podcast" className="space-y-6">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {[
+              {([
                 { 
+                  type: 'tactical' as PodcastType,
                   title: 'Análise Tática Completa', 
                   description: `Breakdown detalhado de ${homeTeamName} vs ${awayTeamName}`,
-                  duration: '--:--',
-                  status: 'pending',
-                  hasData: !!analysis?.tacticalAnalysis
+                  hasData: !!analysis?.tacticalAnalysis || (events && events.length > 0)
                 },
                 { 
+                  type: 'summary' as PodcastType,
                   title: 'Resumo da Partida', 
                   description: 'Principais momentos e destaques do jogo',
-                  duration: '--:--',
-                  status: 'pending',
                   hasData: events && events.length > 0
                 },
                 { 
+                  type: 'debate' as PodcastType,
                   title: 'Debate: Torcedores', 
                   description: `Perspectiva de ${homeTeamName} e ${awayTeamName}`,
-                  duration: '--:--',
-                  status: 'pending',
-                  hasData: false
+                  hasData: events && events.length > 0
                 },
-              ].map((podcast, i) => (
-                <Card key={i} variant="glow">
-                  <CardContent className="pt-6">
-                    <div className="flex items-start justify-between mb-4">
-                      <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-                        <Radio className="h-6 w-6 text-primary" />
+              ]).map((podcast) => {
+                const podcastData = podcasts[podcast.type];
+                const isThisGenerating = isPodcastGenerating && podcastGeneratingType === podcast.type;
+                const isReady = !!podcastData?.audioContent;
+                const isThisPlaying = playingPodcast === podcast.type;
+                
+                return (
+                  <Card key={podcast.type} variant="glow">
+                    <CardContent className="pt-6">
+                      <div className="flex items-start justify-between mb-4">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
+                          <Radio className="h-6 w-6 text-primary" />
+                        </div>
+                        <Badge variant={isReady ? 'success' : podcast.hasData ? 'arena' : 'secondary'}>
+                          {isReady ? 'Pronto' : podcast.hasData ? 'Dados disponíveis' : 'Sem dados'}
+                        </Badge>
                       </div>
-                      <Badge variant={podcast.hasData ? 'arena' : 'secondary'}>
-                        {podcast.hasData ? 'Dados disponíveis' : 'Sem dados'}
-                      </Badge>
-                    </div>
-                    <h3 className="font-display text-lg font-semibold">{podcast.title}</h3>
-                    <p className="mt-1 text-sm text-muted-foreground">{podcast.description}</p>
-                    <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
-                      <Clock className="h-4 w-4" />
-                      <span>{podcast.duration}</span>
-                    </div>
-                    <div className="mt-4 flex gap-2">
-                      <Button 
-                        variant="arena" 
-                        size="sm" 
-                        className="flex-1"
-                        disabled={!podcast.hasData}
-                      >
-                        <Sparkles className="mr-1 h-4 w-4" />
-                        Gerar
-                      </Button>
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        disabled
-                      >
-                        <Download className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              ))}
+                      <h3 className="font-display text-lg font-semibold">{podcast.title}</h3>
+                      <p className="mt-1 text-sm text-muted-foreground">{podcast.description}</p>
+                      
+                      {/* Script Preview */}
+                      {podcastData?.script && (
+                        <div className="mt-3 rounded-lg bg-muted/50 p-3 max-h-24 overflow-y-auto">
+                          <p className="text-xs text-muted-foreground line-clamp-3">
+                            {podcastData.script.slice(0, 200)}...
+                          </p>
+                        </div>
+                      )}
+                      
+                      <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground">
+                        <Clock className="h-4 w-4" />
+                        <span>{isReady ? 'Gerado' : '--:--'}</span>
+                      </div>
+                      <div className="mt-4 flex gap-2">
+                        {isReady ? (
+                          <>
+                            <Button 
+                              variant={isThisPlaying ? "outline" : "arena"}
+                              size="sm" 
+                              className="flex-1"
+                              onClick={() => handlePlayPodcast(podcast.type)}
+                            >
+                              {isThisPlaying ? (
+                                <>
+                                  <Pause className="mr-1 h-4 w-4" />
+                                  Pausar
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="mr-1 h-4 w-4" />
+                                  Ouvir
+                                </>
+                              )}
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              onClick={() => handleDownloadPodcast(podcast.type)}
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button 
+                              variant="arena" 
+                              size="sm" 
+                              className="flex-1"
+                              disabled={!podcast.hasData || isThisGenerating}
+                              onClick={() => handleGeneratePodcast(podcast.type)}
+                            >
+                              {isThisGenerating ? (
+                                <>
+                                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                                  Gerando...
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="mr-1 h-4 w-4" />
+                                  Gerar
+                                </>
+                              )}
+                            </Button>
+                            <Button 
+                              variant="outline" 
+                              size="sm"
+                              disabled
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
           </TabsContent>
 
