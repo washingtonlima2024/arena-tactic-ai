@@ -221,7 +221,22 @@ export default function VideoUpload() {
       });
 
       // Get video URL from first uploaded file
-      const videoUrl = files.find(f => f.status === 'complete')?.url || '';
+      const uploadedFile = files.find(f => f.status === 'complete');
+      const videoUrl = uploadedFile?.url || '';
+
+      // Register video in database
+      if (videoUrl) {
+        const videoType = videoPeriod === 'full' ? 'full' : videoPeriod === '1st' ? 'first_half' : videoPeriod === '2nd' ? 'second_half' : 'clip';
+        await supabase.from('videos').insert({
+          match_id: match.id,
+          file_url: videoUrl,
+          file_name: uploadedFile?.name || 'video',
+          video_type: videoType,
+          start_minute: videoPeriod === '2nd' ? 45 : 0,
+          end_minute: videoPeriod === '1st' ? 45 : videoPeriod === '2nd' ? 90 : null,
+          status: 'uploaded'
+        });
+      }
 
       // Start analysis
       const result = await startAnalysis({
