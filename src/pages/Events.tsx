@@ -23,7 +23,8 @@ import {
   Pencil,
   CheckCircle,
   Clock,
-  XCircle
+  XCircle,
+  Play
 } from 'lucide-react';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
 import { Link } from 'react-router-dom';
@@ -31,6 +32,7 @@ import { EventEditDialog } from '@/components/events/EventEditDialog';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
 
 export default function Events() {
   const { isAdmin } = useAuth();
@@ -40,6 +42,9 @@ export default function Events() {
   const [typeFilter, setTypeFilter] = useState<string>('all');
   const [approvalFilter, setApprovalFilter] = useState<string>('all');
   const [editingEvent, setEditingEvent] = useState<any>(null);
+  const [playingEvent, setPlayingEvent] = useState<any>(null);
+  const [showVignette, setShowVignette] = useState(true);
+  const [isCreatingEvent, setIsCreatingEvent] = useState(false);
 
   // Auto-select first match if none selected
   const currentMatchId = selectedMatchId || matches[0]?.id || null;
@@ -58,6 +63,20 @@ export default function Events() {
         .eq('match_id', currentMatchId)
         .maybeSingle();
       return data;
+    },
+    enabled: !!currentMatchId
+  });
+
+  // Fetch thumbnails for events
+  const { data: thumbnails = [] } = useQuery({
+    queryKey: ['event-thumbnails', currentMatchId],
+    queryFn: async () => {
+      if (!currentMatchId) return [];
+      const { data } = await supabase
+        .from('thumbnails')
+        .select('*')
+        .eq('match_id', currentMatchId);
+      return data || [];
     },
     enabled: !!currentMatchId
   });
@@ -103,6 +122,43 @@ export default function Events() {
       default:
         return <Clock className="h-4 w-4 text-yellow-500" />;
     }
+  };
+
+  // Handle event click - open video
+  const handleEventClick = (event: any) => {
+    if (matchVideo || event.clip_url) {
+      setShowVignette(true);
+      setPlayingEvent(event);
+    }
+  };
+
+  // Handle edit button click
+  const handleEditClick = (e: React.MouseEvent, event: any) => {
+    e.stopPropagation();
+    setEditingEvent(event);
+  };
+
+  // Handle create new event
+  const handleCreateEvent = () => {
+    if (!currentMatchId) return;
+    setIsCreatingEvent(true);
+    setEditingEvent({
+      id: null,
+      event_type: 'goal',
+      minute: null,
+      second: null,
+      description: '',
+      metadata: { team: selectedMatch?.home_team?.name || '' },
+      approval_status: 'pending',
+      match_id: currentMatchId,
+      isNew: true
+    });
+  };
+
+  // Get thumbnail for event
+  const getEventThumbnail = (eventId: string) => {
+    const thumb = thumbnails.find(t => t.event_id === eventId);
+    return thumb ? { imageUrl: thumb.image_url } : undefined;
   };
 
   if (matchesLoading) {
@@ -169,6 +225,12 @@ export default function Events() {
                 ))}
               </SelectContent>
             </Select>
+            {isAdmin && (
+              <Button variant="arena" onClick={handleCreateEvent}>
+                <Plus className="mr-2 h-4 w-4" />
+                Novo Evento
+              </Button>
+            )}
             <Button variant="arena-outline">
               <Download className="mr-2 h-4 w-4" />
               Exportar
@@ -313,8 +375,15 @@ export default function Events() {
                             ? 'border-green-500/20 bg-muted/30 hover:bg-muted/50'
                             : 'border-red-500/20 bg-red-500/5 hover:bg-red-500/10'
                         }`}
-                        onClick={() => setEditingEvent(event)}
+                        onClick={() => handleEventClick(event)}
                       >
+                        {/* Play icon for video */}
+                        {(matchVideo || event.clip_url) && (
+                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/20 text-primary group-hover:bg-primary/30 transition-colors">
+                            <Play className="h-4 w-4" />
+                          </div>
+                        )}
+
                         {/* Approval status icon */}
                         {getApprovalIcon(event.approval_status)}
                         
@@ -348,17 +417,17 @@ export default function Events() {
                             Editado
                           </Badge>
                         )}
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setEditingEvent(event);
-                          }}
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </Button>
+                        {/* Edit button - only for admin */}
+                        {isAdmin && (
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                            onClick={(e) => handleEditClick(e, event)}
+                          >
+                            <Pencil className="h-4 w-4" />
+                          </Button>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -509,10 +578,13 @@ export default function Events() {
           </div>
         </div>
 
-        {/* Edit Dialog with Video Preview */}
+        {/* Edit Dialog */}
         <EventEditDialog
           isOpen={!!editingEvent}
-          onClose={() => setEditingEvent(null)}
+          onClose={() => {
+            setEditingEvent(null);
+            setIsCreatingEvent(false);
+          }}
           event={editingEvent}
           homeTeam={selectedMatch?.home_team?.name}
           awayTeam={selectedMatch?.away_team?.name}
@@ -523,6 +595,33 @@ export default function Events() {
           onSave={() => {
             queryClient.invalidateQueries({ queryKey: ['match-events', currentMatchId] });
           }}
+          isCreating={isCreatingEvent}
+          matchId={currentMatchId}
+        />
+
+        {/* Video Player Modal */}
+        <VideoPlayerModal
+          isOpen={!!playingEvent}
+          onClose={() => {
+            setPlayingEvent(null);
+            setShowVignette(true);
+          }}
+          clip={playingEvent ? {
+            id: playingEvent.id,
+            title: playingEvent.event_type.replace(/_/g, ' '),
+            type: playingEvent.event_type,
+            minute: playingEvent.minute || 0,
+            description: playingEvent.description || '',
+            clipUrl: playingEvent.clip_url
+          } : null}
+          thumbnail={playingEvent ? getEventThumbnail(playingEvent.id) : undefined}
+          matchVideo={matchVideo}
+          homeTeam={selectedMatch?.home_team?.name || 'Casa'}
+          awayTeam={selectedMatch?.away_team?.name || 'Visitante'}
+          homeScore={selectedMatch?.home_score ?? 0}
+          awayScore={selectedMatch?.away_score ?? 0}
+          showVignette={showVignette}
+          onVignetteComplete={() => setShowVignette(false)}
         />
       </div>
     </AppLayout>
