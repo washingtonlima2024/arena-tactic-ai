@@ -32,13 +32,35 @@ import { useQuery } from '@tanstack/react-query';
 import { ClipVignette } from '@/components/media/ClipVignette';
 import { TeamPlaylist } from '@/components/media/TeamPlaylist';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
+import { SocialContentDialog } from '@/components/media/SocialContentDialog';
 import { toast } from '@/hooks/use-toast';
+
+// Social platform icons
+import { 
+  Instagram, 
+  Youtube,
+  Facebook,
+  Twitter,
+  Linkedin
+} from 'lucide-react';
+
+const socialPlatforms = [
+  { name: 'Instagram Reels', icon: Instagram, color: 'from-pink-500 to-purple-500' },
+  { name: 'TikTok', icon: Video, color: 'from-black to-gray-800' },
+  { name: 'YouTube Shorts', icon: Youtube, color: 'from-red-500 to-red-600' },
+  { name: 'Twitter/X', icon: Twitter, color: 'from-blue-400 to-blue-500' },
+  { name: 'Facebook', icon: Facebook, color: 'from-blue-600 to-blue-700' },
+  { name: 'LinkedIn', icon: Linkedin, color: 'from-blue-700 to-blue-800' },
+];
 
 export default function Media() {
   const { data: matches, isLoading: matchesLoading } = useAllCompletedMatches();
   const [selectedMatchId, setSelectedMatchId] = useState<string>('');
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   const [showingVignette, setShowingVignette] = useState(false);
+  const [socialDialogOpen, setSocialDialogOpen] = useState(false);
+  const [selectedPlatform, setSelectedPlatform] = useState<string>('');
+  const [isGeneratingSocial, setIsGeneratingSocial] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   
   const selectedMatch = matches?.find(m => m.id === selectedMatchId) || matches?.[0];
@@ -648,29 +670,76 @@ export default function Media() {
           {/* Social Tab */}
           <TabsContent value="social" className="space-y-4">
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-              {['Instagram Reels', 'TikTok', 'YouTube Shorts', 'Twitter/X', 'Facebook'].map((platform, i) => (
-                <Card key={i} variant="glow">
-                  <CardContent className="pt-6">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                        <Share2 className="h-5 w-5 text-primary" />
+              {socialPlatforms.map((platform, i) => {
+                const IconComponent = platform.icon;
+                return (
+                  <Card key={i} variant="glow" className="group hover:border-primary/50 transition-all">
+                    <CardContent className="pt-6">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className={`flex h-10 w-10 items-center justify-center rounded-lg bg-gradient-to-br ${platform.color}`}>
+                          <IconComponent className="h-5 w-5 text-white" />
+                        </div>
+                        <div>
+                          <h3 className="font-medium">{platform.name}</h3>
+                          <p className="text-xs text-muted-foreground">Formato otimizado</p>
+                        </div>
                       </div>
-                      <div>
-                        <h3 className="font-medium">{platform}</h3>
-                        <p className="text-xs text-muted-foreground">Formato otimizado</p>
-                      </div>
-                    </div>
-                    <p className="text-sm text-muted-foreground mb-4">
-                      Gere conteúdo de {selectedMatch?.home_team?.name} vs {selectedMatch?.away_team?.name} otimizado para {platform}.
-                    </p>
-                    <Button variant="arena-outline" className="w-full" disabled={clips.length === 0}>
-                      <Sparkles className="mr-2 h-4 w-4" />
-                      Gerar Conteúdo
-                    </Button>
-                  </CardContent>
-                </Card>
-              ))}
+                      <p className="text-sm text-muted-foreground mb-4">
+                        Gere conteúdo de {selectedMatch?.home_team?.name} vs {selectedMatch?.away_team?.name} otimizado para {platform.name}.
+                      </p>
+                      <Button 
+                        variant="arena-outline" 
+                        className="w-full group-hover:bg-primary group-hover:text-primary-foreground transition-all" 
+                        disabled={clips.length === 0}
+                        onClick={() => {
+                          setSelectedPlatform(platform.name);
+                          setSocialDialogOpen(true);
+                        }}
+                      >
+                        <Sparkles className="mr-2 h-4 w-4" />
+                        Gerar Conteúdo
+                      </Button>
+                    </CardContent>
+                  </Card>
+                );
+              })}
             </div>
+
+            {/* Social Content Dialog */}
+            <SocialContentDialog
+              isOpen={socialDialogOpen}
+              onClose={() => setSocialDialogOpen(false)}
+              platform={selectedPlatform}
+              homeTeamPlaylist={{
+                teamName: selectedMatch?.home_team?.name || 'Time Casa',
+                teamType: 'home',
+                clips: clips.map(c => ({
+                  ...c,
+                  thumbnail: getThumbnail(c.id)?.imageUrl
+                }))
+              }}
+              awayTeamPlaylist={{
+                teamName: selectedMatch?.away_team?.name || 'Time Fora',
+                teamType: 'away',
+                clips: clips.map(c => ({
+                  ...c,
+                  thumbnail: getThumbnail(c.id)?.imageUrl
+                }))
+              }}
+              onGenerate={(config) => {
+                setIsGeneratingSocial(true);
+                // Simulate generation
+                setTimeout(() => {
+                  setIsGeneratingSocial(false);
+                  setSocialDialogOpen(false);
+                  toast({
+                    title: "Vídeo gerado com sucesso!",
+                    description: `Melhores momentos para ${config.platform} (${config.format.ratio}) com ${config.selectedClips.length} clipes.`,
+                  });
+                }, 3000);
+              }}
+              isGenerating={isGeneratingSocial}
+            />
           </TabsContent>
         </Tabs>
       </div>
