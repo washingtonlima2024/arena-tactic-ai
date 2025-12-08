@@ -124,18 +124,34 @@ export function useVideoGeneration() {
         setProgress({
           stage: 'processing',
           progress: 25 + (i / clips.length) * 30,
-          message: `Baixando clipe ${i + 1}/${clips.length}...`,
+          message: `Baixando clipe ${i + 1}/${clips.length}... (pode demorar)`,
           currentClip: i + 1,
           totalClips: clips.length
         });
 
         try {
+          console.log(`[VideoGen] Downloading clip ${i + 1}: ${clip.url.substring(0, 50)}...`);
           const inputFile = `input_${i}.mp4`;
-          const fileData = await fetchFile(clip.url);
-          await ffmpeg.writeFile(inputFile, fileData);
+          
+          // Use fetch with timeout for large files
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 min timeout
+          
+          const response = await fetch(clip.url, { signal: controller.signal });
+          clearTimeout(timeoutId);
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+          }
+          
+          const arrayBuffer = await response.arrayBuffer();
+          console.log(`[VideoGen] Clip ${i + 1} downloaded: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)}MB`);
+          
+          await ffmpeg.writeFile(inputFile, new Uint8Array(arrayBuffer));
           clipFiles.push(inputFile);
+          console.log(`[VideoGen] Clip ${i + 1} written to FFmpeg`);
         } catch (error) {
-          console.error(`Error loading clip ${i}:`, error);
+          console.error(`[VideoGen] Error loading clip ${i}:`, error);
           // Continue with other clips
         }
       }
