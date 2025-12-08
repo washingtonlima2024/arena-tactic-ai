@@ -98,6 +98,36 @@ export type Database = {
         }
         Relationships: []
       }
+      chatbot_conversations: {
+        Row: {
+          created_at: string
+          id: string
+          match_id: string
+          messages: Json
+          team_name: string
+          team_type: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          match_id: string
+          messages?: Json
+          team_name: string
+          team_type: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          match_id?: string
+          messages?: Json
+          team_name?: string
+          team_type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       generated_audio: {
         Row: {
           audio_type: string

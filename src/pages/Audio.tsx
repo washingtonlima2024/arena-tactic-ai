@@ -598,6 +598,7 @@ export default function Audio() {
                 teamName={homeTeamName}
                 teamShort={homeTeamShort}
                 teamType="home"
+                matchId={matchId}
                 matchContext={{
                   homeTeam: homeTeamName,
                   awayTeam: awayTeamName,
@@ -611,6 +612,7 @@ export default function Audio() {
                 teamName={awayTeamName}
                 teamShort={awayTeamShort}
                 teamType="away"
+                matchId={matchId}
                 matchContext={{
                   homeTeam: homeTeamName,
                   awayTeam: awayTeamName,
