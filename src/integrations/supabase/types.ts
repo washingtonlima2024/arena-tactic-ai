@@ -174,6 +174,7 @@ export type Database = {
       }
       match_events: {
         Row: {
+          clip_url: string | null
           created_at: string
           description: string | null
           event_type: string
@@ -187,6 +188,7 @@ export type Database = {
           second: number | null
         }
         Insert: {
+          clip_url?: string | null
           created_at?: string
           description?: string | null
           event_type: string
@@ -200,6 +202,7 @@ export type Database = {
           second?: number | null
         }
         Update: {
+          clip_url?: string | null
           created_at?: string
           description?: string | null
           event_type?: string
