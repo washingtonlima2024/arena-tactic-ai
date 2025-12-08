@@ -87,8 +87,7 @@ export default function VideoUpload() {
   
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
-  const [srtFile, setSrtFile] = useState<File | null>(null);
-  const [srtContent, setSrtContent] = useState<string>('');
+  // SRT removed - transcription is now automatic via Whisper
   const [homeTeamId, setHomeTeamId] = useState<string>('');
   const [awayTeamId, setAwayTeamId] = useState<string>('');
   const [competition, setCompetition] = useState<string>('');
@@ -217,20 +216,7 @@ export default function VideoUpload() {
     }
   };
 
-  const handleSrtUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files?.[0]) {
-      const file = e.target.files[0];
-      setSrtFile(file);
-      
-      const text = await file.text();
-      setSrtContent(text);
-      
-      toast({
-        title: "Arquivo SRT carregado",
-        description: file.name
-      });
-    }
-  };
+  // SRT upload removed - transcription is now automatic via Whisper AI
 
   const removeFile = (fileName: string) => {
     setFiles(prev => prev.filter(f => f.name !== fileName));
@@ -358,17 +344,21 @@ export default function VideoUpload() {
         });
       }
 
-      // Get primary video URL for analysis
-      const primaryVideoUrl = videoLinks[0]?.embedUrl || uploadedFile?.url || '';
+      // Get primary video info for analysis
+      const primaryVideo = videoLinks[0];
+      const primaryVideoUrl = primaryVideo?.embedUrl || uploadedFile?.url || '';
+      const startMinute = primaryVideo?.startMinute ?? 0;
+      const endMinute = primaryVideo?.endMinute ?? 90;
 
-      // Start analysis
+      // Start analysis with video segment info
       const result = await startAnalysis({
         matchId: match.id,
         videoUrl: primaryVideoUrl,
         homeTeamId,
         awayTeamId,
         competition,
-        srtContent: srtContent || undefined,
+        startMinute,
+        endMinute,
       });
 
       setCurrentJobId(result.jobId);
@@ -423,8 +413,6 @@ export default function VideoUpload() {
                   setAwayTeamId('');
                   setCompetition('');
                   setMatchDate('');
-                  setSrtFile(null);
-                  setSrtContent('');
                 }}>
                   Nova Análise
                 </Button>
@@ -794,49 +782,20 @@ export default function VideoUpload() {
               </TabsContent>
             </Tabs>
 
-            {/* SRT File Upload */}
-            <Card variant="glass">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <FileText className="h-5 w-5" />
-                  Arquivo de Legendas (SRT)
-                </CardTitle>
-                <CardDescription>
-                  Opcional: Importe um arquivo SRT ou deixe em branco para extração automática do áudio
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="flex items-center gap-4">
-                  <div className="flex-1">
-                    <Input
-                      type="file"
-                      accept=".srt,.vtt"
-                      onChange={handleSrtUpload}
-                      className="cursor-pointer"
-                    />
+            {/* Info: Automatic Transcription */}
+            <Card variant="glass" className="border-primary/20">
+              <CardContent className="py-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2 rounded-full bg-primary/10">
+                    <Brain className="h-5 w-5 text-primary" />
                   </div>
-                  {srtFile && (
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="flex items-center gap-1">
-                        <FileText className="h-3 w-3" />
-                        {srtFile.name}
-                      </Badge>
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => {
-                          setSrtFile(null);
-                          setSrtContent('');
-                        }}
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  )}
+                  <div>
+                    <p className="text-sm font-medium">Transcrição Automática</p>
+                    <p className="text-xs text-muted-foreground">
+                      O áudio será extraído e transcrito automaticamente usando IA (Whisper + Vision)
+                    </p>
+                  </div>
                 </div>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Formatos aceitos: .srt, .vtt • Sem arquivo? O sistema extrairá o áudio automaticamente
-                </p>
               </CardContent>
             </Card>
           </div>
@@ -979,9 +938,9 @@ export default function VideoUpload() {
               </p>
             )}
 
-            {hasEmbed && !srtFile && (
+            {hasEmbed && (
               <p className="text-center text-xs text-muted-foreground">
-                💡 Sem arquivo SRT? O sistema irá extrair o áudio automaticamente.
+                ✨ O sistema irá transcrever o áudio e analisar o vídeo automaticamente com IA
               </p>
             )}
 

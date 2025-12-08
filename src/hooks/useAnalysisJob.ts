@@ -24,13 +24,13 @@ interface DbAnalysisJob {
 
 function mapDbJobToAnalysisJob(dbJob: DbAnalysisJob): AnalysisJob {
   const defaultSteps: AnalysisStep[] = [
-    { name: 'Upload do vídeo', status: 'pending', progress: 0 },
-    { name: 'Detecção de jogadores', status: 'pending', progress: 0 },
-    { name: 'Rastreamento de movimento', status: 'pending', progress: 0 },
+    { name: 'Preparação do vídeo', status: 'pending', progress: 0 },
+    { name: 'Extração de áudio', status: 'pending', progress: 0 },
+    { name: 'Transcrição automática', status: 'pending', progress: 0 },
+    { name: 'Análise visual (Vision AI)', status: 'pending', progress: 0 },
     { name: 'Identificação de eventos', status: 'pending', progress: 0 },
     { name: 'Análise tática', status: 'pending', progress: 0 },
-    { name: 'Geração de insights', status: 'pending', progress: 0 },
-    { name: 'Criação de cortes', status: 'pending', progress: 0 },
+    { name: 'Finalização', status: 'pending', progress: 0 },
   ];
 
   return {
@@ -105,7 +105,8 @@ export function useStartAnalysis() {
     homeTeamId: string;
     awayTeamId: string;
     competition?: string;
-    srtContent?: string;
+    startMinute?: number;
+    endMinute?: number;
   }) => {
     setIsLoading(true);
     
