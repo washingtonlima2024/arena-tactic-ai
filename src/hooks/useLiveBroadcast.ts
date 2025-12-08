@@ -25,6 +25,14 @@ export interface Score {
   away: number;
 }
 
+export interface TranscriptChunk {
+  id: string;
+  text: string;
+  minute: number;
+  second: number;
+  timestamp: Date;
+}
+
 export const useLiveBroadcast = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -48,11 +56,64 @@ export const useLiveBroadcast = () => {
   const [currentScore, setCurrentScore] = useState<Score>({ home: 0, away: 0 });
   
   const [transcriptBuffer, setTranscriptBuffer] = useState("");
+  const [transcriptChunks, setTranscriptChunks] = useState<TranscriptChunk[]>([]);
+  const [isSavingTranscript, setIsSavingTranscript] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const transcriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const autoSaveIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const tempMatchIdRef = useRef<string | null>(null);
+
+  // Save transcript to database
+  const saveTranscriptToDatabase = useCallback(async (matchId?: string) => {
+    if (!transcriptBuffer.trim()) return;
+    
+    const targetMatchId = matchId || tempMatchIdRef.current;
+    if (!targetMatchId) return;
+    
+    setIsSavingTranscript(true);
+    
+    try {
+      // Check if there's already a transcript for this match
+      const { data: existing } = await supabase
+        .from("generated_audio")
+        .select("id, script")
+        .eq("match_id", targetMatchId)
+        .eq("audio_type", "live_transcript")
+        .maybeSingle();
+
+      if (existing) {
+        // Update existing transcript
+        await supabase
+          .from("generated_audio")
+          .update({
+            script: transcriptBuffer.trim(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id);
+      } else {
+        // Create new transcript entry
+        await supabase
+          .from("generated_audio")
+          .insert({
+            match_id: targetMatchId,
+            audio_type: "live_transcript",
+            script: transcriptBuffer.trim(),
+            voice: "whisper",
+          });
+      }
+
+      setLastSavedAt(new Date());
+      console.log("Transcript auto-saved at", new Date().toISOString());
+    } catch (error) {
+      console.error("Error saving transcript:", error);
+    } finally {
+      setIsSavingTranscript(false);
+    }
+  }, [transcriptBuffer]);
 
   // Timer effect
   useEffect(() => {
@@ -66,21 +127,57 @@ export const useLiveBroadcast = () => {
       }
     }
     return () => {
-      if (timerRef.current) {
-        clearInterval(timerRef.current);
-      }
+      if (timerRef.current) clearInterval(timerRef.current);
     };
   }, [isRecording, isPaused]);
+
+  // Auto-save transcript every 60 seconds
+  useEffect(() => {
+    if (isRecording && !isPaused) {
+      autoSaveIntervalRef.current = setInterval(() => {
+        if (transcriptBuffer.trim()) {
+          saveTranscriptToDatabase();
+        }
+      }, 60000);
+    }
+    return () => {
+      if (autoSaveIntervalRef.current) clearInterval(autoSaveIntervalRef.current);
+    };
+  }, [isRecording, isPaused, saveTranscriptToDatabase, transcriptBuffer]);
+
+  // Create temporary match on start for auto-saving
+  const createTempMatch = useCallback(async () => {
+    try {
+      const { data: match, error } = await supabase
+        .from("matches")
+        .insert({
+          home_score: 0,
+          away_score: 0,
+          competition: matchInfo.competition || "Transmissão ao vivo",
+          match_date: matchInfo.matchDate,
+          status: "live",
+          venue: "Transmissão ao vivo",
+        })
+        .select()
+        .single();
+
+      if (!error && match) {
+        tempMatchIdRef.current = match.id;
+        return match.id;
+      }
+    } catch (error) {
+      console.error("Error creating temp match:", error);
+    }
+    return null;
+  }, [matchInfo]);
 
   const startRecording = useCallback(async () => {
     try {
       let audioStream: MediaStream;
       
       if (cameraStream) {
-        // Use audio from camera stream
         audioStream = cameraStream;
       } else {
-        // Request microphone access for stream URL mode
         audioStream = await navigator.mediaDevices.getUserMedia({
           audio: {
             echoCancellation: true,
@@ -89,6 +186,9 @@ export const useLiveBroadcast = () => {
           },
         });
       }
+
+      // Create temp match for auto-saving transcripts
+      await createTempMatch();
 
       const mediaRecorder = new MediaRecorder(audioStream, {
         mimeType: "audio/webm;codecs=opus",
@@ -101,11 +201,13 @@ export const useLiveBroadcast = () => {
       };
 
       mediaRecorderRef.current = mediaRecorder;
-      mediaRecorder.start(1000); // Collect data every second
+      mediaRecorder.start(1000);
 
       setIsRecording(true);
       setIsPaused(false);
       setRecordingTime(0);
+      setTranscriptBuffer("");
+      setTranscriptChunks([]);
       audioChunksRef.current = [];
 
       // Start transcription interval (every 30 seconds)
@@ -115,7 +217,7 @@ export const useLiveBroadcast = () => {
 
       toast({
         title: "Transmissão iniciada",
-        description: "Gravando áudio e detectando eventos...",
+        description: "Gravando áudio e salvando transcrição automaticamente...",
       });
     } catch (error) {
       console.error("Error starting recording:", error);
@@ -125,27 +227,25 @@ export const useLiveBroadcast = () => {
         variant: "destructive",
       });
     }
-  }, [cameraStream, toast]);
+  }, [cameraStream, toast, createTempMatch]);
 
   const processAudioChunk = useCallback(async () => {
     if (audioChunksRef.current.length === 0) return;
 
     const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
     audioChunksRef.current = [];
+    const currentMinute = Math.floor(recordingTime / 60);
+    const currentSecond = recordingTime % 60;
 
     try {
-      // Convert to base64
       const reader = new FileReader();
       reader.readAsDataURL(audioBlob);
       reader.onloadend = async () => {
         const base64Audio = (reader.result as string).split(",")[1];
 
-        // Send to transcription
         const { data: transcriptData, error: transcriptError } = await supabase.functions.invoke(
           "transcribe-audio",
-          {
-            body: { audio: base64Audio },
-          }
+          { body: { audio: base64Audio } }
         );
 
         if (transcriptError) {
@@ -154,7 +254,19 @@ export const useLiveBroadcast = () => {
         }
 
         if (transcriptData?.text) {
-          setTranscriptBuffer((prev) => prev + " " + transcriptData.text);
+          const newChunk: TranscriptChunk = {
+            id: crypto.randomUUID(),
+            text: transcriptData.text,
+            minute: currentMinute,
+            second: currentSecond,
+            timestamp: new Date(),
+          };
+
+          setTranscriptChunks((prev) => [...prev, newChunk]);
+          setTranscriptBuffer((prev) => {
+            const updated = prev + " " + transcriptData.text;
+            return updated.trim();
+          });
 
           // Extract events from transcript
           const { data: eventsData, error: eventsError } = await supabase.functions.invoke(
@@ -165,7 +277,7 @@ export const useLiveBroadcast = () => {
                 homeTeam: matchInfo.homeTeam,
                 awayTeam: matchInfo.awayTeam,
                 currentScore,
-                currentMinute: Math.floor(recordingTime / 60),
+                currentMinute,
               },
             }
           );
@@ -197,16 +309,30 @@ export const useLiveBroadcast = () => {
     if (transcriptionIntervalRef.current) {
       clearInterval(transcriptionIntervalRef.current);
     }
+    if (autoSaveIntervalRef.current) {
+      clearInterval(autoSaveIntervalRef.current);
+    }
+    
+    // Save transcript one final time
+    if (transcriptBuffer.trim()) {
+      saveTranscriptToDatabase();
+    }
+    
     setIsRecording(false);
     setIsPaused(false);
-  }, []);
+  }, [transcriptBuffer, saveTranscriptToDatabase]);
 
   const pauseRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.pause();
       setIsPaused(true);
+      
+      // Save transcript when pausing
+      if (transcriptBuffer.trim()) {
+        saveTranscriptToDatabase();
+      }
     }
-  }, [isRecording]);
+  }, [isRecording, transcriptBuffer, saveTranscriptToDatabase]);
 
   const resumeRecording = useCallback(() => {
     if (mediaRecorderRef.current && isPaused) {
@@ -230,7 +356,6 @@ export const useLiveBroadcast = () => {
 
     setApprovedEvents((prev) => [...prev, newEvent]);
 
-    // Update score if goal
     if (type === "goal_home") {
       setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
     } else if (type === "goal_away") {
@@ -249,9 +374,7 @@ export const useLiveBroadcast = () => {
       setDetectedEvents((prev) => prev.filter((e) => e.id !== eventId));
       setApprovedEvents((prev) => [...prev, { ...event, status: "approved" }]);
 
-      // Update score if goal
       if (event.type === "goal") {
-        // Try to determine which team scored based on description
         const desc = event.description.toLowerCase();
         if (desc.includes(matchInfo.homeTeam.toLowerCase())) {
           setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
@@ -287,41 +410,44 @@ export const useLiveBroadcast = () => {
     stopRecording();
 
     try {
-      // Create match in database
-      const { data: match, error: matchError } = await supabase
-        .from("matches")
-        .insert({
-          home_score: currentScore.home,
-          away_score: currentScore.away,
-          competition: matchInfo.competition,
-          match_date: matchInfo.matchDate,
-          status: "completed",
-          venue: "Transmissão ao vivo",
-        })
-        .select()
-        .single();
+      const matchId = tempMatchIdRef.current;
+      
+      if (matchId) {
+        // Update the temp match with final data
+        await supabase
+          .from("matches")
+          .update({
+            home_score: currentScore.home,
+            away_score: currentScore.away,
+            competition: matchInfo.competition,
+            status: "completed",
+          })
+          .eq("id", matchId);
 
-      if (matchError) throw matchError;
+        // Save final transcript
+        await saveTranscriptToDatabase(matchId);
 
-      // Save approved events
-      if (approvedEvents.length > 0 && match) {
-        const eventsToInsert = approvedEvents.map((e) => ({
-          match_id: match.id,
-          event_type: e.type,
-          minute: e.minute,
-          second: e.second,
-          description: e.description,
-          approval_status: "approved",
-        }));
+        // Save approved events
+        if (approvedEvents.length > 0) {
+          const eventsToInsert = approvedEvents.map((e) => ({
+            match_id: matchId,
+            event_type: e.type,
+            minute: e.minute,
+            second: e.second,
+            description: e.description,
+            approval_status: "approved",
+          }));
 
-        await supabase.from("match_events").insert(eventsToInsert);
+          await supabase.from("match_events").insert(eventsToInsert);
+        }
       }
 
       toast({
         title: "Partida finalizada",
-        description: "Dados salvos com sucesso!",
+        description: `Transcrição salva (${transcriptBuffer.split(" ").length} palavras)`,
       });
 
+      tempMatchIdRef.current = null;
       navigate("/matches");
     } catch (error) {
       console.error("Error finishing match:", error);
@@ -331,7 +457,7 @@ export const useLiveBroadcast = () => {
         variant: "destructive",
       });
     }
-  }, [stopRecording, currentScore, matchInfo, approvedEvents, toast, navigate]);
+  }, [stopRecording, currentScore, matchInfo, approvedEvents, transcriptBuffer, saveTranscriptToDatabase, toast, navigate]);
 
   return {
     matchInfo,
@@ -347,6 +473,9 @@ export const useLiveBroadcast = () => {
     approvedEvents,
     currentScore,
     transcriptBuffer,
+    transcriptChunks,
+    isSavingTranscript,
+    lastSavedAt,
     startRecording,
     stopRecording,
     pauseRecording,
