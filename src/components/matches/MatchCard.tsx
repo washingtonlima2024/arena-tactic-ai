@@ -102,18 +102,32 @@ export function MatchCard({ match }: MatchCardProps) {
 
             <div className="flex flex-col items-center">
               {match.status === 'completed' || match.status === 'analyzing' ? (
-                <div className="group relative flex items-center gap-2 text-2xl font-bold">
-                  <span>{match.score.home}</span>
-                  <span className="text-muted-foreground">-</span>
-                  <span>{match.score.away}</span>
-                  {isAdmin && (
+                <div className="group relative flex flex-col items-center gap-1">
+                  <div className="flex items-center gap-2 text-2xl font-bold">
+                    <span>{match.score.home}</span>
+                    <span className="text-muted-foreground">-</span>
+                    <span>{match.score.away}</span>
+                    {isAdmin && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="absolute -right-8 h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
+                        onClick={() => setShowEditDialog(true)}
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                  {/* Preview button */}
+                  {matchVideo && (
                     <Button
                       variant="ghost"
-                      size="icon"
-                      className="absolute -right-8 h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
-                      onClick={() => setShowEditDialog(true)}
+                      size="sm"
+                      className="mt-1 h-7 gap-1 text-xs text-arena hover:bg-arena/10 hover:text-arena"
+                      onClick={handleOpenVideo}
                     >
-                      <Pencil className="h-3 w-3" />
+                      <Play className="h-3 w-3" />
+                      Preview
                     </Button>
                   )}
                 </div>
