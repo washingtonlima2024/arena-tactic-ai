@@ -228,14 +228,46 @@ export default function Media() {
               </div>
             </div>
 
-            {/* Video Player (hidden, used for playback) */}
-            {matchVideo && (
-              <video 
-                ref={videoRef} 
-                src={matchVideo.file_url}
-                className="hidden"
-                onEnded={() => setPlayingClipId(null)}
-              />
+            {/* Video Player - usando iframe para embeds */}
+            {matchVideo && playingClipId && (
+              <Card variant="glass" className="overflow-hidden">
+                <CardHeader className="pb-2">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">
+                      {clips.find(c => c.id === playingClipId)?.title || 'Reproduzindo clipe'}
+                    </CardTitle>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => setPlayingClipId(null)}
+                    >
+                      Fechar
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="relative aspect-video w-full overflow-hidden rounded-lg">
+                    {matchVideo.file_url.includes('xtream.tech') || matchVideo.file_url.includes('embed') ? (
+                      <iframe
+                        src={matchVideo.file_url}
+                        className="absolute inset-0 w-full h-full"
+                        frameBorder="0"
+                        allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
+                        title="Match Video"
+                      />
+                    ) : (
+                      <video 
+                        ref={videoRef} 
+                        src={matchVideo.file_url}
+                        className="w-full h-full"
+                        controls
+                        autoPlay
+                        onEnded={() => setPlayingClipId(null)}
+                      />
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             )}
 
             {/* No video warning */}
@@ -278,25 +310,12 @@ export default function Media() {
                   const isGeneratingThumbnail = isGenerating(clip.id);
                   
                   const handlePlayClip = () => {
-                    if (!matchVideo || !videoRef.current) return;
+                    if (!matchVideo) return;
                     
                     if (isPlaying) {
-                      videoRef.current.pause();
                       setPlayingClipId(null);
                     } else {
-                      const videoStartMinute = matchVideo.start_minute || 0;
-                      const clipStartSeconds = (clip.minute - videoStartMinute) * 60;
-                      
-                      videoRef.current.currentTime = Math.max(0, clipStartSeconds);
-                      videoRef.current.play();
                       setPlayingClipId(clip.id);
-                      
-                      setTimeout(() => {
-                        if (videoRef.current) {
-                          videoRef.current.pause();
-                          setPlayingClipId(null);
-                        }
-                      }, 15000);
                     }
                   };
 
