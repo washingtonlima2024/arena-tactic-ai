@@ -3,6 +3,8 @@ import { Button } from '@/components/ui/button';
 import { FolderOpen, Upload, Link as LinkIcon, BarChart3, Share2, Settings } from 'lucide-react';
 import logoKakttus from '@/assets/logo-kakttus.png';
 import soccerBall from '@/assets/soccer-ball.png';
+import arenaIcon from '@/assets/arena-play-icon.png';
+import arenaWordmark from '@/assets/arena-play-wordmark.png';
 
 export default function Landing() {
   return (
@@ -39,13 +41,12 @@ export default function Landing() {
 
       {/* Main Content */}
       <main className="relative z-10 flex flex-col items-center justify-center px-6 py-16">
-        {/* Title with Soccer Ball */}
+        {/* Title with Logo */}
         <div className="text-center mb-8">
-          <h1 className="text-6xl md:text-7xl lg:text-8xl neon-text-blue flex items-center justify-center gap-1">
-            <span className="text-7xl md:text-8xl lg:text-9xl">A</span>rena Visi
-            <img src={soccerBall} alt="" className="h-14 w-14 md:h-18 md:w-18 lg:h-20 lg:w-20 inline-block animate-spin-slow" />
-            n
-          </h1>
+          <div className="flex items-center justify-center gap-4 mb-4">
+            <img src={arenaIcon} alt="Arena Play" className="h-20 w-20 md:h-24 md:w-24 object-contain" />
+            <img src={arenaWordmark} alt="Arena Play" className="h-14 md:h-16 object-contain" />
+          </div>
           <p className="text-muted-foreground mt-3 text-lg">
             Análise Inteligente de Futebol
           </p>
