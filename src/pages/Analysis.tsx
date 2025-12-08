@@ -408,20 +408,45 @@ export default function Analysis() {
                     {events.map((event) => {
                       const thumbnail = getThumbnail(event.id);
                       return (
-                        <Card key={event.id} variant="glass" className="hover:border-primary/50 transition-colors cursor-pointer" onClick={() => setSelectedEventForPlay(event.id)}>
+                        <Card key={event.id} variant="glass" className="hover:border-primary/50 transition-colors">
                           <CardContent className="py-3 px-4">
                             <div className="flex items-center gap-4">
+                              {/* Play button */}
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="shrink-0 h-12 w-12"
+                                onClick={() => handlePlayVideo(event.id)}
+                                disabled={!matchVideo}
+                              >
+                                <Play className={`h-5 w-5 ${matchVideo ? 'text-primary' : 'text-muted-foreground'}`} />
+                              </Button>
+                              
+                              {/* Thumbnail or placeholder */}
                               {thumbnail ? (
                                 <img 
                                   src={thumbnail.imageUrl} 
                                   alt={event.event_type}
-                                  className="w-16 h-10 object-cover rounded"
+                                  className="w-16 h-10 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
+                                  onClick={() => window.open(thumbnail.imageUrl, '_blank')}
                                 />
                               ) : (
-                                <div className="w-16 h-10 bg-muted rounded flex items-center justify-center">
-                                  <Play className="h-4 w-4 text-muted-foreground" />
+                                <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center">
+                                  <div className={`w-3 h-3 rounded-full ${
+                                    event.event_type === 'goal' ? 'bg-green-500' :
+                                    event.event_type.includes('card') ? 'bg-red-500' :
+                                    event.event_type === 'foul' ? 'bg-yellow-500' : 'bg-muted-foreground'
+                                  }`} />
                                 </div>
                               )}
+                              
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium capitalize">{event.event_type.replace(/_/g, ' ')}</p>
+                                {event.description && (
+                                  <p className="text-sm text-muted-foreground truncate">{event.description}</p>
+                                )}
+                              </div>
+                              
                               <Badge variant={
                                 event.event_type === 'goal' ? 'success' :
                                 event.event_type.includes('card') ? 'destructive' :
@@ -429,24 +454,6 @@ export default function Analysis() {
                               }>
                                 {event.minute ? `${event.minute}'` : '—'}
                               </Badge>
-                              <div className="flex-1">
-                                <p className="font-medium capitalize">{event.event_type.replace(/_/g, ' ')}</p>
-                                {event.description && (
-                                  <p className="text-sm text-muted-foreground">{event.description}</p>
-                                )}
-                              </div>
-                              <div className="flex items-center gap-2">
-                                {matchVideo && (
-                                  <Badge variant="outline" className="gap-1">
-                                    <Video className="h-3 w-3" /> Vídeo
-                                  </Badge>
-                                )}
-                                {thumbnail && (
-                                  <Badge variant="outline" className="gap-1">
-                                    <Image className="h-3 w-3" /> Thumbnail
-                                  </Badge>
-                                )}
-                              </div>
                             </div>
                           </CardContent>
                         </Card>
