@@ -36,17 +36,30 @@ export function MatchCard({ match }: MatchCardProps) {
   const [showVignette, setShowVignette] = useState(true);
   const [showEditDialog, setShowEditDialog] = useState(false);
 
-  // Fetch video for this match
+  // Fetch video for this match - prioritize 'full' type, fallback to any video
   const { data: matchVideo } = useQuery({
     queryKey: ['match-video', match.id],
     queryFn: async () => {
-      const { data } = await supabase
+      // First try to get 'full' video
+      const { data: fullVideo } = await supabase
         .from('videos')
         .select('*')
         .eq('match_id', match.id)
         .eq('video_type', 'full')
         .single();
-      return data;
+      
+      if (fullVideo) return fullVideo;
+      
+      // Fallback to any video associated with this match
+      const { data: anyVideo } = await supabase
+        .from('videos')
+        .select('*')
+        .eq('match_id', match.id)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single();
+      
+      return anyVideo;
     },
     enabled: match.status === 'completed' || match.status === 'analyzing',
   });
