@@ -24,7 +24,8 @@ import {
   Film,
   Loader2,
   GripVertical,
-  Check
+  Check,
+  Download
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useVideoGeneration } from '@/hooks/useVideoGeneration';
@@ -469,21 +470,31 @@ export function SocialContentDialog({
                 variant="arena" 
                 onClick={handleGenerate}
                 disabled={selectedClips.length === 0 || isGenerating || externalIsGenerating}
-                className="flex-1"
+                className="flex-1 gap-2"
               >
                 {isGenerating || externalIsGenerating ? (
                   <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    <Loader2 className="h-4 w-4 animate-spin" />
                     Gerando...
                   </>
                 ) : (
                   <>
-                    <Sparkles className="mr-2 h-4 w-4" />
-                    Gerar Melhores Momentos
+                    <Download className="h-4 w-4" />
+                    Exportar Vídeo
                   </>
                 )}
               </Button>
             </div>
+
+            {/* No video warning */}
+            {!matchVideoUrl && selectedClips.length > 0 && (
+              <div className="p-3 bg-warning/10 border border-warning/30 rounded-lg">
+                <p className="text-xs text-warning flex items-center gap-2">
+                  <Film className="h-4 w-4" />
+                  Faça upload do vídeo da partida para gerar vídeo real. Será gerada uma prévia simulada.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </DialogContent>
