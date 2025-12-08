@@ -8,7 +8,8 @@ import {
   Mic, 
   Settings, 
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Radio
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -21,6 +22,7 @@ const navItems = [
   { icon: LayoutDashboard, label: 'Dashboard', path: '/' },
   { icon: Video, label: 'Partidas', path: '/matches' },
   { icon: Upload, label: 'Importar Vídeo', path: '/upload' },
+  { icon: Radio, label: 'Ao Vivo', path: '/live' },
   { icon: BarChart3, label: 'Análise Tática', path: '/analysis' },
   { icon: Calendar, label: 'Eventos', path: '/events' },
   { icon: Scissors, label: 'Cortes & Mídia', path: '/media' },

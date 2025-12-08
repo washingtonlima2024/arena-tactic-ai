@@ -1,0 +1,157 @@
+import { Button } from "@/components/ui/button";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import { Check, X, Edit2, Clock } from "lucide-react";
+import { LiveEvent } from "@/hooks/useLiveBroadcast";
+
+interface LiveEventsListProps {
+  detectedEvents: LiveEvent[];
+  approvedEvents: LiveEvent[];
+  onApprove: (eventId: string) => void;
+  onEdit: (eventId: string, updates: Partial<LiveEvent>) => void;
+  onRemove: (eventId: string) => void;
+}
+
+const getEventIcon = (type: string) => {
+  switch (type) {
+    case "goal":
+    case "goal_home":
+    case "goal_away":
+      return "⚽";
+    case "yellow_card":
+      return "🟨";
+    case "red_card":
+      return "🟥";
+    case "shot":
+      return "🎯";
+    case "foul":
+      return "⚠️";
+    case "substitution":
+      return "🔄";
+    case "halftime":
+      return "⏱️";
+    default:
+      return "📌";
+  }
+};
+
+const getEventLabel = (type: string) => {
+  switch (type) {
+    case "goal":
+      return "Gol";
+    case "goal_home":
+      return "Gol Casa";
+    case "goal_away":
+      return "Gol Fora";
+    case "yellow_card":
+      return "Cartão Amarelo";
+    case "red_card":
+      return "Cartão Vermelho";
+    case "shot":
+      return "Finalização";
+    case "foul":
+      return "Falta";
+    case "substitution":
+      return "Substituição";
+    case "halftime":
+      return "Intervalo";
+    default:
+      return type;
+  }
+};
+
+export const LiveEventsList = ({
+  detectedEvents,
+  approvedEvents,
+  onApprove,
+  onEdit,
+  onRemove,
+}: LiveEventsListProps) => {
+  const allEvents = [
+    ...detectedEvents.map((e) => ({ ...e, source: "detected" as const })),
+    ...approvedEvents.map((e) => ({ ...e, source: "approved" as const })),
+  ].sort((a, b) => b.minute * 60 + b.second - (a.minute * 60 + a.second));
+
+  return (
+    <div className="glass-card p-4 rounded-xl h-[400px] flex flex-col">
+      <h3 className="font-semibold mb-3 flex items-center gap-2 text-foreground">
+        <Clock className="h-5 w-5 text-primary" />
+        Eventos ({allEvents.length})
+      </h3>
+
+      <ScrollArea className="flex-1">
+        <div className="space-y-2 pr-2">
+          {allEvents.length === 0 ? (
+            <p className="text-center text-muted-foreground py-8">
+              Nenhum evento detectado ainda
+            </p>
+          ) : (
+            allEvents.map((event) => (
+              <div
+                key={event.id}
+                className={`p-3 rounded-lg border transition-colors ${
+                  event.source === "approved"
+                    ? "bg-green-500/10 border-green-500/30"
+                    : "bg-yellow-500/10 border-yellow-500/30"
+                }`}
+              >
+                <div className="flex items-start gap-2">
+                  <span className="text-xl">{getEventIcon(event.type)}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium text-sm">
+                        {getEventLabel(event.type)}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {event.minute}'{event.second > 0 ? event.second + '"' : ""}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">
+                      {event.description}
+                    </p>
+                    {event.confidence && (
+                      <span className="text-xs text-muted-foreground">
+                        Confiança: {Math.round(event.confidence * 100)}%
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  {event.source === "detected" && (
+                    <div className="flex gap-1">
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-green-500 hover:text-green-400"
+                        onClick={() => onApprove(event.id)}
+                      >
+                        <Check className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        size="icon"
+                        variant="ghost"
+                        className="h-7 w-7 text-red-500 hover:text-red-400"
+                        onClick={() => onRemove(event.id)}
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  )}
+                  {event.source === "approved" && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                      onClick={() => onRemove(event.id)}
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              </div>
+            ))
+          )}
+        </div>
+      </ScrollArea>
+    </div>
+  );
+};
