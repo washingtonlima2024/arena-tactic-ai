@@ -25,7 +25,9 @@ import {
   CheckCircle,
   Clock,
   XCircle,
-  Play
+  Play,
+  Scissors,
+  AlertCircle
 } from 'lucide-react';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
 import { Link } from 'react-router-dom';
@@ -34,6 +36,9 @@ import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
+import { useClipGeneration } from '@/hooks/useClipGeneration';
+import { toast } from 'sonner';
+import { Progress } from '@/components/ui/progress';
 
 export default function Events() {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -49,6 +54,14 @@ export default function Events() {
   const [playingEvent, setPlayingEvent] = useState<any>(null);
   const [showVignette, setShowVignette] = useState(true);
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
+  
+  // Clip generation
+  const { 
+    isGenerating: isExtractingClips, 
+    progress: clipProgress, 
+    generateClip,
+    isGeneratingEvent 
+  } = useClipGeneration();
 
   // Sync URL param with state when URL changes
   useEffect(() => {
@@ -172,6 +185,80 @@ export default function Events() {
     return thumb ? { imageUrl: thumb.image_url } : undefined;
   };
 
+  // Check if video is extractable (direct file, not embed)
+  const isVideoExtractable = matchVideo && 
+    !matchVideo.file_url.includes('xtream.tech') && 
+    !matchVideo.file_url.includes('embed') &&
+    matchVideo.file_url.includes('supabase');
+
+  // Count clips already extracted
+  const clipsExtracted = events.filter(e => e.clip_url).length;
+
+  // Handle single clip extraction
+  const handleExtractClip = async (e: React.MouseEvent, event: any) => {
+    e.stopPropagation();
+    
+    if (!matchVideo || !isVideoExtractable) {
+      toast.error('Vídeo não disponível para extração. Use um arquivo MP4 direto.');
+      return;
+    }
+
+    const videoStartMinute = matchVideo.start_minute ?? 0;
+    const videoEndMinute = matchVideo.end_minute ?? 90;
+    const videoDuration = matchVideo.duration_seconds ?? ((videoEndMinute - videoStartMinute) * 60);
+
+    await generateClip({
+      eventId: event.id,
+      eventMinute: event.minute || 0,
+      eventSecond: event.second || 0,
+      videoUrl: matchVideo.file_url,
+      videoStartMinute,
+      videoEndMinute,
+      videoDurationSeconds: videoDuration,
+      matchId: currentMatchId!,
+      bufferBefore: 10,
+      bufferAfter: 10
+    });
+
+    queryClient.invalidateQueries({ queryKey: ['match-events', currentMatchId] });
+  };
+
+  // Handle extract all clips
+  const handleExtractAllClips = async () => {
+    if (!matchVideo || !isVideoExtractable) {
+      toast.error('Vídeo não disponível para extração');
+      return;
+    }
+
+    const eventsWithoutClips = events.filter(e => !e.clip_url);
+    if (eventsWithoutClips.length === 0) {
+      toast.info('Todos os clips já foram extraídos');
+      return;
+    }
+
+    const videoStartMinute = matchVideo.start_minute ?? 0;
+    const videoEndMinute = matchVideo.end_minute ?? 90;
+    const videoDuration = matchVideo.duration_seconds ?? ((videoEndMinute - videoStartMinute) * 60);
+
+    for (const event of eventsWithoutClips) {
+      await generateClip({
+        eventId: event.id,
+        eventMinute: event.minute || 0,
+        eventSecond: event.second || 0,
+        videoUrl: matchVideo.file_url,
+        videoStartMinute,
+        videoEndMinute,
+        videoDurationSeconds: videoDuration,
+        matchId: currentMatchId!,
+        bufferBefore: 10,
+        bufferAfter: 10
+      });
+    }
+
+    queryClient.invalidateQueries({ queryKey: ['match-events', currentMatchId] });
+    toast.success(`${eventsWithoutClips.length} clips extraídos!`);
+  };
+
   if (matchesLoading) {
     return (
       <AppLayout>
@@ -223,7 +310,7 @@ export default function Events() {
               </p>
             )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Select 
               value={currentMatchId || ''} 
               onValueChange={(value) => {
@@ -246,6 +333,20 @@ export default function Events() {
               <Button variant="arena" onClick={handleCreateEvent}>
                 <Plus className="mr-2 h-4 w-4" />
                 Novo Evento
+              </Button>
+            )}
+            {isVideoExtractable && events.length > 0 && (
+              <Button 
+                variant="arena-outline" 
+                onClick={handleExtractAllClips}
+                disabled={isExtractingClips}
+              >
+                {isExtractingClips ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Scissors className="mr-2 h-4 w-4" />
+                )}
+                Extrair Clips ({clipsExtracted}/{events.length})
               </Button>
             )}
             <Button variant="arena-outline">
@@ -334,6 +435,34 @@ export default function Events() {
             </>
           )}
         </div>
+
+        {/* Clip Extraction Progress */}
+        {isExtractingClips && (
+          <Card variant="glow" className="border-primary/30">
+            <CardContent className="flex items-center gap-4 py-4">
+              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+              <div className="flex-1">
+                <p className="font-medium">{clipProgress.message}</p>
+                <Progress value={clipProgress.progress} className="mt-2 h-2" />
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Warning for non-extractable videos */}
+        {matchVideo && !isVideoExtractable && (
+          <Card variant="glass" className="border-yellow-500/30">
+            <CardContent className="flex items-center gap-4 py-4">
+              <AlertCircle className="h-6 w-6 text-yellow-500" />
+              <div>
+                <p className="font-medium text-yellow-500">Vídeo embed detectado</p>
+                <p className="text-sm text-muted-foreground">
+                  Clips só podem ser extraídos de arquivos MP4 enviados diretamente. Para embeds, use o player com navegação por timestamp.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Timeline */}
@@ -433,6 +562,28 @@ export default function Events() {
                           <Badge variant="secondary" className="shrink-0 text-xs">
                             Editado
                           </Badge>
+                        )}
+                        {/* Clip status indicator */}
+                        {event.clip_url ? (
+                          <Badge variant="success" className="shrink-0 text-xs gap-1">
+                            <CheckCircle className="h-3 w-3" />
+                            Clip
+                          </Badge>
+                        ) : isVideoExtractable && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 text-xs"
+                            onClick={(e) => handleExtractClip(e, event)}
+                            disabled={isGeneratingEvent(event.id)}
+                          >
+                            {isGeneratingEvent(event.id) ? (
+                              <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                            ) : (
+                              <Scissors className="h-3 w-3 mr-1" />
+                            )}
+                            Extrair
+                          </Button>
                         )}
                         {/* Edit button - only for admin */}
                         {isAdmin && (
