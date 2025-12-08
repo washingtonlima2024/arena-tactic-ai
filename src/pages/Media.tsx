@@ -31,6 +31,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { ClipVignette } from '@/components/media/ClipVignette';
 import { TeamPlaylist } from '@/components/media/TeamPlaylist';
+import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
 import { toast } from '@/hooks/use-toast';
 
 export default function Media() {
@@ -232,88 +233,23 @@ export default function Media() {
               </div>
             </div>
 
-            {/* Video Player - com vinheta animada */}
-            {matchVideo && playingClipId && (() => {
-              const playingClip = clips.find(c => c.id === playingClipId);
-              const thumbnail = getThumbnail(playingClip?.id || '');
-              const videoStartMinute = matchVideo.start_minute || 0;
-              const eventSeconds = ((playingClip?.minute || 0) - videoStartMinute) * 60;
-              const startSeconds = Math.max(0, eventSeconds - 10);
-              
-              // Build URL with time parameter
-              const baseUrl = matchVideo.file_url;
-              const separator = baseUrl.includes('?') ? '&' : '?';
-              const embedUrl = `${baseUrl}${separator}t=${startSeconds}`;
-              
-              return (
-                <Card variant="glass" className="overflow-hidden">
-                  <CardHeader className="pb-2">
-                    <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg">
-                        {playingClip?.title || 'Reproduzindo clipe'}
-                      </CardTitle>
-                      <div className="flex items-center gap-2">
-                        <Badge variant="outline">
-                          <Clock className="mr-1 h-3 w-3" />
-                          {playingClip?.minute}' (início: {Math.floor(startSeconds / 60)}:{String(startSeconds % 60).padStart(2, '0')})
-                        </Badge>
-                        <Button 
-                          variant="outline" 
-                          size="sm"
-                          onClick={() => {
-                            setPlayingClipId(null);
-                            setShowingVignette(false);
-                          }}
-                        >
-                          Fechar
-                        </Button>
-                      </div>
-                    </div>
-                  </CardHeader>
-                  <CardContent>
-                    <div className="relative aspect-video w-full overflow-hidden rounded-lg">
-                      {/* Vinheta animada */}
-                      {showingVignette && thumbnail?.imageUrl && playingClip ? (
-                        <ClipVignette
-                          thumbnailUrl={thumbnail.imageUrl}
-                          eventType={playingClip.type}
-                          minute={playingClip.minute}
-                          title={playingClip.description || playingClip.title}
-                          homeTeam={selectedMatch?.home_team?.name || 'Time Casa'}
-                          awayTeam={selectedMatch?.away_team?.name || 'Time Fora'}
-                          homeScore={selectedMatch?.home_score || 0}
-                          awayScore={selectedMatch?.away_score || 0}
-                          onComplete={() => setShowingVignette(false)}
-                          duration={4000}
-                        />
-                      ) : matchVideo.file_url.includes('xtream.tech') || matchVideo.file_url.includes('embed') ? (
-                        <iframe
-                          src={embedUrl}
-                          className="absolute inset-0 w-full h-full"
-                          frameBorder="0"
-                          allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
-                          title="Match Video"
-                        />
-                      ) : (
-                        <video 
-                          ref={videoRef} 
-                          src={matchVideo.file_url}
-                          className="w-full h-full"
-                          controls
-                          autoPlay
-                          onLoadedMetadata={() => {
-                            if (videoRef.current) {
-                              videoRef.current.currentTime = startSeconds;
-                            }
-                          }}
-                          onEnded={() => setPlayingClipId(null)}
-                        />
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })()}
+            {/* Video Player Modal */}
+            <VideoPlayerModal
+              isOpen={!!playingClipId && !!matchVideo}
+              onClose={() => {
+                setPlayingClipId(null);
+                setShowingVignette(false);
+              }}
+              clip={clips.find(c => c.id === playingClipId) || null}
+              thumbnail={getThumbnail(playingClipId || '')}
+              matchVideo={matchVideo}
+              homeTeam={selectedMatch?.home_team?.name || 'Time Casa'}
+              awayTeam={selectedMatch?.away_team?.name || 'Time Fora'}
+              homeScore={selectedMatch?.home_score || 0}
+              awayScore={selectedMatch?.away_score || 0}
+              showVignette={showingVignette}
+              onVignetteComplete={() => setShowingVignette(false)}
+            />
 
             {/* No video warning */}
             {!matchVideo && clips.length > 0 && (
