@@ -94,9 +94,17 @@ export function VideoPlayerModal({
     }
 
     const baseUrl = matchVideo.file_url;
-    const separator = baseUrl.includes('?') ? '&' : '?';
-    embedUrl = `${baseUrl}${separator}t=${Math.round(startSeconds)}`;
     isEmbed = baseUrl.includes('xtream.tech') || baseUrl.includes('embed');
+    
+    // Different embed players use different timestamp parameters
+    // Try multiple formats for better compatibility
+    if (isEmbed) {
+      const separator = baseUrl.includes('?') ? '&' : '?';
+      // Xtream and many players use 'start' parameter in seconds
+      embedUrl = `${baseUrl}${separator}start=${Math.round(startSeconds)}&t=${Math.round(startSeconds)}`;
+    } else {
+      embedUrl = baseUrl;
+    }
 
     console.log('Video sync debug:', {
       eventMinute: clip.minute,
@@ -106,7 +114,8 @@ export function VideoPlayerModal({
       matchMinutesSpan,
       relativePosition: matchMinutesSpan > 0 ? (eventMatchMinute - videoStartMinute) / matchMinutesSpan : 0,
       startSeconds,
-      isEmbed
+      isEmbed,
+      embedUrl
     });
   }
 
@@ -180,13 +189,20 @@ export function VideoPlayerModal({
                 muted={isMuted}
               />
             ) : isEmbed ? (
-              <iframe
-                src={embedUrl}
-                className="absolute inset-0 w-full h-full"
-                frameBorder="0"
-                allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
-                title="Match Video"
-              />
+              <div className="relative w-full h-full">
+                <iframe
+                  src={embedUrl}
+                  className="absolute inset-0 w-full h-full"
+                  frameBorder="0"
+                  allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
+                  title="Match Video"
+                />
+                {/* Timestamp indicator for embeds */}
+                <div className="absolute bottom-16 left-4 bg-black/70 text-white px-3 py-1.5 rounded-lg text-sm font-medium backdrop-blur-sm z-10 pointer-events-none">
+                  Início: {Math.floor(startSeconds / 60)}:{String(Math.round(startSeconds % 60)).padStart(2, '0')} 
+                  <span className="text-primary ml-2">(min {clip.minute}')</span>
+                </div>
+              </div>
             ) : matchVideo ? (
               <video 
                 ref={videoRef} 
