@@ -71,13 +71,15 @@ export function ArenaChatbot() {
     }
   }, [transcript]);
 
-  // Handle dragging
+  // Handle dragging with improved smoothness
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
     if (chatContainerRef.current) {
       const rect = chatContainerRef.current.getBoundingClientRect();
       setDragOffset({
-        x: e.clientX - rect.right,
-        y: e.clientY - rect.bottom,
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
       });
       setIsDragging(true);
     }
@@ -87,12 +89,15 @@ export function ArenaChatbot() {
     if (!isDragging) return;
 
     const handleMouseMove = (e: MouseEvent) => {
-      const newX = window.innerWidth - e.clientX + dragOffset.x;
-      const newY = window.innerHeight - e.clientY + dragOffset.y;
+      e.preventDefault();
+      requestAnimationFrame(() => {
+        const newX = window.innerWidth - (e.clientX - dragOffset.x) - (chatContainerRef.current?.offsetWidth || 384);
+        const newY = window.innerHeight - (e.clientY - dragOffset.y) - (chatContainerRef.current?.offsetHeight || 512);
 
-      setPosition({
-        x: Math.max(0, Math.min(newX, window.innerWidth - 100)),
-        y: Math.max(0, Math.min(newY, window.innerHeight - 100)),
+        setPosition({
+          x: Math.max(0, Math.min(newX, window.innerWidth - 100)),
+          y: Math.max(0, Math.min(newY, window.innerHeight - 100)),
+        });
       });
     };
 
@@ -100,7 +105,7 @@ export function ArenaChatbot() {
       setIsDragging(false);
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
+    document.addEventListener('mousemove', handleMouseMove, { passive: false });
     document.addEventListener('mouseup', handleMouseUp);
 
     return () => {
@@ -195,13 +200,14 @@ export function ArenaChatbot() {
         variant="glass"
         className={cn(
           "flex flex-col overflow-hidden shadow-2xl border-primary/30",
-          "bg-gradient-to-b from-background/95 to-background/90 backdrop-blur-xl",
-          isMinimized ? "w-72 h-14" : "w-96 h-[32rem]"
+          "bg-background/50 backdrop-blur-xl",
+          isMinimized ? "w-72 h-14" : "w-96 h-[32rem]",
+          isDragging && "transition-none"
         )}
       >
         {/* Header */}
         <div
-          className="flex items-center justify-between px-4 py-3 bg-gradient-to-r from-primary/20 to-primary/10 border-b border-border/50 cursor-grab active:cursor-grabbing"
+          className="flex items-center justify-between px-4 py-3 bg-primary/20 border-b border-border/50 cursor-grab active:cursor-grabbing select-none"
           onMouseDown={handleMouseDown}
         >
           <div className="flex items-center gap-2">
@@ -334,7 +340,7 @@ export function ArenaChatbot() {
             </ScrollArea>
 
             {/* Input */}
-            <div className="p-3 border-t border-border/50 bg-muted/30">
+            <div className="p-3 border-t border-border/50 bg-background/30">
               {/* Controls Row */}
               <div className="flex items-center justify-between mb-2">
                 <div className="flex items-center gap-2">
