@@ -211,6 +211,10 @@ export default function VideoUpload() {
       return;
     }
 
+    // Get video URL from first uploaded file
+    const uploadedFile = files.find(f => f.status === 'complete');
+    const videoUrl = uploadedFile?.url || '';
+
     try {
       // Create match
       const match = await createMatch.mutateAsync({
@@ -220,14 +224,10 @@ export default function VideoUpload() {
         match_date: matchDate ? new Date(matchDate).toISOString() : undefined,
       });
 
-      // Get video URL from first uploaded file
-      const uploadedFile = files.find(f => f.status === 'complete');
-      const videoUrl = uploadedFile?.url || '';
-
-      // Register video in database
+      // Register video in database - ALWAYS register if there's a URL
       if (videoUrl) {
         const videoType = videoPeriod === 'full' ? 'full' : videoPeriod === '1st' ? 'first_half' : videoPeriod === '2nd' ? 'second_half' : 'clip';
-        await supabase.from('videos').insert({
+        const { error: videoError } = await supabase.from('videos').insert({
           match_id: match.id,
           file_url: videoUrl,
           file_name: uploadedFile?.name || 'video',
@@ -235,6 +235,25 @@ export default function VideoUpload() {
           start_minute: videoPeriod === '2nd' ? 45 : 0,
           end_minute: videoPeriod === '1st' ? 45 : videoPeriod === '2nd' ? 90 : null,
           status: 'uploaded'
+        });
+
+        if (videoError) {
+          console.error('Error registering video:', videoError);
+          toast({
+            title: "Erro ao registrar vídeo",
+            description: videoError.message,
+            variant: "destructive"
+          });
+        } else {
+          toast({
+            title: "Vídeo registrado",
+            description: "O vídeo foi vinculado à partida com sucesso."
+          });
+        }
+      } else {
+        toast({
+          title: "Análise sem vídeo",
+          description: "A análise será iniciada sem vídeo vinculado. Você pode adicionar o vídeo depois.",
         });
       }
 
@@ -250,8 +269,13 @@ export default function VideoUpload() {
 
       setCurrentJobId(result.jobId);
 
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error starting analysis:', error);
+      toast({
+        title: "Erro ao iniciar análise",
+        description: error.message || "Ocorreu um erro ao iniciar a análise.",
+        variant: "destructive"
+      });
     }
   };
 
