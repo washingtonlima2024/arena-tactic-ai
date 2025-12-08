@@ -177,9 +177,15 @@ export default function Media() {
                   {clips.length} cortes disponíveis baseados nos eventos detectados
                 </p>
                 {matchVideo ? (
-                  <Badge variant="success">Vídeo disponível</Badge>
+                  <Badge variant="success" className="gap-1">
+                    <Video className="h-3 w-3" />
+                    Vídeo disponível
+                  </Badge>
                 ) : (
-                  <Badge variant="outline">Sem vídeo vinculado</Badge>
+                  <Badge variant="warning" className="gap-1">
+                    <AlertCircle className="h-3 w-3" />
+                    Sem vídeo vinculado
+                  </Badge>
                 )}
               </div>
               <div className="flex gap-2">
@@ -230,6 +236,31 @@ export default function Media() {
                 className="hidden"
                 onEnded={() => setPlayingClipId(null)}
               />
+            )}
+
+            {/* No video warning */}
+            {!matchVideo && clips.length > 0 && (
+              <Card variant="glass" className="border-warning/50 bg-warning/5">
+                <CardContent className="py-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-warning/20">
+                      <AlertCircle className="h-5 w-5 text-warning" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium">Vídeo não vinculado</p>
+                      <p className="text-sm text-muted-foreground">
+                        Para reproduzir os cortes, faça upload do vídeo da partida na página de Upload
+                      </p>
+                    </div>
+                    <Button variant="arena" size="sm" asChild>
+                      <a href="/upload">
+                        <Video className="mr-2 h-4 w-4" />
+                        Fazer Upload
+                      </a>
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             )}
 
             {clips.length === 0 ? (
