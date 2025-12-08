@@ -229,46 +229,69 @@ export default function Media() {
             </div>
 
             {/* Video Player - usando iframe para embeds */}
-            {matchVideo && playingClipId && (
-              <Card variant="glass" className="overflow-hidden">
-                <CardHeader className="pb-2">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg">
-                      {clips.find(c => c.id === playingClipId)?.title || 'Reproduzindo clipe'}
-                    </CardTitle>
-                    <Button 
-                      variant="outline" 
-                      size="sm"
-                      onClick={() => setPlayingClipId(null)}
-                    >
-                      Fechar
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="relative aspect-video w-full overflow-hidden rounded-lg">
-                    {matchVideo.file_url.includes('xtream.tech') || matchVideo.file_url.includes('embed') ? (
-                      <iframe
-                        src={matchVideo.file_url}
-                        className="absolute inset-0 w-full h-full"
-                        frameBorder="0"
-                        allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
-                        title="Match Video"
-                      />
-                    ) : (
-                      <video 
-                        ref={videoRef} 
-                        src={matchVideo.file_url}
-                        className="w-full h-full"
-                        controls
-                        autoPlay
-                        onEnded={() => setPlayingClipId(null)}
-                      />
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+            {matchVideo && playingClipId && (() => {
+              const playingClip = clips.find(c => c.id === playingClipId);
+              const videoStartMinute = matchVideo.start_minute || 0;
+              const eventSeconds = ((playingClip?.minute || 0) - videoStartMinute) * 60;
+              const startSeconds = Math.max(0, eventSeconds - 10);
+              
+              // Build URL with time parameter
+              const baseUrl = matchVideo.file_url;
+              const separator = baseUrl.includes('?') ? '&' : '?';
+              const embedUrl = `${baseUrl}${separator}t=${startSeconds}`;
+              
+              return (
+                <Card variant="glass" className="overflow-hidden">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-lg">
+                        {playingClip?.title || 'Reproduzindo clipe'}
+                      </CardTitle>
+                      <div className="flex items-center gap-2">
+                        <Badge variant="outline">
+                          <Clock className="mr-1 h-3 w-3" />
+                          {playingClip?.minute}' (início: {Math.floor(startSeconds / 60)}:{String(startSeconds % 60).padStart(2, '0')})
+                        </Badge>
+                        <Button 
+                          variant="outline" 
+                          size="sm"
+                          onClick={() => setPlayingClipId(null)}
+                        >
+                          Fechar
+                        </Button>
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="relative aspect-video w-full overflow-hidden rounded-lg">
+                      {matchVideo.file_url.includes('xtream.tech') || matchVideo.file_url.includes('embed') ? (
+                        <iframe
+                          src={embedUrl}
+                          className="absolute inset-0 w-full h-full"
+                          frameBorder="0"
+                          allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
+                          title="Match Video"
+                        />
+                      ) : (
+                        <video 
+                          ref={videoRef} 
+                          src={matchVideo.file_url}
+                          className="w-full h-full"
+                          controls
+                          autoPlay
+                          onLoadedMetadata={() => {
+                            if (videoRef.current) {
+                              videoRef.current.currentTime = startSeconds;
+                            }
+                          }}
+                          onEnded={() => setPlayingClipId(null)}
+                        />
+                      )}
+                    </div>
+                  </CardContent>
+                </Card>
+              );
+            })()}
 
             {/* No video warning */}
             {!matchVideo && clips.length > 0 && (
