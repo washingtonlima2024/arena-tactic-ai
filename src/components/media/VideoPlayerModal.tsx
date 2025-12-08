@@ -73,15 +73,25 @@ export function VideoPlayerModal({
     embedUrl = clip.clipUrl!;
     isEmbed = false;
   } else if (matchVideo) {
-    const videoStartMinute = matchVideo.start_minute || 0;
-    const videoEndMinute = matchVideo.end_minute || (videoStartMinute + 45);
-    const videoDuration = matchVideo.duration_seconds || ((videoEndMinute - videoStartMinute) * 60);
+    const videoStartMinute = matchVideo.start_minute ?? 0;
+    const videoEndMinute = matchVideo.end_minute ?? (videoStartMinute + 45);
+    // Use actual video duration if available, otherwise estimate from minute range
+    const videoDuration = matchVideo.duration_seconds ?? ((videoEndMinute - videoStartMinute) * 60);
     
     const matchMinutesSpan = videoEndMinute - videoStartMinute;
     const eventMatchMinute = clip.minute;
-    const relativePosition = (eventMatchMinute - videoStartMinute) / matchMinutesSpan;
-    const eventVideoSeconds = relativePosition * videoDuration;
-    startSeconds = Math.max(0, eventVideoSeconds - 10);
+    
+    // Handle edge case where event is outside video range
+    if (eventMatchMinute < videoStartMinute || eventMatchMinute > videoEndMinute) {
+      console.warn('Event minute outside video range:', { eventMatchMinute, videoStartMinute, videoEndMinute });
+      startSeconds = 0;
+    } else if (matchMinutesSpan <= 0) {
+      startSeconds = 0;
+    } else {
+      const relativePosition = (eventMatchMinute - videoStartMinute) / matchMinutesSpan;
+      const eventVideoSeconds = relativePosition * videoDuration;
+      startSeconds = Math.max(0, eventVideoSeconds - 10);
+    }
 
     const baseUrl = matchVideo.file_url;
     const separator = baseUrl.includes('?') ? '&' : '?';
@@ -93,9 +103,10 @@ export function VideoPlayerModal({
       videoStartMinute,
       videoEndMinute,
       videoDuration,
-      relativePosition,
-      eventVideoSeconds,
-      startSeconds
+      matchMinutesSpan,
+      relativePosition: matchMinutesSpan > 0 ? (eventMatchMinute - videoStartMinute) / matchMinutesSpan : 0,
+      startSeconds,
+      isEmbed
     });
   }
 

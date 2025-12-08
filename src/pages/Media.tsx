@@ -213,10 +213,17 @@ export default function Media() {
                   {clips.length} eventos • Gere capas e extraia clips (~20s cada) para redes sociais
                 </p>
                 {matchVideo ? (
-                  <Badge variant="success" className="gap-1">
-                    <Video className="h-3 w-3" />
-                    Vídeo disponível
-                  </Badge>
+                  matchVideo.file_url.includes('embed') || matchVideo.file_url.includes('xtream') ? (
+                    <Badge variant="warning" className="gap-1">
+                      <Film className="h-3 w-3" />
+                      Embed (só reprodução)
+                    </Badge>
+                  ) : (
+                    <Badge variant="success" className="gap-1">
+                      <Video className="h-3 w-3" />
+                      Vídeo disponível
+                    </Badge>
+                  )
                 ) : (
                   <Badge variant="warning" className="gap-1">
                     <AlertCircle className="h-3 w-3" />
@@ -225,13 +232,14 @@ export default function Media() {
                 )}
               </div>
               <div className="flex gap-2">
-                {/* Generate Clips Button */}
-                {clips.length > 0 && matchVideo && clips.some(c => !c.clipUrl) && (
+                {/* Generate Clips Button - Only show for direct video files, not embeds */}
+                {clips.length > 0 && matchVideo && clips.some(c => !c.clipUrl) && 
+                  !matchVideo.file_url.includes('embed') && !matchVideo.file_url.includes('xtream') && (
                   <Button 
                     variant="arena" 
                     size="sm"
                     onClick={async () => {
-                      if (!matchVideo.file_url || !matchVideo.start_minute || !matchVideo.end_minute || !matchVideo.duration_seconds) {
+                      if (!matchVideo.file_url || matchVideo.start_minute == null || matchVideo.end_minute == null || !matchVideo.duration_seconds) {
                         toast({
                           title: "Dados de sincronização ausentes",
                           description: "Configure os tempos de sincronização do vídeo na página de Upload",
@@ -357,6 +365,26 @@ export default function Media() {
               </Card>
             )}
 
+            {/* Embed video warning - can't extract clips from embeds */}
+            {matchVideo && (matchVideo.file_url.includes('embed') || matchVideo.file_url.includes('xtream')) && clips.length > 0 && (
+              <Card variant="glass" className="border-primary/30 bg-primary/5">
+                <CardContent className="py-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/20">
+                      <Film className="h-5 w-5 text-primary" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium">Vídeo via Embed</p>
+                      <p className="text-sm text-muted-foreground">
+                        Clips são reproduzidos diretamente no player via iframe. Para extração de clips separados, 
+                        faça upload de um arquivo MP4 direto na página de Upload.
+                      </p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {clips.length === 0 ? (
               <Card variant="glass">
                 <CardContent className="py-12 text-center">
@@ -411,8 +439,18 @@ export default function Media() {
                     });
                   };
 
+                  const isEmbedVideo = matchVideo?.file_url.includes('embed') || matchVideo?.file_url.includes('xtream');
+
                   const handleExtractClip = async () => {
-                    if (!matchVideo?.file_url || !matchVideo.start_minute || !matchVideo.end_minute || !matchVideo.duration_seconds) {
+                    if (isEmbedVideo) {
+                      toast({
+                        title: "Extração não disponível",
+                        description: "Vídeos via embed não suportam extração de clips. Faça upload de um arquivo MP4 direto.",
+                        variant: "destructive"
+                      });
+                      return;
+                    }
+                    if (!matchVideo?.file_url || matchVideo.start_minute == null || matchVideo.end_minute == null || !matchVideo.duration_seconds) {
                       toast({
                         title: "Dados de sincronização ausentes",
                         description: "Configure os tempos de sincronização do vídeo na página de Upload",
@@ -510,8 +548,8 @@ export default function Media() {
                               Gerar Capa
                             </Button>
                           )}
-                          {/* Botão Extrair Clip */}
-                          {matchVideo && !clip.clipUrl && !isExtractingClip && (
+                          {/* Botão Extrair Clip - Only show for direct video files, not embeds */}
+                          {matchVideo && !clip.clipUrl && !isExtractingClip && !isEmbedVideo && (
                             <Button 
                               variant="outline" 
                               size="sm" 
