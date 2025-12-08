@@ -95,6 +95,7 @@ interface Clip {
   description: string;
   minute: number;
   thumbnail?: string;
+  clipUrl?: string | null;
 }
 
 interface TeamPlaylistData {
@@ -294,11 +295,42 @@ export function SocialContentDialog({
   const handleGenerate = async () => {
     if (!selectedFormat || selectedClips.length === 0) return;
     
-    // If we have a video URL, use FFmpeg to generate video
-    if (matchVideoUrl) {
+    const allClips = [...homeTeamPlaylist.clips, ...awayTeamPlaylist.clips];
+    
+    // Check if clips have pre-extracted URLs (much faster)
+    const selectedClipData = selectedClips.map(id => allClips.find(c => c.id === id)).filter(Boolean);
+    const clipsWithUrls = selectedClipData.filter(c => c?.clipUrl);
+    const hasExtractedClips = clipsWithUrls.length > 0;
+    
+    // If we have pre-extracted clips, use those (MUCH faster - ~10MB each vs 100MB+ full video)
+    if (hasExtractedClips) {
       setStep('generating');
       
-      const allClips = [...homeTeamPlaylist.clips, ...awayTeamPlaylist.clips];
+      const clipsToProcess = clipsWithUrls.map(clip => ({
+        id: clip!.id,
+        url: clip!.clipUrl!,
+        startTime: 0, // Clips already cut, no need to seek
+        endTime: 20, // ~20 second clips
+        title: clip!.title
+      }));
+
+      console.log(`[SocialExport] Using ${clipsToProcess.length} pre-extracted clips`);
+
+      await generateHighlightsVideo({
+        clips: clipsToProcess,
+        format: {
+          width: selectedFormat.width,
+          height: selectedFormat.height,
+          ratio: selectedFormat.ratio
+        },
+        includeVignettes,
+        outputName: `highlights_${platform.replace(/\s+/g, '_').toLowerCase()}`
+      });
+    } else if (matchVideoUrl) {
+      // Fallback to full video (slower, may timeout)
+      toast.warning('Clips não extraídos. Usando vídeo completo (pode demorar).');
+      setStep('generating');
+      
       const clipsToProcess = selectedClips.map(id => {
         const clip = allClips.find(c => c.id === id);
         return clip ? {

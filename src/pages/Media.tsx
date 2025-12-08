@@ -747,7 +747,8 @@ export default function Media() {
                 teamType: 'home',
                 clips: clips.map(c => ({
                   ...c,
-                  thumbnail: getThumbnail(c.id)?.imageUrl
+                  thumbnail: getThumbnail(c.id)?.imageUrl,
+                  clipUrl: c.clipUrl
                 }))
               }}
               awayTeamPlaylist={{
@@ -755,7 +756,8 @@ export default function Media() {
                 teamType: 'away',
                 clips: clips.map(c => ({
                   ...c,
-                  thumbnail: getThumbnail(c.id)?.imageUrl
+                  thumbnail: getThumbnail(c.id)?.imageUrl,
+                  clipUrl: c.clipUrl
                 }))
               }}
               onGenerate={(config) => {
