@@ -314,7 +314,14 @@ export default function Media() {
                   const isGeneratingThumbnail = isGenerating(clip.id);
                   
                   const handlePlayClip = () => {
-                    if (!matchVideo) return;
+                    if (!matchVideo) {
+                      toast({
+                        title: "Vídeo não disponível",
+                        description: "Faça upload do vídeo da partida para reproduzir os cortes",
+                        variant: "destructive"
+                      });
+                      return;
+                    }
                     
                     if (isPlaying) {
                       setPlayingClipId(null);
@@ -366,20 +373,18 @@ export default function Media() {
                           </div>
                         )}
                         <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-t from-background/80 to-transparent pointer-events-none">
-                          {matchVideo && thumbnail?.imageUrl && (
-                            <Button 
-                              variant="arena" 
-                              size="icon-lg" 
-                              className="rounded-full pointer-events-auto"
-                              onClick={handlePlayClip}
-                            >
-                              {isPlaying ? (
-                                <Pause className="h-6 w-6" />
-                              ) : (
-                                <Play className="h-6 w-6" />
-                              )}
-                            </Button>
-                          )}
+                          <Button 
+                            variant="arena" 
+                            size="icon-lg" 
+                            className="rounded-full pointer-events-auto"
+                            onClick={handlePlayClip}
+                          >
+                            {isPlaying ? (
+                              <Pause className="h-6 w-6" />
+                            ) : (
+                              <Play className="h-6 w-6" />
+                            )}
+                          </Button>
                         </div>
                         <div className="absolute bottom-2 right-2">
                           <Badge variant="secondary" className="backdrop-blur">
