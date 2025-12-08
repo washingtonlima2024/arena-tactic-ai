@@ -117,59 +117,447 @@ function generatePlaySteps(event: MatchEvent): PlayStep[] {
     case 'shot_on_target':
       return [
         {
-          label: 'Preparação',
+          label: 'Armação da Jogada',
           players: [
-            { id: '1', number: 10, x: 65, y: 45, team: 'home' },
-            { id: '2', number: 9, x: 75, y: 55, team: 'home' },
-            { id: '3', number: 11, x: 70, y: 30, team: 'home' },
+            { id: '1', number: 8, x: 45, y: 40, team: 'home' },
+            { id: '2', number: 10, x: 55, y: 50, team: 'home' },
+            { id: '3', number: 9, x: 70, y: 55, team: 'home' },
+            { id: '4', number: 11, x: 65, y: 25, team: 'home' },
+            { id: '5', number: 7, x: 60, y: 75, team: 'home' },
+            { id: 'd1', number: 4, x: 80, y: 35, team: 'away' },
+            { id: 'd2', number: 5, x: 82, y: 55, team: 'away' },
           ],
-          ballPosition: { x: 65, y: 45 },
+          ballPosition: { x: 55, y: 50 },
         },
         {
-          label: 'Finalização',
+          label: 'Infiltração',
           players: [
-            { id: '1', number: 10, x: 72, y: 48, team: 'home' },
-            { id: '2', number: 9, x: 82, y: 52, team: 'home' },
-            { id: '3', number: 11, x: 78, y: 35, team: 'home' },
+            { id: '1', number: 8, x: 55, y: 45, team: 'home' },
+            { id: '2', number: 10, x: 70, y: 48, team: 'home' },
+            { id: '3', number: 9, x: 82, y: 52, team: 'home' },
+            { id: '4', number: 11, x: 78, y: 30, team: 'home' },
+            { id: '5', number: 7, x: 72, y: 70, team: 'home' },
+            { id: 'd1', number: 4, x: 85, y: 40, team: 'away' },
+            { id: 'd2', number: 5, x: 86, y: 58, team: 'away' },
           ],
-          ballPosition: { x: 72, y: 48 },
-          shotLine: { from: { x: 72, y: 48 }, to: { x: 98, y: 50 } },
+          ballPosition: { x: 70, y: 48 },
+          passLine: { from: { x: 55, y: 50 }, to: { x: 70, y: 48 } },
+        },
+        {
+          label: 'Finalização!',
+          players: [
+            { id: '1', number: 8, x: 60, y: 45, team: 'home' },
+            { id: '2', number: 10, x: 78, y: 50, team: 'home' },
+            { id: '3', number: 9, x: 88, y: 52, team: 'home' },
+            { id: '4', number: 11, x: 82, y: 35, team: 'home' },
+            { id: '5', number: 7, x: 80, y: 65, team: 'home' },
+            { id: 'd1', number: 4, x: 88, y: 45, team: 'away' },
+            { id: 'd2', number: 5, x: 90, y: 55, team: 'away' },
+          ],
+          ballPosition: { x: 78, y: 50 },
+          shotLine: { from: { x: 78, y: 50 }, to: { x: 98, y: 50 } },
         },
       ];
     
     case 'corner':
       return [
         {
-          label: 'Posicionamento',
+          label: 'Posicionamento para Escanteio',
           players: [
             { id: '1', number: 7, x: 98, y: 2, team: 'home' },
             { id: '2', number: 9, x: 88, y: 40, team: 'home' },
             { id: '3', number: 4, x: 85, y: 55, team: 'home' },
             { id: '4', number: 10, x: 90, y: 60, team: 'home' },
             { id: '5', number: 8, x: 75, y: 45, team: 'home' },
+            { id: '6', number: 5, x: 82, y: 65, team: 'home' },
+            { id: 'd1', number: 2, x: 92, y: 45, team: 'away' },
+            { id: 'd2', number: 4, x: 90, y: 52, team: 'away' },
+            { id: 'd3', number: 5, x: 93, y: 58, team: 'away' },
           ],
           ballPosition: { x: 98, y: 2 },
         },
         {
+          label: 'Movimentação na Área',
+          players: [
+            { id: '1', number: 7, x: 96, y: 5, team: 'home' },
+            { id: '2', number: 9, x: 90, y: 45, team: 'home' },
+            { id: '3', number: 4, x: 88, y: 50, team: 'home' },
+            { id: '4', number: 10, x: 92, y: 55, team: 'home' },
+            { id: '5', number: 8, x: 78, y: 48, team: 'home' },
+            { id: '6', number: 5, x: 85, y: 60, team: 'home' },
+            { id: 'd1', number: 2, x: 91, y: 48, team: 'away' },
+            { id: 'd2', number: 4, x: 89, y: 53, team: 'away' },
+            { id: 'd3', number: 5, x: 91, y: 58, team: 'away' },
+          ],
+          ballPosition: { x: 96, y: 5 },
+        },
+        {
+          label: 'Cobrança!',
+          players: [
+            { id: '1', number: 7, x: 94, y: 8, team: 'home' },
+            { id: '2', number: 9, x: 93, y: 48, team: 'home' },
+            { id: '3', number: 4, x: 90, y: 52, team: 'home' },
+            { id: '4', number: 10, x: 94, y: 56, team: 'home' },
+            { id: '5', number: 8, x: 82, y: 50, team: 'home' },
+            { id: '6', number: 5, x: 88, y: 58, team: 'home' },
+            { id: 'd1', number: 2, x: 92, y: 50, team: 'away' },
+            { id: 'd2', number: 4, x: 91, y: 54, team: 'away' },
+            { id: 'd3', number: 5, x: 92, y: 60, team: 'away' },
+          ],
+          ballPosition: { x: 93, y: 48 },
+          passLine: { from: { x: 98, y: 2 }, to: { x: 93, y: 48 } },
+        },
+      ];
+
+    case 'penalty':
+      return [
+        {
+          label: 'Preparação do Pênalti',
+          players: [
+            { id: '1', number: 10, x: 85, y: 50, team: 'home' },
+            { id: '2', number: 9, x: 78, y: 55, team: 'home' },
+            { id: '3', number: 11, x: 78, y: 45, team: 'home' },
+            { id: 'gk', number: 1, x: 98, y: 50, team: 'away' },
+          ],
+          ballPosition: { x: 88, y: 50 },
+        },
+        {
           label: 'Cobrança',
           players: [
-            { id: '1', number: 7, x: 95, y: 5, team: 'home' },
+            { id: '1', number: 10, x: 86, y: 50, team: 'home' },
+            { id: '2', number: 9, x: 80, y: 55, team: 'home' },
+            { id: '3', number: 11, x: 80, y: 45, team: 'home' },
+            { id: 'gk', number: 1, x: 98, y: 48, team: 'away' },
+          ],
+          ballPosition: { x: 88, y: 50 },
+        },
+        {
+          label: 'GOOOL!',
+          players: [
+            { id: '1', number: 10, x: 90, y: 50, team: 'home' },
+            { id: '2', number: 9, x: 85, y: 55, team: 'home' },
+            { id: '3', number: 11, x: 85, y: 45, team: 'home' },
+            { id: 'gk', number: 1, x: 98, y: 45, team: 'away' },
+          ],
+          ballPosition: { x: 99, y: 52 },
+          shotLine: { from: { x: 88, y: 50 }, to: { x: 99, y: 52 } },
+        },
+      ];
+
+    case 'foul':
+      return [
+        {
+          label: 'Disputa de Bola',
+          players: [
+            { id: '1', number: 10, x: eventX - 5, y: eventY, team: 'home' },
+            { id: '2', number: 8, x: eventX - 10, y: eventY - 10, team: 'home' },
+            { id: 'd1', number: 6, x: eventX + 2, y: eventY + 2, team: 'away' },
+            { id: 'd2', number: 4, x: eventX + 8, y: eventY - 5, team: 'away' },
+          ],
+          ballPosition: { x: eventX - 3, y: eventY },
+        },
+        {
+          label: 'Falta Cometida!',
+          players: [
+            { id: '1', number: 10, x: eventX, y: eventY - 3, team: 'home' },
+            { id: '2', number: 8, x: eventX - 8, y: eventY - 8, team: 'home' },
+            { id: 'd1', number: 6, x: eventX + 5, y: eventY + 5, team: 'away' },
+            { id: 'd2', number: 4, x: eventX + 10, y: eventY - 3, team: 'away' },
+          ],
+          ballPosition: { x: eventX, y: eventY },
+        },
+      ];
+
+    case 'cross':
+      return [
+        {
+          label: 'Subida pela Lateral',
+          players: [
+            { id: '1', number: 7, x: 70, y: 15, team: 'home' },
+            { id: '2', number: 9, x: 80, y: 45, team: 'home' },
+            { id: '3', number: 11, x: 75, y: 55, team: 'home' },
+            { id: '4', number: 8, x: 65, y: 35, team: 'home' },
+            { id: 'd1', number: 2, x: 82, y: 20, team: 'away' },
+            { id: 'd2', number: 4, x: 88, y: 48, team: 'away' },
+          ],
+          ballPosition: { x: 70, y: 15 },
+        },
+        {
+          label: 'Avanço na Linha de Fundo',
+          players: [
+            { id: '1', number: 7, x: 92, y: 10, team: 'home' },
+            { id: '2', number: 9, x: 88, y: 48, team: 'home' },
+            { id: '3', number: 11, x: 85, y: 55, team: 'home' },
+            { id: '4', number: 8, x: 75, y: 40, team: 'home' },
+            { id: 'd1', number: 2, x: 90, y: 18, team: 'away' },
+            { id: 'd2', number: 4, x: 90, y: 50, team: 'away' },
+          ],
+          ballPosition: { x: 92, y: 10 },
+          passLine: { from: { x: 70, y: 15 }, to: { x: 92, y: 10 } },
+        },
+        {
+          label: 'Cruzamento na Área!',
+          players: [
+            { id: '1', number: 7, x: 95, y: 8, team: 'home' },
+            { id: '2', number: 9, x: 92, y: 50, team: 'home' },
+            { id: '3', number: 11, x: 90, y: 55, team: 'home' },
+            { id: '4', number: 8, x: 82, y: 45, team: 'home' },
+            { id: 'd1', number: 2, x: 93, y: 15, team: 'away' },
+            { id: 'd2', number: 4, x: 91, y: 52, team: 'away' },
+          ],
+          ballPosition: { x: 92, y: 50 },
+          passLine: { from: { x: 95, y: 8 }, to: { x: 92, y: 50 } },
+        },
+      ];
+
+    case 'offside':
+      return [
+        {
+          label: 'Linha de Impedimento',
+          players: [
+            { id: '1', number: 10, x: 65, y: 50, team: 'home' },
+            { id: '2', number: 9, x: 88, y: 48, team: 'home' },
+            { id: 'd1', number: 4, x: 85, y: 40, team: 'away' },
+            { id: 'd2', number: 5, x: 85, y: 60, team: 'away' },
+          ],
+          ballPosition: { x: 65, y: 50 },
+        },
+        {
+          label: 'Passe em Profundidade',
+          players: [
+            { id: '1', number: 10, x: 68, y: 50, team: 'home' },
             { id: '2', number: 9, x: 92, y: 48, team: 'home' },
-            { id: '3', number: 4, x: 88, y: 52, team: 'home' },
-            { id: '4', number: 10, x: 93, y: 55, team: 'home' },
-            { id: '5', number: 8, x: 80, y: 50, team: 'home' },
+            { id: 'd1', number: 4, x: 87, y: 42, team: 'away' },
+            { id: 'd2', number: 5, x: 87, y: 58, team: 'away' },
+          ],
+          ballPosition: { x: 90, y: 48 },
+          passLine: { from: { x: 65, y: 50 }, to: { x: 90, y: 48 } },
+        },
+        {
+          label: 'Impedimento!',
+          players: [
+            { id: '1', number: 10, x: 70, y: 50, team: 'home' },
+            { id: '2', number: 9, x: 94, y: 48, team: 'home' },
+            { id: 'd1', number: 4, x: 88, y: 44, team: 'away' },
+            { id: 'd2', number: 5, x: 88, y: 56, team: 'away' },
+          ],
+          ballPosition: { x: 94, y: 48 },
+        },
+      ];
+
+    case 'save':
+      return [
+        {
+          label: 'Finalização',
+          players: [
+            { id: '1', number: 9, x: 78, y: 48, team: 'home' },
+            { id: 'gk', number: 1, x: 98, y: 50, team: 'away' },
+            { id: 'd1', number: 4, x: 85, y: 45, team: 'away' },
+          ],
+          ballPosition: { x: 78, y: 48 },
+          shotLine: { from: { x: 78, y: 48 }, to: { x: 98, y: 50 } },
+        },
+        {
+          label: 'Defesa do Goleiro!',
+          players: [
+            { id: '1', number: 9, x: 80, y: 48, team: 'home' },
+            { id: 'gk', number: 1, x: 97, y: 48, team: 'away' },
+            { id: 'd1', number: 4, x: 86, y: 46, team: 'away' },
+          ],
+          ballPosition: { x: 96, y: 48 },
+        },
+      ];
+
+    case 'substitution':
+      return [
+        {
+          label: 'Substituição',
+          players: [
+            { id: '1', number: 10, x: 50, y: 2, team: 'home' },
+            { id: '2', number: 20, x: 50, y: 98, team: 'home' },
+          ],
+          ballPosition: { x: 50, y: 50 },
+        },
+        {
+          label: 'Troca de Jogadores',
+          players: [
+            { id: '1', number: 10, x: 50, y: 10, team: 'home' },
+            { id: '2', number: 20, x: 50, y: 50, team: 'home' },
+          ],
+          ballPosition: { x: 50, y: 50 },
+        },
+      ];
+
+    case 'yellow_card':
+    case 'red_card':
+      return [
+        {
+          label: 'Infração',
+          players: [
+            { id: '1', number: 6, x: eventX, y: eventY, team: 'away' },
+            { id: '2', number: 10, x: eventX - 5, y: eventY - 3, team: 'home' },
+          ],
+          ballPosition: { x: eventX, y: eventY },
+        },
+        {
+          label: event.event_type === 'red_card' ? 'Cartão Vermelho!' : 'Cartão Amarelo!',
+          players: [
+            { id: '1', number: 6, x: eventX, y: eventY, team: 'away' },
+            { id: '2', number: 10, x: eventX - 8, y: eventY - 5, team: 'home' },
+          ],
+          ballPosition: { x: eventX + 5, y: eventY },
+        },
+      ];
+
+    case 'free_kick':
+      return [
+        {
+          label: 'Posicionamento da Barreira',
+          players: [
+            { id: '1', number: 10, x: 75, y: 50, team: 'home' },
+            { id: '2', number: 7, x: 72, y: 45, team: 'home' },
+            { id: 'd1', number: 4, x: 82, y: 48, team: 'away' },
+            { id: 'd2', number: 5, x: 82, y: 50, team: 'away' },
+            { id: 'd3', number: 6, x: 82, y: 52, team: 'away' },
+            { id: 'gk', number: 1, x: 98, y: 50, team: 'away' },
+          ],
+          ballPosition: { x: 75, y: 50 },
+        },
+        {
+          label: 'Cobrança de Falta',
+          players: [
+            { id: '1', number: 10, x: 76, y: 50, team: 'home' },
+            { id: '2', number: 7, x: 74, y: 46, team: 'home' },
+            { id: 'd1', number: 4, x: 82, y: 48, team: 'away' },
+            { id: 'd2', number: 5, x: 83, y: 50, team: 'away' },
+            { id: 'd3', number: 6, x: 82, y: 52, team: 'away' },
+            { id: 'gk', number: 1, x: 97, y: 52, team: 'away' },
           ],
           ballPosition: { x: 92, y: 48 },
-          passLine: { from: { x: 98, y: 2 }, to: { x: 92, y: 48 } },
+          shotLine: { from: { x: 75, y: 50 }, to: { x: 92, y: 48 } },
+        },
+      ];
+
+    case 'ball_recovery':
+    case 'interception':
+      return [
+        {
+          label: 'Pressão na Bola',
+          players: [
+            { id: '1', number: 6, x: 55, y: 50, team: 'home' },
+            { id: '2', number: 8, x: 52, y: 45, team: 'home' },
+            { id: 'd1', number: 10, x: 50, y: 52, team: 'away' },
+          ],
+          ballPosition: { x: 50, y: 52 },
+        },
+        {
+          label: 'Recuperação de Bola!',
+          players: [
+            { id: '1', number: 6, x: 52, y: 50, team: 'home' },
+            { id: '2', number: 8, x: 50, y: 46, team: 'home' },
+            { id: 'd1', number: 10, x: 48, y: 55, team: 'away' },
+          ],
+          ballPosition: { x: 52, y: 50 },
+        },
+        {
+          label: 'Contra-Ataque!',
+          players: [
+            { id: '1', number: 6, x: 58, y: 50, team: 'home' },
+            { id: '2', number: 8, x: 62, y: 45, team: 'home' },
+            { id: 'd1', number: 10, x: 45, y: 58, team: 'away' },
+          ],
+          ballPosition: { x: 62, y: 45 },
+          passLine: { from: { x: 52, y: 50 }, to: { x: 62, y: 45 } },
+        },
+      ];
+
+    case 'high_press':
+      return [
+        {
+          label: 'Pressão Alta Coordenada',
+          players: [
+            { id: '1', number: 9, x: 75, y: 50, team: 'home' },
+            { id: '2', number: 10, x: 72, y: 40, team: 'home' },
+            { id: '3', number: 11, x: 72, y: 60, team: 'home' },
+            { id: '4', number: 8, x: 65, y: 50, team: 'home' },
+            { id: 'd1', number: 4, x: 85, y: 45, team: 'away' },
+            { id: 'd2', number: 5, x: 85, y: 55, team: 'away' },
+            { id: 'gk', number: 1, x: 95, y: 50, team: 'away' },
+          ],
+          ballPosition: { x: 85, y: 50 },
+        },
+        {
+          label: 'Fechando os Espaços',
+          players: [
+            { id: '1', number: 9, x: 80, y: 48, team: 'home' },
+            { id: '2', number: 10, x: 78, y: 38, team: 'home' },
+            { id: '3', number: 11, x: 78, y: 58, team: 'home' },
+            { id: '4', number: 8, x: 72, y: 50, team: 'home' },
+            { id: 'd1', number: 4, x: 88, y: 42, team: 'away' },
+            { id: 'd2', number: 5, x: 88, y: 58, team: 'away' },
+            { id: 'gk', number: 1, x: 96, y: 50, team: 'away' },
+          ],
+          ballPosition: { x: 88, y: 50 },
+        },
+        {
+          label: 'Roubo de Bola!',
+          players: [
+            { id: '1', number: 9, x: 85, y: 50, team: 'home' },
+            { id: '2', number: 10, x: 82, y: 40, team: 'home' },
+            { id: '3', number: 11, x: 82, y: 60, team: 'home' },
+            { id: '4', number: 8, x: 78, y: 50, team: 'home' },
+            { id: 'd1', number: 4, x: 90, y: 40, team: 'away' },
+            { id: 'd2', number: 5, x: 90, y: 60, team: 'away' },
+            { id: 'gk', number: 1, x: 97, y: 50, team: 'away' },
+          ],
+          ballPosition: { x: 85, y: 50 },
+        },
+      ];
+
+    case 'transition':
+      return [
+        {
+          label: 'Recuperação no Meio',
+          players: [
+            { id: '1', number: 6, x: 45, y: 50, team: 'home' },
+            { id: '2', number: 9, x: 55, y: 45, team: 'home' },
+            { id: '3', number: 11, x: 50, y: 65, team: 'home' },
+            { id: 'd1', number: 8, x: 40, y: 52, team: 'away' },
+          ],
+          ballPosition: { x: 45, y: 50 },
+        },
+        {
+          label: 'Transição Rápida',
+          players: [
+            { id: '1', number: 6, x: 55, y: 50, team: 'home' },
+            { id: '2', number: 9, x: 70, y: 48, team: 'home' },
+            { id: '3', number: 11, x: 65, y: 60, team: 'home' },
+            { id: 'd1', number: 8, x: 42, y: 55, team: 'away' },
+          ],
+          ballPosition: { x: 70, y: 48 },
+          passLine: { from: { x: 45, y: 50 }, to: { x: 70, y: 48 } },
+        },
+        {
+          label: 'Ataque em Velocidade!',
+          players: [
+            { id: '1', number: 6, x: 65, y: 50, team: 'home' },
+            { id: '2', number: 9, x: 85, y: 50, team: 'home' },
+            { id: '3', number: 11, x: 80, y: 55, team: 'home' },
+            { id: 'd1', number: 8, x: 50, y: 58, team: 'away' },
+          ],
+          ballPosition: { x: 85, y: 50 },
+          passLine: { from: { x: 70, y: 48 }, to: { x: 85, y: 50 } },
         },
       ];
     
     default:
       return [
         {
-          label: event.event_type.toUpperCase(),
+          label: event.event_type.toUpperCase().replace('_', ' '),
           players: [
             { id: '1', number: 10, x: eventX, y: eventY, team: 'home' },
+            { id: '2', number: 8, x: eventX - 10, y: eventY - 8, team: 'home' },
+            { id: '3', number: 9, x: eventX + 5, y: eventY + 8, team: 'home' },
           ],
           ballPosition: { x: eventX, y: eventY },
         },

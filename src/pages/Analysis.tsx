@@ -70,10 +70,11 @@ export default function Analysis() {
 
   const tacticalAnalysis = analysis?.tacticalAnalysis;
 
-  // Get important events (goals, shots, key moments)
+  // Get important events (goals, shots, key moments, tactical events)
   const importantEvents = events.filter(e => 
-    ['goal', 'shot', 'shot_on_target', 'penalty', 'corner'].includes(e.event_type)
-  ).slice(0, 5);
+    ['goal', 'shot', 'shot_on_target', 'penalty', 'corner', 'foul', 'free_kick', 'cross', 
+     'save', 'offside', 'yellow_card', 'red_card', 'high_press', 'transition', 'ball_recovery'].includes(e.event_type)
+  ).slice(0, 10);
 
   // Calculate stats from events
   const eventCounts = {
@@ -306,6 +307,16 @@ export default function Analysis() {
                         shot_on_target: 'Chute no Gol',
                         corner: 'Escanteio',
                         penalty: 'Pênalti',
+                        foul: 'Falta',
+                        free_kick: 'Falta Direta',
+                        cross: 'Cruzamento',
+                        save: 'Defesa',
+                        offside: 'Impedimento',
+                        yellow_card: 'Amarelo',
+                        red_card: 'Vermelho',
+                        high_press: 'Pressão Alta',
+                        transition: 'Transição',
+                        ball_recovery: 'Recuperação',
                       };
                       const isSelected = selectedEventForPlay === event.id;
                       return (
