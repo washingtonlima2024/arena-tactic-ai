@@ -537,34 +537,40 @@ export default function Analysis() {
                 Reproduzindo Evento - {getEventMinute(playingEventId || '')}'
               </DialogTitle>
             </DialogHeader>
-            {matchVideo && playingEventId && (
-              <div className="aspect-video relative">
-                {/* Check if it's an embed URL or regular video */}
-                {matchVideo.file_url.includes('/embed/') || matchVideo.file_url.includes('iframe') ? (
-                  <iframe
-                    src={matchVideo.file_url}
-                    className="absolute inset-0 w-full h-full rounded-lg"
-                    frameBorder="0"
-                    allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
-                    title={`Evento ${getEventMinute(playingEventId)}'`}
-                  />
-                ) : (
-                  <video
-                    src={matchVideo.file_url}
-                    controls
-                    autoPlay
-                    className="w-full h-full rounded-lg"
-                    onLoadedMetadata={(e) => {
-                      const video = e.currentTarget;
-                      const eventMinute = getEventMinute(playingEventId);
-                      const videoStartMinute = matchVideo.start_minute || 0;
-                      const seekTo = Math.max(0, (eventMinute - videoStartMinute) * 60 - 5);
-                      video.currentTime = seekTo;
-                    }}
-                  />
-                )}
-              </div>
-            )}
+            {matchVideo && playingEventId && (() => {
+              const eventMinute = getEventMinute(playingEventId);
+              const videoStartMinute = matchVideo.start_minute || 0;
+              const eventSeconds = (eventMinute - videoStartMinute) * 60;
+              const startSeconds = Math.max(0, eventSeconds - 10);
+              const isEmbed = matchVideo.file_url.includes('/embed/') || matchVideo.file_url.includes('iframe') || matchVideo.file_url.includes('xtream');
+              const separator = matchVideo.file_url.includes('?') ? '&' : '?';
+              const embedUrl = `${matchVideo.file_url}${separator}t=${startSeconds}`;
+              
+              return (
+                <div className="aspect-video relative">
+                  {isEmbed ? (
+                    <iframe
+                      src={embedUrl}
+                      className="absolute inset-0 w-full h-full rounded-lg"
+                      frameBorder="0"
+                      allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
+                      title={`Evento ${eventMinute}'`}
+                    />
+                  ) : (
+                    <video
+                      src={matchVideo.file_url}
+                      controls
+                      autoPlay
+                      className="w-full h-full rounded-lg"
+                      onLoadedMetadata={(e) => {
+                        const video = e.currentTarget;
+                        video.currentTime = startSeconds;
+                      }}
+                    />
+                  )}
+                </div>
+              );
+            })()}
           </DialogContent>
         </Dialog>
       </div>
