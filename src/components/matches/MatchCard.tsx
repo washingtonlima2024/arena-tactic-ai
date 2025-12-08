@@ -3,11 +3,13 @@ import { Match } from '@/types/arena';
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Play, BarChart3, Clock } from 'lucide-react';
+import { Play, BarChart3, Clock, Pencil } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
-import { useQuery } from '@tanstack/react-query';
+import { MatchEditDialog } from '@/components/matches/MatchEditDialog';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 
 interface MatchCardProps {
   match: Match;
@@ -28,8 +30,11 @@ const statusColors = {
 } as const;
 
 export function MatchCard({ match }: MatchCardProps) {
+  const { isAdmin } = useAuth();
+  const queryClient = useQueryClient();
   const [showVideoPlayer, setShowVideoPlayer] = useState(false);
   const [showVignette, setShowVignette] = useState(true);
+  const [showEditDialog, setShowEditDialog] = useState(false);
 
   // Fetch video for this match
   const { data: matchVideo } = useQuery({
@@ -67,6 +72,10 @@ export function MatchCard({ match }: MatchCardProps) {
     setShowVignette(true);
   };
 
+  const handleSaveMatch = () => {
+    queryClient.invalidateQueries({ queryKey: ['matches'] });
+  };
+
   return (
     <>
       <Card variant="glow" className="overflow-hidden">
@@ -93,10 +102,20 @@ export function MatchCard({ match }: MatchCardProps) {
 
             <div className="flex flex-col items-center">
               {match.status === 'completed' || match.status === 'analyzing' ? (
-                <div className="flex items-center gap-2 text-2xl font-bold">
+                <div className="group relative flex items-center gap-2 text-2xl font-bold">
                   <span>{match.score.home}</span>
                   <span className="text-muted-foreground">-</span>
                   <span>{match.score.away}</span>
+                  {isAdmin && (
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="absolute -right-8 h-6 w-6 opacity-0 transition-opacity group-hover:opacity-100"
+                      onClick={() => setShowEditDialog(true)}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                  )}
                 </div>
               ) : (
                 <div className="text-center">
@@ -193,6 +212,20 @@ export function MatchCard({ match }: MatchCardProps) {
         awayScore={match.score.away}
         showVignette={false}
         onVignetteComplete={() => setShowVignette(false)}
+      />
+
+      {/* Match Edit Dialog (Admin only) */}
+      <MatchEditDialog
+        isOpen={showEditDialog}
+        onClose={() => setShowEditDialog(false)}
+        match={{
+          id: match.id,
+          home_score: match.score.home,
+          away_score: match.score.away,
+          home_team: { name: match.homeTeam.name },
+          away_team: { name: match.awayTeam.name },
+        }}
+        onSave={handleSaveMatch}
       />
     </>
   );
