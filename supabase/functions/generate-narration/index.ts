@@ -131,11 +131,18 @@ INSTRUÇÕES:
       throw new Error(`TTS generation failed: ${errorText}`);
     }
 
-    // Convert audio buffer to base64
+    // Convert audio buffer to base64 in chunks to avoid stack overflow
     const audioBuffer = await ttsResponse.arrayBuffer();
-    const audioContent = btoa(
-      String.fromCharCode(...new Uint8Array(audioBuffer))
-    );
+    const uint8Array = new Uint8Array(audioBuffer);
+    
+    // Process in chunks to avoid "Maximum call stack size exceeded"
+    const chunkSize = 8192;
+    let binaryString = '';
+    for (let i = 0; i < uint8Array.length; i += chunkSize) {
+      const chunk = uint8Array.subarray(i, Math.min(i + chunkSize, uint8Array.length));
+      binaryString += String.fromCharCode.apply(null, Array.from(chunk));
+    }
+    const audioContent = btoa(binaryString);
 
     console.log('Audio generated successfully');
 
