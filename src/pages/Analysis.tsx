@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FootballField } from '@/components/tactical/FootballField';
+import { AnimatedTacticalPlay } from '@/components/tactical/AnimatedTacticalPlay';
 import { 
   Select, 
   SelectContent, 
@@ -22,14 +23,23 @@ import {
   Zap,
   Download,
   Loader2,
-  Video
+  Video,
+  Play,
+  Image
 } from 'lucide-react';
 import { useAllCompletedMatches, useMatchAnalysis, useMatchEvents } from '@/hooks/useMatchDetails';
+import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
 import { Link } from 'react-router-dom';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { supabase } from '@/integrations/supabase/client';
+import { useQuery } from '@tanstack/react-query';
 
 export default function Analysis() {
   const { data: matches = [], isLoading: matchesLoading } = useAllCompletedMatches();
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [selectedEventForPlay, setSelectedEventForPlay] = useState<string | null>(null);
+  const [videoDialogOpen, setVideoDialogOpen] = useState(false);
+  const [playingEventId, setPlayingEventId] = useState<string | null>(null);
 
   // Auto-select first match if none selected
   const currentMatchId = selectedMatchId || matches[0]?.id || null;
@@ -37,8 +47,30 @@ export default function Analysis() {
   
   const { data: analysis, isLoading: analysisLoading } = useMatchAnalysis(currentMatchId);
   const { data: events = [] } = useMatchEvents(currentMatchId);
+  const { thumbnails, getThumbnail } = useThumbnailGeneration(currentMatchId || undefined);
+
+  // Fetch video for the match
+  const { data: matchVideo } = useQuery({
+    queryKey: ['match-video', currentMatchId],
+    queryFn: async () => {
+      if (!currentMatchId) return null;
+      const { data, error } = await supabase
+        .from('videos')
+        .select('*')
+        .eq('match_id', currentMatchId)
+        .maybeSingle();
+      if (error) return null;
+      return data;
+    },
+    enabled: !!currentMatchId
+  });
 
   const tacticalAnalysis = analysis?.tacticalAnalysis;
+
+  // Get important events (goals, shots, key moments)
+  const importantEvents = events.filter(e => 
+    ['goal', 'shot', 'shot_on_target', 'penalty', 'corner'].includes(e.event_type)
+  ).slice(0, 5);
 
   // Calculate stats from events
   const eventCounts = {
@@ -46,6 +78,18 @@ export default function Analysis() {
     shots: events.filter(e => e.event_type.includes('shot')).length,
     fouls: events.filter(e => e.event_type === 'foul' || e.event_type.includes('card')).length,
     tactical: events.filter(e => ['high_press', 'transition', 'ball_recovery', 'substitution'].includes(e.event_type)).length,
+  };
+
+  const handlePlayVideo = (eventId: string) => {
+    if (matchVideo) {
+      setPlayingEventId(eventId);
+      setVideoDialogOpen(true);
+    }
+  };
+
+  const getEventMinute = (eventId: string) => {
+    const event = events.find(e => e.id === eventId);
+    return event?.minute || 0;
   };
 
   if (matchesLoading) {
@@ -98,7 +142,7 @@ export default function Analysis() {
               )}
             </div>
             <p className="text-muted-foreground">
-              {selectedMatch?.competition || 'Partida'} • {selectedMatch?.match_date ? new Date(selectedMatch.match_date).toLocaleDateString('pt-BR') : 'Data não definida'}
+              {selectedMatch?.competition || 'Amistoso'} • {selectedMatch?.match_date ? new Date(selectedMatch.match_date).toLocaleDateString('pt-BR') : 'Data não definida'}
             </p>
           </div>
           <div className="flex gap-2">
@@ -181,6 +225,73 @@ export default function Analysis() {
                 </CardContent>
               </Card>
             </div>
+
+            {/* Animated Tactical Plays - Key Events */}
+            {importantEvents.length > 0 && (
+              <Card variant="glow">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2">
+                      <Play className="h-5 w-5 text-primary" />
+                      Jogadas Táticas Animadas
+                    </CardTitle>
+                    <Badge variant="outline">{importantEvents.length} momentos-chave</Badge>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Event selector */}
+                  <div className="flex flex-wrap gap-2">
+                    {importantEvents.map((event) => {
+                      const eventLabels: Record<string, string> = {
+                        goal: 'GOL',
+                        shot: 'Finalização',
+                        shot_on_target: 'Chute no Gol',
+                        corner: 'Escanteio',
+                        penalty: 'Pênalti',
+                      };
+                      const isSelected = selectedEventForPlay === event.id;
+                      return (
+                        <Button
+                          key={event.id}
+                          variant={isSelected ? "arena" : "outline"}
+                          size="sm"
+                          onClick={() => setSelectedEventForPlay(isSelected ? null : event.id)}
+                          className="gap-2"
+                        >
+                          <Badge variant={event.event_type === 'goal' ? 'success' : 'secondary'} className="h-5">
+                            {event.minute}'
+                          </Badge>
+                          {eventLabels[event.event_type] || event.event_type}
+                          {getThumbnail(event.id) && <Image className="h-3 w-3" />}
+                          {matchVideo && <Video className="h-3 w-3" />}
+                        </Button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Animated Play */}
+                  {selectedEventForPlay ? (
+                    <AnimatedTacticalPlay
+                      event={importantEvents.find(e => e.id === selectedEventForPlay)!}
+                      homeTeam={selectedMatch?.home_team?.name || 'Time Casa'}
+                      awayTeam={selectedMatch?.away_team?.name || 'Time Visitante'}
+                      thumbnail={getThumbnail(selectedEventForPlay)?.imageUrl}
+                      hasVideo={!!matchVideo}
+                      onViewThumbnail={(id) => {
+                        const thumb = getThumbnail(id);
+                        if (thumb) window.open(thumb.imageUrl, '_blank');
+                      }}
+                      onPlayVideo={handlePlayVideo}
+                    />
+                  ) : (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <Play className="h-12 w-12 mx-auto mb-4 opacity-50" />
+                      <p>Selecione um evento acima para ver a jogada animada</p>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Stats Comparison */}
             <Card variant="glass">
@@ -294,30 +405,53 @@ export default function Analysis() {
               <TabsContent value="events" className="space-y-4">
                 {events.length > 0 ? (
                   <div className="space-y-2">
-                    {events.map((event) => (
-                      <Card key={event.id} variant="glass">
-                        <CardContent className="py-3 px-4">
-                          <div className="flex items-center gap-4">
-                            <Badge variant={
-                              event.event_type === 'goal' ? 'success' :
-                              event.event_type.includes('card') ? 'destructive' :
-                              event.event_type === 'foul' ? 'warning' : 'outline'
-                            }>
-                              {event.minute ? `${event.minute}'` : '—'}
-                            </Badge>
-                            <div className="flex-1">
-                              <p className="font-medium capitalize">{event.event_type.replace(/_/g, ' ')}</p>
-                              {event.description && (
-                                <p className="text-sm text-muted-foreground">{event.description}</p>
+                    {events.map((event) => {
+                      const thumbnail = getThumbnail(event.id);
+                      return (
+                        <Card key={event.id} variant="glass" className="hover:border-primary/50 transition-colors cursor-pointer" onClick={() => setSelectedEventForPlay(event.id)}>
+                          <CardContent className="py-3 px-4">
+                            <div className="flex items-center gap-4">
+                              {thumbnail ? (
+                                <img 
+                                  src={thumbnail.imageUrl} 
+                                  alt={event.event_type}
+                                  className="w-16 h-10 object-cover rounded"
+                                />
+                              ) : (
+                                <div className="w-16 h-10 bg-muted rounded flex items-center justify-center">
+                                  <Play className="h-4 w-4 text-muted-foreground" />
+                                </div>
                               )}
+                              <Badge variant={
+                                event.event_type === 'goal' ? 'success' :
+                                event.event_type.includes('card') ? 'destructive' :
+                                event.event_type === 'foul' ? 'warning' : 'outline'
+                              }>
+                                {event.minute ? `${event.minute}'` : '—'}
+                              </Badge>
+                              <div className="flex-1">
+                                <p className="font-medium capitalize">{event.event_type.replace(/_/g, ' ')}</p>
+                                {event.description && (
+                                  <p className="text-sm text-muted-foreground">{event.description}</p>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-2">
+                                {matchVideo && (
+                                  <Badge variant="outline" className="gap-1">
+                                    <Video className="h-3 w-3" /> Vídeo
+                                  </Badge>
+                                )}
+                                {thumbnail && (
+                                  <Badge variant="outline" className="gap-1">
+                                    <Image className="h-3 w-3" /> Thumbnail
+                                  </Badge>
+                                )}
+                              </div>
                             </div>
-                            {event.metadata?.team && (
-                              <Badge variant="outline">{event.metadata.team}</Badge>
-                            )}
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
                   </div>
                 ) : (
                   <Card variant="glass">
@@ -330,6 +464,34 @@ export default function Analysis() {
             </Tabs>
           </>
         )}
+
+        {/* Video Dialog */}
+        <Dialog open={videoDialogOpen} onOpenChange={setVideoDialogOpen}>
+          <DialogContent className="max-w-4xl">
+            <DialogHeader>
+              <DialogTitle>
+                Reproduzindo Evento - {getEventMinute(playingEventId || '')}'
+              </DialogTitle>
+            </DialogHeader>
+            {matchVideo && playingEventId && (
+              <div className="aspect-video">
+                <video
+                  src={matchVideo.file_url}
+                  controls
+                  autoPlay
+                  className="w-full h-full rounded-lg"
+                  onLoadedMetadata={(e) => {
+                    const video = e.currentTarget;
+                    const eventMinute = getEventMinute(playingEventId);
+                    const videoStartMinute = matchVideo.start_minute || 0;
+                    const seekTo = Math.max(0, (eventMinute - videoStartMinute) * 60 - 5);
+                    video.currentTime = seekTo;
+                  }}
+                />
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );
