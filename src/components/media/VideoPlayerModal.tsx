@@ -54,19 +54,26 @@ export function VideoPlayerModal({
 
   const hasDirectClip = !!clip?.clipUrl;
 
+  // Check if we have video metadata for timestamp calculation
+  const hasVideoMetadata = matchVideo && (
+    matchVideo.duration_seconds || 
+    (matchVideo.end_minute && matchVideo.end_minute > 0)
+  );
+
   // Calculate initial timestamp
   const calculateInitialTimestamp = useCallback(() => {
     if (!clip || !matchVideo || hasDirectClip) return 0;
     
     const videoStartMinute = matchVideo.start_minute ?? 0;
-    const videoEndMinute = matchVideo.end_minute ?? (videoStartMinute + 45);
+    const videoEndMinute = matchVideo.end_minute ?? 90; // Default to 90 minutes
     const videoDuration = matchVideo.duration_seconds ?? ((videoEndMinute - videoStartMinute) * 60);
     
     const matchMinutesSpan = videoEndMinute - videoStartMinute;
     const eventMatchMinute = clip.minute;
     
     if (eventMatchMinute < videoStartMinute || eventMatchMinute > videoEndMinute || matchMinutesSpan <= 0) {
-      return 0;
+      // If event is outside video range, estimate based on minute alone
+      return Math.max(0, (eventMatchMinute * 60) - 10);
     }
     
     const relativePosition = (eventMatchMinute - videoStartMinute) / matchMinutesSpan;
