@@ -12,6 +12,9 @@ verify_jwt = false
 [functions.extract-audio-srt]
 verify_jwt = false
 
+[functions.extract-live-events]
+verify_jwt = false
+
 [functions.generate-narration]
 verify_jwt = false
 
