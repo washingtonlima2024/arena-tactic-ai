@@ -13,12 +13,6 @@ interface SmartProject {
   language: string;
 }
 
-interface RenderProgress {
-  stage: string;
-  progress: number;
-  message: string;
-}
-
 export const useSmartVideoEditor = () => {
   const [project, setProject] = useState<SmartProject | null>(null);
   const [clips, setClips] = useState<SmartClip[]>([]);
@@ -26,13 +20,6 @@ export const useSmartVideoEditor = () => {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadStatus, setUploadStatus] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [isRendering, setIsRendering] = useState(false);
-  const [renderProgress, setRenderProgress] = useState<RenderProgress>({
-    stage: '',
-    progress: 0,
-    message: ''
-  });
-  const [finalVideoUrl, setFinalVideoUrl] = useState<string | null>(null);
 
   const [settings, setSettings] = useState<SmartEditorSettings>({
     channelName: 'Meu Canal',
@@ -233,72 +220,11 @@ export const useSmartVideoEditor = () => {
     }
   }, [project]);
 
-  const renderFinalVideo = useCallback(async () => {
-    if (!project) return;
-
-    setIsRendering(true);
-    setRenderProgress({ stage: 'preparing', progress: 0, message: 'Preparando renderização...' });
-
-    try {
-      const enabledClips = clips.filter(c => c.is_enabled);
-      
-      if (enabledClips.length === 0) {
-        toast.error('Selecione pelo menos um clip');
-        return;
-      }
-
-      // Create render record
-      const { data: renderData, error: renderError } = await supabase
-        .from('smart_edit_renders')
-        .insert({
-          project_id: project.id,
-          status: 'rendering'
-        })
-        .select()
-        .single();
-
-      if (renderError) throw renderError;
-
-      setRenderProgress({ stage: 'rendering', progress: 10, message: 'Renderizando vídeo...' });
-
-      // Call render edge function
-      const { data, error } = await supabase.functions.invoke('render-smart-video', {
-        body: {
-          projectId: project.id,
-          renderId: renderData.id,
-          videoUrl: project.source_video_url,
-          clips: enabledClips,
-          settings: {
-            channelName: settings.channelName,
-            openingText: settings.openingText,
-            transitionText: settings.transitionText,
-            closingText: settings.closingText
-          }
-        }
-      });
-
-      if (error) throw error;
-
-      setRenderProgress({ stage: 'complete', progress: 100, message: 'Renderização concluída!' });
-      setFinalVideoUrl(data?.videoUrl || null);
-      toast.success('Vídeo renderizado com sucesso!');
-
-    } catch (error) {
-      console.error('Render error:', error);
-      toast.error('Erro na renderização');
-      setRenderProgress({ stage: 'error', progress: 0, message: 'Erro na renderização' });
-    } finally {
-      setIsRendering(false);
-    }
-  }, [project, clips, settings]);
-
   const reset = useCallback(() => {
     setProject(null);
     setClips([]);
-    setFinalVideoUrl(null);
     setUploadProgress(0);
     setUploadStatus('');
-    setRenderProgress({ stage: '', progress: 0, message: '' });
   }, []);
 
   return {
@@ -309,13 +235,9 @@ export const useSmartVideoEditor = () => {
     uploadProgress,
     uploadStatus,
     isAnalyzing,
-    isRendering,
-    renderProgress,
-    finalVideoUrl,
     uploadVideo,
     toggleClip,
     updateSettings,
-    renderFinalVideo,
     reset
   };
 };
