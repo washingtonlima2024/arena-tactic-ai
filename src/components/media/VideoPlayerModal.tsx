@@ -349,7 +349,9 @@ export function VideoPlayerModal({
                     title="Voltar ao início do evento"
                   >
                     <RotateCcw className="h-4 w-4" />
-                    Min {clip.minute}'
+                    {clip.videoSecond !== undefined 
+                      ? `${formatTime(Math.max(0, clip.videoSecond - 3))}` 
+                      : `Min ${clip.minute}'`}
                   </Button>
                   
                   <Button 
