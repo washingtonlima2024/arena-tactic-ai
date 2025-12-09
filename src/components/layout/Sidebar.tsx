@@ -9,8 +9,7 @@ import {
   Settings, 
   ChevronLeft,
   ChevronRight,
-  Radio,
-  Sparkles
+  Radio
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -28,7 +27,6 @@ const navItems = [
   { icon: BarChart3, label: 'Análise Tática', path: '/analysis' },
   { icon: Calendar, label: 'Eventos', path: '/events' },
   { icon: Scissors, label: 'Cortes & Mídia', path: '/media' },
-  { icon: Sparkles, label: 'Editor Inteligente', path: '/smart-editor' },
   { icon: Mic, label: 'Podcast & Locução', path: '/audio' },
   { icon: Settings, label: 'Configurações', path: '/settings' },
 ];
