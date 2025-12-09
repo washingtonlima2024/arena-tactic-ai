@@ -331,10 +331,10 @@ export function VideoPlayerModal({
                     variant="ghost" 
                     size="sm"
                     className="text-white/80 hover:text-white hover:bg-white/10 gap-1"
-                    onClick={() => handleSeek(-10)}
+                    onClick={() => handleSeek(-3)}
                   >
                     <SkipBack className="h-4 w-4" />
-                    10s
+                    3s
                   </Button>
                   
                   <Button 
@@ -354,9 +354,9 @@ export function VideoPlayerModal({
                     variant="ghost" 
                     size="sm"
                     className="text-white/80 hover:text-white hover:bg-white/10 gap-1"
-                    onClick={() => handleSeek(10)}
+                    onClick={() => handleSeek(3)}
                   >
-                    10s
+                    3s
                     <SkipForward className="h-4 w-4" />
                   </Button>
                 </div>
