@@ -249,17 +249,21 @@ export default function Media() {
                       variant="arena" 
                       size="sm"
                       onClick={async () => {
-                        if (!matchVideo.file_url || matchVideo.start_minute == null || matchVideo.end_minute == null || !matchVideo.duration_seconds) {
+                        if (!matchVideo.file_url) {
                           toast({
-                            title: "Dados de sincronização ausentes",
-                            description: "Configure os tempos de sincronização do vídeo na página de Upload",
+                            title: "Vídeo não encontrado",
+                            description: "Faça upload de um vídeo na página de Upload",
                             variant: "destructive"
                           });
                           return;
                         }
-                        const videoStartMs = (matchVideo.start_minute || 0) * 60 * 1000;
-                        const videoEndMs = (matchVideo.end_minute || 90) * 60 * 1000;
-                        const videoDurationMs = (matchVideo.duration_seconds || 5400) * 1000;
+                        // Use sensible defaults: assume full 90-minute match if not configured
+                        const videoStartMs = (matchVideo.start_minute ?? 0) * 60 * 1000;
+                        const videoEndMs = (matchVideo.end_minute ?? 90) * 60 * 1000;
+                        // If duration not set, estimate from start/end range or use 90 min default
+                        const estimatedDurationMs = matchVideo.duration_seconds 
+                          ? matchVideo.duration_seconds * 1000
+                          : (videoEndMs - videoStartMs) || (90 * 60 * 1000);
                         
                         const clipsToGenerate = clips
                           .filter(c => !c.clipUrl)
@@ -269,7 +273,7 @@ export default function Media() {
                             videoUrl: matchVideo.file_url,
                             videoStartMs,
                             videoEndMs,
-                            videoDurationMs,
+                            videoDurationMs: estimatedDurationMs,
                             matchId: matchId,
                             bufferBeforeMs: 3000,
                             bufferAfterMs: 3000
