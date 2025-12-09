@@ -408,7 +408,12 @@ export function SocialContentDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={handleClose}>
-      <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto">
+      <DialogContent 
+        className={cn(
+          "max-w-3xl max-h-[80vh] overflow-y-auto transition-opacity duration-200",
+          showPlayer && "opacity-0 pointer-events-none"
+        )}
+      >
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Sparkles className="h-5 w-5 text-primary" />
@@ -665,7 +670,7 @@ export function SocialContentDialog({
         )}
       </DialogContent>
 
-      {/* Immersive Playlist Player */}
+      {/* Immersive Playlist Player - Dialog hidden while player is active */}
       {showPlayer && selectedFormat && (
         <PlaylistPlayer
           clips={(() => {
@@ -695,6 +700,15 @@ export function SocialContentDialog({
           format={selectedFormat.id as '9:16' | '16:9' | '1:1' | '4:5'}
           platform={selectedFormat.platforms[0]}
           onClose={() => setShowPlayer(false)}
+          onEdit={() => {
+            // Return to playlist editing
+            setShowPlayer(false);
+          }}
+          onExport={() => {
+            // Close player and trigger export
+            setShowPlayer(false);
+            handleGenerate();
+          }}
         />
       )}
     </Dialog>
