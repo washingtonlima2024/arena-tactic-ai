@@ -121,9 +121,25 @@ export default function Events() {
     approved: events.filter(e => e.approval_status === 'approved').length,
   };
 
-  // Group events by half
-  const firstHalfEvents = filteredEvents.filter(e => (e.minute || 0) <= 45);
-  const secondHalfEvents = filteredEvents.filter(e => (e.minute || 0) > 45);
+  // Helper to get event time in ms from metadata
+  const getEventTimeMs = (event: any): number => {
+    const metadata = event.metadata as { eventMs?: number; videoSecond?: number } | null;
+    if (metadata?.eventMs !== undefined) return metadata.eventMs;
+    if (metadata?.videoSecond !== undefined) return metadata.videoSecond * 1000;
+    return ((event.minute || 0) * 60 + (event.second || 0)) * 1000;
+  };
+  
+  // Format timestamp from ms to MM:SS
+  const formatTimestamp = (ms: number): string => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const mins = Math.floor(totalSeconds / 60);
+    const secs = totalSeconds % 60;
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Group events by half (based on video seconds, not game minutes)
+  const firstHalfEvents = filteredEvents.filter(e => getEventTimeMs(e) <= 45 * 60 * 1000);
+  const secondHalfEvents = filteredEvents.filter(e => getEventTimeMs(e) > 45 * 60 * 1000);
 
   const getApprovalIcon = (status: string | null) => {
     switch (status) {
@@ -196,7 +212,7 @@ export default function Events() {
   // Count clips already extracted
   const clipsExtracted = events.filter(e => e.clip_url).length;
 
-  // Handle single clip extraction
+  // Handle single clip extraction - use eventMs from metadata
   const handleExtractClip = async (e: React.MouseEvent, event: any) => {
     e.stopPropagation();
     
@@ -208,7 +224,9 @@ export default function Events() {
     const videoStartMs = (matchVideo.start_minute ?? 0) * 60 * 1000;
     const videoEndMs = (matchVideo.end_minute ?? 90) * 60 * 1000;
     const videoDurationMs = (matchVideo.duration_seconds ?? ((matchVideo.end_minute ?? 90) - (matchVideo.start_minute ?? 0)) * 60) * 1000;
-    const eventMs = ((event.minute || 0) * 60 + (event.second || 0)) * 1000;
+    
+    // Use eventMs from metadata as primary source
+    const eventMs = getEventTimeMs(event);
 
     await generateClip({
       eventId: event.id,
@@ -243,7 +261,8 @@ export default function Events() {
     const videoDurationMs = (matchVideo.duration_seconds ?? ((matchVideo.end_minute ?? 90) - (matchVideo.start_minute ?? 0)) * 60) * 1000;
 
     for (const event of eventsWithoutClips) {
-      const eventMs = ((event.minute || 0) * 60 + (event.second || 0)) * 1000;
+      // Use eventMs from metadata as primary source
+      const eventMs = getEventTimeMs(event);
       await generateClip({
         eventId: event.id,
         eventMinuteMs: eventMs,
@@ -538,9 +557,9 @@ export default function Events() {
                             event.event_type.includes('card') ? 'destructive' :
                             event.event_type === 'foul' ? 'warning' : 'outline'
                           }
-                          className="min-w-[50px] justify-center"
+                          className="min-w-[60px] justify-center font-mono"
                         >
-                          {event.minute ? `${event.minute}'` : '—'}
+                          {formatTimestamp(getEventTimeMs(event))}
                         </Badge>
                         <div className="flex-1 min-w-0">
                           <p className="font-medium capitalize truncate">

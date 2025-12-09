@@ -100,19 +100,44 @@ export default function Media() {
     enabled: !!matchId
   });
 
-  // Generate clips from events (include clip_url and videoSecond from database)
-  const clips = events?.map((event) => ({
-    id: event.id,
-    title: event.description || `${event.event_type} - ${event.minute}'`,
-    type: event.event_type,
-    startTime: (event.minute || 0) * 60,
-    endTime: ((event.minute || 0) * 60) + 15,
-    description: `Minuto ${event.minute}' - ${event.event_type}`,
-    minute: event.minute || 0,
-    second: event.second || 0,
-    clipUrl: (event as any).clip_url as string | null,
-    videoSecond: ((event as any).metadata?.videoSecond as number | undefined)
-  })) || [];
+  // Generate clips from events - Use eventMs from metadata as primary timestamp source
+  const clips = events?.map((event) => {
+    const metadata = (event as any).metadata as { eventMs?: number; videoSecond?: number } | null;
+    const eventMs = metadata?.eventMs; // Primary: milliseconds from AI analysis
+    const videoSecond = metadata?.videoSecond; // Fallback: seconds from AI analysis
+    
+    // Calculate total seconds: prefer eventMs, then videoSecond, then minute+second
+    const totalSeconds = eventMs !== undefined 
+      ? eventMs / 1000 
+      : videoSecond !== undefined 
+        ? videoSecond 
+        : ((event.minute || 0) * 60) + (event.second || 0);
+    
+    const displayMinutes = Math.floor(totalSeconds / 60);
+    const displaySeconds = Math.floor(totalSeconds % 60);
+    
+    return {
+      id: event.id,
+      title: event.description || `${event.event_type} - ${formatTimestamp(totalSeconds)}`,
+      type: event.event_type,
+      startTime: totalSeconds,
+      endTime: totalSeconds + 15,
+      description: `${formatTimestamp(totalSeconds)} - ${event.event_type}`,
+      totalSeconds, // Primary timestamp in seconds
+      eventMs: eventMs ?? totalSeconds * 1000, // Store milliseconds
+      minute: displayMinutes,
+      second: displaySeconds,
+      clipUrl: (event as any).clip_url as string | null,
+      videoSecond: videoSecond ?? totalSeconds
+    };
+  }) || [];
+  
+  // Helper function to format timestamp
+  function formatTimestamp(seconds: number): string {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  }
 
   const goalClips = clips.filter(c => c.type === 'goal');
   const shotClips = clips.filter(c => c.type === 'shot' || c.type === 'shot_on_target');
@@ -566,8 +591,8 @@ export default function Media() {
                           <Badge variant="arena">{clip.type}</Badge>
                         </div>
                         <div className="absolute left-2 bottom-2">
-                          <Badge variant="outline" className="backdrop-blur">
-                            {clip.minute}'
+                          <Badge variant="outline" className="backdrop-blur font-mono">
+                            {formatTimestamp(clip.totalSeconds)}
                           </Badge>
                         </div>
                       </div>

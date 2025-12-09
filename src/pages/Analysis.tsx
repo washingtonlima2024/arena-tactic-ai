@@ -95,30 +95,37 @@ export default function Analysis() {
     }
   };
 
+  // Get event time from metadata.eventMs (milliseconds) as primary source
   const getEventTime = (eventId: string) => {
     const event = events.find(e => e.id === eventId);
-    if (!event) return { minute: 0, second: 0, totalSeconds: 0 };
+    if (!event) return { minute: 0, second: 0, totalSeconds: 0, totalMs: 0 };
     
-    // Use videoSecond from metadata if available
-    const metadata = event.metadata as { videoSecond?: number } | null;
-    const videoSecond = metadata?.videoSecond;
+    const metadata = event.metadata as { eventMs?: number; videoSecond?: number } | null;
     
-    // If we have videoSecond from analysis, use it directly
-    if (videoSecond !== undefined && videoSecond >= 0) {
-      return { 
-        minute: Math.floor(videoSecond / 60), 
-        second: videoSecond % 60, 
-        totalSeconds: videoSecond 
-      };
+    // Priority: eventMs (ms) > videoSecond (s) > minute+second
+    let totalMs: number;
+    if (metadata?.eventMs !== undefined) {
+      totalMs = metadata.eventMs;
+    } else if (metadata?.videoSecond !== undefined) {
+      totalMs = metadata.videoSecond * 1000;
+    } else {
+      totalMs = ((event.minute || 0) * 60 + (event.second || 0)) * 1000;
     }
     
-    // Fallback to minute + second fields
-    const totalSeconds = (event.minute * 60) + (event.second || 0);
+    const totalSeconds = Math.floor(totalMs / 1000);
     return { 
-      minute: event.minute, 
-      second: event.second || 0, 
-      totalSeconds 
+      minute: Math.floor(totalSeconds / 60), 
+      second: totalSeconds % 60, 
+      totalSeconds,
+      totalMs
     };
+  };
+  
+  // Format timestamp helper
+  const formatTimestamp = (seconds: number): string => {
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
   if (matchesLoading) {
@@ -352,8 +359,8 @@ export default function Analysis() {
                           onClick={() => setSelectedEventForPlay(isSelected ? null : event.id)}
                           className="gap-2"
                         >
-                          <Badge variant={event.event_type === 'goal' ? 'success' : 'secondary'} className="h-5">
-                            {event.minute}'
+                          <Badge variant={event.event_type === 'goal' ? 'success' : 'secondary'} className="h-5 font-mono">
+                            {formatTimestamp(getEventTime(event.id).totalSeconds)}
                           </Badge>
                           {eventLabels[event.event_type] || event.event_type}
                           {getThumbnail(event.id) && <Image className="h-3 w-3" />}
