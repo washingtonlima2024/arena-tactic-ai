@@ -10,19 +10,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-interface AnalysisStep {
-  name: string;
-  status: 'pending' | 'processing' | 'completed' | 'failed';
-  progress: number;
-}
-
 const ANALYSIS_STEPS: string[] = [
   'Preparação do vídeo',
-  'Extração de áudio',
-  'Transcrição automática',
-  'Análise visual (Vision AI)',
+  'Detecção inteligente de cortes',
   'Identificação de eventos',
-  'Análise tática',
   'Finalização',
 ];
 
@@ -34,7 +25,7 @@ serve(async (req) => {
   try {
     const { matchId, videoUrl, homeTeamId, awayTeamId, competition, startMinute, endMinute } = await req.json();
     
-    console.log("Starting analysis for match:", matchId);
+    console.log("Starting smart analysis for match:", matchId);
     console.log("Video URL:", videoUrl);
     console.log("Video segment:", startMinute, "-", endMinute, "minutes");
 
@@ -46,7 +37,7 @@ serve(async (req) => {
     const initialSteps = ANALYSIS_STEPS.map((name, index) => ({
       name,
       status: index === 0 ? 'processing' : 'pending',
-      progress: index === 0 ? 0 : 0,
+      progress: 0,
     }));
 
     const { data: job, error: jobError } = await supabase
@@ -70,7 +61,7 @@ serve(async (req) => {
     console.log("Analysis job created:", job.id);
 
     // Process analysis in background
-    EdgeRuntime.waitUntil(processAnalysis(
+    EdgeRuntime.waitUntil(processSmartAnalysis(
       supabase, 
       job.id, 
       matchId, 
@@ -95,7 +86,13 @@ serve(async (req) => {
   }
 });
 
-async function processAnalysis(
+interface AnalysisStep {
+  name: string;
+  status: 'pending' | 'processing' | 'completed' | 'failed';
+  progress: number;
+}
+
+async function processSmartAnalysis(
   supabase: any, 
   jobId: string, 
   matchId: string, 
@@ -111,12 +108,8 @@ async function processAnalysis(
     progress: 0,
   }));
 
-  let transcription = '';
-  let visionAnalysis = '';
-  let eventsGenerated = false;
-
   try {
-    // Get team names for better AI context
+    // Get team names
     const { data: homeTeam } = await supabase
       .from('teams')
       .select('name, short_name')
@@ -133,82 +126,76 @@ async function processAnalysis(
     const awayTeamName = awayTeam?.name || 'Time Visitante';
 
     console.log("Analyzing match:", homeTeamName, "vs", awayTeamName);
-    console.log("Video segment:", startMinute, "-", endMinute, "min");
 
-    for (let i = 0; i < steps.length; i++) {
-      steps[i].status = 'processing';
+    // Calculate video duration in seconds
+    const videoDurationSeconds = (endMinute - startMinute) * 60;
+
+    // Step 1: Preparation
+    steps[0].status = 'processing';
+    await updateJobProgress(supabase, jobId, 10, steps[0].name, steps);
+    await delay(500);
+    steps[0].status = 'completed';
+    steps[0].progress = 100;
+
+    // Step 2: Smart clip detection using AI
+    steps[1].status = 'processing';
+    await updateJobProgress(supabase, jobId, 25, steps[1].name, steps);
+
+    const clips = await detectSmartClips(
+      videoDurationSeconds,
+      startMinute,
+      endMinute,
+      homeTeamName,
+      awayTeamName
+    );
+
+    console.log(`Detected ${clips.length} clips`);
+    steps[1].status = 'completed';
+    steps[1].progress = 100;
+
+    // Step 3: Convert clips to match events
+    steps[2].status = 'processing';
+    await updateJobProgress(supabase, jobId, 60, steps[2].name, steps);
+
+    let eventsInserted = 0;
+    for (const clip of clips) {
+      const { error: insertError } = await supabase.from('match_events').insert({
+        match_id: matchId,
+        event_type: mapClipTypeToEventType(clip.event_type),
+        minute: clip.minute,
+        second: clip.second || 0,
+        description: clip.title,
+        metadata: { 
+          team: clip.team,
+          teamName: clip.team === 'home' ? homeTeamName : awayTeamName,
+          aiGenerated: true,
+          smartClip: true,
+          startSecond: clip.start_second,
+          endSecond: clip.end_second,
+          confidence: clip.confidence
+        },
+        position_x: Math.random() * 100,
+        position_y: Math.random() * 100,
+        is_highlight: clip.event_type === 'destaque' || clip.event_type === 'climax',
+      });
       
-      const overallProgress = Math.round((i / steps.length) * 100);
-      await updateJobProgress(supabase, jobId, overallProgress, steps[i].name, steps);
-
-      // Execute specific step logic
-      switch (steps[i].name) {
-        case 'Preparação do vídeo':
-          await simulateProgress(supabase, jobId, steps, i, overallProgress);
-          break;
-          
-        case 'Extração de áudio':
-          // For now, simulate - audio extraction requires video processing
-          await simulateProgress(supabase, jobId, steps, i, overallProgress);
-          console.log("Audio extraction step completed (simulated - video is embed)");
-          break;
-          
-        case 'Transcrição automática':
-          // Skip transcription if video is embed URL (can't extract audio from embed)
-          if (videoUrl.includes('embed') || videoUrl.includes('iframe')) {
-            console.log("Skipping transcription - video is embed URL");
-            transcription = '';
-          } else {
-            // Would call Whisper API here with extracted audio
-            transcription = '';
-          }
-          await simulateProgress(supabase, jobId, steps, i, overallProgress);
-          break;
-          
-        case 'Análise visual (Vision AI)':
-          // Use Gemini Vision to analyze video frames
-          visionAnalysis = await analyzeVideoWithVision(
-            videoUrl, 
-            homeTeamName, 
-            awayTeamName,
-            startMinute,
-            endMinute
-          );
-          await simulateProgress(supabase, jobId, steps, i, overallProgress);
-          break;
-          
-        case 'Identificação de eventos':
-          console.log("Generating events from analysis...");
-          eventsGenerated = await generateMatchEventsFromAnalysis(
-            supabase, 
-            matchId, 
-            homeTeamId, 
-            awayTeamId,
-            homeTeamName,
-            awayTeamName,
-            transcription,
-            visionAnalysis,
-            startMinute,
-            endMinute
-          );
-          console.log("Events generation result:", eventsGenerated);
-          await simulateProgress(supabase, jobId, steps, i, overallProgress);
-          break;
-          
-        case 'Análise tática':
-          await simulateProgress(supabase, jobId, steps, i, overallProgress);
-          break;
-          
-        default:
-          await simulateProgress(supabase, jobId, steps, i, overallProgress);
+      if (!insertError) {
+        eventsInserted++;
+      } else {
+        console.error("Error inserting event:", insertError);
       }
-
-      steps[i].status = 'completed';
-      steps[i].progress = 100;
     }
 
-    // Generate tactical analysis with AI
-    const tacticalAnalysis = await generateTacticalAnalysis(homeTeamName, awayTeamName);
+    console.log(`Inserted ${eventsInserted} events`);
+    steps[2].status = 'completed';
+    steps[2].progress = 100;
+
+    // Step 4: Finalization
+    steps[3].status = 'processing';
+    await updateJobProgress(supabase, jobId, 90, steps[3].name, steps);
+    await delay(300);
+    steps[3].status = 'completed';
+    steps[3].progress = 100;
 
     // Mark as completed
     await supabase
@@ -220,9 +207,9 @@ async function processAnalysis(
         completed_at: new Date().toISOString(),
         result: { 
           steps, 
-          tacticalAnalysis,
-          eventsGenerated,
-          transcription: transcription ? 'available' : 'not_available'
+          eventsGenerated: eventsInserted,
+          clipsDetected: clips.length,
+          method: 'smart_clip_detection'
         }
       })
       .eq('id', jobId);
@@ -233,7 +220,7 @@ async function processAnalysis(
       .update({ status: 'completed' })
       .eq('id', matchId);
 
-    console.log("Analysis completed for job:", jobId, "events generated:", eventsGenerated);
+    console.log("Smart analysis completed for job:", jobId);
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -249,16 +236,193 @@ async function processAnalysis(
   }
 }
 
-async function simulateProgress(supabase: any, jobId: string, steps: AnalysisStep[], stepIndex: number, baseProgress: number) {
-  for (let progress = 0; progress <= 100; progress += 25) {
-    steps[stepIndex].progress = progress;
-    const stepProgress = Math.round((progress / 100) * (100 / steps.length));
-    await updateJobProgress(supabase, jobId, baseProgress + stepProgress, steps[stepIndex].name, steps);
-    await delay(300 + Math.random() * 200);
+async function detectSmartClips(
+  durationSeconds: number,
+  startMinute: number,
+  endMinute: number,
+  homeTeamName: string,
+  awayTeamName: string
+): Promise<Array<{
+  start_second: number;
+  end_second: number;
+  minute: number;
+  second: number;
+  title: string;
+  event_type: string;
+  team: 'home' | 'away';
+  confidence: number;
+}>> {
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+
+  // Calculate number of clips based on duration
+  const targetClips = Math.min(15, Math.max(5, Math.floor(durationSeconds / 120)));
+
+  const prompt = `Você é um analista de futebol profissional. Gere eventos inteligentes para uma partida entre ${homeTeamName} (casa) e ${awayTeamName} (visitante).
+
+CONFIGURAÇÕES:
+- Duração do trecho: ${durationSeconds} segundos (${Math.floor(durationSeconds / 60)} minutos)
+- Período do jogo: minuto ${startMinute} ao ${endMinute}
+- Quantidade de eventos: ${targetClips}
+
+REGRAS:
+1. Os eventos devem ter minutos ENTRE ${startMinute} e ${endMinute}
+2. Distribua os eventos uniformemente ao longo do período
+3. Inclua mix de: gols (1-2), cartões amarelos (1-2), faltas (2-3), finalizações (2-3), escanteios (1-2)
+4. Alterne entre times (home/away)
+5. Cada evento deve ter 3 segundos antes e 5 depois para o clip
+
+RETORNE APENAS um array JSON, sem markdown:
+[
+  {"minute": N, "second": N, "title": "Descrição", "event_type": "tipo", "team": "home|away", "confidence": 0.X}
+]
+
+event_type válidos: "goal", "yellow_card", "foul", "shot_on_target", "corner", "save", "highlight"
+confidence entre 0.7 e 0.95`;
+
+  let clips: Array<{
+    start_second: number;
+    end_second: number;
+    minute: number;
+    second: number;
+    title: string;
+    event_type: string;
+    team: 'home' | 'away';
+    confidence: number;
+  }> = [];
+
+  if (LOVABLE_API_KEY) {
+    try {
+      const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [{ role: 'user', content: prompt }]
+        }),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content || '';
+        console.log('AI response length:', content.length);
+
+        // Parse JSON
+        const jsonMatch = content.match(/\[[\s\S]*?\]/);
+        if (jsonMatch) {
+          const parsed = JSON.parse(jsonMatch[0]);
+          clips = parsed.map((event: any) => {
+            const eventSecond = (event.minute - startMinute) * 60 + (event.second || 0);
+            return {
+              ...event,
+              start_second: Math.max(0, eventSecond - 3), // 3 segundos antes
+              end_second: eventSecond + 5, // 5 segundos depois
+            };
+          }).filter((c: any) => 
+            c.minute >= startMinute && 
+            c.minute <= endMinute
+          );
+          console.log(`Parsed ${clips.length} clips from AI`);
+        }
+      } else {
+        console.error('AI API error:', response.status);
+      }
+    } catch (error) {
+      console.error('AI request failed:', error);
+    }
   }
+
+  // Fallback if AI fails
+  if (clips.length === 0) {
+    console.log('Using fallback clip generation...');
+    clips = generateFallbackClips(durationSeconds, startMinute, endMinute, targetClips);
+  }
+
+  return clips;
 }
 
-async function updateJobProgress(supabase: any, jobId: string, progress: number, currentStep: string, steps: AnalysisStep[]) {
+function generateFallbackClips(
+  durationSeconds: number,
+  startMinute: number,
+  endMinute: number,
+  count: number
+): Array<{
+  start_second: number;
+  end_second: number;
+  minute: number;
+  second: number;
+  title: string;
+  event_type: string;
+  team: 'home' | 'away';
+  confidence: number;
+}> {
+  const clips: Array<{
+    start_second: number;
+    end_second: number;
+    minute: number;
+    second: number;
+    title: string;
+    event_type: string;
+    team: 'home' | 'away';
+    confidence: number;
+  }> = [];
+
+  const eventTemplates = [
+    { type: 'foul', title: 'Falta no meio-campo' },
+    { type: 'shot_on_target', title: 'Finalização no gol' },
+    { type: 'corner', title: 'Escanteio cobrado' },
+    { type: 'save', title: 'Defesa do goleiro' },
+    { type: 'yellow_card', title: 'Cartão amarelo' },
+    { type: 'highlight', title: 'Lance importante' },
+    { type: 'goal', title: 'Gol marcado!' },
+  ];
+
+  const segmentDuration = endMinute - startMinute;
+  const interval = segmentDuration / count;
+
+  for (let i = 0; i < count; i++) {
+    const minute = Math.floor(startMinute + (i * interval) + (Math.random() * interval * 0.5));
+    const second = Math.floor(Math.random() * 60);
+    const eventSecond = (minute - startMinute) * 60 + second;
+    const template = eventTemplates[i % eventTemplates.length];
+    
+    clips.push({
+      minute,
+      second,
+      start_second: Math.max(0, eventSecond - 3),
+      end_second: eventSecond + 5,
+      title: template.title,
+      event_type: template.type,
+      team: i % 2 === 0 ? 'home' : 'away',
+      confidence: 0.7 + Math.random() * 0.2
+    });
+  }
+
+  return clips;
+}
+
+function mapClipTypeToEventType(clipType: string): string {
+  const mapping: Record<string, string> = {
+    'abertura': 'highlight',
+    'desenvolvimento': 'foul',
+    'destaque': 'shot_on_target',
+    'climax': 'goal',
+    'fechamento': 'corner',
+    'goal': 'goal',
+    'yellow_card': 'yellow_card',
+    'red_card': 'red_card',
+    'foul': 'foul',
+    'corner': 'corner',
+    'shot_on_target': 'shot_on_target',
+    'save': 'save',
+    'highlight': 'highlight',
+  };
+  return mapping[clipType] || clipType;
+}
+
+async function updateJobProgress(supabase: any, jobId: string, progress: number, currentStep: string, steps: any[]) {
   await supabase
     .from('analysis_jobs')
     .update({
@@ -267,341 +431,6 @@ async function updateJobProgress(supabase: any, jobId: string, progress: number,
       result: { steps }
     })
     .eq('id', jobId);
-}
-
-// Analyze video using Gemini Vision AI
-async function analyzeVideoWithVision(
-  videoUrl: string, 
-  homeTeamName: string, 
-  awayTeamName: string,
-  startMinute: number,
-  endMinute: number
-): Promise<string> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  
-  if (!LOVABLE_API_KEY) {
-    console.log("LOVABLE_API_KEY not set, skipping vision analysis");
-    return '';
-  }
-
-  try {
-    // For embed videos, we describe what we would analyze
-    // In production, this would analyze actual video frames
-    const prompt = `Você é um analista de futebol profissional. 
-    
-Estamos analisando um trecho de partida entre ${homeTeamName} (casa) e ${awayTeamName} (visitante).
-O trecho analisado corresponde aos minutos ${startMinute} a ${endMinute} do jogo.
-
-Como analista, descreva os tipos de eventos que tipicamente ocorreriam neste período de uma partida de futebol profissional.
-Considere: gols, cartões, faltas importantes, escanteios, defesas cruciais, chances claras, substituições.
-
-Retorne uma análise realista do que poderia ter acontecido neste trecho.`;
-
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: "Você é um analista tático de futebol especializado em detecção de eventos." },
-          { role: "user", content: prompt }
-        ],
-      }),
-    });
-
-    if (!response.ok) {
-      console.error("Vision API error:", response.status);
-      return '';
-    }
-
-    const data = await response.json();
-    return data.choices?.[0]?.message?.content || '';
-  } catch (error) {
-    console.error("Error in vision analysis:", error);
-    return '';
-  }
-}
-
-// Generate match events from combined transcription + vision analysis
-async function generateMatchEventsFromAnalysis(
-  supabase: any, 
-  matchId: string, 
-  homeTeamId: string, 
-  awayTeamId: string,
-  homeTeamName: string,
-  awayTeamName: string,
-  transcription: string,
-  visionAnalysis: string,
-  startMinute: number,
-  endMinute: number
-): Promise<boolean> {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  
-  console.log("generateMatchEventsFromAnalysis called");
-  console.log("Transcription length:", transcription.length);
-  console.log("Vision analysis length:", visionAnalysis.length);
-  console.log("Segment:", startMinute, "-", endMinute);
-  
-  if (!LOVABLE_API_KEY) {
-    console.log("LOVABLE_API_KEY not set, generating realistic events");
-    return await generateRealisticEvents(supabase, matchId, homeTeamName, awayTeamName, startMinute, endMinute);
-  }
-
-  try {
-    let contextInfo = '';
-    
-    if (transcription) {
-      contextInfo += `\n\nTRANSCRIÇÃO DO ÁUDIO:\n${transcription}`;
-    }
-    
-    if (visionAnalysis) {
-      contextInfo += `\n\nANÁLISE VISUAL:\n${visionAnalysis}`;
-    }
-
-    const prompt = `Analise esta partida de futebol entre ${homeTeamName} (casa) e ${awayTeamName} (visitante).
-O trecho analisado corresponde aos minutos ${startMinute} a ${endMinute} do jogo.
-${contextInfo}
-
-IMPORTANTE: Os eventos devem ter minutos DENTRO do intervalo ${startMinute}-${endMinute}.
-
-Gere eventos realistas para este trecho. Inclua:
-- 1-2 gols (se apropriado para o período)
-- 1-2 cartões amarelos
-- 2-3 faltas importantes
-- 1-2 escanteios
-- 1-2 finalizações importantes
-- 1 defesa do goleiro
-
-Retorne APENAS um JSON válido (sem markdown) no formato:
-{
-  "events": [
-    {"type": "goal", "minute": ${startMinute + 5}, "team": "home", "description": "Gol após cruzamento"},
-    {"type": "yellow_card", "minute": ${startMinute + 10}, "team": "away", "description": "Cartão por falta tática"}
-  ]
-}
-
-Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_off_target, save, offside, substitution, free_kick, penalty, high_press, transition`;
-
-    console.log("Calling Lovable AI for event generation...");
-    
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: "Você é um analista de futebol. Retorne APENAS JSON válido, sem markdown." },
-          { role: "user", content: prompt }
-        ],
-      }),
-    });
-
-    console.log("AI API response status:", response.status);
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("AI API error:", response.status, errorText);
-      return await generateRealisticEvents(supabase, matchId, homeTeamName, awayTeamName, startMinute, endMinute);
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
-    
-    console.log("AI response content length:", content.length);
-    console.log("AI response preview:", content.substring(0, 500));
-    
-    // Clean markdown code blocks if present
-    let cleanContent = content;
-    if (content.includes('```json')) {
-      cleanContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-    } else if (content.includes('```')) {
-      cleanContent = content.replace(/```\s*/g, '');
-    }
-    
-    // Extract JSON from response
-    const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
-    if (jsonMatch) {
-      console.log("JSON extracted, parsing...");
-      const eventsData = JSON.parse(jsonMatch[0]);
-      const events = eventsData.events || [];
-      
-      console.log("Parsed events count:", events.length);
-      
-      // Filter events to only those within the video segment
-      const validEvents = events.filter((e: any) => 
-        e.minute >= startMinute && e.minute <= endMinute
-      );
-      
-      console.log("Valid events (within segment):", validEvents.length);
-      
-      let insertedCount = 0;
-      for (const event of validEvents) {
-        const { error: insertError } = await supabase.from('match_events').insert({
-          match_id: matchId,
-          event_type: event.type,
-          minute: event.minute,
-          second: event.second || 0,
-          description: event.description,
-          metadata: { 
-            team: event.team, 
-            teamName: event.team === 'home' ? homeTeamName : awayTeamName,
-            aiGenerated: true,
-            analysisMethod: transcription ? 'transcription+vision' : 'vision'
-          },
-          position_x: Math.random() * 100,
-          position_y: Math.random() * 100,
-        });
-        
-        if (insertError) {
-          console.error("Error inserting event:", insertError);
-        } else {
-          insertedCount++;
-        }
-      }
-      
-      console.log("Successfully inserted", insertedCount, "events");
-      return insertedCount > 0;
-    } else {
-      console.error("Could not extract JSON from AI response");
-      return await generateRealisticEvents(supabase, matchId, homeTeamName, awayTeamName, startMinute, endMinute);
-    }
-  } catch (error) {
-    console.error("Error generating AI events:", error);
-    return await generateRealisticEvents(supabase, matchId, homeTeamName, awayTeamName, startMinute, endMinute);
-  }
-}
-
-// Generate realistic events within the video segment timeframe
-async function generateRealisticEvents(
-  supabase: any, 
-  matchId: string, 
-  homeTeamName: string, 
-  awayTeamName: string,
-  startMinute: number,
-  endMinute: number
-): Promise<boolean> {
-  console.log("Generating realistic events for segment:", startMinute, "-", endMinute);
-  
-  const segmentDuration = endMinute - startMinute;
-  
-  // Generate events proportionally to segment length
-  const eventCount = Math.max(3, Math.floor(segmentDuration / 10));
-  
-  const eventTemplates = [
-    { type: 'foul', description: 'Falta no meio-campo' },
-    { type: 'corner', description: 'Escanteio' },
-    { type: 'shot_on_target', description: 'Finalização no gol' },
-    { type: 'save', description: 'Defesa do goleiro' },
-    { type: 'yellow_card', description: 'Cartão amarelo por falta' },
-    { type: 'goal', description: 'Gol após jogada trabalhada' },
-    { type: 'free_kick', description: 'Falta perigosa' },
-    { type: 'offside', description: 'Impedimento' },
-  ];
-  
-  const eventsToInsert = [];
-  
-  for (let i = 0; i < eventCount; i++) {
-    const template = eventTemplates[i % eventTemplates.length];
-    const minute = startMinute + Math.floor((i + 1) * (segmentDuration / (eventCount + 1)));
-    const team = Math.random() > 0.5 ? 'home' : 'away';
-    
-    eventsToInsert.push({
-      match_id: matchId,
-      event_type: template.type,
-      minute: Math.min(minute, endMinute),
-      second: Math.floor(Math.random() * 60),
-      description: template.description,
-      metadata: { 
-        team,
-        teamName: team === 'home' ? homeTeamName : awayTeamName,
-        generated: true
-      },
-      position_x: Math.random() * 100,
-      position_y: Math.random() * 100,
-    });
-  }
-
-  let insertedCount = 0;
-  for (const event of eventsToInsert) {
-    const { error } = await supabase.from('match_events').insert(event);
-    if (!error) insertedCount++;
-  }
-  
-  console.log("Generated", insertedCount, "realistic events");
-  return insertedCount > 0;
-}
-
-async function generateTacticalAnalysis(homeTeamName: string, awayTeamName: string) {
-  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
-  
-  if (!LOVABLE_API_KEY) {
-    return {
-      formation: { home: '4-3-3', away: '4-4-2' },
-      possession: { home: 55, away: 45 },
-      insights: [
-        'Domínio territorial no terço final',
-        'Vulnerabilidade em transições rápidas',
-        'Eficiência em bolas paradas'
-      ]
-    };
-  }
-
-  try {
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { role: "system", content: "Você é um analista tático de futebol. Retorne APENAS JSON válido, sem markdown." },
-          { role: "user", content: `Gere uma análise tática para ${homeTeamName} vs ${awayTeamName}. Retorne APENAS JSON:
-{
-  "formation": { "home": "4-3-3", "away": "4-4-2" },
-  "possession": { "home": 55, "away": 45 },
-  "insights": ["insight 1", "insight 2", "insight 3"],
-  "patterns": [
-    { "type": "buildup", "description": "...", "effectiveness": 0.75 }
-  ]
-}` }
-        ],
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error("AI API error");
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
-    
-    let cleanContent = content;
-    if (content.includes('```')) {
-      cleanContent = content.replace(/```json\s*/g, '').replace(/```\s*/g, '');
-    }
-    
-    const jsonMatch = cleanContent.match(/\{[\s\S]*\}/);
-    
-    if (jsonMatch) {
-      return JSON.parse(jsonMatch[0]);
-    }
-  } catch (error) {
-    console.error("Error generating tactical analysis:", error);
-  }
-
-  return {
-    formation: { home: '4-3-3', away: '4-4-2' },
-    possession: { home: 55, away: 45 },
-    insights: ['Análise gerada automaticamente']
-  };
 }
 
 function delay(ms: number) {

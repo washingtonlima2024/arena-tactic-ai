@@ -568,14 +568,14 @@ export default function Analysis() {
                       const matchMinutesSpan = videoEndMinute - videoStartMinute;
                       const relativePosition = (eventMinute - videoStartMinute) / matchMinutesSpan;
                       const eventVideoSeconds = relativePosition * videoDuration;
-                      const startSeconds = Math.max(0, eventVideoSeconds - 5); // 5 seconds before
+                      const startSeconds = Math.max(0, eventVideoSeconds - 3); // 3 seconds before
                       
                       if (videoRef.current) {
                         videoRef.current.currentTime = startSeconds;
                         videoRef.current.play();
                         toast({
                           title: "Navegando para evento",
-                          description: `Indo para ${Math.floor(startSeconds / 60)}:${String(Math.floor(startSeconds % 60)).padStart(2, '0')} (5s antes do evento)`,
+                          description: `Indo para ${Math.floor(startSeconds / 60)}:${String(Math.floor(startSeconds % 60)).padStart(2, '0')} (3s antes do evento)`,
                         });
                       }
                     }}
@@ -596,7 +596,7 @@ export default function Analysis() {
               const matchMinutesSpan = videoEndMinute - videoStartMinute;
               const relativePosition = (eventMinute - videoStartMinute) / matchMinutesSpan;
               const eventVideoSeconds = relativePosition * videoDuration;
-              const startSeconds = Math.max(0, eventVideoSeconds - 5); // 5 seconds before event
+              const startSeconds = Math.max(0, eventVideoSeconds - 3); // 3 seconds before event
               
               const isEmbed = matchVideo.file_url.includes('/embed/') || matchVideo.file_url.includes('iframe') || matchVideo.file_url.includes('xtream');
               const separator = matchVideo.file_url.includes('?') ? '&' : '?';

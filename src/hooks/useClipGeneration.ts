@@ -192,8 +192,8 @@ export function useClipGeneration() {
       videoEndMinute,
       videoDurationSeconds,
       matchId,
-      bufferBefore = 10,
-      bufferAfter = 10
+      bufferBefore = 3,
+      bufferAfter = 5
     } = config;
 
     const eventVideoSeconds = calculateVideoTimestamp(
