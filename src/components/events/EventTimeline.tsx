@@ -83,15 +83,31 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
     return highlightEventTypes.includes(eventType);
   };
 
-  // Format time from seconds or minute:second to display format
+  // Get event time from metadata.eventMs (milliseconds) as primary source
+  const getEventTimeMs = (event: MatchEvent): number => {
+    const metadata = event.metadata as { eventMs?: number; videoSecond?: number } | null;
+    
+    // Priority: eventMs (ms) > videoSecond (s) > minute+second
+    if (metadata?.eventMs !== undefined) {
+      return metadata.eventMs;
+    }
+    if (metadata?.videoSecond !== undefined) {
+      return metadata.videoSecond * 1000;
+    }
+    return ((event.minute || 0) * 60 + (event.second || 0)) * 1000;
+  };
+
+  // Format time from milliseconds to MM:SS display
   const formatEventTime = (event: MatchEvent) => {
-    // If we have second, calculate total seconds and format as MM:SS
-    const totalSeconds = (event.minute * 60) + (event.second || 0);
+    const totalMs = getEventTimeMs(event);
+    const totalSeconds = Math.floor(totalMs / 1000);
     const displayMinutes = Math.floor(totalSeconds / 60);
     const displaySeconds = totalSeconds % 60;
     return {
       minutes: displayMinutes.toString().padStart(2, '0'),
-      seconds: displaySeconds.toString().padStart(2, '0')
+      seconds: displaySeconds.toString().padStart(2, '0'),
+      totalMs,
+      totalSeconds
     };
   };
 

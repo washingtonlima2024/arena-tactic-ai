@@ -17,7 +17,9 @@ interface VideoPlayerModalProps {
     second?: number;
     description: string;
     clipUrl?: string | null;
-    videoSecond?: number; // Real timestamp in the video file (in seconds)
+    eventMs?: number; // Primary: milliseconds from AI analysis
+    videoSecond?: number; // Fallback: seconds from AI analysis
+    totalSeconds?: number; // Calculated total seconds
   } | null;
   thumbnail?: {
     imageUrl: string;
@@ -68,43 +70,37 @@ export function VideoPlayerModal({
     return matchVideo.duration_seconds ?? ((matchVideo.end_minute ?? 90) - (matchVideo.start_minute ?? 0)) * 60;
   }, [matchVideo]);
 
-  // Calculate initial timestamp - prioritize videoSecond from event metadata
+  // Calculate initial timestamp - use eventMs (milliseconds) as primary source
   // CRITICAL: Ensure timestamp never exceeds video duration
   const calculateInitialTimestamp = useCallback(() => {
     if (!clip || hasDirectClip) return 0;
     
     const videoDuration = getVideoDuration();
     
-    // If we have a precise videoSecond from analysis, use it directly
-    if (clip.videoSecond !== undefined && clip.videoSecond >= 0) {
-      const targetTs = Math.max(0, clip.videoSecond - 3); // 3 second buffer before event
-      // CRITICAL: Clamp to video duration to prevent seeking beyond end
+    // Priority 1: eventMs from metadata (milliseconds)
+    if (clip.eventMs !== undefined && clip.eventMs >= 0) {
+      const eventSeconds = clip.eventMs / 1000;
+      const targetTs = Math.max(0, eventSeconds - 3); // 3 second buffer before event
       return Math.min(targetTs, Math.max(0, videoDuration - 1));
     }
     
-    // Fallback: calculate from minute/second
-    if (!matchVideo) return 0;
-    
-    const videoStartMinute = matchVideo.start_minute ?? 0;
-    const videoEndMinute = matchVideo.end_minute ?? 90;
-    
-    const matchMinutesSpan = videoEndMinute - videoStartMinute;
-    const eventMatchMinute = clip.minute;
-    
-    // Check if event is within valid video range
-    if (eventMatchMinute < videoStartMinute || eventMatchMinute > videoEndMinute || matchMinutesSpan <= 0) {
-      // Event is outside video range - clamp to valid range
-      console.warn('Event minute', eventMatchMinute, 'is outside video range', videoStartMinute, '-', videoEndMinute);
-      return 0; // Start from beginning instead of invalid timestamp
+    // Priority 2: totalSeconds (already calculated)
+    if (clip.totalSeconds !== undefined && clip.totalSeconds >= 0) {
+      const targetTs = Math.max(0, clip.totalSeconds - 3);
+      return Math.min(targetTs, Math.max(0, videoDuration - 1));
     }
     
-    const relativePosition = (eventMatchMinute - videoStartMinute) / matchMinutesSpan;
-    const eventVideoSeconds = relativePosition * videoDuration;
-    const targetTs = Math.max(0, eventVideoSeconds - 3); // 3 second buffer before event
+    // Priority 3: videoSecond from metadata
+    if (clip.videoSecond !== undefined && clip.videoSecond >= 0) {
+      const targetTs = Math.max(0, clip.videoSecond - 3);
+      return Math.min(targetTs, Math.max(0, videoDuration - 1));
+    }
     
-    // CRITICAL: Clamp to video duration
+    // Priority 4: minute + second fields
+    const totalSeconds = (clip.minute * 60) + (clip.second || 0);
+    const targetTs = Math.max(0, totalSeconds - 3);
     return Math.min(targetTs, Math.max(0, videoDuration - 1));
-  }, [clip, matchVideo, hasDirectClip, getVideoDuration]);
+  }, [clip, hasDirectClip, getVideoDuration]);
 
   // Initialize timestamp when modal opens or clip changes
   useEffect(() => {

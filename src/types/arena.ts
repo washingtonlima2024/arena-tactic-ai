@@ -48,6 +48,11 @@ export interface MatchEvent {
   description?: string;
   isHighlight?: boolean;
   clipUrl?: string;
+  metadata?: {
+    eventMs?: number;
+    videoSecond?: number;
+    [key: string]: any;
+  };
 }
 
 export type EventType = 
