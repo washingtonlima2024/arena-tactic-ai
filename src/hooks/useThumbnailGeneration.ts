@@ -89,17 +89,15 @@ export function useThumbnailGeneration(matchId?: string) {
 
       const eventLabel = eventLabels[eventType] || eventType.toUpperCase();
 
-      const prompt = `Crie uma thumbnail dinâmica para um momento de partida de futebol:
-Evento: ${eventLabel} aos ${minute} minutos
-Partida: ${homeTeam} ${homeScore} x ${awayScore} ${awayTeam}
-${description ? `Contexto: ${description}` : ''}
+      const prompt = `Create a dynamic sports action thumbnail for a soccer match moment:
+Event: ${eventLabel} at minute ${minute}
+Match: ${homeTeam} ${homeScore} x ${awayScore} ${awayTeam}
+${description ? `Context: ${description}` : ''}
 
-IMPORTANTE: Todos os textos na imagem devem estar em PORTUGUÊS DO BRASIL.
-- Mostre "${eventLabel}" em destaque grande
-- Mostre "${minute}'" indicando o minuto
-- Mostre o placar "${homeTeam} ${homeScore} x ${awayScore} ${awayTeam}"
+CRITICAL: Do NOT include any text, words, letters, numbers, or typography in the image.
+Generate ONLY a visual scene without any text overlay.
 
-Estilo: Gráfico profissional de transmissão esportiva, iluminação dramática, fundo de campo de futebol, tipografia em negrito. Use esquema de cores verde e turquesa. Proporção 16:9. Design moderno e limpo com efeitos de energia e movimento.`;
+Style: Professional sports broadcast graphics, dramatic lighting, soccer field background, energy and motion effects. Use green and teal/turquoise color scheme. 16:9 aspect ratio. Modern clean design with dynamic action feel. Show players in motion, ball, stadium atmosphere. NO TEXT AT ALL.`;
 
       const { data, error } = await supabase.functions.invoke('generate-thumbnail', {
         body: { 
