@@ -34,11 +34,17 @@ serve(async (req) => {
   }
 
   try {
-    const { matchId, videoUrl, homeTeamId, awayTeamId, competition, startMinute, endMinute } = await req.json();
+    const { matchId, videoUrl, homeTeamId, awayTeamId, competition, startMinute, endMinute, durationSeconds } = await req.json();
+    
+    // CRITICAL: Use video file duration in seconds, not game minutes
+    // If durationSeconds is provided, use it as the video length
+    // Otherwise fall back to endMinute-startMinute (but convert to proper video time)
+    const videoDurationSeconds = durationSeconds || ((endMinute || 90) - (startMinute || 0)) * 60;
     
     console.log("Starting REAL video analysis for match:", matchId);
     console.log("Video URL:", videoUrl);
-    console.log("Video segment:", startMinute, "-", endMinute, "minutes");
+    console.log("Video duration:", videoDurationSeconds, "seconds");
+    console.log("Game time reference: minutes", startMinute, "to", endMinute);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -89,6 +95,7 @@ serve(async (req) => {
       awayTeamId,
       startMinute ?? 0,
       endMinute ?? 90,
+      videoDurationSeconds,
       isDirectFile
     ));
 
@@ -119,6 +126,7 @@ async function processAnalysis(
   awayTeamId: string,
   startMinute: number,
   endMinute: number,
+  videoDurationSeconds: number,
   isDirectFile: boolean
 ) {
   const steps: AnalysisStep[] = ANALYSIS_STEPS.map(name => ({
@@ -131,6 +139,16 @@ async function processAnalysis(
   let visionAnalysis = '';
   let extractedFrames: string[] = [];
   let videoData: Uint8Array | null = null;
+
+  // CRITICAL: All event times will be based on video file duration (0 to videoDurationSeconds)
+  // NOT on game time (startMinute to endMinute)
+  const videoStartSecond = 0;
+  const videoEndSecond = videoDurationSeconds;
+
+  console.log("=== VIDEO TIME CONSTRAINTS ===");
+  console.log("Video duration:", videoDurationSeconds, "seconds");
+  console.log("Events must be between 0 and", videoDurationSeconds, "seconds (video time)");
+  console.log("Game time reference:", startMinute, "-", endMinute, "minutes");
 
   try {
     // Get team names
@@ -177,21 +195,23 @@ async function processAnalysis(
         case 'Análise visual (Vision AI)':
           if (isDirectFile) {
             console.log("Analyzing video with Gemini Vision (URL-based)...");
+            // Use video duration in seconds for time constraints
             visionAnalysis = await analyzeVideoWithURL(
               videoUrl,
               homeTeamName,
               awayTeamName,
-              startMinute,
-              endMinute
+              videoStartSecond,
+              videoEndSecond
             );
             console.log("Vision analysis completed:", visionAnalysis.length, "chars");
           } else {
             console.log("Using estimated vision analysis (no frames)");
+            // Use video duration for embed analysis too
             visionAnalysis = await analyzeVideoWithVisionEstimated(
               homeTeamName,
               awayTeamName,
-              startMinute,
-              endMinute
+              videoStartSecond,
+              videoEndSecond
             );
           }
           await simulateProgress(supabase, jobId, steps, i, overallProgress);
@@ -219,6 +239,7 @@ async function processAnalysis(
           console.log("Generating events from analysis...");
           console.log("Has vision:", visionAnalysis.length > 0);
           console.log("Has transcription:", transcription.length > 0);
+          console.log("Video time range: 0 to", videoEndSecond, "seconds");
           
           await generateMatchEventsFromAnalysis(
             supabase, 
@@ -229,8 +250,9 @@ async function processAnalysis(
             awayTeamName,
             transcription,
             visionAnalysis,
-            startMinute,
-            endMinute,
+            videoStartSecond,
+            videoEndSecond,
+            videoDurationSeconds,
             isDirectFile
           );
           await simulateProgress(supabase, jobId, steps, i, overallProgress);
@@ -298,12 +320,13 @@ async function processAnalysis(
 }
 
 // Analyze video directly via URL (no download needed - saves memory)
+// CRITICAL: startSecond and endSecond are VIDEO TIME, not game time
 async function analyzeVideoWithURL(
   videoUrl: string,
   homeTeamName: string,
   awayTeamName: string,
-  startMinute: number,
-  endMinute: number
+  startSecond: number,
+  endSecond: number
 ): Promise<string> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   
@@ -312,27 +335,34 @@ async function analyzeVideoWithURL(
     return '';
   }
 
+  const videoDurationSeconds = endSecond - startSecond;
+  const videoDurationFormatted = `${Math.floor(videoDurationSeconds / 60)}:${String(videoDurationSeconds % 60).padStart(2, '0')}`;
+
   try {
     console.log("Analyzing video URL with Gemini...");
+    console.log("Video duration:", videoDurationSeconds, "seconds (", videoDurationFormatted, ")");
     
     const prompt = `Você é um analista de futebol profissional. Analise esta partida de futebol.
 
 PARTIDA: ${homeTeamName} (casa) vs ${awayTeamName} (visitante)
-PERÍODO: Minutos ${startMinute} a ${endMinute}
 URL DO VÍDEO: ${videoUrl}
 
-Baseado em padrões típicos de partidas de futebol neste período, identifique eventos prováveis:
+IMPORTANTE - DURAÇÃO DO VÍDEO: Este arquivo tem ${videoDurationSeconds} segundos (${videoDurationFormatted}).
+- Todos os eventos DEVEM ter timestamps entre 0 e ${videoDurationSeconds} segundos
+- Use o formato MM:SS para referenciar momentos (ex: 0:30 = 30 segundos, 1:15 = 75 segundos)
+
+Baseado em padrões típicos de partidas de futebol, identifique eventos prováveis distribuídos ao longo da duração do vídeo:
 1. EVENTOS: Gols, cartões, faltas, escanteios, finalizações, defesas
 2. POSIÇÕES: Formação tática de cada time
 3. JOGADORES: Ações individuais importantes
 
 Para cada evento, indique:
-- Tipo do evento (goal, shot, foul, card, corner, save, substitution, offside, kickoff, halftime, fulltime)
-- Minuto exato (entre ${startMinute}-${endMinute})
+- Tipo do evento (goal, shot, foul, card, corner, save, substitution, offside, kickoff)
+- Segundo exato do vídeo (entre 0 e ${videoDurationSeconds})
 - Time responsável (casa/visitante)
 - Descrição detalhada
 
-Gere de 5 a 15 eventos distribuídos ao longo do período.`;
+Gere de 3 a 10 eventos distribuídos proporcionalmente ao longo dos ${videoDurationSeconds} segundos de vídeo.`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -468,11 +498,12 @@ Seja específico e baseie-se APENAS no que você vê nas imagens.`;
 }
 
 // Estimated vision analysis when no direct video access
+// CRITICAL: Uses video duration in seconds, not game minutes
 async function analyzeVideoWithVisionEstimated(
   homeTeamName: string, 
   awayTeamName: string,
-  startMinute: number,
-  endMinute: number
+  startSecond: number,
+  endSecond: number
 ): Promise<string> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   
@@ -480,21 +511,26 @@ async function analyzeVideoWithVisionEstimated(
     return '';
   }
 
+  const videoDurationSeconds = endSecond - startSecond;
+  const videoDurationFormatted = `${Math.floor(videoDurationSeconds / 60)}:${String(videoDurationSeconds % 60).padStart(2, '0')}`;
+
   try {
     const prompt = `Você é um analista de futebol profissional. 
     
 Estamos analisando um trecho de partida entre ${homeTeamName} (casa) e ${awayTeamName} (visitante).
-O trecho corresponde aos minutos ${startMinute} a ${endMinute} do jogo.
 
-IMPORTANTE: Esta é uma análise ESTIMADA baseada em padrões típicos de partidas.
-Não temos acesso direto ao vídeo (é um embed externo).
+IMPORTANTE - DURAÇÃO DO VÍDEO: ${videoDurationSeconds} segundos (${videoDurationFormatted})
+- Este é o tempo REAL do arquivo de vídeo, não o tempo de jogo
+- Todos os eventos devem ter timestamps entre 0 e ${videoDurationSeconds} segundos
+- Esta é uma análise ESTIMADA baseada em padrões típicos de partidas
+- Não temos acesso direto ao vídeo (é um embed externo)
 
 Gere uma análise realista do que tipicamente aconteceria neste período:
-- Eventos esperados (gols, cartões, faltas)
+- Eventos esperados (gols, cartões, faltas) - use "videoSecond" entre 0 e ${videoDurationSeconds}
 - Padrões táticos prováveis
 - Momentos críticos típicos
 
-Seja conservador e realista na quantidade de eventos.`;
+Seja conservador e realista na quantidade de eventos (3-10 eventos para ${videoDurationSeconds} segundos).`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -583,6 +619,7 @@ function formatTime(seconds: number): string {
 }
 
 // Generate match events from combined analysis
+// CRITICAL: Uses video time in seconds (0 to videoDurationSeconds), NOT game minutes
 async function generateMatchEventsFromAnalysis(
   supabase: any, 
   matchId: string, 
@@ -592,22 +629,24 @@ async function generateMatchEventsFromAnalysis(
   awayTeamName: string,
   transcription: string,
   visionAnalysis: string,
-  startMinute: number,
-  endMinute: number,
+  videoStartSecond: number,
+  videoEndSecond: number,
+  videoDurationSeconds: number,
   isRealAnalysis: boolean
 ): Promise<boolean> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   
-  console.log("=== Event Generation ===");
+  console.log("=== Event Generation (VIDEO TIME) ===");
   console.log("Match:", matchId);
   console.log("Transcription length:", transcription.length);
   console.log("Vision analysis length:", visionAnalysis.length);
-  console.log("Segment:", startMinute, "-", endMinute);
+  console.log("Video duration:", videoDurationSeconds, "seconds");
+  console.log("Valid event range: 0 to", videoDurationSeconds, "seconds");
   console.log("Real analysis:", isRealAnalysis);
   
   if (!LOVABLE_API_KEY) {
     console.log("No API key, generating fallback events");
-    return await generateFallbackEvents(supabase, matchId, homeTeamName, awayTeamName, startMinute, endMinute);
+    return await generateFallbackEvents(supabase, matchId, homeTeamName, awayTeamName, 0, videoDurationSeconds);
   }
 
   try {
@@ -625,32 +664,36 @@ async function generateMatchEventsFromAnalysis(
       ? "ANÁLISE REAL baseada em frames extraídos e transcrição de áudio"
       : "ANÁLISE ESTIMADA baseada em padrões típicos (vídeo embed sem acesso direto)";
 
+    const videoDurationFormatted = `${Math.floor(videoDurationSeconds / 60)}:${String(Math.floor(videoDurationSeconds % 60)).padStart(2, '0')}`;
+
     const prompt = `${analysisType}
 
 PARTIDA: ${homeTeamName} (casa) vs ${awayTeamName} (visitante)
-PERÍODO ANALISADO: Minutos ${startMinute} a ${endMinute}
+
+IMPORTANTE - DURAÇÃO DO VÍDEO: ${videoDurationSeconds} segundos (${videoDurationFormatted})
+- TODOS os eventos devem ter "videoSecond" entre 0 e ${videoDurationSeconds}
+- NÃO gere eventos fora dessa faixa de tempo
+- Este é o TEMPO DO ARQUIVO DE VÍDEO, não o tempo de jogo
 ${analysisContext}
 
-Baseado na análise acima, gere eventos de futebol REAIS detectados.
+Baseado na análise acima, gere eventos de futebol detectados.
 
-REGRAS IMPORTANTES:
-1. Minutos DEVEM estar entre ${startMinute} e ${endMinute}
+REGRAS CRÍTICAS:
+1. "videoSecond" DEVE estar entre 0 e ${videoDurationSeconds} (tempo do arquivo de vídeo)
 2. ${isRealAnalysis ? 'Baseie-se APENAS no que foi detectado na análise visual e transcrição' : 'Gere eventos conservadores e realistas'}
-3. Cada evento deve ter justificativa baseada na análise
+3. Distribua os eventos proporcionalmente ao longo da duração do vídeo
 
-Gere entre 5-15 eventos dependendo da intensidade do trecho.
+Gere entre 3-10 eventos para este vídeo de ${videoDurationSeconds} segundos.
 
 Retorne APENAS JSON válido (sem markdown):
 {
   "events": [
     {
-      "type": "goal",
-      "minute": ${startMinute + 5},
-      "second": 30,
+      "type": "foul",
+      "videoSecond": 45,
       "team": "home",
-      "description": "Gol de cabeça após cruzamento",
-      "confidence": 0.95,
-      "source": "visual+audio"
+      "description": "Falta no meio-campo",
+      "confidence": 0.85
     }
   ]
 }
@@ -680,7 +723,7 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
     if (!response.ok) {
       const errorText = await response.text();
       console.error("AI API error:", response.status, errorText);
-      return await generateFallbackEvents(supabase, matchId, homeTeamName, awayTeamName, startMinute, endMinute);
+      return await generateFallbackEvents(supabase, matchId, homeTeamName, awayTeamName, 0, videoDurationSeconds);
     }
 
     const data = await response.json();
@@ -698,7 +741,7 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
     
     if (!jsonMatch) {
       console.error("No JSON found in response");
-      return await generateFallbackEvents(supabase, matchId, homeTeamName, awayTeamName, startMinute, endMinute);
+      return await generateFallbackEvents(supabase, matchId, homeTeamName, awayTeamName, 0, videoDurationSeconds);
     }
 
     const eventsData = JSON.parse(jsonMatch[0]);
@@ -706,26 +749,32 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
     
     console.log("Parsed events:", events.length);
     
-    // Filter and validate events
-    const validEvents = events.filter((e: any) => 
-      e.minute >= startMinute && 
-      e.minute <= endMinute &&
-      e.type &&
-      e.team
-    );
+    // Filter and validate events - use videoSecond (0 to videoDurationSeconds)
+    const validEvents = events.filter((e: any) => {
+      const eventSecond = e.videoSecond ?? ((e.minute || 0) * 60 + (e.second || 0));
+      return eventSecond >= 0 && 
+             eventSecond <= videoDurationSeconds &&
+             e.type &&
+             e.team;
+    });
     
-    console.log("Valid events:", validEvents.length);
+    console.log("Valid events (within video duration):", validEvents.length);
     
     let insertedCount = 0;
     for (const event of validEvents) {
-      // Convert minute/second to milliseconds for precision
-      const eventMs = ((event.minute || 0) * 60 + (event.second || 0)) * 1000;
+      // Use videoSecond directly if available, otherwise compute from minute/second
+      const eventSecond = event.videoSecond ?? ((event.minute || 0) * 60 + (event.second || 0));
+      const eventMs = eventSecond * 1000;
+      
+      // Convert videoSecond to minute:second for display
+      const displayMinute = Math.floor(eventSecond / 60);
+      const displaySecond = Math.floor(eventSecond % 60);
       
       const { error } = await supabase.from('match_events').insert({
         match_id: matchId,
         event_type: event.type,
-        minute: event.minute,
-        second: event.second || 0,
+        minute: displayMinute,
+        second: displaySecond,
         description: event.description,
         is_highlight: ['goal', 'red_card', 'penalty'].includes(event.type),
         metadata: { 
@@ -734,8 +783,10 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
           confidence: event.confidence || 0.7,
           source: event.source || (isRealAnalysis ? 'real_analysis' : 'estimated'),
           analysisMethod: isRealAnalysis ? 'vision+transcription' : 'ai_inference',
-          // Store milliseconds for precise clip extraction
+          // Store video time in seconds and milliseconds for precise clip extraction
+          videoSecond: eventSecond,
           eventMs: eventMs,
+          videoDurationSeconds: videoDurationSeconds,
           bufferBeforeMs: 3000, // 3 seconds before
           bufferAfterMs: 3000   // 3 seconds after
         },
@@ -747,6 +798,7 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
         console.error("Insert error:", error.message);
       } else {
         insertedCount++;
+        console.log(`Event ${event.type} at ${displayMinute}:${displaySecond} (video second: ${eventSecond})`);
       }
     }
     
@@ -755,23 +807,24 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
 
   } catch (error) {
     console.error("Error generating events:", error);
-    return await generateFallbackEvents(supabase, matchId, homeTeamName, awayTeamName, startMinute, endMinute);
+    return await generateFallbackEvents(supabase, matchId, homeTeamName, awayTeamName, 0, videoDurationSeconds);
   }
 }
 
-// Fallback event generation
+// Fallback event generation - uses VIDEO SECONDS, not game minutes
 async function generateFallbackEvents(
   supabase: any, 
   matchId: string, 
   homeTeamName: string, 
   awayTeamName: string,
-  startMinute: number,
-  endMinute: number
+  startSecond: number,
+  endSecond: number
 ): Promise<boolean> {
-  console.log("Generating fallback events for segment:", startMinute, "-", endMinute);
+  const videoDurationSeconds = endSecond - startSecond;
+  console.log("Generating fallback events for video duration:", videoDurationSeconds, "seconds");
   
-  const segmentDuration = endMinute - startMinute;
-  const eventCount = Math.max(4, Math.floor(segmentDuration / 8));
+  // Generate 1 event per ~15 seconds of video, minimum 2, maximum 8
+  const eventCount = Math.min(8, Math.max(2, Math.floor(videoDurationSeconds / 15)));
   
   const templates = [
     { type: 'foul', description: 'Falta no meio-campo', highlight: false },
@@ -788,18 +841,22 @@ async function generateFallbackEvents(
   
   for (let i = 0; i < eventCount; i++) {
     const template = templates[i % templates.length];
-    const minute = startMinute + Math.floor((i + 1) * (segmentDuration / (eventCount + 1)));
-    const second = Math.floor(Math.random() * 60);
     const team = Math.random() > 0.5 ? 'home' : 'away';
     
-    // Convert to milliseconds for precision
-    const eventMs = (Math.min(minute, endMinute) * 60 + second) * 1000;
+    // Calculate event position in VIDEO SECONDS
+    const eventSecond = Math.floor(startSecond + ((i + 1) * (videoDurationSeconds / (eventCount + 1))));
+    const clampedSecond = Math.min(eventSecond, endSecond - 1);
+    
+    // Convert to display format
+    const displayMinute = Math.floor(clampedSecond / 60);
+    const displaySecond = Math.floor(clampedSecond % 60);
+    const eventMs = clampedSecond * 1000;
     
     const { error } = await supabase.from('match_events').insert({
       match_id: matchId,
       event_type: template.type,
-      minute: Math.min(minute, endMinute),
-      second: second,
+      minute: displayMinute,
+      second: displaySecond,
       description: template.description,
       is_highlight: template.highlight,
       metadata: { 
@@ -807,8 +864,10 @@ async function generateFallbackEvents(
         teamName: team === 'home' ? homeTeamName : awayTeamName,
         source: 'fallback',
         analysisMethod: 'pattern_based',
-        // Store milliseconds for precise clip extraction
+        // Store video time for precise clip extraction
+        videoSecond: clampedSecond,
         eventMs: eventMs,
+        videoDurationSeconds: videoDurationSeconds,
         bufferBeforeMs: 3000, // 3 seconds before
         bufferAfterMs: 3000   // 3 seconds after
       },
@@ -816,7 +875,10 @@ async function generateFallbackEvents(
       position_y: Math.random() * 100,
     });
     
-    if (!error) insertedCount++;
+    if (!error) {
+      insertedCount++;
+      console.log(`Fallback event ${template.type} at ${displayMinute}:${displaySecond} (video second: ${clampedSecond})`);
+    }
   }
   
   console.log("Fallback events inserted:", insertedCount);
