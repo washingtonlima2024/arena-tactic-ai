@@ -781,7 +781,10 @@ export default function Events() {
             second: playingEvent.second || 0,
             description: playingEvent.description || '',
             clipUrl: playingEvent.clip_url,
-            videoSecond: playingEvent.metadata?.videoSecond as number | undefined
+            // Priority: use 'second' field directly (user edited), fallback to metadata.videoSecond
+            videoSecond: playingEvent.second !== undefined && playingEvent.second !== null 
+              ? playingEvent.second 
+              : (playingEvent.metadata?.videoSecond as number | undefined)
           } : null}
           thumbnail={playingEvent ? getEventThumbnail(playingEvent.id) : undefined}
           matchVideo={matchVideo}
