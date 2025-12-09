@@ -138,6 +138,20 @@ export default function Events() {
 
   // Handle event click - open video
   const handleEventClick = (event: any) => {
+    if (!matchVideo && !event.clip_url) {
+      toast.error('Nenhum vídeo vinculado a esta partida');
+      return;
+    }
+    
+    // Check if event is within video range (when we have duration info)
+    const videoDuration = matchVideo?.duration_seconds;
+    const eventVideoSecond = event.metadata?.videoSecond;
+    
+    if (videoDuration && eventVideoSecond && eventVideoSecond > videoDuration) {
+      toast.error(`Evento fora do range do vídeo (${Math.round(videoDuration)}s). O vídeo não contém este momento.`);
+      return;
+    }
+    
     if (matchVideo || event.clip_url) {
       setShowVignette(true);
       setPlayingEvent(event);
@@ -764,8 +778,10 @@ export default function Events() {
             title: playingEvent.event_type.replace(/_/g, ' '),
             type: playingEvent.event_type,
             minute: playingEvent.minute || 0,
+            second: playingEvent.second || 0,
             description: playingEvent.description || '',
-            clipUrl: playingEvent.clip_url
+            clipUrl: playingEvent.clip_url,
+            videoSecond: playingEvent.metadata?.videoSecond as number | undefined
           } : null}
           thumbnail={playingEvent ? getEventThumbnail(playingEvent.id) : undefined}
           matchVideo={matchVideo}
