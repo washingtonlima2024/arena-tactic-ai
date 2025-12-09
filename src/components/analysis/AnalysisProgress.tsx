@@ -1,8 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState, useMemo } from 'react';
 import { AnalysisJob } from '@/types/arena';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
-import { CheckCircle2, Circle, Loader2 } from 'lucide-react';
+import { CheckCircle2, Circle, Loader2, Clock } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useNotificationSound } from '@/hooks/useNotificationSound';
 
@@ -10,9 +10,63 @@ interface AnalysisProgressProps {
   job: AnalysisJob;
 }
 
+// Estimated time per step in seconds (based on typical video analysis)
+const STEP_TIME_ESTIMATES: Record<string, number> = {
+  'Preparação do vídeo': 5,
+  'Download do vídeo': 30,
+  'Extração de frames': 15,
+  'Análise visual (Vision AI)': 120, // Most time-consuming
+  'Extração de áudio': 20,
+  'Transcrição (Whisper)': 60,
+  'Identificação de eventos': 30,
+  'Análise tática': 20,
+  'Finalização': 5,
+};
+
+function formatTimeRemaining(seconds: number): string {
+  if (seconds <= 0) return 'Concluindo...';
+  if (seconds < 60) return `~${Math.ceil(seconds)}s restantes`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.ceil(seconds % 60);
+  if (secs === 0) return `~${minutes}min restantes`;
+  return `~${minutes}min ${secs}s restantes`;
+}
+
 export function AnalysisProgress({ job }: AnalysisProgressProps) {
   const { playSuccessSound, playErrorSound } = useNotificationSound();
   const previousStatusRef = useRef<string | null>(null);
+  const [startTime] = useState(() => Date.now());
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+
+  // Update elapsed time every second
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setElapsedSeconds(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [startTime]);
+
+  // Calculate estimated time remaining
+  const estimatedTimeRemaining = useMemo(() => {
+    let remainingSeconds = 0;
+    let foundCurrentStep = false;
+    
+    for (const step of job.steps) {
+      const stepTime = STEP_TIME_ESTIMATES[step.name] || 15;
+      
+      if (step.status === 'processing') {
+        foundCurrentStep = true;
+        // For current step, estimate based on progress
+        const stepProgressFraction = step.progress / 100;
+        remainingSeconds += stepTime * (1 - stepProgressFraction);
+      } else if (step.status === 'pending' && foundCurrentStep) {
+        // Add full time for pending steps after current
+        remainingSeconds += stepTime;
+      }
+    }
+    
+    return remainingSeconds;
+  }, [job.steps]);
 
   // Play sound when analysis completes
   useEffect(() => {
@@ -42,8 +96,17 @@ export function AnalysisProgress({ job }: AnalysisProgressProps) {
             <Loader2 className="h-5 w-5 animate-spin text-primary" />
             Análise em Andamento
           </CardTitle>
-          <span className="text-2xl font-bold text-primary">{job.progress}%</span>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
+              <Clock className="h-4 w-4" />
+              <span>{formatTimeRemaining(estimatedTimeRemaining)}</span>
+            </div>
+            <span className="text-2xl font-bold text-primary">{job.progress}%</span>
+          </div>
         </div>
+        <p className="text-xs text-muted-foreground mt-1">
+          Tempo decorrido: {Math.floor(elapsedSeconds / 60)}:{String(elapsedSeconds % 60).padStart(2, '0')}
+        </p>
       </CardHeader>
       <CardContent className="space-y-6">
         {/* Overall Progress */}
