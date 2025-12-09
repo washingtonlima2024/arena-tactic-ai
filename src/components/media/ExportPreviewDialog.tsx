@@ -27,7 +27,8 @@ import {
   Repeat,
   Share2,
   ChevronLeft,
-  Settings2
+  Settings2,
+  Download
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
@@ -971,6 +972,18 @@ export function ExportPreviewDialog({
                   onClick={toggleFullscreen}
                 >
                   {isFullscreen ? <Minimize className="h-4 w-4 sm:h-5 sm:w-5" /> : <Maximize className="h-4 w-4 sm:h-5 sm:w-5" />}
+                </Button>
+
+                <div className="w-px h-6 bg-white/20 mx-1 hidden sm:block" />
+
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5 h-8 sm:h-10 px-3 sm:px-4"
+                  onClick={() => toast.info('Funcionalidade de download em desenvolvimento')}
+                >
+                  <Download className="h-4 w-4" />
+                  <span className="hidden sm:inline">Download</span>
                 </Button>
               </div>
             </div>
