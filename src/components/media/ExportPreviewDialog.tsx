@@ -34,6 +34,7 @@ import { cn } from '@/lib/utils';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { TransitionVignette } from './TransitionVignette';
 import { ClipVignette } from './ClipVignette';
+import { SocialSharePanel } from './SocialSharePanel';
 import arenaPlayLogo from '@/assets/arena-play-icon.png';
 import { toast } from 'sonner';
 import { CLIP_BUFFER_BEFORE_MS, CLIP_BUFFER_AFTER_MS } from '@/hooks/useClipGeneration';
@@ -125,6 +126,7 @@ export function ExportPreviewDialog({
   const [selectedClipIds, setSelectedClipIds] = useState<Set<string>>(new Set());
   const [includeVignettes, setIncludeVignettes] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
+  const [showSharePanel, setShowSharePanel] = useState(false);
 
   // Preview state
   const [playbackState, setPlaybackState] = useState<PlaybackState>({ type: 'idle' });
@@ -985,10 +987,28 @@ export function ExportPreviewDialog({
                   <Download className="h-4 w-4" />
                   <span className="hidden sm:inline">Download</span>
                 </Button>
+
+                <Button
+                  variant="default"
+                  size="sm"
+                  className="bg-gradient-to-r from-[#833AB4] via-[#FD1D1D] to-[#F77737] hover:opacity-90 text-white gap-1.5 h-8 sm:h-10 px-3 sm:px-4"
+                  onClick={() => setShowSharePanel(true)}
+                >
+                  <Share2 className="h-4 w-4" />
+                  <span className="hidden sm:inline">Compartilhar</span>
+                </Button>
               </div>
             </div>
           )}
         </div>
+
+        {/* Social Share Panel */}
+        <SocialSharePanel
+          isOpen={showSharePanel}
+          onClose={() => setShowSharePanel(false)}
+          clipCount={selectedClips.length}
+          matchTitle={`${homeTeam} x ${awayTeam}`}
+        />
       </DialogContent>
     </Dialog>
   );
