@@ -1,14 +1,28 @@
+import { useEffect, useRef } from 'react';
 import { AnalysisJob } from '@/types/arena';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { CheckCircle2, Circle, Loader2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useNotificationSound } from '@/hooks/useNotificationSound';
 
 interface AnalysisProgressProps {
   job: AnalysisJob;
 }
 
 export function AnalysisProgress({ job }: AnalysisProgressProps) {
+  const { playSuccessSound, playErrorSound } = useNotificationSound();
+  const previousStatusRef = useRef<string | null>(null);
+
+  // Play sound when analysis completes
+  useEffect(() => {
+    if (previousStatusRef.current === 'processing' && job.status === 'completed') {
+      playSuccessSound();
+    } else if (previousStatusRef.current === 'processing' && job.status === 'failed') {
+      playErrorSound();
+    }
+    previousStatusRef.current = job.status ?? null;
+  }, [job.status, playSuccessSound, playErrorSound]);
   const getStepIcon = (status: string) => {
     switch (status) {
       case 'completed':
