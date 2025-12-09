@@ -11,7 +11,10 @@ import {
   Minimize,
   FastForward,
   Repeat,
-  ListVideo
+  ListVideo,
+  Smartphone,
+  Monitor,
+  Tablet
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,6 +22,7 @@ import { Progress } from '@/components/ui/progress';
 import { cn } from '@/lib/utils';
 import { ClipVignette } from './ClipVignette';
 import { TransitionVignette } from './TransitionVignette';
+import { DeviceMockup } from './DeviceMockup';
 import { useVignetteAudio } from '@/hooks/useVignetteAudio';
 import arenaPlayLogo from '@/assets/arena-play-icon.png';
 
@@ -43,6 +47,8 @@ interface PlaylistPlayerProps {
   awayScore: number;
   matchTitle?: string;
   includeVignettes?: boolean;
+  format?: '9:16' | '16:9' | '1:1' | '4:5';
+  platform?: string;
   onClose: () => void;
 }
 
@@ -62,6 +68,8 @@ export function PlaylistPlayer({
   awayScore,
   matchTitle,
   includeVignettes = true,
+  format = '9:16',
+  platform = 'Instagram Reels',
   onClose
 }: PlaylistPlayerProps) {
   const [playbackState, setPlaybackState] = useState<PlaybackState>({ type: 'idle' });
@@ -302,125 +310,179 @@ export function PlaylistPlayer({
     return clip.clipUrl || clip.videoUrl;
   };
 
-  return (
-    <div 
-      ref={containerRef}
-      className="fixed inset-0 z-[100] bg-black flex flex-col"
-      onMouseMove={resetControlsTimeout}
-      onClick={resetControlsTimeout}
-    >
-      {/* Main content area */}
-      <div className="flex-1 relative overflow-hidden">
-        {/* Opening Vignette */}
-        {playbackState.type === 'opening' && (
-          <div className="absolute inset-0 z-20">
-            <OpeningVignette
+  // Get device icon
+  const getDeviceIcon = () => {
+    if (format === '16:9') return <Monitor className="h-4 w-4" />;
+    if (format === '1:1') return <Tablet className="h-4 w-4" />;
+    return <Smartphone className="h-4 w-4" />;
+  };
+
+  // Video content component (reused in device mockup)
+  const VideoContent = () => (
+    <div className="relative w-full h-full">
+      {/* Opening Vignette */}
+      {playbackState.type === 'opening' && (
+        <div className="absolute inset-0 z-20">
+          <OpeningVignette
+            homeTeam={homeTeam}
+            awayTeam={awayTeam}
+            homeScore={homeScore}
+            awayScore={awayScore}
+            matchTitle={matchTitle}
+            onComplete={handleOpeningComplete}
+          />
+        </div>
+      )}
+
+      {/* Transition Vignette */}
+      {playbackState.type === 'transition' && clips[playbackState.nextIndex] && (
+        <div className="absolute inset-0 z-20">
+          <TransitionVignette
+            nextClipTitle={clips[playbackState.nextIndex].title}
+            nextClipMinute={clips[playbackState.nextIndex].minute}
+            nextClipType={clips[playbackState.nextIndex].type}
+            onComplete={handleTransitionComplete}
+          />
+        </div>
+      )}
+
+      {/* Closing Vignette */}
+      {playbackState.type === 'closing' && (
+        <div className="absolute inset-0 z-20">
+          <ClosingVignette
+            totalClips={totalClips}
+            onComplete={handleClosingComplete}
+          />
+        </div>
+      )}
+
+      {/* Video Player */}
+      {playbackState.type === 'clip' && currentClip && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black">
+          {/* Clip Vignette (before video) */}
+          {includeVignettes && currentClip.thumbnail && clipProgress === 0 && (
+            <ClipVignette
+              thumbnailUrl={currentClip.thumbnail}
+              eventType={currentClip.type}
+              minute={currentClip.minute}
+              title={currentClip.title}
               homeTeam={homeTeam}
               awayTeam={awayTeam}
               homeScore={homeScore}
               awayScore={awayScore}
-              matchTitle={matchTitle}
-              onComplete={handleOpeningComplete}
+              onComplete={() => {
+                const video = videoRef.current;
+                if (video) {
+                  video.currentTime = 0;
+                  video.play().catch(() => {});
+                }
+              }}
+              duration={3000}
             />
-          </div>
-        )}
+          )}
 
-        {/* Transition Vignette */}
-        {playbackState.type === 'transition' && clips[playbackState.nextIndex] && (
-          <div className="absolute inset-0 z-20">
-            <TransitionVignette
-              nextClipTitle={clips[playbackState.nextIndex].title}
-              nextClipMinute={clips[playbackState.nextIndex].minute}
-              nextClipType={clips[playbackState.nextIndex].type}
-              onComplete={handleTransitionComplete}
+          {/* Actual video */}
+          {getClipVideoUrl(currentClip) ? (
+            <video
+              ref={videoRef}
+              src={getClipVideoUrl(currentClip)!}
+              className={cn(
+                "w-full h-full object-cover transition-opacity duration-500",
+                includeVignettes && currentClip.thumbnail && clipProgress === 0 ? "opacity-0" : "opacity-100"
+              )}
+              autoPlay={!includeVignettes || !currentClip.thumbnail}
+              muted={isMuted}
+              playsInline
             />
-          </div>
-        )}
-
-        {/* Closing Vignette */}
-        {playbackState.type === 'closing' && (
-          <div className="absolute inset-0 z-20">
-            <ClosingVignette
-              totalClips={totalClips}
-              onComplete={handleClosingComplete}
-            />
-          </div>
-        )}
-
-        {/* Video Player */}
-        {playbackState.type === 'clip' && currentClip && (
-          <div className="absolute inset-0 flex items-center justify-center bg-black">
-            {/* Clip Vignette (before video) */}
-            {includeVignettes && currentClip.thumbnail && clipProgress === 0 && (
-              <ClipVignette
-                thumbnailUrl={currentClip.thumbnail}
-                eventType={currentClip.type}
-                minute={currentClip.minute}
-                title={currentClip.title}
-                homeTeam={homeTeam}
-                awayTeam={awayTeam}
-                homeScore={homeScore}
-                awayScore={awayScore}
-                onComplete={() => {
-                  // Start video after vignette
-                  const video = videoRef.current;
-                  if (video) {
-                    video.currentTime = 0;
-                    video.play().catch(() => {});
-                  }
-                }}
-                duration={3000}
-              />
-            )}
-
-            {/* Actual video */}
-            {getClipVideoUrl(currentClip) ? (
-              <video
-                ref={videoRef}
-                src={getClipVideoUrl(currentClip)!}
-                className={cn(
-                  "max-w-full max-h-full object-contain transition-opacity duration-500",
-                  includeVignettes && currentClip.thumbnail && clipProgress === 0 ? "opacity-0" : "opacity-100"
-                )}
-                autoPlay={!includeVignettes || !currentClip.thumbnail}
-                muted={isMuted}
-                playsInline
-              />
-            ) : (
-              // Fallback: show thumbnail as static image
-              <div className="relative w-full h-full flex items-center justify-center">
-                {currentClip.thumbnail ? (
-                  <img 
-                    src={currentClip.thumbnail} 
-                    alt={currentClip.title}
-                    className="max-w-full max-h-full object-contain"
-                  />
-                ) : (
-                  <div className="text-center text-muted-foreground">
-                    <ListVideo className="h-16 w-16 mx-auto mb-4 text-primary" />
-                    <p className="text-xl font-medium">{currentClip.title}</p>
-                    <p className="text-sm mt-2">{currentClip.minute}' • {currentClip.type}</p>
-                  </div>
-                )}
-                {/* Auto-advance after 5 seconds for static content */}
-                <StaticClipTimer 
-                  duration={5000} 
-                  onComplete={handleClipEnd}
-                  onProgress={setClipProgress}
+          ) : (
+            <div className="relative w-full h-full flex items-center justify-center">
+              {currentClip.thumbnail ? (
+                <img 
+                  src={currentClip.thumbnail} 
+                  alt={currentClip.title}
+                  className="w-full h-full object-cover"
                 />
-              </div>
-            )}
-          </div>
-        )}
+              ) : (
+                <div className="text-center text-white">
+                  <ListVideo className="h-12 w-12 mx-auto mb-3 text-primary" />
+                  <p className="text-lg font-medium">{currentClip.title}</p>
+                  <p className="text-sm mt-1 opacity-70">{currentClip.minute}' • {currentClip.type}</p>
+                </div>
+              )}
+              <StaticClipTimer 
+                duration={5000} 
+                onComplete={handleClipEnd}
+                onProgress={setClipProgress}
+              />
+            </div>
+          )}
+        </div>
+      )}
 
-        {/* Complete screen */}
-        {playbackState.type === 'complete' && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-background">
+      {/* Idle state */}
+      {playbackState.type === 'idle' && (
+        <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-br from-gray-900 to-black">
+          <div className="text-center text-white">
+            <img src={arenaPlayLogo} alt="Arena Play" className="h-16 mx-auto mb-4 opacity-60" />
+            <p className="text-sm opacity-50">Aguardando reprodução...</p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+
+  return (
+    <div 
+      ref={containerRef}
+      className="fixed inset-0 z-[100] bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 flex flex-col"
+      onMouseMove={resetControlsTimeout}
+      onClick={resetControlsTimeout}
+    >
+      {/* Background pattern */}
+      <div className="absolute inset-0 opacity-5">
+        <div className="absolute inset-0" style={{
+          backgroundImage: `radial-gradient(circle at 25% 25%, hsl(var(--primary)) 0%, transparent 50%),
+                           radial-gradient(circle at 75% 75%, hsl(var(--primary)) 0%, transparent 50%)`,
+        }} />
+      </div>
+
+      {/* Header with device/format info */}
+      <div className={cn(
+        "relative z-30 px-6 py-4 flex items-center justify-between transition-opacity duration-300",
+        showControls ? "opacity-100" : "opacity-0"
+      )}>
+        <div className="flex items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={onClose} className="text-white hover:bg-white/10">
+            <X className="h-5 w-5" />
+          </Button>
+          <div className="flex items-center gap-2">
+            {getDeviceIcon()}
+            <span className="text-white/80 text-sm font-medium">{platform}</span>
+            <Badge variant="outline" className="border-primary/50 text-primary text-xs">
+              {format}
+            </Badge>
+          </div>
+        </div>
+        <div className="text-white/60 text-sm">
+          {homeTeam} {homeScore} × {awayScore} {awayTeam}
+        </div>
+      </div>
+
+      {/* Main content area with device mockup */}
+      <div className="flex-1 relative overflow-hidden flex items-center justify-center py-4">
+        {/* Device mockup with video content inside */}
+        {playbackState.type !== 'complete' ? (
+          <DeviceMockup format={format} platform={platform}>
+            <VideoContent />
+          </DeviceMockup>
+        ) : (
+          /* Complete screen */
+          <div className="flex flex-col items-center justify-center text-center">
             <img src={arenaPlayLogo} alt="Arena Play" className="h-20 mb-6 opacity-80" />
-            <h2 className="text-3xl font-bold text-foreground mb-2">Reprodução Completa</h2>
-            <p className="text-muted-foreground mb-8">{totalClips} clips reproduzidos</p>
+            <h2 className="text-3xl font-bold text-white mb-2">Reprodução Completa</h2>
+            <p className="text-white/60 mb-8">{totalClips} clips reproduzidos</p>
             <div className="flex gap-4">
-              <Button variant="outline" size="lg" onClick={onClose}>
+              <Button variant="outline" size="lg" onClick={onClose} className="border-white/30 text-white hover:bg-white/10">
                 <X className="h-5 w-5 mr-2" />
                 Fechar
               </Button>
@@ -441,7 +503,7 @@ export function PlaylistPlayer({
             variant="ghost"
             size="sm"
             className={cn(
-              "absolute bottom-24 right-4 z-30 text-white/80 hover:text-white transition-opacity duration-300",
+              "absolute bottom-32 right-8 z-30 text-white/80 hover:text-white bg-black/40 hover:bg-black/60 transition-opacity duration-300",
               showControls ? "opacity-100" : "opacity-0"
             )}
             onClick={skipVignette}

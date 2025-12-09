@@ -666,7 +666,7 @@ export function SocialContentDialog({
       </DialogContent>
 
       {/* Immersive Playlist Player */}
-      {showPlayer && (
+      {showPlayer && selectedFormat && (
         <PlaylistPlayer
           clips={(() => {
             const allClips = [...homeTeamPlaylist.clips, ...awayTeamPlaylist.clips];
@@ -692,6 +692,8 @@ export function SocialContentDialog({
           awayScore={awayScore}
           matchTitle={matchTitle}
           includeVignettes={includeVignettes}
+          format={selectedFormat.id as '9:16' | '16:9' | '1:1' | '4:5'}
+          platform={selectedFormat.platforms[0]}
           onClose={() => setShowPlayer(false)}
         />
       )}
