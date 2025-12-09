@@ -6,11 +6,15 @@ import { supabase } from '@/integrations/supabase/client';
 
 export interface ClipConfig {
   eventId: string;
-  // Segundos diretos do vídeo (do metadata)
-  videoSecondStart: number;
-  videoSecondEnd: number;
+  eventMinute: number;
+  eventSecond?: number;
   videoUrl: string;
+  videoStartMinute: number;
+  videoEndMinute: number;
+  videoDurationSeconds: number;
   matchId: string;
+  bufferBefore?: number;
+  bufferAfter?: number;
 }
 
 export interface ClipGenerationProgress {
@@ -50,7 +54,7 @@ export function useClipGeneration() {
       ffmpegRef.current = ffmpeg;
 
       ffmpeg.on('log', ({ message }) => {
-        console.log('[FFmpeg]', message);
+        console.log('[FFmpeg Clip]', message);
       });
 
       const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
@@ -67,7 +71,7 @@ export function useClipGeneration() {
       });
       return true;
     } catch (error) {
-      console.error('Erro ao carregar FFmpeg:', error);
+      console.error('Error loading FFmpeg:', error);
       setProgress({
         stage: 'error',
         progress: 0,
@@ -77,6 +81,23 @@ export function useClipGeneration() {
     }
   }, [isLoaded]);
 
+  const calculateVideoTimestamp = (
+    eventMinute: number,
+    eventSecond: number,
+    videoStartMinute: number,
+    videoEndMinute: number,
+    videoDurationSeconds: number
+  ): number => {
+    const eventTotalMinutes = eventMinute + (eventSecond / 60);
+    const videoRangeMinutes = videoEndMinute - videoStartMinute;
+    
+    if (videoRangeMinutes <= 0) return 0;
+    
+    const positionRatio = (eventTotalMinutes - videoStartMinute) / videoRangeMinutes;
+    return Math.max(0, positionRatio * videoDurationSeconds);
+  };
+
+  // Cancel current operation
   const cancel = useCallback(() => {
     setIsCancelled(true);
     if (abortControllerRef.current) {
@@ -89,9 +110,10 @@ export function useClipGeneration() {
     });
     setIsGenerating(false);
     setGeneratingEventIds(new Set());
-    toast.info('Extração cancelada');
+    toast.info('Extração de clips cancelada');
   }, []);
 
+  // Download video with progress tracking
   const downloadVideoWithProgress = useCallback(async (url: string): Promise<Uint8Array | null> => {
     abortControllerRef.current = new AbortController();
     
@@ -109,7 +131,7 @@ export function useClipGeneration() {
       const totalMB = totalBytes / (1024 * 1024);
 
       const reader = response.body?.getReader();
-      if (!reader) throw new Error('Reader não disponível');
+      if (!reader) throw new Error('No reader available');
 
       const chunks: Uint8Array[] = [];
       let receivedBytes = 0;
@@ -129,13 +151,14 @@ export function useClipGeneration() {
 
         setProgress({
           stage: 'downloading',
-          progress: 10 + (receivedBytes / totalBytes) * 20,
+          progress: 10 + (receivedBytes / totalBytes) * 20, // 10-30%
           message: `Baixando vídeo... ${downloadedMB.toFixed(1)}MB / ${totalMB.toFixed(1)}MB`,
           downloadedMB,
           totalMB
         });
       }
 
+      // Combine chunks
       const videoData = new Uint8Array(receivedBytes);
       let offset = 0;
       for (const chunk of chunks) {
@@ -143,7 +166,7 @@ export function useClipGeneration() {
         offset += chunk.length;
       }
 
-      console.log(`Vídeo baixado: ${(receivedBytes / (1024 * 1024)).toFixed(2)}MB`);
+      console.log(`[ClipGen] Video downloaded: ${(receivedBytes / (1024 * 1024)).toFixed(2)}MB`);
       return videoData;
 
     } catch (error) {
@@ -154,21 +177,39 @@ export function useClipGeneration() {
     }
   }, [isCancelled]);
 
-  // Extrai clip usando segundos diretos
+  // Extract single clip from already loaded video
   const extractSingleClip = useCallback(async (
     ffmpeg: FFmpeg,
     config: ClipConfig,
     clipIndex: number,
     totalClips: number
   ): Promise<string | null> => {
-    const { eventId, videoSecondStart, videoSecondEnd, matchId } = config;
+    const {
+      eventId,
+      eventMinute,
+      eventSecond = 0,
+      videoStartMinute,
+      videoEndMinute,
+      videoDurationSeconds,
+      matchId,
+      bufferBefore = 10,
+      bufferAfter = 10
+    } = config;
 
-    const startTime = Math.max(0, videoSecondStart);
-    const duration = videoSecondEnd - videoSecondStart;
+    const eventVideoSeconds = calculateVideoTimestamp(
+      eventMinute,
+      eventSecond,
+      videoStartMinute,
+      videoEndMinute,
+      videoDurationSeconds
+    );
 
-    console.log(`[Clip ${clipIndex + 1}/${totalClips}] ${eventId}: ${startTime}s -> ${videoSecondEnd}s (duração: ${duration}s)`);
+    const startTime = Math.max(0, eventVideoSeconds - bufferBefore);
+    const duration = bufferBefore + bufferAfter;
 
-    const baseProgress = 30 + ((clipIndex / totalClips) * 50);
+    console.log(`[ClipGen] Extracting clip ${clipIndex + 1}/${totalClips}: event=${eventId}, start=${startTime.toFixed(1)}s, duration=${duration}s`);
+
+    const baseProgress = 30 + ((clipIndex / totalClips) * 50); // 30-80%
     
     setProgress({
       stage: 'extracting',
@@ -193,6 +234,7 @@ export function useClipGeneration() {
       outputFile
     ]);
 
+    // Read and upload
     setProgress({
       stage: 'uploading',
       progress: baseProgress + 3,
@@ -218,7 +260,7 @@ export function useClipGeneration() {
       });
 
     if (uploadError) {
-      console.error(`Erro no upload do clip ${eventId}:`, uploadError);
+      console.error(`Upload error for clip ${eventId}:`, uploadError);
       return null;
     }
 
@@ -228,20 +270,24 @@ export function useClipGeneration() {
 
     const clipUrl = urlData.publicUrl;
 
+    // Update database
     await supabase
       .from('match_events')
       .update({ clip_url: clipUrl })
       .eq('id', eventId);
 
+    // Cleanup clip file
     try {
       await ffmpeg.deleteFile(outputFile);
-    } catch (e) {}
+    } catch (e) {
+      // Ignore
+    }
 
     return clipUrl;
   }, []);
 
-  // Gerar todos os clips de uma vez
-  const generateAllClips = useCallback(async (configs: ClipConfig[]): Promise<void> => {
+  // OPTIMIZED: Generate all clips with single download
+  const generateAllClipsOptimized = useCallback(async (configs: ClipConfig[]): Promise<void> => {
     if (configs.length === 0) return;
 
     setIsGenerating(true);
@@ -249,6 +295,7 @@ export function useClipGeneration() {
     setGeneratingEventIds(new Set(configs.map(c => c.eventId)));
 
     try {
+      // 1. Load FFmpeg
       const loaded = await loadFFmpeg();
       if (!loaded || !ffmpegRef.current) {
         throw new Error('FFmpeg não carregado');
@@ -256,6 +303,7 @@ export function useClipGeneration() {
 
       const ffmpeg = ffmpegRef.current;
 
+      // 2. Download video ONCE
       setProgress({
         stage: 'downloading',
         progress: 10,
@@ -270,6 +318,7 @@ export function useClipGeneration() {
         return;
       }
 
+      // 3. Write video to FFmpeg memory
       setProgress({
         stage: 'extracting',
         progress: 30,
@@ -278,6 +327,7 @@ export function useClipGeneration() {
 
       await ffmpeg.writeFile('input.mp4', videoData);
 
+      // 4. Extract each clip (video already in memory)
       let completed = 0;
       for (const config of configs) {
         if (isCancelled) break;
@@ -288,37 +338,40 @@ export function useClipGeneration() {
         }
       }
 
+      // 5. Cleanup input file
       try {
         await ffmpeg.deleteFile('input.mp4');
-      } catch (e) {}
+      } catch (e) {
+        // Ignore
+      }
 
       if (!isCancelled) {
         setProgress({
           stage: 'complete',
           progress: 100,
-          message: `${completed} clips gerados!`,
+          message: `${completed} clips gerados com sucesso!`,
           currentClip: completed,
           totalClips: configs.length
         });
-        toast.success(`${completed} clips extraídos!`);
+        toast.success(`${completed} clips extraídos e salvos!`);
       }
 
     } catch (error) {
-      console.error('Erro na geração de clips:', error);
+      console.error('Error in batch clip generation:', error);
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
       setProgress({
         stage: 'error',
         progress: 0,
         message: `Erro: ${errorMessage}`
       });
-      toast.error(`Erro: ${errorMessage}`);
+      toast.error(`Erro ao gerar clips: ${errorMessage}`);
     } finally {
       setIsGenerating(false);
       setGeneratingEventIds(new Set());
     }
   }, [loadFFmpeg, downloadVideoWithProgress, extractSingleClip, isCancelled]);
 
-  // Gerar um único clip
+  // Single clip generation (for individual extraction)
   const generateClip = useCallback(async (config: ClipConfig): Promise<string | null> => {
     setGeneratingEventIds(prev => new Set(prev).add(config.eventId));
     setIsGenerating(true);
@@ -352,22 +405,22 @@ export function useClipGeneration() {
         setProgress({
           stage: 'complete',
           progress: 100,
-          message: 'Clip gerado!'
+          message: 'Clip gerado com sucesso!'
         });
-        toast.success('Clip extraído!');
+        toast.success('Clip extraído e salvo!');
       }
 
       return clipUrl;
 
     } catch (error) {
-      console.error('Erro ao gerar clip:', error);
+      console.error('Error generating clip:', error);
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
       setProgress({
         stage: 'error',
         progress: 0,
         message: `Erro: ${errorMessage}`
       });
-      toast.error(`Erro: ${errorMessage}`);
+      toast.error(`Erro ao gerar clip: ${errorMessage}`);
       return null;
     } finally {
       setGeneratingEventIds(prev => {
@@ -380,6 +433,9 @@ export function useClipGeneration() {
       }
     }
   }, [loadFFmpeg, downloadVideoWithProgress, extractSingleClip, generatingEventIds]);
+
+  // Legacy function name for compatibility
+  const generateAllClips = generateAllClipsOptimized;
 
   const isGeneratingEvent = useCallback((eventId: string) => {
     return generatingEventIds.has(eventId);
@@ -400,6 +456,7 @@ export function useClipGeneration() {
     progress,
     generateClip,
     generateAllClips,
+    generateAllClipsOptimized,
     isGeneratingEvent,
     generatingEventIds,
     reset,
