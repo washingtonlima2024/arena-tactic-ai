@@ -77,7 +77,9 @@ export default function Media() {
     generateAllClips, 
     isGenerating: isGeneratingClips, 
     isGeneratingEvent: isGeneratingClip,
-    progress: clipProgress 
+    progress: clipProgress,
+    cancel: cancelClipGeneration,
+    isCancelled
   } = useClipGeneration();
   
   const { data: events, refetch: refetchEvents } = useMatchEvents(matchId);
@@ -240,49 +242,63 @@ export default function Media() {
               </div>
               <div className="flex gap-2">
                 {/* Generate Clips Button - Only show for direct video files, not embeds */}
-                {clips.length > 0 && matchVideo && clips.some(c => !c.clipUrl) && 
+{clips.length > 0 && matchVideo && clips.some(c => !c.clipUrl) && 
                   !matchVideo.file_url.includes('embed') && !matchVideo.file_url.includes('xtream') && (
-                  <Button 
-                    variant="arena" 
-                    size="sm"
-                    onClick={async () => {
-                      if (!matchVideo.file_url || matchVideo.start_minute == null || matchVideo.end_minute == null || !matchVideo.duration_seconds) {
-                        toast({
-                          title: "Dados de sincronização ausentes",
-                          description: "Configure os tempos de sincronização do vídeo na página de Upload",
-                          variant: "destructive"
-                        });
-                        return;
-                      }
-                      const clipsToGenerate = clips
-                        .filter(c => !c.clipUrl)
-                        .map(c => ({
-                          eventId: c.id,
-                          eventMinute: c.minute,
-                          eventSecond: c.second,
-                          videoUrl: matchVideo.file_url,
-                          videoStartMinute: matchVideo.start_minute || 0,
-                          videoEndMinute: matchVideo.end_minute || 90,
-                          videoDurationSeconds: matchVideo.duration_seconds || 5400,
-                          matchId: matchId
-                        }));
-                      await generateAllClips(clipsToGenerate);
-                      refetchEvents();
-                    }}
-                    disabled={isGeneratingClips}
-                  >
-                    {isGeneratingClips ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        {clipProgress.message}
-                      </>
-                    ) : (
-                      <>
-                        <Scissors className="mr-2 h-4 w-4" />
-                        Extrair Clips ({clips.filter(c => !c.clipUrl).length})
-                      </>
+                  <>
+                    <Button 
+                      variant="arena" 
+                      size="sm"
+                      onClick={async () => {
+                        if (!matchVideo.file_url || matchVideo.start_minute == null || matchVideo.end_minute == null || !matchVideo.duration_seconds) {
+                          toast({
+                            title: "Dados de sincronização ausentes",
+                            description: "Configure os tempos de sincronização do vídeo na página de Upload",
+                            variant: "destructive"
+                          });
+                          return;
+                        }
+                        const clipsToGenerate = clips
+                          .filter(c => !c.clipUrl)
+                          .map(c => ({
+                            eventId: c.id,
+                            eventMinute: c.minute,
+                            eventSecond: c.second,
+                            videoUrl: matchVideo.file_url,
+                            videoStartMinute: matchVideo.start_minute || 0,
+                            videoEndMinute: matchVideo.end_minute || 90,
+                            videoDurationSeconds: matchVideo.duration_seconds || 5400,
+                            matchId: matchId
+                          }));
+                        await generateAllClips(clipsToGenerate);
+                        refetchEvents();
+                      }}
+                      disabled={isGeneratingClips}
+                    >
+                      {isGeneratingClips ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          {clipProgress.currentClip && clipProgress.totalClips 
+                            ? `Clip ${clipProgress.currentClip}/${clipProgress.totalClips}`
+                            : clipProgress.message
+                          }
+                        </>
+                      ) : (
+                        <>
+                          <Scissors className="mr-2 h-4 w-4" />
+                          Extrair Clips ({clips.filter(c => !c.clipUrl).length})
+                        </>
+                      )}
+                    </Button>
+                    {isGeneratingClips && (
+                      <Button 
+                        variant="destructive" 
+                        size="sm"
+                        onClick={cancelClipGeneration}
+                      >
+                        Cancelar
+                      </Button>
                     )}
-                  </Button>
+                  </>
                 )}
                 {clips.length > 0 && clips.every(c => c.clipUrl) && (
                   <Badge variant="success" className="gap-1">
