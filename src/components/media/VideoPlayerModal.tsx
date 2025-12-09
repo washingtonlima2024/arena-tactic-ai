@@ -62,13 +62,24 @@ export function VideoPlayerModal({
     (matchVideo.end_minute && matchVideo.end_minute > 0)
   );
 
+  // Get video duration for validation
+  const getVideoDuration = useCallback(() => {
+    if (!matchVideo) return 90 * 60; // Default 90 minutes
+    return matchVideo.duration_seconds ?? ((matchVideo.end_minute ?? 90) - (matchVideo.start_minute ?? 0)) * 60;
+  }, [matchVideo]);
+
   // Calculate initial timestamp - prioritize videoSecond from event metadata
+  // CRITICAL: Ensure timestamp never exceeds video duration
   const calculateInitialTimestamp = useCallback(() => {
     if (!clip || hasDirectClip) return 0;
     
+    const videoDuration = getVideoDuration();
+    
     // If we have a precise videoSecond from analysis, use it directly
     if (clip.videoSecond !== undefined && clip.videoSecond >= 0) {
-      return Math.max(0, clip.videoSecond - 5); // 5 second buffer before event
+      const targetTs = Math.max(0, clip.videoSecond - 5); // 5 second buffer before event
+      // CRITICAL: Clamp to video duration to prevent seeking beyond end
+      return Math.min(targetTs, Math.max(0, videoDuration - 1));
     }
     
     // Fallback: calculate from minute/second
@@ -76,19 +87,24 @@ export function VideoPlayerModal({
     
     const videoStartMinute = matchVideo.start_minute ?? 0;
     const videoEndMinute = matchVideo.end_minute ?? 90;
-    const videoDuration = matchVideo.duration_seconds ?? ((videoEndMinute - videoStartMinute) * 60);
     
     const matchMinutesSpan = videoEndMinute - videoStartMinute;
     const eventMatchMinute = clip.minute;
     
+    // Check if event is within valid video range
     if (eventMatchMinute < videoStartMinute || eventMatchMinute > videoEndMinute || matchMinutesSpan <= 0) {
-      return Math.max(0, (eventMatchMinute * 60) - 10);
+      // Event is outside video range - clamp to valid range
+      console.warn('Event minute', eventMatchMinute, 'is outside video range', videoStartMinute, '-', videoEndMinute);
+      return 0; // Start from beginning instead of invalid timestamp
     }
     
     const relativePosition = (eventMatchMinute - videoStartMinute) / matchMinutesSpan;
     const eventVideoSeconds = relativePosition * videoDuration;
-    return Math.max(0, eventVideoSeconds - 10);
-  }, [clip, matchVideo, hasDirectClip]);
+    const targetTs = Math.max(0, eventVideoSeconds - 10);
+    
+    // CRITICAL: Clamp to video duration
+    return Math.min(targetTs, Math.max(0, videoDuration - 1));
+  }, [clip, matchVideo, hasDirectClip, getVideoDuration]);
 
   // Initialize timestamp when modal opens or clip changes
   useEffect(() => {
@@ -114,9 +130,10 @@ export function VideoPlayerModal({
 
   const embedUrl = buildEmbedUrl(currentTimestamp);
 
-  // Navigation handlers
+  // Navigation handlers - clamp to video duration
   const handleSeek = (delta: number) => {
-    const newTimestamp = Math.max(0, currentTimestamp + delta);
+    const videoDuration = getVideoDuration();
+    const newTimestamp = Math.max(0, Math.min(currentTimestamp + delta, videoDuration - 1));
     setCurrentTimestamp(newTimestamp);
     
     if (videoRef.current && !isEmbed) {
