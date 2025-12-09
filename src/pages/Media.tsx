@@ -257,17 +257,22 @@ export default function Media() {
                           });
                           return;
                         }
+                        const videoStartMs = (matchVideo.start_minute || 0) * 60 * 1000;
+                        const videoEndMs = (matchVideo.end_minute || 90) * 60 * 1000;
+                        const videoDurationMs = (matchVideo.duration_seconds || 5400) * 1000;
+                        
                         const clipsToGenerate = clips
                           .filter(c => !c.clipUrl)
                           .map(c => ({
                             eventId: c.id,
-                            eventMinute: c.minute,
-                            eventSecond: c.second,
+                            eventMinuteMs: (c.minute * 60 + c.second) * 1000,
                             videoUrl: matchVideo.file_url,
-                            videoStartMinute: matchVideo.start_minute || 0,
-                            videoEndMinute: matchVideo.end_minute || 90,
-                            videoDurationSeconds: matchVideo.duration_seconds || 5400,
-                            matchId: matchId
+                            videoStartMs,
+                            videoEndMs,
+                            videoDurationMs,
+                            matchId: matchId,
+                            bufferBeforeMs: 3000,
+                            bufferAfterMs: 3000
                           }));
                         await generateAllClips(clipsToGenerate);
                         refetchEvents();
@@ -481,15 +486,17 @@ export default function Media() {
                       });
                       return;
                     }
+                    const eventMs = (clip.minute * 60 + clip.second) * 1000;
                     await generateClip({
                       eventId: clip.id,
-                      eventMinute: clip.minute,
-                      eventSecond: clip.second,
+                      eventMinuteMs: eventMs,
                       videoUrl: matchVideo.file_url,
-                      videoStartMinute: matchVideo.start_minute,
-                      videoEndMinute: matchVideo.end_minute,
-                      videoDurationSeconds: matchVideo.duration_seconds,
-                      matchId: matchId
+                      videoStartMs: matchVideo.start_minute * 60 * 1000,
+                      videoEndMs: matchVideo.end_minute * 60 * 1000,
+                      videoDurationMs: matchVideo.duration_seconds * 1000,
+                      matchId: matchId,
+                      bufferBeforeMs: 3000,
+                      bufferAfterMs: 3000
                     });
                     refetchEvents();
                   };
