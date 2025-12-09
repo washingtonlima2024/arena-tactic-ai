@@ -107,6 +107,7 @@ export function useStartAnalysis() {
     competition?: string;
     startMinute?: number;
     endMinute?: number;
+    durationSeconds?: number; // Duração real do arquivo de vídeo em segundos
   }) => {
     setIsLoading(true);
     

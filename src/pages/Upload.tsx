@@ -103,6 +103,9 @@ export default function VideoUpload() {
   const [newStartMinute, setNewStartMinute] = useState<string>('');
   const [newEndMinute, setNewEndMinute] = useState<string>('');
   const [newDuration, setNewDuration] = useState<string>('');
+  
+  // File upload duration - CRITICAL for correct event timing
+  const [uploadedFileDuration, setUploadedFileDuration] = useState<string>('');
 
   const { data: teams = [], isLoading: teamsLoading } = useTeams();
   const createMatch = useCreateMatch();
@@ -349,6 +352,21 @@ export default function VideoUpload() {
       const primaryVideoUrl = primaryVideo?.embedUrl || uploadedFile?.url || '';
       const startMinute = primaryVideo?.startMinute ?? 0;
       const endMinute = primaryVideo?.endMinute ?? 90;
+      
+      // CRITICAL: Send actual video duration in seconds for proper event timing
+      // Priority: videoLink duration > uploaded file duration > default calculation
+      let durationSeconds: number;
+      
+      if (primaryVideo?.durationSeconds) {
+        durationSeconds = primaryVideo.durationSeconds;
+      } else if (uploadedFileDuration && parseInt(uploadedFileDuration) > 0) {
+        durationSeconds = parseInt(uploadedFileDuration);
+      } else {
+        // Fallback to minute-based calculation (less precise)
+        durationSeconds = (endMinute - startMinute) * 60;
+      }
+
+      console.log('Starting analysis with duration:', durationSeconds, 'seconds');
 
       // Start analysis with video segment info
       const result = await startAnalysis({
@@ -359,6 +377,7 @@ export default function VideoUpload() {
         competition,
         startMinute,
         endMinute,
+        durationSeconds, // Pass actual video duration
       });
 
       setCurrentJobId(result.jobId);
@@ -588,18 +607,39 @@ export default function VideoUpload() {
                     </div>
 
                     {/* Sincronização de Tempo - Seção Expandida */}
-                    <div className="p-4 rounded-lg bg-muted/30 border border-border/50 space-y-4">
-                      <div className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+                    <div className="p-4 rounded-lg bg-primary/5 border border-primary/20 space-y-4">
+                      <div className="flex items-center gap-2 text-sm font-medium text-primary">
                         <Clock className="h-4 w-4" />
-                        Sincronização de Tempo (Importante para cortes)
+                        ⚠️ IMPORTANTE: Duração Real do Vídeo
                       </div>
                       <p className="text-xs text-muted-foreground">
-                        Configure o alinhamento entre o tempo do jogo e o tempo do vídeo. 
-                        Ex: Se o vídeo é do 2º tempo, o minuto inicial seria 45.
+                        <strong>A duração do vídeo é ESSENCIAL</strong> para gerar eventos corretos. 
+                        Se o seu vídeo tem 1 min 17 seg, insira 77 segundos. Os eventos serão gerados 
+                        dentro desse tempo, não no tempo de jogo (0-90 min).
                       </p>
-                      <div className="grid grid-cols-3 gap-4">
+                      
+                      {/* Duração Real - Campo Principal */}
+                      <div className="space-y-2 p-3 rounded-lg bg-background border border-border">
+                        <Label className="text-sm font-medium flex items-center gap-2">
+                          <span className="text-primary">★</span>
+                          Duração REAL do Arquivo de Vídeo (segundos)
+                        </Label>
+                        <Input
+                          type="number"
+                          placeholder="Ex: 77 para 1:17, 300 para 5 min"
+                          min={1}
+                          value={newDuration}
+                          onChange={(e) => setNewDuration(e.target.value)}
+                          className="text-lg font-mono"
+                        />
+                        <p className="text-xs text-muted-foreground">
+                          Vídeo de 1 min = 60 seg | 2 min = 120 seg | 5 min = 300 seg | 10 min = 600 seg
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label className="text-xs">Minuto Inicial (Jogo)</Label>
+                          <Label className="text-xs text-muted-foreground">Minuto Inicial (referência jogo)</Label>
                           <Input
                             type="number"
                             placeholder={newLinkType === 'second_half' ? '45' : '0'}
@@ -608,10 +648,9 @@ export default function VideoUpload() {
                             value={newStartMinute}
                             onChange={(e) => setNewStartMinute(e.target.value)}
                           />
-                          <p className="text-xs text-muted-foreground">Em que minuto do jogo o vídeo começa</p>
                         </div>
                         <div className="space-y-2">
-                          <Label className="text-xs">Minuto Final (Jogo)</Label>
+                          <Label className="text-xs text-muted-foreground">Minuto Final (referência jogo)</Label>
                           <Input
                             type="number"
                             placeholder={newLinkType === 'first_half' ? '45' : newLinkType === 'second_half' ? '90' : '90'}
@@ -620,18 +659,6 @@ export default function VideoUpload() {
                             value={newEndMinute}
                             onChange={(e) => setNewEndMinute(e.target.value)}
                           />
-                          <p className="text-xs text-muted-foreground">Em que minuto do jogo o vídeo termina</p>
-                        </div>
-                        <div className="space-y-2">
-                          <Label className="text-xs">Duração do Vídeo (seg)</Label>
-                          <Input
-                            type="number"
-                            placeholder="Opcional"
-                            min={0}
-                            value={newDuration}
-                            onChange={(e) => setNewDuration(e.target.value)}
-                          />
-                          <p className="text-xs text-muted-foreground">Deixe vazio para usar cálculo padrão</p>
                         </div>
                       </div>
                     </div>
@@ -776,6 +803,28 @@ export default function VideoUpload() {
                           </Button>
                         </div>
                       ))}
+                      
+                      {/* Duration input for uploaded files */}
+                      {files.some(f => f.status === 'complete') && (
+                        <div className="p-4 rounded-lg bg-primary/5 border border-primary/20 space-y-3">
+                          <div className="flex items-center gap-2 text-sm font-medium text-primary">
+                            <Clock className="h-4 w-4" />
+                            ⚠️ IMPORTANTE: Duração Real do Vídeo
+                          </div>
+                          <p className="text-xs text-muted-foreground">
+                            Informe a duração EXATA do arquivo em segundos. 
+                            Vídeo de 1:17 = 77 seg | 2:30 = 150 seg | 5:00 = 300 seg
+                          </p>
+                          <Input
+                            type="number"
+                            placeholder="Duração em segundos (ex: 77 para 1:17)"
+                            min={1}
+                            value={uploadedFileDuration}
+                            onChange={(e) => setUploadedFileDuration(e.target.value)}
+                            className="text-lg font-mono"
+                          />
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
                 )}
