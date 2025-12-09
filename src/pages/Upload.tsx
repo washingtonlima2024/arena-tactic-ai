@@ -83,7 +83,7 @@ const extractEmbedUrl = (input: string): string => {
 export default function VideoUpload() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const initialMode = searchParams.get('mode') === 'file' ? 'file' : 'link';
+  const initialMode = searchParams.get('mode') === 'link' ? 'link' : 'file';
   
   const [files, setFiles] = useState<UploadedFile[]>([]);
   const [isDragging, setIsDragging] = useState(false);
@@ -528,13 +528,13 @@ export default function VideoUpload() {
             {/* Mode Tabs */}
             <Tabs value={uploadMode} onValueChange={(v) => setUploadMode(v as 'link' | 'file')}>
               <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="link" className="gap-2">
-                  <LinkIcon className="h-4 w-4" />
-                  Link/Embed
-                </TabsTrigger>
                 <TabsTrigger value="file" className="gap-2">
                   <UploadIcon className="h-4 w-4" />
                   Upload de Arquivo
+                </TabsTrigger>
+                <TabsTrigger value="link" className="gap-2">
+                  <LinkIcon className="h-4 w-4" />
+                  Link/Embed
                 </TabsTrigger>
               </TabsList>
 
