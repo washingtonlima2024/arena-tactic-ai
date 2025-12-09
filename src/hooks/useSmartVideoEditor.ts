@@ -126,7 +126,7 @@ export const useSmartVideoEditor = () => {
 
   const analyzeVideo = useCallback(async (projectId: string, videoUrl: string) => {
     setIsAnalyzing(true);
-    setUploadStatus('Analisando vídeo com IA...');
+    setUploadStatus('Iniciando análise com Google Video Intelligence...');
 
     try {
       // Update project status
