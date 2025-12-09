@@ -25,11 +25,8 @@ interface DbAnalysisJob {
 function mapDbJobToAnalysisJob(dbJob: DbAnalysisJob): AnalysisJob {
   const defaultSteps: AnalysisStep[] = [
     { name: 'Preparação do vídeo', status: 'pending', progress: 0 },
-    { name: 'Extração de áudio', status: 'pending', progress: 0 },
-    { name: 'Transcrição automática', status: 'pending', progress: 0 },
-    { name: 'Análise visual (Vision AI)', status: 'pending', progress: 0 },
+    { name: 'Detecção inteligente de cortes', status: 'pending', progress: 0 },
     { name: 'Identificação de eventos', status: 'pending', progress: 0 },
-    { name: 'Análise tática', status: 'pending', progress: 0 },
     { name: 'Finalização', status: 'pending', progress: 0 },
   ];
 
