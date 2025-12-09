@@ -96,47 +96,54 @@ confidence deve ser entre 0.6 e 0.95
 
 Gere exatamente ${targetCount} clips bem distribuídos ao longo dos ${videoDuration} segundos.`;
 
-    const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${lovableApiKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
-        messages: [{ role: 'user', content: prompt }]
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('AI API error:', response.status, errorText);
-      
-      if (response.status === 429) {
-        throw new Error('Rate limit exceeded. Please try again later.');
-      }
-      if (response.status === 402) {
-        throw new Error('Payment required. Please add credits to your workspace.');
-      }
-      throw new Error(`AI request failed: ${response.status}`);
-    }
-
-    const data = await response.json();
-    const content = data.choices?.[0]?.message?.content || '';
-    console.log('AI response received, length:', content.length);
-
-    // Parse JSON from response
     let clips: Array<{ start_second: number; end_second: number; title: string; event_type: string; confidence: number }> = [];
     
     try {
-      const jsonMatch = content.match(/\[[\s\S]*?\]/);
-      if (jsonMatch) {
-        clips = JSON.parse(jsonMatch[0]);
-        console.log(`Parsed ${clips.length} clips from AI`);
+      const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${lovableApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: 'google/gemini-2.5-flash',
+          messages: [{ role: 'user', content: prompt }]
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('AI API error:', response.status, errorText.substring(0, 200));
+        
+        if (response.status === 402) {
+          throw new Error('Payment required. Please add credits to your workspace.');
+        }
+        // For other errors (429, 500, etc), use fallback
+        console.log('AI unavailable, using fallback clip generation...');
+      } else {
+        const data = await response.json();
+        const content = data.choices?.[0]?.message?.content || '';
+        console.log('AI response received, length:', content.length);
+
+        // Parse JSON from response
+        try {
+          const jsonMatch = content.match(/\[[\s\S]*?\]/);
+          if (jsonMatch) {
+            clips = JSON.parse(jsonMatch[0]);
+            console.log(`Parsed ${clips.length} clips from AI`);
+          }
+        } catch (parseError) {
+          console.error('JSON parse error:', parseError);
+          console.log('Raw content:', content.substring(0, 500));
+        }
       }
-    } catch (parseError) {
-      console.error('JSON parse error:', parseError);
-      console.log('Raw content:', content.substring(0, 500));
+    } catch (aiError) {
+      // Only re-throw payment errors
+      if (aiError instanceof Error && aiError.message.includes('Payment required')) {
+        throw aiError;
+      }
+      console.error('AI request failed:', aiError);
+      console.log('Using fallback clip generation...');
     }
 
     // Validate clips
