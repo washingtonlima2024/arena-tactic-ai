@@ -37,6 +37,7 @@ import { ClipVignette } from '@/components/media/ClipVignette';
 import { TeamPlaylist } from '@/components/media/TeamPlaylist';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
 import { SocialContentDialog } from '@/components/media/SocialContentDialog';
+import { ExportPreviewDialog } from '@/components/media/ExportPreviewDialog';
 import { toast } from '@/hooks/use-toast';
 
 // Social platform icons
@@ -65,6 +66,7 @@ export default function Media() {
   const [playingClipId, setPlayingClipId] = useState<string | null>(null);
   const [showingVignette, setShowingVignette] = useState(false);
   const [socialDialogOpen, setSocialDialogOpen] = useState(false);
+  const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
   const [selectedPlatform, setSelectedPlatform] = useState<string>('');
   const [isGeneratingSocial, setIsGeneratingSocial] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -583,13 +585,10 @@ export default function Media() {
                     variant="arena" 
                     size="lg"
                     disabled={clips.length === 0}
-                    onClick={() => {
-                      setSelectedPlatform('Vídeo Personalizado');
-                      setSocialDialogOpen(true);
-                    }}
+                    onClick={() => setExportPreviewOpen(true)}
                   >
                     <Download className="mr-2 h-5 w-5" />
-                    {matchVideo ? 'Exportar Vídeo' : 'Exportar Imagem'}
+                    Exportar Preview
                   </Button>
                 </div>
                 {!matchVideo && (
@@ -674,6 +673,21 @@ export default function Media() {
                 }, 3000);
               }}
               isGenerating={isGeneratingSocial}
+            />
+            
+            {/* Export Preview Dialog */}
+            <ExportPreviewDialog
+              isOpen={exportPreviewOpen}
+              onClose={() => setExportPreviewOpen(false)}
+              clips={clips.map(c => ({
+                ...c,
+                thumbnail: getThumbnail(c.id)?.imageUrl,
+              }))}
+              matchVideo={matchVideo}
+              homeTeam={selectedMatch?.home_team?.name || 'Time Casa'}
+              awayTeam={selectedMatch?.away_team?.name || 'Time Fora'}
+              homeScore={selectedMatch?.home_score || 0}
+              awayScore={selectedMatch?.away_score || 0}
             />
           </TabsContent>
         </Tabs>

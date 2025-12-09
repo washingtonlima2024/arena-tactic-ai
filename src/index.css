@@ -381,3 +381,9 @@
     0 0 30px hsl(var(--neon-blue) / 0.6),
     0 0 50px hsl(var(--neon-blue) / 0.4);
 }
+
+/* Auto-advance animation for vignettes */
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 0; }
+}
