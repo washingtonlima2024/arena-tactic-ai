@@ -30,7 +30,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
-import { useClipGeneration } from '@/hooks/useClipGeneration';
+
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipVignette } from '@/components/media/ClipVignette';
@@ -72,15 +72,6 @@ export default function Media() {
   const queryClient = useQueryClient();
   
   const { thumbnails, generateThumbnail, generateAllThumbnails, isGenerating, getThumbnail, generatingIds } = useThumbnailGeneration(matchId);
-  const { 
-    generateClip, 
-    generateAllClips, 
-    isGenerating: isGeneratingClips, 
-    isGeneratingEvent: isGeneratingClip,
-    progress: clipProgress,
-    cancel: cancelClipGeneration,
-    isCancelled
-  } = useClipGeneration();
   
   const { data: events, refetch: refetchEvents } = useMatchEvents(matchId);
   
@@ -245,20 +236,13 @@ export default function Media() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <p className="text-sm text-muted-foreground">
-                  {clips.length} eventos • Gere capas e extraia clips (~20s cada) para redes sociais
+                  {clips.length} eventos • Clique para reproduzir a partir do timestamp original
                 </p>
                 {matchVideo ? (
-                  matchVideo.file_url.includes('embed') || matchVideo.file_url.includes('xtream') ? (
-                    <Badge variant="warning" className="gap-1">
-                      <Film className="h-3 w-3" />
-                      Embed (só reprodução)
-                    </Badge>
-                  ) : (
-                    <Badge variant="success" className="gap-1">
-                      <Video className="h-3 w-3" />
-                      Vídeo disponível
-                    </Badge>
-                  )
+                  <Badge variant="success" className="gap-1">
+                    <Video className="h-3 w-3" />
+                    Reprodução instantânea
+                  </Badge>
                 ) : (
                   <Badge variant="warning" className="gap-1">
                     <AlertCircle className="h-3 w-3" />
@@ -267,80 +251,6 @@ export default function Media() {
                 )}
               </div>
               <div className="flex gap-2">
-                {/* Generate Clips Button - Only show for direct video files, not embeds */}
-{clips.length > 0 && matchVideo && clips.some(c => !c.clipUrl) && 
-                  !matchVideo.file_url.includes('embed') && !matchVideo.file_url.includes('xtream') && (
-                  <>
-                    <Button 
-                      variant="arena" 
-                      size="sm"
-                      onClick={async () => {
-                        if (!matchVideo.file_url) {
-                          toast({
-                            title: "Vídeo não encontrado",
-                            description: "Faça upload de um vídeo na página de Upload",
-                            variant: "destructive"
-                          });
-                          return;
-                        }
-                        // Use sensible defaults: assume full 90-minute match if not configured
-                        const videoStartMs = (matchVideo.start_minute ?? 0) * 60 * 1000;
-                        const videoEndMs = (matchVideo.end_minute ?? 90) * 60 * 1000;
-                        // If duration not set, estimate from start/end range or use 90 min default
-                        const estimatedDurationMs = matchVideo.duration_seconds 
-                          ? matchVideo.duration_seconds * 1000
-                          : (videoEndMs - videoStartMs) || (90 * 60 * 1000);
-                        
-                        const clipsToGenerate = clips
-                          .filter(c => !c.clipUrl)
-                          .map(c => ({
-                            eventId: c.id,
-                            eventMinuteMs: c.eventMs, // Use eventMs directly from metadata
-                            videoUrl: matchVideo.file_url,
-                            videoStartMs,
-                            videoEndMs,
-                            videoDurationMs: estimatedDurationMs,
-                            matchId: matchId,
-                            bufferBeforeMs: 3000,
-                            bufferAfterMs: 5000 // 5s after event per user requirement
-                          }));
-                        await generateAllClips(clipsToGenerate);
-                        refetchEvents();
-                      }}
-                      disabled={isGeneratingClips}
-                    >
-                      {isGeneratingClips ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          {clipProgress.currentClip && clipProgress.totalClips 
-                            ? `Clip ${clipProgress.currentClip}/${clipProgress.totalClips}`
-                            : clipProgress.message
-                          }
-                        </>
-                      ) : (
-                        <>
-                          <Scissors className="mr-2 h-4 w-4" />
-                          Extrair Clips ({clips.filter(c => !c.clipUrl).length})
-                        </>
-                      )}
-                    </Button>
-                    {isGeneratingClips && (
-                      <Button 
-                        variant="destructive" 
-                        size="sm"
-                        onClick={cancelClipGeneration}
-                      >
-                        Cancelar
-                      </Button>
-                    )}
-                  </>
-                )}
-                {clips.length > 0 && clips.every(c => c.clipUrl) && (
-                  <Badge variant="success" className="gap-1">
-                    <CheckCircle className="h-3 w-3" />
-                    Todos clips extraídos
-                  </Badge>
-                )}
                 {clips.length > 0 && clips.some(c => !getThumbnail(c.id)) && (
                   <Button 
                     variant="outline" 
@@ -369,12 +279,6 @@ export default function Media() {
                       <Image className="mr-2 h-4 w-4" />
                     )}
                     Gerar Capas
-                  </Button>
-                )}
-                {clips.length > 0 && clips.some(c => c.clipUrl) && (
-                  <Button variant="outline" size="sm">
-                    <Download className="mr-2 h-4 w-4" />
-                    Baixar Todos
                   </Button>
                 )}
               </div>
@@ -424,18 +328,19 @@ export default function Media() {
             )}
 
             {/* Embed video warning - can't extract clips from embeds */}
-            {matchVideo && (matchVideo.file_url.includes('embed') || matchVideo.file_url.includes('xtream')) && clips.length > 0 && (
+            {/* Info card about timestamp playback */}
+            {matchVideo && clips.length > 0 && (
               <Card variant="glass" className="border-primary/30 bg-primary/5">
                 <CardContent className="py-4">
                   <div className="flex items-center gap-4">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/20">
-                      <Film className="h-5 w-5 text-primary" />
+                      <Play className="h-5 w-5 text-primary" />
                     </div>
                     <div className="flex-1">
-                      <p className="font-medium">Vídeo via Embed</p>
+                      <p className="font-medium">Reprodução por Timestamp</p>
                       <p className="text-sm text-muted-foreground">
-                        Clips são reproduzidos diretamente no player via iframe. Para extração de clips separados, 
-                        faça upload de um arquivo MP4 direto na página de Upload.
+                        Os clips são reproduzidos diretamente do vídeo original a partir do timestamp do evento 
+                        (3s antes e 5s depois). Sem downloads ou processamento - reprodução instantânea!
                       </p>
                     </div>
                   </div>
@@ -456,16 +361,12 @@ export default function Media() {
                   const thumbnail = getThumbnail(clip.id);
                   const isPlaying = playingClipId === clip.id;
                   const isGeneratingThumbnail = isGenerating(clip.id);
-                  const isExtractingClip = isGeneratingClip(clip.id);
                   
                   const handlePlayClip = () => {
-                    // Se tem clipUrl extraído, pode reproduzir direto
-                    const hasClipUrl = !!clip.clipUrl;
-                    
-                    if (!matchVideo && !hasClipUrl) {
+                    if (!matchVideo && !clip.clipUrl) {
                       toast({
                         title: "Vídeo não disponível",
-                        description: "Extraia o clip ou faça upload do vídeo da partida",
+                        description: "Faça upload do vídeo da partida para reproduzir",
                         variant: "destructive"
                       });
                       return;
@@ -475,7 +376,6 @@ export default function Media() {
                       setPlayingClipId(null);
                       setShowingVignette(false);
                     } else {
-                      // Se tiver thumbnail, mostra a vinheta primeiro
                       if (thumbnail?.imageUrl) {
                         setShowingVignette(true);
                       }
@@ -495,47 +395,6 @@ export default function Media() {
                       matchId: matchId,
                       description: clip.description
                     });
-                  };
-
-                  const isEmbedVideo = matchVideo?.file_url.includes('embed') || matchVideo?.file_url.includes('xtream');
-
-                  const handleExtractClip = async () => {
-                    if (isEmbedVideo) {
-                      toast({
-                        title: "Extração não disponível",
-                        description: "Vídeos via embed não suportam extração de clips. Faça upload de um arquivo MP4 direto.",
-                        variant: "destructive"
-                      });
-                      return;
-                    }
-                    if (!matchVideo?.file_url) {
-                      toast({
-                        title: "Vídeo não encontrado",
-                        description: "Faça upload de um vídeo na página de Upload",
-                        variant: "destructive"
-                      });
-                      return;
-                    }
-                    // Use sensible defaults if sync data not configured
-                    const videoStartMs = (matchVideo.start_minute ?? 0) * 60 * 1000;
-                    const videoEndMs = (matchVideo.end_minute ?? 90) * 60 * 1000;
-                    const videoDurationMs = matchVideo.duration_seconds 
-                      ? matchVideo.duration_seconds * 1000
-                      : (videoEndMs - videoStartMs) || (90 * 60 * 1000);
-                    
-                    const eventMs = (clip.minute * 60 + clip.second) * 1000;
-                    await generateClip({
-                      eventId: clip.id,
-                      eventMinuteMs: eventMs,
-                      videoUrl: matchVideo.file_url,
-                      videoStartMs,
-                      videoEndMs,
-                      videoDurationMs,
-                      matchId: matchId,
-                      bufferBeforeMs: 3000,
-                      bufferAfterMs: 3000
-                    });
-                    refetchEvents();
                   };
                   
                   return (
@@ -613,24 +472,6 @@ export default function Media() {
                             >
                               <Sparkles className="mr-1 h-3 w-3" />
                               Gerar Capa
-                            </Button>
-                          )}
-                          {/* Botão Extrair Clip - Only show for direct video files, not embeds */}
-                          {matchVideo && !clip.clipUrl && !isExtractingClip && !isEmbedVideo && (
-                            <Button 
-                              variant="outline" 
-                              size="sm" 
-                              className="flex-1"
-                              onClick={handleExtractClip}
-                            >
-                              <Scissors className="mr-1 h-3 w-3" />
-                              Extrair
-                            </Button>
-                          )}
-                          {isExtractingClip && (
-                            <Button variant="outline" size="sm" className="flex-1" disabled>
-                              <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                              Extraindo...
                             </Button>
                           )}
                           {/* Botão Reproduzir */}
