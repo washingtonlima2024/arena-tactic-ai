@@ -25,15 +25,16 @@ import {
   ListVideo,
   Check,
   Repeat,
-  Download,
+  Share2,
   ChevronLeft,
-  ChevronRight
+  Settings2
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { TransitionVignette } from './TransitionVignette';
 import { ClipVignette } from './ClipVignette';
 import arenaPlayLogo from '@/assets/arena-play-icon.png';
+import { toast } from 'sonner';
 
 // Video formats
 const VIDEO_FORMATS = [
@@ -43,11 +44,35 @@ const VIDEO_FORMATS = [
   { id: '4:5', name: 'Feed Vertical', ratio: '4:5', width: 1080, height: 1350, icon: RectangleVertical },
 ];
 
-// Device types
+// Device types with responsive dimensions
 const DEVICES = [
-  { id: 'phone', name: 'Celular', icon: Smartphone, bestFor: ['9:16', '4:5'] },
-  { id: 'tablet', name: 'Tablet', icon: Tablet, bestFor: ['1:1', '4:5'] },
-  { id: 'desktop', name: 'Computador', icon: Monitor, bestFor: ['16:9', '1:1'] },
+  { 
+    id: 'phone', 
+    name: 'Celular', 
+    icon: Smartphone, 
+    bestFor: ['9:16', '4:5'],
+    dimensions: { base: { w: 280, h: 560 }, sm: { w: 320, h: 640 }, lg: { w: 360, h: 720 } },
+    borderRadius: 40,
+    padding: 12
+  },
+  { 
+    id: 'tablet', 
+    name: 'Tablet', 
+    icon: Tablet, 
+    bestFor: ['1:1', '4:5'],
+    dimensions: { base: { w: 380, h: 520 }, sm: { w: 480, h: 640 }, lg: { w: 560, h: 750 } },
+    borderRadius: 24,
+    padding: 16
+  },
+  { 
+    id: 'desktop', 
+    name: 'Computador', 
+    icon: Monitor, 
+    bestFor: ['16:9', '1:1'],
+    dimensions: { base: { w: 500, h: 340 }, sm: { w: 640, h: 420 }, lg: { w: 800, h: 520 } },
+    borderRadius: 12,
+    padding: 8
+  },
 ];
 
 interface Clip {
@@ -100,6 +125,7 @@ export function ExportPreviewDialog({
   const [selectedDevice, setSelectedDevice] = useState(DEVICES[0]);
   const [selectedClipIds, setSelectedClipIds] = useState<Set<string>>(new Set());
   const [includeVignettes, setIncludeVignettes] = useState(true);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Preview state
   const [playbackState, setPlaybackState] = useState<PlaybackState>({ type: 'idle' });
@@ -123,6 +149,7 @@ export function ExportPreviewDialog({
       setPlaybackState({ type: 'idle' });
       setSelectedClipIds(new Set());
       setClipProgress(0);
+      setShowSettings(false);
     }
   }, [isOpen]);
 
@@ -252,27 +279,34 @@ export function ExportPreviewDialog({
     }
   };
 
+  // Share functionality
+  const handleShare = async () => {
+    const shareData = {
+      title: `${homeTeam} vs ${awayTeam} - Melhores Momentos`,
+      text: `Confira os melhores momentos: ${homeTeam} ${homeScore} x ${awayScore} ${awayTeam}`,
+      url: window.location.href,
+    };
+
+    try {
+      if (navigator.share) {
+        await navigator.share(shareData);
+        toast.success('Conteúdo compartilhado!');
+      } else {
+        await navigator.clipboard.writeText(`${shareData.title}\n${shareData.text}\n${shareData.url}`);
+        toast.success('Link copiado para a área de transferência!');
+      }
+    } catch (error) {
+      if ((error as Error).name !== 'AbortError') {
+        toast.error('Erro ao compartilhar');
+      }
+    }
+  };
+
   // Get aspect ratio style for device screen
   const getScreenStyle = () => {
     const [w, h] = selectedFormat.ratio.split(':').map(Number);
     return { aspectRatio: `${w}/${h}` };
   };
-
-  // Device mockup dimensions
-  const getDeviceDimensions = () => {
-    switch (selectedDevice.id) {
-      case 'phone':
-        return { width: 320, height: 640, borderRadius: 40, padding: 12 };
-      case 'tablet':
-        return { width: 480, height: 640, borderRadius: 24, padding: 16 };
-      case 'desktop':
-        return { width: 720, height: 480, borderRadius: 12, padding: 8 };
-      default:
-        return { width: 320, height: 640, borderRadius: 40, padding: 12 };
-    }
-  };
-
-  const deviceDims = getDeviceDimensions();
 
   // Render config step
   if (step === 'config') {
@@ -460,11 +494,11 @@ export function ExportPreviewDialog({
     );
   }
 
-  // Render preview step
+  // Render preview step - responsive layout
   return (
-    <Dialog open={isOpen} onOpenChange={onClose}>
+    <Dialog open={isOpen} onOpenChange={() => {}}>
       <DialogContent 
-        className="max-w-[95vw] w-full h-[95vh] p-0 border-0 bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950"
+        className="max-w-[100vw] w-full h-[100vh] p-0 border-0 bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950"
         hideCloseButton
       >
         <VisuallyHidden>
@@ -472,54 +506,128 @@ export function ExportPreviewDialog({
         </VisuallyHidden>
         
         <div ref={containerRef} className="flex flex-col h-full">
-          {/* Header */}
-          <div className="flex items-center justify-between px-6 py-4 border-b border-white/10">
-            <div className="flex items-center gap-4">
+          {/* Header - responsive */}
+          <div className="flex items-center justify-between px-3 sm:px-6 py-3 sm:py-4 border-b border-white/10">
+            <div className="flex items-center gap-2 sm:gap-4">
               <Button 
                 variant="ghost" 
                 size="icon" 
                 onClick={() => setStep('config')}
-                className="text-white hover:bg-white/10"
+                className="text-white hover:bg-white/10 h-8 w-8 sm:h-10 sm:w-10"
               >
-                <ChevronLeft className="h-5 w-5" />
+                <ChevronLeft className="h-4 w-4 sm:h-5 sm:w-5" />
               </Button>
               <div>
-                <h2 className="text-white font-medium">Preview de Exportação</h2>
-                <p className="text-white/60 text-sm">
+                <h2 className="text-white font-medium text-sm sm:text-base">Preview</h2>
+                <p className="text-white/60 text-xs sm:text-sm hidden sm:block">
                   {selectedFormat.name} ({selectedFormat.ratio}) • {selectedDevice.name}
                 </p>
               </div>
             </div>
             
-            <div className="flex items-center gap-2">
-              <Badge variant="arena">
+            <div className="flex items-center gap-1 sm:gap-2">
+              {/* Device selector in preview - responsive */}
+              <div className="hidden md:flex items-center gap-1 mr-2 p-1 bg-white/10 rounded-lg">
+                {DEVICES.map(device => {
+                  const IconComponent = device.icon;
+                  return (
+                    <button
+                      key={device.id}
+                      onClick={() => setSelectedDevice(device)}
+                      className={cn(
+                        "p-2 rounded transition-all",
+                        selectedDevice.id === device.id 
+                          ? "bg-primary text-primary-foreground" 
+                          : "text-white/60 hover:text-white hover:bg-white/10"
+                      )}
+                      title={device.name}
+                    >
+                      <IconComponent className="h-4 w-4" />
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Mobile device selector button */}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="md:hidden text-white hover:bg-white/10 h-8 w-8"
+                onClick={() => setShowSettings(!showSettings)}
+              >
+                <Settings2 className="h-4 w-4" />
+              </Button>
+
+              <Badge variant="arena" className="text-xs">
                 {currentClipIndex >= 0 ? `${currentClipIndex + 1}/${selectedClips.length}` : '0/0'}
               </Badge>
+              
               <Button 
                 variant="ghost" 
                 size="icon"
-                className="text-white hover:bg-white/10"
+                className="text-white hover:bg-white/10 h-8 w-8 sm:h-10 sm:w-10"
+                onClick={handleShare}
+                title="Compartilhar"
+              >
+                <Share2 className="h-4 w-4 sm:h-5 sm:w-5" />
+              </Button>
+              
+              <Button 
+                variant="ghost" 
+                size="icon"
+                className="text-white hover:bg-white/10 h-8 w-8 sm:h-10 sm:w-10"
                 onClick={onClose}
               >
-                <X className="h-5 w-5" />
+                <X className="h-4 w-4 sm:h-5 sm:w-5" />
               </Button>
             </div>
           </div>
 
-          {/* Main content */}
-          <div className="flex-1 flex items-center justify-center p-8 overflow-hidden">
+          {/* Mobile settings panel */}
+          {showSettings && (
+            <div className="md:hidden px-4 py-3 bg-black/50 border-b border-white/10">
+              <div className="flex items-center justify-between">
+                <span className="text-white/60 text-sm">Dispositivo:</span>
+                <div className="flex items-center gap-1 p-1 bg-white/10 rounded-lg">
+                  {DEVICES.map(device => {
+                    const IconComponent = device.icon;
+                    return (
+                      <button
+                        key={device.id}
+                        onClick={() => {
+                          setSelectedDevice(device);
+                          setShowSettings(false);
+                        }}
+                        className={cn(
+                          "p-2 rounded transition-all",
+                          selectedDevice.id === device.id 
+                            ? "bg-primary text-primary-foreground" 
+                            : "text-white/60 hover:text-white hover:bg-white/10"
+                        )}
+                      >
+                        <IconComponent className="h-4 w-4" />
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Main content - responsive device mockup */}
+          <div className="flex-1 flex items-center justify-center p-2 sm:p-4 md:p-8 overflow-hidden">
             {playbackState.type === 'complete' ? (
-              /* Complete screen */
-              <div className="text-center text-white space-y-6">
+              /* Complete screen - responsive */
+              <div className="text-center text-white space-y-4 sm:space-y-6 px-4">
                 <div className="relative inline-block">
                   <div className="absolute inset-0 blur-2xl bg-primary/30 animate-pulse" />
-                  <img src={arenaPlayLogo} alt="Arena Play" className="relative h-20 mx-auto" />
+                  <img src={arenaPlayLogo} alt="Arena Play" className="relative h-12 sm:h-16 md:h-20 mx-auto" />
                 </div>
-                <h2 className="text-2xl font-bold">Preview Concluído!</h2>
-                <p className="text-white/60">
+                <h2 className="text-lg sm:text-xl md:text-2xl font-bold">Preview Concluído!</h2>
+                <p className="text-white/60 text-sm sm:text-base">
                   {selectedClips.length} clips • {selectedFormat.ratio} • {selectedDevice.name}
                 </p>
-                <div className="flex items-center justify-center gap-4">
+                <div className="flex flex-wrap items-center justify-center gap-2 sm:gap-4">
                   <Button 
                     variant="outline" 
                     onClick={() => {
@@ -527,6 +635,7 @@ export function ExportPreviewDialog({
                       startPreview();
                     }}
                     className="border-white/30 text-white hover:bg-white/10"
+                    size="sm"
                   >
                     <Repeat className="mr-2 h-4 w-4" />
                     Repetir
@@ -535,69 +644,75 @@ export function ExportPreviewDialog({
                     variant="outline"
                     onClick={() => setStep('config')}
                     className="border-primary/50 text-primary hover:bg-primary/10"
+                    size="sm"
                   >
                     <ChevronLeft className="mr-2 h-4 w-4" />
                     Editar
                   </Button>
-                  <Button variant="arena">
-                    <Download className="mr-2 h-4 w-4" />
-                    Gravar Tela
+                  <Button 
+                    variant="arena"
+                    onClick={handleShare}
+                    size="sm"
+                  >
+                    <Share2 className="mr-2 h-4 w-4" />
+                    Compartilhar
                   </Button>
                 </div>
               </div>
             ) : (
-              /* Device mockup with content */
+              /* Device mockup with content - responsive sizing */
               <div 
-                className="relative transition-all duration-500"
-                style={{
-                  width: deviceDims.width,
-                  maxHeight: '100%',
-                }}
+                className="relative transition-all duration-500 w-full max-w-fit"
               >
-                {/* Device frame */}
+                {/* Device frame - responsive dimensions */}
                 <div 
-                  className="relative bg-gray-900 shadow-2xl border-4 border-gray-800"
+                  className={cn(
+                    "relative bg-gray-900 shadow-2xl border-4 border-gray-800 mx-auto",
+                    "transition-all duration-300"
+                  )}
                   style={{
-                    borderRadius: deviceDims.borderRadius,
-                    padding: deviceDims.padding,
+                    width: `min(${selectedDevice.dimensions.lg.w}px, calc(100vw - 32px))`,
+                    maxHeight: `min(${selectedDevice.dimensions.lg.h}px, calc(100vh - 200px))`,
+                    borderRadius: selectedDevice.borderRadius,
+                    padding: selectedDevice.padding,
                   }}
                 >
                   {/* Phone notch */}
                   {selectedDevice.id === 'phone' && (
-                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1/3 h-7 bg-black rounded-b-2xl z-30 flex items-center justify-center gap-2">
-                      <div className="w-2 h-2 rounded-full bg-gray-700" />
-                      <div className="w-12 h-3 rounded-full bg-gray-800" />
+                    <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1/3 h-5 sm:h-7 bg-black rounded-b-2xl z-30 flex items-center justify-center gap-2">
+                      <div className="w-1.5 sm:w-2 h-1.5 sm:h-2 rounded-full bg-gray-700" />
+                      <div className="w-8 sm:w-12 h-2 sm:h-3 rounded-full bg-gray-800" />
                     </div>
                   )}
                   
                   {/* Tablet camera */}
                   {selectedDevice.id === 'tablet' && (
-                    <div className="absolute top-3 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-gray-700 z-30" />
+                    <div className="absolute top-2 sm:top-3 left-1/2 -translate-x-1/2 w-1.5 sm:w-2 h-1.5 sm:h-2 rounded-full bg-gray-700 z-30" />
                   )}
                   
                   {/* Desktop webcam */}
                   {selectedDevice.id === 'desktop' && (
-                    <div className="absolute top-1 left-1/2 -translate-x-1/2 w-2 h-2 rounded-full bg-gray-700 z-30" />
+                    <div className="absolute top-1 left-1/2 -translate-x-1/2 w-1.5 sm:w-2 h-1.5 sm:h-2 rounded-full bg-gray-700 z-30" />
                   )}
 
                   {/* Screen */}
                   <div 
-                    className="relative bg-black overflow-hidden"
+                    className="relative bg-black overflow-hidden w-full h-full"
                     style={{
-                      borderRadius: Math.max(0, deviceDims.borderRadius - deviceDims.padding - 4),
+                      borderRadius: Math.max(0, selectedDevice.borderRadius - selectedDevice.padding - 4),
                       ...getScreenStyle(),
                     }}
                   >
                     {/* Opening Vignette */}
                     {playbackState.type === 'opening' && (
                       <div className="absolute inset-0 z-20 bg-gradient-to-br from-gray-900 via-primary/20 to-gray-900 flex items-center justify-center">
-                        <div className="text-center text-white animate-in fade-in zoom-in duration-700">
-                          <img src={arenaPlayLogo} alt="Arena Play" className="h-16 mx-auto mb-4" />
-                          <h3 className="text-xl font-bold">{homeTeam} vs {awayTeam}</h3>
-                          <p className="text-3xl font-display font-bold mt-2">{homeScore} - {awayScore}</p>
-                          <p className="text-sm text-white/60 mt-4">Melhores Momentos</p>
-                          <div className="mt-6 animate-pulse">
-                            <div className="w-12 h-1 bg-primary rounded-full mx-auto" />
+                        <div className="text-center text-white animate-in fade-in zoom-in duration-700 p-4">
+                          <img src={arenaPlayLogo} alt="Arena Play" className="h-10 sm:h-16 mx-auto mb-2 sm:mb-4" />
+                          <h3 className="text-base sm:text-xl font-bold">{homeTeam} vs {awayTeam}</h3>
+                          <p className="text-xl sm:text-3xl font-display font-bold mt-1 sm:mt-2">{homeScore} - {awayScore}</p>
+                          <p className="text-xs sm:text-sm text-white/60 mt-2 sm:mt-4">Melhores Momentos</p>
+                          <div className="mt-3 sm:mt-6 animate-pulse">
+                            <div className="w-8 sm:w-12 h-1 bg-primary rounded-full mx-auto" />
                           </div>
                         </div>
                         {/* Auto-advance after 3s */}
@@ -624,10 +739,10 @@ export function ExportPreviewDialog({
                     {/* Closing Vignette */}
                     {playbackState.type === 'closing' && (
                       <div className="absolute inset-0 z-20 bg-gradient-to-br from-gray-900 via-primary/20 to-gray-900 flex items-center justify-center">
-                        <div className="text-center text-white animate-in fade-in zoom-in duration-500">
-                          <img src={arenaPlayLogo} alt="Arena Play" className="h-12 mx-auto mb-4 opacity-80" />
-                          <p className="text-lg font-medium">FIM</p>
-                          <p className="text-sm text-white/60 mt-2">{selectedClips.length} clips</p>
+                        <div className="text-center text-white animate-in fade-in zoom-in duration-500 p-4">
+                          <img src={arenaPlayLogo} alt="Arena Play" className="h-8 sm:h-12 mx-auto mb-2 sm:mb-4 opacity-80" />
+                          <p className="text-base sm:text-lg font-medium">FIM</p>
+                          <p className="text-xs sm:text-sm text-white/60 mt-1 sm:mt-2">{selectedClips.length} clips</p>
                         </div>
                         {/* Auto-advance after 2s */}
                         <div 
@@ -680,22 +795,22 @@ export function ExportPreviewDialog({
                               className="w-full h-full object-cover"
                             />
                             <div className="absolute inset-0 bg-gradient-to-t from-black/80 to-transparent" />
-                            <div className="absolute bottom-4 left-4 right-4 text-white">
-                              <Badge variant="arena" className="mb-2">
+                            <div className="absolute bottom-2 sm:bottom-4 left-2 sm:left-4 right-2 sm:right-4 text-white">
+                              <Badge variant="arena" className="mb-1 sm:mb-2 text-xs">
                                 {currentClip.type.replace(/_/g, ' ')}
                               </Badge>
-                              <p className="text-2xl font-bold">{currentClip.minute}'</p>
-                              <p className="text-sm opacity-80">{currentClip.title}</p>
+                              <p className="text-lg sm:text-2xl font-bold">{currentClip.minute}'</p>
+                              <p className="text-xs sm:text-sm opacity-80 truncate">{currentClip.title}</p>
                             </div>
                             {/* Auto-advance timer */}
                             <StaticClipTimer duration={5000} onComplete={handleClipEnd} />
                           </div>
                         ) : (
                           <div className="w-full h-full flex items-center justify-center bg-gray-900">
-                            <div className="text-center text-white">
-                              <Play className="h-12 w-12 mx-auto mb-2 text-primary" />
-                              <p className="text-lg font-medium">{currentClip.title}</p>
-                              <p className="text-sm text-white/60">{currentClip.minute}'</p>
+                            <div className="text-center text-white p-4">
+                              <Play className="h-8 sm:h-12 w-8 sm:w-12 mx-auto mb-2 text-primary" />
+                              <p className="text-sm sm:text-lg font-medium truncate">{currentClip.title}</p>
+                              <p className="text-xs sm:text-sm text-white/60">{currentClip.minute}'</p>
                             </div>
                             <StaticClipTimer duration={5000} onComplete={handleClipEnd} />
                           </div>
@@ -706,15 +821,15 @@ export function ExportPreviewDialog({
 
                   {/* Phone home indicator */}
                   {selectedDevice.id === 'phone' && (
-                    <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1/3 h-1 bg-white/50 rounded-full z-40" />
+                    <div className="absolute bottom-1 left-1/2 -translate-x-1/2 w-1/3 h-0.5 sm:h-1 bg-white/50 rounded-full z-40" />
                   )}
                   
                   {/* Phone side buttons */}
                   {selectedDevice.id === 'phone' && (
                     <>
-                      <div className="absolute -left-1 top-24 w-1 h-8 bg-gray-700 rounded-l" />
-                      <div className="absolute -left-1 top-36 w-1 h-12 bg-gray-700 rounded-l" />
-                      <div className="absolute -right-1 top-32 w-1 h-16 bg-gray-700 rounded-r" />
+                      <div className="absolute -left-1 top-20 sm:top-24 w-1 h-6 sm:h-8 bg-gray-700 rounded-l" />
+                      <div className="absolute -left-1 top-28 sm:top-36 w-1 h-10 sm:h-12 bg-gray-700 rounded-l" />
+                      <div className="absolute -right-1 top-24 sm:top-32 w-1 h-12 sm:h-16 bg-gray-700 rounded-r" />
                     </>
                   )}
                 </div>
@@ -722,27 +837,27 @@ export function ExportPreviewDialog({
                 {/* Desktop stand */}
                 {selectedDevice.id === 'desktop' && (
                   <div className="flex flex-col items-center">
-                    <div className="w-24 h-6 bg-gradient-to-b from-gray-800 to-gray-900" />
-                    <div className="w-40 h-3 bg-gray-800 rounded-lg" />
+                    <div className="w-16 sm:w-24 h-4 sm:h-6 bg-gradient-to-b from-gray-800 to-gray-900" />
+                    <div className="w-28 sm:w-40 h-2 sm:h-3 bg-gray-800 rounded-lg" />
                   </div>
                 )}
               </div>
             )}
           </div>
 
-          {/* Bottom controls */}
+          {/* Bottom controls - responsive */}
           {playbackState.type !== 'complete' && (
-            <div className="border-t border-white/10 bg-black/50 backdrop-blur-lg px-6 py-4">
-              {/* Clip timeline */}
-              <div className="flex gap-2 mb-4 overflow-x-auto pb-2">
+            <div className="border-t border-white/10 bg-black/50 backdrop-blur-lg px-3 sm:px-6 py-2 sm:py-4">
+              {/* Clip timeline - scrollable */}
+              <div className="flex gap-1.5 sm:gap-2 mb-2 sm:mb-4 overflow-x-auto pb-2 scrollbar-thin scrollbar-thumb-white/20">
                 {selectedClips.map((clip, index) => (
                   <button
                     key={clip.id}
                     onClick={() => goToClip(index)}
                     className={cn(
-                      "flex-shrink-0 w-20 h-12 rounded overflow-hidden border-2 transition-all",
+                      "flex-shrink-0 w-14 sm:w-20 h-8 sm:h-12 rounded overflow-hidden border-2 transition-all",
                       index === currentClipIndex 
-                        ? "border-primary scale-110 shadow-[0_0_20px_hsl(var(--primary)/0.5)]" 
+                        ? "border-primary scale-105 sm:scale-110 shadow-[0_0_20px_hsl(var(--primary)/0.5)]" 
                         : index < currentClipIndex 
                         ? "border-primary/50 opacity-60" 
                         : "border-white/20 opacity-40 hover:opacity-80"
@@ -752,62 +867,62 @@ export function ExportPreviewDialog({
                       <img src={clip.thumbnail} alt={clip.title} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full bg-muted flex items-center justify-center">
-                        <Play className="h-4 w-4 text-muted-foreground" />
+                        <Play className="h-3 sm:h-4 w-3 sm:w-4 text-muted-foreground" />
                       </div>
                     )}
                   </button>
                 ))}
               </div>
 
-              {/* Playback controls */}
-              <div className="flex items-center justify-center gap-4">
+              {/* Playback controls - responsive */}
+              <div className="flex items-center justify-center gap-2 sm:gap-4">
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="text-white hover:bg-white/20"
+                  className="text-white hover:bg-white/20 h-8 w-8 sm:h-10 sm:w-10"
                   onClick={() => goToClip(Math.max(0, currentClipIndex - 1))}
                   disabled={currentClipIndex <= 0}
                 >
-                  <SkipBack className="h-5 w-5" />
+                  <SkipBack className="h-4 w-4 sm:h-5 sm:w-5" />
                 </Button>
 
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-12 w-12 text-white hover:bg-white/20"
+                  className="h-10 w-10 sm:h-12 sm:w-12 text-white hover:bg-white/20"
                   onClick={() => setIsPaused(!isPaused)}
                 >
-                  {isPaused ? <Play className="h-8 w-8 fill-white" /> : <Pause className="h-8 w-8" />}
+                  {isPaused ? <Play className="h-6 w-6 sm:h-8 sm:w-8 fill-white" /> : <Pause className="h-6 w-6 sm:h-8 sm:w-8" />}
                 </Button>
 
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="text-white hover:bg-white/20"
+                  className="text-white hover:bg-white/20 h-8 w-8 sm:h-10 sm:w-10"
                   onClick={() => goToClip(Math.min(selectedClips.length - 1, currentClipIndex + 1))}
                   disabled={currentClipIndex >= selectedClips.length - 1}
                 >
-                  <SkipForward className="h-5 w-5" />
+                  <SkipForward className="h-4 w-4 sm:h-5 sm:w-5" />
                 </Button>
 
-                <div className="w-px h-8 bg-white/20 mx-2" />
+                <div className="w-px h-6 sm:h-8 bg-white/20 mx-1 sm:mx-2 hidden sm:block" />
 
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="text-white hover:bg-white/20"
+                  className="text-white hover:bg-white/20 h-8 w-8 sm:h-10 sm:w-10"
                   onClick={() => setIsMuted(!isMuted)}
                 >
-                  {isMuted ? <VolumeX className="h-5 w-5" /> : <Volume2 className="h-5 w-5" />}
+                  {isMuted ? <VolumeX className="h-4 w-4 sm:h-5 sm:w-5" /> : <Volume2 className="h-4 w-4 sm:h-5 sm:w-5" />}
                 </Button>
 
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="text-white hover:bg-white/20"
+                  className="text-white hover:bg-white/20 h-8 w-8 sm:h-10 sm:w-10 hidden sm:flex"
                   onClick={toggleFullscreen}
                 >
-                  {isFullscreen ? <Minimize className="h-5 w-5" /> : <Maximize className="h-5 w-5" />}
+                  {isFullscreen ? <Minimize className="h-4 w-4 sm:h-5 sm:w-5" /> : <Maximize className="h-4 w-4 sm:h-5 sm:w-5" />}
                 </Button>
               </div>
             </div>
