@@ -613,15 +613,19 @@ IMPORTANTE - DURAÇÃO DO VÍDEO: ${videoDurationSeconds} segundos (${videoDurat
 - Este é o TEMPO DO ARQUIVO DE VÍDEO, não o tempo de jogo
 ${analysisContext}
 
-REGRA CRÍTICA PARA DESCRIÇÕES:
-1. A "description" de cada evento DEVE ser extraída DIRETAMENTE da transcrição/narração acima
-2. Use as PALAVRAS EXATAS que o narrador disse no momento do evento
-3. Se a transcrição diz "[0:45] Gol do Flamengo! Gabigol marca de cabeça!" - a description deve ser "Gol do Flamengo! Gabigol marca de cabeça!"
-4. NÃO invente descrições genéricas como "Falta no meio-campo" - COPIE o que foi dito
-5. Cada description deve ter no máximo 100 caracteres, extraídos da fala do narrador
-6. Se não houver transcrição clara para um momento, use a descrição visual ou pule o evento
+REGRA CRÍTICA PARA DESCRIÇÕES (EM PORTUGUÊS DO BRASIL):
+1. Analise a transcrição/narração acima para entender o CONTEXTO do que aconteceu
+2. Crie uma "description" CURTA e IMPACTANTE baseada no que foi dito (máximo 60 caracteres)
+3. A description deve ser uma LEGENDA para redes sociais - criativa, envolvente
+4. NÃO copie literalmente - INTERPRETE e crie uma frase de impacto
+5. Exemplos de boas descriptions:
+   - "Chutaço de Gabigol! Quase gol!" (não: "O jogador chutou a bola")
+   - "Falta dura! Árbitro marca!" (não: "Falta cometida no meio-campo")
+   - "QUE DEFESA DO GOLEIRO!" (não: "O goleiro defendeu o chute")
+6. Use linguagem de narrador brasileiro - empolgada, curta, direta
+7. Pode usar MAIÚSCULAS para ênfase em momentos importantes
 
-Baseado na análise acima, gere eventos de futebol detectados.
+Baseado na análise, gere eventos com descriptions criativas e impactantes.
 
 REGRAS DE TEMPO:
 1. "videoSecond" DEVE estar entre 0 e ${videoDurationSeconds}
@@ -637,8 +641,7 @@ Retorne APENAS JSON válido (sem markdown):
       "type": "goal",
       "videoSecond": 45,
       "team": "home",
-      "description": "Gol do Flamengo! Gabigol marca de cabeça!",
-      "narration": "trecho exato da narração usada",
+      "description": "GOOOOL! Gabigol de cabeça!",
       "confidence": 0.95
     }
   ]
@@ -659,14 +662,15 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
         messages: [
           { 
             role: "system", 
-            content: `Você é um sistema de detecção de eventos de futebol especializado em extrair legendas da narração.
+            content: `Você é um criador de legendas para cortes de futebol em redes sociais.
 
 REGRAS OBRIGATÓRIAS:
-1. A "description" de cada evento DEVE ser copiada EXATAMENTE da transcrição do narrador
-2. NÃO invente ou parafraseie - use as palavras exatas do áudio transcrito
-3. Se a transcrição mostra "[0:30] Que chute! O goleiro defende!" - use exatamente "Que chute! O goleiro defende!" como description
-4. Legendas devem ser curtas (max 100 caracteres) e impactantes
-5. Priorize trechos emocionantes da narração
+1. Analise a transcrição e crie legendas CRIATIVAS e IMPACTANTES em português do Brasil
+2. NÃO copie literalmente - INTERPRETE o contexto e crie frases de impacto curtas
+3. Máximo 60 caracteres por description
+4. Use linguagem de narrador brasileiro - empolgante, direta
+5. Pode usar MAIÚSCULAS para momentos importantes
+6. Exemplos: "GOLAÇO DE FORA DA ÁREA!", "Que jogada! Quase gol!", "Falta perigosa!"
 
 Retorne APENAS JSON válido.` 
           },
