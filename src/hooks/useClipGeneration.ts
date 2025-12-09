@@ -48,6 +48,7 @@ export interface ClipGenerationProgress {
 export function useClipGeneration() {
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const cancelledRef = useRef(false); // Use ref for reliable cancellation check
   const [isLoaded, setIsLoaded] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
@@ -122,6 +123,7 @@ export function useClipGeneration() {
 
   // Cancel current operation
   const cancel = useCallback(() => {
+    cancelledRef.current = true;
     setIsCancelled(true);
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
@@ -160,7 +162,7 @@ export function useClipGeneration() {
       let receivedBytes = 0;
 
       while (true) {
-        if (isCancelled) {
+        if (cancelledRef.current) {
           reader.cancel();
           return null;
         }
@@ -198,7 +200,7 @@ export function useClipGeneration() {
       }
       throw error;
     }
-  }, [isCancelled]);
+  }, []);
 
   // Extract single clip from already loaded video (all timing in MILLISECONDS)
   const extractSingleClip = useCallback(async (
@@ -318,6 +320,7 @@ export function useClipGeneration() {
     if (configs.length === 0) return;
 
     setIsGenerating(true);
+    cancelledRef.current = false;
     setIsCancelled(false);
     setGeneratingEventIds(new Set(configs.map(c => c.eventId)));
 
@@ -340,8 +343,9 @@ export function useClipGeneration() {
       const videoUrl = configs[0].videoUrl;
       const videoData = await downloadVideoWithProgress(videoUrl);
 
-      if (!videoData || isCancelled) {
+      if (!videoData || cancelledRef.current) {
         setIsGenerating(false);
+        setGeneratingEventIds(new Set());
         return;
       }
 
@@ -357,7 +361,7 @@ export function useClipGeneration() {
       // 4. Extract each clip (video already in memory)
       let completed = 0;
       for (const config of configs) {
-        if (isCancelled) break;
+        if (cancelledRef.current) break;
 
         const clipUrl = await extractSingleClip(ffmpeg, config, completed, configs.length);
         if (clipUrl) {
@@ -372,7 +376,7 @@ export function useClipGeneration() {
         // Ignore
       }
 
-      if (!isCancelled) {
+      if (!cancelledRef.current) {
         setProgress({
           stage: 'complete',
           progress: 100,
@@ -396,7 +400,7 @@ export function useClipGeneration() {
       setIsGenerating(false);
       setGeneratingEventIds(new Set());
     }
-  }, [loadFFmpeg, downloadVideoWithProgress, extractSingleClip, isCancelled]);
+  }, [loadFFmpeg, downloadVideoWithProgress, extractSingleClip]);
 
   // Single clip generation (for individual extraction)
   const generateClip = useCallback(async (config: ClipConfig): Promise<string | null> => {
@@ -469,6 +473,7 @@ export function useClipGeneration() {
   }, [generatingEventIds]);
 
   const reset = useCallback(() => {
+    cancelledRef.current = false;
     setProgress({
       stage: 'idle',
       progress: 0,
