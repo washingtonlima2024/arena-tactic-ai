@@ -95,9 +95,30 @@ export default function Analysis() {
     }
   };
 
-  const getEventMinute = (eventId: string) => {
+  const getEventTime = (eventId: string) => {
     const event = events.find(e => e.id === eventId);
-    return event?.minute || 0;
+    if (!event) return { minute: 0, second: 0, totalSeconds: 0 };
+    
+    // Use videoSecond from metadata if available
+    const metadata = event.metadata as { videoSecond?: number } | null;
+    const videoSecond = metadata?.videoSecond;
+    
+    // If we have videoSecond from analysis, use it directly
+    if (videoSecond !== undefined && videoSecond >= 0) {
+      return { 
+        minute: Math.floor(videoSecond / 60), 
+        second: videoSecond % 60, 
+        totalSeconds: videoSecond 
+      };
+    }
+    
+    // Fallback to minute + second fields
+    const totalSeconds = (event.minute * 60) + (event.second || 0);
+    return { 
+      minute: event.minute, 
+      second: event.second || 0, 
+      totalSeconds 
+    };
   };
 
   if (matchesLoading) {
@@ -545,70 +566,52 @@ export default function Analysis() {
           </>
         )}
 
-        {/* Video Dialog with Embed - 5s before and 5s after event */}
+        {/* Video Dialog with Embed - 3s before and 5s after event */}
         <Dialog open={videoDialogOpen} onOpenChange={setVideoDialogOpen}>
           <DialogContent className="max-w-4xl">
             <DialogHeader>
               <DialogTitle className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
-                  <span>Evento - {getEventMinute(playingEventId || '')}'</span>
-                  <Badge variant="arena">5s antes • 5s depois</Badge>
+                  {(() => {
+                    const eventTime = getEventTime(playingEventId || '');
+                    return <span>Evento - {eventTime.minute}:{String(eventTime.second).padStart(2, '0')}</span>;
+                  })()}
+                  <Badge variant="arena">3s antes • 5s depois</Badge>
                 </div>
                 {playingEventId && matchVideo && (
                   <Button
                     variant="arena"
                     size="sm"
                     onClick={() => {
-                      const eventMinute = getEventMinute(playingEventId);
-                      const videoStartMinute = matchVideo.start_minute || 0;
-                      const videoEndMinute = matchVideo.end_minute || (videoStartMinute + 45);
-                      const videoDuration = matchVideo.duration_seconds || ((videoEndMinute - videoStartMinute) * 60);
-                      
-                      // Cálculo proporcional: posição relativa do evento no span de minutos da partida
-                      const matchMinutesSpan = videoEndMinute - videoStartMinute;
-                      const relativePosition = (eventMinute - videoStartMinute) / matchMinutesSpan;
-                      const eventVideoSeconds = relativePosition * videoDuration;
-                      const startSeconds = Math.max(0, eventVideoSeconds - 5); // 5 seconds before
+                      const eventTime = getEventTime(playingEventId);
+                      const startSeconds = Math.max(0, eventTime.totalSeconds - 3); // 3 seconds before
                       
                       if (videoRef.current) {
                         videoRef.current.currentTime = startSeconds;
                         videoRef.current.play();
                         toast({
                           title: "Navegando para evento",
-                          description: `Indo para ${Math.floor(startSeconds / 60)}:${String(Math.floor(startSeconds % 60)).padStart(2, '0')} (5s antes do evento)`,
+                          description: `Indo para ${Math.floor(startSeconds / 60)}:${String(Math.floor(startSeconds % 60)).padStart(2, '0')} (3s antes do evento)`,
                         });
                       }
                     }}
                   >
                     <Play className="h-4 w-4 mr-1" />
-                    Ir para {getEventMinute(playingEventId)}'
+                    Ir para {getEventTime(playingEventId).minute}:{String(getEventTime(playingEventId).second).padStart(2, '0')}
                   </Button>
                 )}
               </DialogTitle>
             </DialogHeader>
             {matchVideo && playingEventId && (() => {
-              const eventMinute = getEventMinute(playingEventId);
-              const videoStartMinute = matchVideo.start_minute || 0;
-              const videoEndMinute = matchVideo.end_minute || (videoStartMinute + 45);
-              const videoDuration = matchVideo.duration_seconds || ((videoEndMinute - videoStartMinute) * 60);
-              
-              // Cálculo proporcional: posição relativa do evento no span de minutos da partida
-              const matchMinutesSpan = videoEndMinute - videoStartMinute;
-              const relativePosition = (eventMinute - videoStartMinute) / matchMinutesSpan;
-              const eventVideoSeconds = relativePosition * videoDuration;
-              const startSeconds = Math.max(0, eventVideoSeconds - 5); // 5 seconds before event
+              const eventTime = getEventTime(playingEventId);
+              const startSeconds = Math.max(0, eventTime.totalSeconds - 3); // 3 seconds before event
               
               const isEmbed = matchVideo.file_url.includes('/embed/') || matchVideo.file_url.includes('iframe') || matchVideo.file_url.includes('xtream');
               const separator = matchVideo.file_url.includes('?') ? '&' : '?';
               const embedUrl = `${matchVideo.file_url}${separator}t=${Math.round(startSeconds)}&autoplay=1`;
               
               console.log('Analysis video sync:', {
-                eventMinute,
-                videoStartMinute,
-                videoEndMinute,
-                videoDuration,
-                relativePosition,
-                eventVideoSeconds,
+                eventTime,
                 startSeconds,
                 videoUrl: matchVideo.file_url
               });
@@ -622,7 +625,7 @@ export default function Analysis() {
                         className="absolute inset-0 w-full h-full rounded-lg"
                         frameBorder="0"
                         allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
-                        title={`Evento ${eventMinute}'`}
+                        title={`Evento ${eventTime.minute}:${String(eventTime.second).padStart(2, '0')}`}
                       />
                     ) : (
                       <video
@@ -644,7 +647,7 @@ export default function Analysis() {
                     <div className="flex items-center gap-3">
                       <Badge variant="outline" className="gap-1">
                         <Play className="h-3 w-3" />
-                        {eventMinute}'
+                        {eventTime.minute}:{String(eventTime.second).padStart(2, '0')}
                       </Badge>
                       <span className="text-sm text-muted-foreground">
                         Visualize o vídeo para confirmar se o evento está correto. Use a página de Eventos para editar se necessário.
