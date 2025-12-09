@@ -87,6 +87,7 @@ export function PlaylistPlayer({
   const [loop, setLoop] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [clipProgress, setClipProgress] = useState(0);
+  const [videoStarted, setVideoStarted] = useState(false);
   
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -121,6 +122,8 @@ export function PlaylistPlayer({
   // Handle vignette completion
   const handleOpeningComplete = useCallback(() => {
     if (clips.length > 0) {
+      setVideoStarted(false);
+      setClipProgress(0);
       setPlaybackState({ type: 'clip', index: 0 });
     } else {
       setPlaybackState({ type: 'complete' });
@@ -155,6 +158,8 @@ export function PlaylistPlayer({
   // Handle transition complete
   const handleTransitionComplete = useCallback(() => {
     if (playbackState.type === 'transition') {
+      setVideoStarted(false);
+      setClipProgress(0);
       setPlaybackState({ type: 'clip', index: playbackState.nextIndex });
     }
   }, [playbackState]);
@@ -184,6 +189,7 @@ export function PlaylistPlayer({
     if (index >= 0 && index < clips.length) {
       setPlaybackState({ type: 'clip', index });
       setClipProgress(0);
+      setVideoStarted(false);
     }
   }, [clips.length]);
 
@@ -237,18 +243,12 @@ export function PlaylistPlayer({
       }
     };
 
-    const handleEnded = () => {
-      handleClipEnd();
-    };
-
     video.addEventListener('timeupdate', handleTimeUpdate);
-    video.addEventListener('ended', handleEnded);
 
     return () => {
       video.removeEventListener('timeupdate', handleTimeUpdate);
-      video.removeEventListener('ended', handleEnded);
     };
-  }, [handleClipEnd]);
+  }, []);
 
   // Pause/play video sync
   useEffect(() => {
@@ -367,49 +367,69 @@ export function PlaylistPlayer({
       {/* Video Player */}
       {playbackState.type === 'clip' && currentClip && (
         <div className="absolute inset-0 flex items-center justify-center bg-black">
-          {/* Clip Vignette (before video) */}
-          {includeVignettes && currentClip.thumbnail && clipProgress === 0 && (
-            <ClipVignette
-              thumbnailUrl={currentClip.thumbnail}
-              eventType={currentClip.type}
-              minute={currentClip.minute}
-              title={currentClip.title}
-              homeTeam={homeTeam}
-              awayTeam={awayTeam}
-              homeScore={homeScore}
-              awayScore={awayScore}
-              onComplete={() => {
-                const video = videoRef.current;
-                if (video) {
-                  video.currentTime = 0;
-                  video.play().catch(() => {});
-                }
-              }}
-              duration={3000}
-            />
-          )}
-
-          {/* Actual video */}
+          {/* Has video URL - play video */}
           {getClipVideoUrl(currentClip) ? (
-            <video
-              ref={videoRef}
-              src={getClipVideoUrl(currentClip)!}
-              className={cn(
-                "w-full h-full object-cover transition-opacity duration-500",
-                includeVignettes && currentClip.thumbnail && clipProgress === 0 ? "opacity-0" : "opacity-100"
+            <>
+              {/* Clip Vignette (shown before video starts) */}
+              {includeVignettes && currentClip.thumbnail && clipProgress === 0 && !videoStarted && (
+                <div className="absolute inset-0 z-10">
+                  <ClipVignette
+                    thumbnailUrl={currentClip.thumbnail}
+                    eventType={currentClip.type}
+                    minute={currentClip.minute}
+                    title={currentClip.title}
+                    homeTeam={homeTeam}
+                    awayTeam={awayTeam}
+                    homeScore={homeScore}
+                    awayScore={awayScore}
+                    onComplete={() => {
+                      setVideoStarted(true);
+                      const video = videoRef.current;
+                      if (video) {
+                        video.currentTime = 0;
+                        video.play().catch(() => {});
+                      }
+                    }}
+                    duration={3000}
+                  />
+                </div>
               )}
-              autoPlay={!includeVignettes || !currentClip.thumbnail}
-              muted={isMuted}
-              playsInline
-            />
+
+              {/* Actual video */}
+              <video
+                ref={videoRef}
+                src={getClipVideoUrl(currentClip)!}
+                className={cn(
+                  "w-full h-full object-cover transition-opacity duration-500",
+                  includeVignettes && currentClip.thumbnail && !videoStarted ? "opacity-0" : "opacity-100"
+                )}
+                autoPlay={!includeVignettes || !currentClip.thumbnail}
+                muted={isMuted}
+                playsInline
+                onEnded={handleClipEnd}
+              />
+            </>
           ) : (
+            /* No video URL - show thumbnail or placeholder with timer */
             <div className="relative w-full h-full flex items-center justify-center">
               {currentClip.thumbnail ? (
-                <img 
-                  src={currentClip.thumbnail} 
-                  alt={currentClip.title}
-                  className="w-full h-full object-cover"
-                />
+                <>
+                  <img 
+                    src={currentClip.thumbnail} 
+                    alt={currentClip.title}
+                    className="w-full h-full object-cover"
+                  />
+                  {/* Overlay with event info */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/40 to-transparent flex flex-col items-center justify-center">
+                    <Badge variant="arena" className="mb-2 text-sm uppercase">
+                      {currentClip.type.replace(/_/g, ' ')}
+                    </Badge>
+                    <p className="text-2xl font-bold text-white">{currentClip.minute}'</p>
+                    <p className="text-sm text-white/80 mt-2 text-center px-4 max-w-xs">
+                      {currentClip.title}
+                    </p>
+                  </div>
+                </>
               ) : (
                 <div className="text-center text-white">
                   <ListVideo className="h-12 w-12 mx-auto mb-3 text-primary" />
