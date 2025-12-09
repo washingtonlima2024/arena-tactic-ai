@@ -127,6 +127,7 @@ export function ExportPreviewDialog({
   const [includeVignettes, setIncludeVignettes] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [showSharePanel, setShowSharePanel] = useState(false);
+  const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
 
   // Preview state
   const [playbackState, setPlaybackState] = useState<PlaybackState>({ type: 'idle' });
@@ -355,43 +356,58 @@ export function ExportPreviewDialog({
     }
   };
 
-  // Get responsive device mockup dimensions based on format
+  // Get responsive device mockup dimensions based on format and orientation
   const getDeviceDimensions = () => {
     const [w, h] = selectedFormat.ratio.split(':').map(Number);
-    const aspectRatio = w / h;
+    const formatAspectRatio = w / h;
     
-    // Base max sizes by device - increased for better visibility
-    const maxSizes = {
-      phone: { maxW: 360, maxH: 680 },
-      tablet: { maxW: 520, maxH: 680 },
-      desktop: { maxW: 800, maxH: 500 },
+    // Device physical sizes (realistic proportions)
+    // These represent the outer frame dimensions
+    const deviceSizes = {
+      phone: {
+        portrait: { frameW: 220, frameH: 450 },
+        landscape: { frameW: 450, frameH: 220 },
+      },
+      tablet: {
+        portrait: { frameW: 380, frameH: 520 },
+        landscape: { frameW: 520, frameH: 380 },
+      },
+      desktop: {
+        portrait: { frameW: 500, frameH: 400 },
+        landscape: { frameW: 700, frameH: 450 },
+      },
     };
     
-    const deviceMax = maxSizes[selectedDevice.id as keyof typeof maxSizes];
+    const deviceConfig = deviceSizes[selectedDevice.id as keyof typeof deviceSizes];
+    const orientedSize = deviceConfig[orientation];
     
-    // Calculate dimensions that fit within constraints while maintaining aspect ratio
-    let width: number;
-    let height: number;
+    // The screen area inside the device frame (accounting for bezels/padding)
+    const bezelSize = selectedDevice.padding * 2 + 8;
+    const screenMaxW = orientedSize.frameW - bezelSize;
+    const screenMaxH = orientedSize.frameH - bezelSize;
     
-    if (aspectRatio > 1) {
-      // Landscape (16:9, 1:1)
-      width = deviceMax.maxW;
-      height = width / aspectRatio;
-      if (height > deviceMax.maxH) {
-        height = deviceMax.maxH;
-        width = height * aspectRatio;
-      }
+    // Calculate screen dimensions maintaining video aspect ratio
+    let screenW: number;
+    let screenH: number;
+    
+    if (formatAspectRatio > screenMaxW / screenMaxH) {
+      // Video is wider than screen area
+      screenW = screenMaxW;
+      screenH = screenW / formatAspectRatio;
     } else {
-      // Portrait (9:16, 4:5)
-      height = deviceMax.maxH;
-      width = height * aspectRatio;
-      if (width > deviceMax.maxW) {
-        width = deviceMax.maxW;
-        height = width / aspectRatio;
-      }
+      // Video is taller than screen area
+      screenH = screenMaxH;
+      screenW = screenH * formatAspectRatio;
     }
     
-    return { width, height, aspectRatio: `${w}/${h}` };
+    return { 
+      frameWidth: orientedSize.frameW, 
+      frameHeight: orientedSize.frameH,
+      screenWidth: screenW,
+      screenHeight: screenH,
+      aspectRatio: `${w}/${h}`,
+      isLandscape: orientation === 'landscape'
+    };
   };
 
   const deviceDimensions = getDeviceDimensions();
@@ -482,6 +498,31 @@ export function ExportPreviewDialog({
                         </Card>
                       );
                     })}
+                  </div>
+                  
+                  {/* Orientation toggle */}
+                  <div className="flex items-center gap-2 mt-3">
+                    <span className="text-xs text-muted-foreground">Orientação:</span>
+                    <div className="flex gap-1 bg-muted/50 p-1 rounded-lg">
+                      <Button
+                        variant={orientation === 'portrait' ? 'default' : 'ghost'}
+                        size="sm"
+                        className="h-7 px-2 gap-1"
+                        onClick={() => setOrientation('portrait')}
+                      >
+                        <RectangleVertical className="h-3.5 w-3.5" />
+                        <span className="text-xs">Vertical</span>
+                      </Button>
+                      <Button
+                        variant={orientation === 'landscape' ? 'default' : 'ghost'}
+                        size="sm"
+                        className="h-7 px-2 gap-1"
+                        onClick={() => setOrientation('landscape')}
+                      >
+                        <RectangleHorizontal className="h-3.5 w-3.5" />
+                        <span className="text-xs">Horizontal</span>
+                      </Button>
+                    </div>
                   </div>
                 </div>
 
@@ -614,6 +655,34 @@ export function ExportPreviewDialog({
             </div>
             
             <div className="flex items-center gap-1 sm:gap-2">
+              {/* Orientation toggle in preview */}
+              <div className="hidden md:flex items-center gap-1 mr-2 p-1 bg-white/10 rounded-lg">
+                <button
+                  onClick={() => setOrientation('portrait')}
+                  className={cn(
+                    "p-2 rounded transition-all",
+                    orientation === 'portrait' 
+                      ? "bg-primary text-primary-foreground" 
+                      : "text-white/60 hover:text-white hover:bg-white/10"
+                  )}
+                  title="Vertical"
+                >
+                  <RectangleVertical className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setOrientation('landscape')}
+                  className={cn(
+                    "p-2 rounded transition-all",
+                    orientation === 'landscape' 
+                      ? "bg-primary text-primary-foreground" 
+                      : "text-white/60 hover:text-white hover:bg-white/10"
+                  )}
+                  title="Horizontal"
+                >
+                  <RectangleHorizontal className="h-4 w-4" />
+                </button>
+              </div>
+
               {/* Device selector in preview - responsive */}
               <div className="hidden md:flex items-center gap-1 mr-2 p-1 bg-white/10 rounded-lg">
                 {DEVICES.map(device => {
@@ -757,17 +826,23 @@ export function ExportPreviewDialog({
                     "transition-all duration-300 flex-shrink-0"
                   )}
                   style={{
-                    width: `min(${deviceDimensions.width}px, calc(100vw - 32px))`,
-                    height: `min(${deviceDimensions.height}px, calc(100vh - 200px))`,
+                    width: `min(${deviceDimensions.frameWidth}px, calc(100vw - 32px))`,
+                    height: `min(${deviceDimensions.frameHeight}px, calc(100vh - 200px))`,
                     borderRadius: selectedDevice.borderRadius,
                     padding: selectedDevice.padding,
                   }}
                 >
-                  {/* Phone notch */}
-                  {selectedDevice.id === 'phone' && (
+                  {/* Phone notch - position changes based on orientation */}
+                  {selectedDevice.id === 'phone' && !deviceDimensions.isLandscape && (
                     <div className="absolute top-0 left-1/2 -translate-x-1/2 w-1/3 h-5 sm:h-6 bg-black rounded-b-2xl z-30 flex items-center justify-center gap-2">
                       <div className="w-1.5 h-1.5 rounded-full bg-gray-700" />
                       <div className="w-8 h-2 rounded-full bg-gray-800" />
+                    </div>
+                  )}
+                  {selectedDevice.id === 'phone' && deviceDimensions.isLandscape && (
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 h-1/3 w-5 sm:w-6 bg-black rounded-r-2xl z-30 flex flex-col items-center justify-center gap-2">
+                      <div className="w-1.5 h-1.5 rounded-full bg-gray-700" />
+                      <div className="h-8 w-2 rounded-full bg-gray-800" />
                     </div>
                   )}
                   
