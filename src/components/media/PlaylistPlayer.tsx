@@ -14,7 +14,11 @@ import {
   ListVideo,
   Smartphone,
   Monitor,
-  Tablet
+  Tablet,
+  Edit3,
+  Download,
+  CheckCircle,
+  Clock
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -50,6 +54,8 @@ interface PlaylistPlayerProps {
   format?: '9:16' | '16:9' | '1:1' | '4:5';
   platform?: string;
   onClose: () => void;
+  onEdit?: () => void;
+  onExport?: () => void;
 }
 
 type PlaybackState = 
@@ -70,7 +76,9 @@ export function PlaylistPlayer({
   includeVignettes = true,
   format = '9:16',
   platform = 'Instagram Reels',
-  onClose
+  onClose,
+  onEdit,
+  onExport
 }: PlaylistPlayerProps) {
   const [playbackState, setPlaybackState] = useState<PlaybackState>({ type: 'idle' });
   const [isPaused, setIsPaused] = useState(false);
@@ -476,24 +484,89 @@ export function PlaylistPlayer({
             <VideoContent />
           </DeviceMockup>
         ) : (
-          /* Complete screen */
-          <div className="flex flex-col items-center justify-center text-center">
-            <img src={arenaPlayLogo} alt="Arena Play" className="h-20 mb-6 opacity-80" />
-            <h2 className="text-3xl font-bold text-white mb-2">Reprodução Completa</h2>
-            <p className="text-white/60 mb-8">{totalClips} clips reproduzidos</p>
-            <div className="flex gap-4">
-              <Button variant="outline" size="lg" onClick={onClose} className="border-white/30 text-white hover:bg-white/10">
-                <X className="h-5 w-5 mr-2" />
+          /* Complete screen - Enhanced with workflow options */
+          <div className="flex flex-col items-center justify-center text-center max-w-md mx-auto px-4">
+            {/* Success indicator */}
+            <div className="relative mb-6">
+              <div className="absolute inset-0 blur-2xl bg-primary/30 animate-pulse" />
+              <div className="relative bg-primary/20 rounded-full p-4">
+                <CheckCircle className="h-12 w-12 text-primary" />
+              </div>
+            </div>
+
+            <img src={arenaPlayLogo} alt="Arena Play" className="h-16 mb-4 opacity-80" />
+            <h2 className="text-2xl font-bold text-white mb-2">Preview Concluído!</h2>
+            
+            {/* Stats summary */}
+            <div className="flex items-center justify-center gap-6 mb-6 text-white/70">
+              <div className="flex items-center gap-2">
+                <ListVideo className="h-4 w-4 text-primary" />
+                <span className="text-sm">{totalClips} clips</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <Clock className="h-4 w-4 text-primary" />
+                <span className="text-sm">~{totalClips * 15}s</span>
+              </div>
+            </div>
+
+            {/* Workflow options */}
+            <div className="grid gap-3 w-full">
+              {/* Replay button */}
+              <Button 
+                variant="outline" 
+                size="lg" 
+                onClick={() => {
+                  setPlaybackState({ type: 'idle' });
+                  startPlayback();
+                }}
+                className="w-full border-white/30 text-white hover:bg-white/10 gap-2"
+              >
+                <Repeat className="h-5 w-5" />
+                Repetir Preview
+              </Button>
+
+              {/* Edit playlist button */}
+              {onEdit && (
+                <Button 
+                  variant="outline" 
+                  size="lg" 
+                  onClick={onEdit}
+                  className="w-full border-primary/50 text-primary hover:bg-primary/10 gap-2"
+                >
+                  <Edit3 className="h-5 w-5" />
+                  Editar Playlist
+                </Button>
+              )}
+
+              {/* Export button */}
+              {onExport && (
+                <Button 
+                  variant="arena" 
+                  size="lg" 
+                  onClick={onExport}
+                  className="w-full gap-2"
+                >
+                  <Download className="h-5 w-5" />
+                  Exportar Vídeo
+                </Button>
+              )}
+
+              {/* Close button */}
+              <Button 
+                variant="ghost" 
+                size="lg" 
+                onClick={onClose}
+                className="w-full text-white/60 hover:text-white hover:bg-white/10 gap-2"
+              >
+                <X className="h-5 w-5" />
                 Fechar
               </Button>
-              <Button variant="arena" size="lg" onClick={() => {
-                setPlaybackState({ type: 'idle' });
-                startPlayback();
-              }}>
-                <Repeat className="h-5 w-5 mr-2" />
-                Repetir
-              </Button>
             </div>
+
+            {/* Hint text */}
+            <p className="text-xs text-white/40 mt-4">
+              Edite a seleção de clips ou exporte quando estiver satisfeito
+            </p>
           </div>
         )}
 
