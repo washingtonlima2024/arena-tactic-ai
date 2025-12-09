@@ -25,11 +25,13 @@ import {
   Loader2,
   GripVertical,
   Check,
-  Download
+  Download,
+  Eye
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useVideoGeneration } from '@/hooks/useVideoGeneration';
 import { VideoGenerationProgress } from './VideoGenerationProgress';
+import { PlaylistPlayer } from './PlaylistPlayer';
 import { toast } from 'sonner';
 
 interface VideoFormat {
@@ -113,6 +115,11 @@ interface SocialContentDialogProps {
   onGenerate?: (config: GenerationConfig) => void;
   isGenerating?: boolean;
   matchVideoUrl?: string;
+  homeTeam?: string;
+  awayTeam?: string;
+  homeScore?: number;
+  awayScore?: number;
+  matchTitle?: string;
 }
 
 export interface GenerationConfig {
@@ -130,12 +137,18 @@ export function SocialContentDialog({
   awayTeamPlaylist,
   onGenerate,
   isGenerating: externalIsGenerating = false,
-  matchVideoUrl
+  matchVideoUrl,
+  homeTeam = homeTeamPlaylist.teamName,
+  awayTeam = awayTeamPlaylist.teamName,
+  homeScore = 0,
+  awayScore = 0,
+  matchTitle
 }: SocialContentDialogProps) {
   const [selectedFormat, setSelectedFormat] = useState<VideoFormat | null>(null);
   const [step, setStep] = useState<'format' | 'clips' | 'generating'>('format');
   const [selectedClips, setSelectedClips] = useState<string[]>([]);
   const [includeVignettes, setIncludeVignettes] = useState(true);
+  const [showPlayer, setShowPlayer] = useState(false);
   const [activeTeam, setActiveTeam] = useState<'home' | 'away'>('home');
 
   const { 
@@ -611,6 +624,15 @@ export function SocialContentDialog({
                 Voltar
               </Button>
               <Button 
+                variant="outline"
+                onClick={() => setShowPlayer(true)}
+                disabled={selectedClips.length === 0}
+                className="flex-1 gap-2 border-primary/50 text-primary hover:bg-primary/10"
+              >
+                <Eye className="h-4 w-4" />
+                Preview Completo
+              </Button>
+              <Button 
                 variant="arena" 
                 onClick={handleGenerate}
                 disabled={selectedClips.length === 0 || isGenerating || externalIsGenerating}
@@ -642,6 +664,37 @@ export function SocialContentDialog({
           </div>
         )}
       </DialogContent>
+
+      {/* Immersive Playlist Player */}
+      {showPlayer && (
+        <PlaylistPlayer
+          clips={(() => {
+            const allClips = [...homeTeamPlaylist.clips, ...awayTeamPlaylist.clips];
+            return selectedClips.map(id => {
+              const clip = allClips.find(c => c.id === id);
+              return clip ? {
+                id: clip.id,
+                title: clip.title,
+                type: clip.type,
+                minute: clip.minute,
+                description: clip.description,
+                thumbnail: clip.thumbnail,
+                clipUrl: clip.clipUrl,
+                videoUrl: matchVideoUrl,
+                startTime: clip.startTime,
+                endTime: clip.endTime
+              } : null;
+            }).filter(Boolean) as any[];
+          })()}
+          homeTeam={homeTeam}
+          awayTeam={awayTeam}
+          homeScore={homeScore}
+          awayScore={awayScore}
+          matchTitle={matchTitle}
+          includeVignettes={includeVignettes}
+          onClose={() => setShowPlayer(false)}
+        />
+      )}
     </Dialog>
   );
 }
