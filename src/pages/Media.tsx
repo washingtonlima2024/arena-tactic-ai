@@ -295,14 +295,14 @@ export default function Media() {
                           .filter(c => !c.clipUrl)
                           .map(c => ({
                             eventId: c.id,
-                            eventMinuteMs: (c.minute * 60 + c.second) * 1000,
+                            eventMinuteMs: c.eventMs, // Use eventMs directly from metadata
                             videoUrl: matchVideo.file_url,
                             videoStartMs,
                             videoEndMs,
                             videoDurationMs: estimatedDurationMs,
                             matchId: matchId,
                             bufferBeforeMs: 3000,
-                            bufferAfterMs: 3000
+                            bufferAfterMs: 5000 // 5s after event per user requirement
                           }));
                         await generateAllClips(clipsToGenerate);
                         refetchEvents();

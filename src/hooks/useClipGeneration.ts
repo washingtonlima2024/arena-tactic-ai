@@ -6,7 +6,7 @@ import { supabase } from '@/integrations/supabase/client';
 
 // All timing is in MILLISECONDS for precision
 export const CLIP_BUFFER_BEFORE_MS = 3000; // 3 seconds before event
-export const CLIP_BUFFER_AFTER_MS = 3000;  // 3 seconds after event
+export const CLIP_BUFFER_AFTER_MS = 5000;  // 5 seconds after event
 
 export interface ClipConfig {
   eventId: string;
