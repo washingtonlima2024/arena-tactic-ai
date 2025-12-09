@@ -83,12 +83,25 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
     return highlightEventTypes.includes(eventType);
   };
 
+  // Format time from seconds or minute:second to display format
+  const formatEventTime = (event: MatchEvent) => {
+    // If we have second, calculate total seconds and format as MM:SS
+    const totalSeconds = (event.minute * 60) + (event.second || 0);
+    const displayMinutes = Math.floor(totalSeconds / 60);
+    const displaySeconds = totalSeconds % 60;
+    return {
+      minutes: displayMinutes.toString().padStart(2, '0'),
+      seconds: displaySeconds.toString().padStart(2, '0')
+    };
+  };
+
   return (
     <div className={cn("space-y-3", className)}>
       {events.map((event, index) => {
         const player = getPlayer(event.playerId);
         const team = getTeam(event.teamId);
         const isHighlight = isHighlightEvent(event.type);
+        const timeDisplay = formatEventTime(event);
 
         return (
           <div 
@@ -115,14 +128,11 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
             )}
 
             {/* Time */}
-            <div className="flex w-12 flex-col items-center">
+            <div className="flex w-14 flex-col items-center">
               <span className={cn(
-                "text-lg font-bold",
+                "text-base font-bold font-mono",
                 isHighlight ? "text-yellow-500" : "text-primary"
-              )}>{event.minute}'</span>
-              {event.second && (
-                <span className="text-xs text-muted-foreground">:{event.second}</span>
-              )}
+              )}>{timeDisplay.minutes}:{timeDisplay.seconds}</span>
             </div>
 
             {/* Line */}
