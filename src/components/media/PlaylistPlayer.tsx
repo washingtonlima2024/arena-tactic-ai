@@ -705,15 +705,15 @@ function OpeningVignette({
   }, [onComplete, playSwoosh, playImpact, initAudio]);
 
   return (
-    <div className="relative w-full h-full bg-background overflow-hidden flex items-center justify-center">
+    <div className="relative w-full h-full bg-gradient-to-br from-gray-950 via-background to-gray-950 overflow-hidden flex items-center justify-center">
       {/* Background animation */}
       <div className="absolute inset-0">
-        {Array.from({ length: 20 }).map((_, i) => (
+        {Array.from({ length: 12 }).map((_, i) => (
           <div
             key={i}
             className="absolute h-px bg-gradient-to-r from-transparent via-primary/50 to-transparent"
             style={{
-              top: `${5 + i * 5}%`,
+              top: `${8 + i * 8}%`,
               left: 0,
               right: 0,
               animation: `lineSlide ${1 + Math.random()}s ease-out ${i * 0.1}s infinite`,
@@ -722,49 +722,57 @@ function OpeningVignette({
         ))}
       </div>
 
-      {/* Logo */}
-      <div className={cn(
-        "absolute top-8 left-1/2 -translate-x-1/2 transition-all duration-500",
-        phase === 'hold' ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-8'
-      )}>
-        <img src={arenaPlayLogo} alt="Arena Play" className="h-16" />
+      {/* Glow effects */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        <div className="absolute w-32 h-32 rounded-full bg-primary/20 blur-3xl animate-pulse" />
       </div>
 
-      {/* Main content */}
+      {/* Logo - scaled for device */}
       <div className={cn(
-        "text-center transition-all duration-600",
+        "absolute top-4 left-1/2 -translate-x-1/2 transition-all duration-500",
+        phase === 'hold' ? 'opacity-100 translate-y-0' : 'opacity-0 -translate-y-4'
+      )}>
+        <img src={arenaPlayLogo} alt="Arena Play" className="h-8 md:h-12" />
+      </div>
+
+      {/* Main content - scaled for device mockup */}
+      <div className={cn(
+        "text-center px-4 transition-all duration-600",
         phase === 'enter' ? 'opacity-0 scale-90' :
         phase === 'hold' ? 'opacity-100 scale-100' :
         'opacity-0 scale-110'
       )}>
-        <Badge variant="arena" className="mb-4 text-lg px-6 py-2 uppercase tracking-widest">
+        <Badge variant="arena" className="mb-2 text-xs px-3 py-1 uppercase tracking-widest">
           Melhores Momentos
         </Badge>
 
-        <h1 className="text-4xl font-black text-foreground mb-6">{matchTitle || 'Highlights'}</h1>
+        <h1 className="text-lg md:text-2xl font-black text-foreground mb-3 line-clamp-2">{matchTitle || 'Highlights'}</h1>
 
-        <div className="flex items-center justify-center gap-8 text-2xl font-semibold">
-          <span className="text-foreground">{homeTeam}</span>
+        <div className="flex flex-col items-center justify-center gap-2">
+          <div className="flex items-center gap-3 text-sm">
+            <span className="text-foreground font-medium truncate max-w-[80px]">{homeTeam}</span>
+            <span className="text-muted-foreground">vs</span>
+            <span className="text-foreground font-medium truncate max-w-[80px]">{awayTeam}</span>
+          </div>
           <div className="relative">
             <div className="absolute inset-0 blur-xl bg-primary/50 animate-pulse" />
-            <span className="relative text-5xl font-black text-primary">
+            <span className="relative text-3xl md:text-4xl font-black text-primary">
               {homeScore} - {awayScore}
             </span>
           </div>
-          <span className="text-foreground">{awayTeam}</span>
         </div>
       </div>
 
-      {/* Corner decorations */}
+      {/* Corner decorations - scaled */}
       <div className={cn(
-        "absolute top-12 left-8 w-24 h-24 transition-all duration-700",
+        "absolute top-6 left-4 w-12 h-12 transition-all duration-700",
         phase === 'hold' ? 'opacity-100' : 'opacity-0'
       )}>
         <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-primary to-transparent" />
         <div className="absolute top-0 left-0 h-full w-0.5 bg-gradient-to-b from-primary to-transparent" />
       </div>
       <div className={cn(
-        "absolute bottom-12 right-8 w-24 h-24 transition-all duration-700",
+        "absolute bottom-6 right-4 w-12 h-12 transition-all duration-700",
         phase === 'hold' ? 'opacity-100' : 'opacity-0'
       )}>
         <div className="absolute bottom-0 right-0 w-full h-0.5 bg-gradient-to-l from-primary to-transparent" />
@@ -812,7 +820,7 @@ function ClosingVignette({
   }, [onComplete, playImpact, initAudio]);
 
   return (
-    <div className="relative w-full h-full bg-background overflow-hidden flex items-center justify-center">
+    <div className="relative w-full h-full bg-gradient-to-br from-gray-950 via-background to-gray-950 overflow-hidden flex items-center justify-center">
       {/* Radial burst */}
       <div className={cn(
         "absolute inset-0 transition-all duration-500",
@@ -821,17 +829,39 @@ function ClosingVignette({
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,hsl(var(--primary)/0.3)_0%,transparent_70%)]" />
       </div>
 
-      {/* Content */}
+      {/* Particles */}
+      <div className="absolute inset-0 overflow-hidden">
+        {Array.from({ length: 8 }).map((_, i) => (
+          <div
+            key={i}
+            className="absolute w-1 h-1 rounded-full bg-primary/50"
+            style={{
+              left: `${Math.random() * 100}%`,
+              top: `${Math.random() * 100}%`,
+              animation: `float ${2 + Math.random() * 2}s ease-in-out ${i * 0.2}s infinite`
+            }}
+          />
+        ))}
+      </div>
+
+      {/* Content - scaled for device */}
       <div className={cn(
-        "text-center transition-all duration-500",
+        "text-center px-4 transition-all duration-500",
         phase === 'enter' ? 'opacity-0 scale-50' :
         phase === 'hold' ? 'opacity-100 scale-100' :
         'opacity-0 scale-150'
       )}>
-        <img src={arenaPlayLogo} alt="Arena Play" className="h-24 mx-auto mb-4" />
-        <p className="text-xl font-medium text-foreground">{totalClips} momentos incríveis</p>
-        <p className="text-sm text-muted-foreground mt-2">Arena Play • Análise Tática Inteligente</p>
+        <img src={arenaPlayLogo} alt="Arena Play" className="h-12 md:h-16 mx-auto mb-3" />
+        <p className="text-sm md:text-base font-medium text-foreground">{totalClips} momentos incríveis</p>
+        <p className="text-xs text-muted-foreground mt-1">Arena Play</p>
       </div>
+
+      <style>{`
+        @keyframes float {
+          0%, 100% { transform: translateY(0) scale(1); opacity: 0.5; }
+          50% { transform: translateY(-10px) scale(1.2); opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
