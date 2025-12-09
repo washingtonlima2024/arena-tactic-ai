@@ -163,6 +163,8 @@ export function VideoPlayerModal({
 
   console.log('Video sync debug:', {
     eventMinute: clip.minute,
+    eventSecond: clip.second,
+    videoSecond: clip.videoSecond,
     currentTimestamp,
     isEmbed,
     embedUrl
