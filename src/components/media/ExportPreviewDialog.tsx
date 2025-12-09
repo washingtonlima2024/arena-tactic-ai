@@ -360,11 +360,11 @@ export function ExportPreviewDialog({
     const [w, h] = selectedFormat.ratio.split(':').map(Number);
     const aspectRatio = w / h;
     
-    // Base max sizes by device
+    // Base max sizes by device - increased for better visibility
     const maxSizes = {
-      phone: { maxW: 280, maxH: 520 },
-      tablet: { maxW: 380, maxH: 520 },
-      desktop: { maxW: 600, maxH: 380 },
+      phone: { maxW: 360, maxH: 680 },
+      tablet: { maxW: 520, maxH: 680 },
+      desktop: { maxW: 800, maxH: 500 },
     };
     
     const deviceMax = maxSizes[selectedDevice.id as keyof typeof maxSizes];
