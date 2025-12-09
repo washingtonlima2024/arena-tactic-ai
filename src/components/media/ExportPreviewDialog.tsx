@@ -839,14 +839,29 @@ export function ExportPreviewDialog({
                         
                         {/* Video content */}
                         {!showClipVignette && (
-                          <VideoContent
-                            clip={currentClip}
-                            matchVideo={matchVideo}
-                            videoRef={videoRef}
-                            isMuted={isMuted}
-                            onLoaded={handleVideoLoaded}
-                            onEnded={handleClipEnd}
-                          />
+                          <>
+                            <VideoContent
+                              clip={currentClip}
+                              matchVideo={matchVideo}
+                              videoRef={videoRef}
+                              isMuted={isMuted}
+                              onLoaded={handleVideoLoaded}
+                              onEnded={handleClipEnd}
+                            />
+                            
+                            {/* Logo banner overlay */}
+                            <div className="absolute bottom-0 left-0 right-0 z-30 bg-gradient-to-t from-black/80 via-black/50 to-transparent px-2 sm:px-4 py-2 sm:py-3">
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-1.5 sm:gap-2">
+                                  <img src={arenaPlayLogo} alt="Arena Play" className="h-4 sm:h-6 md:h-8" />
+                                  <span className="text-[8px] sm:text-[10px] text-white/60 font-medium tracking-wider uppercase">Melhores Momentos</span>
+                                </div>
+                                <div className="text-right">
+                                  <p className="text-[10px] sm:text-xs text-white/80 font-semibold">{homeTeam} {homeScore} x {awayScore} {awayTeam}</p>
+                                </div>
+                              </div>
+                            </div>
+                          </>
                         )}
                       </div>
                     )}
