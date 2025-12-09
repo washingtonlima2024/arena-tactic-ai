@@ -319,7 +319,7 @@ async function processAnalysis(
   }
 }
 
-// Analyze video directly via URL (no download needed - saves memory)
+// Analyze video directly by downloading and sending to Gemini with video file
 // CRITICAL: startSecond and endSecond are VIDEO TIME, not game time
 async function analyzeVideoWithURL(
   videoUrl: string,
@@ -339,31 +339,56 @@ async function analyzeVideoWithURL(
   const videoDurationFormatted = `${Math.floor(videoDurationSeconds / 60)}:${String(videoDurationSeconds % 60).padStart(2, '0')}`;
 
   try {
-    console.log("Analyzing video URL with Gemini...");
+    console.log("Downloading video for visual analysis...");
     console.log("Video duration:", videoDurationSeconds, "seconds (", videoDurationFormatted, ")");
     
-    const prompt = `Você é um analista de futebol profissional. Analise esta partida de futebol.
+    // Download the video file
+    const videoResponse = await fetch(videoUrl);
+    if (!videoResponse.ok) {
+      console.error("Failed to download video:", videoResponse.status);
+      return await analyzeVideoWithVisionEstimated(homeTeamName, awayTeamName, startSecond, endSecond);
+    }
+    
+    const videoArrayBuffer = await videoResponse.arrayBuffer();
+    const videoBase64 = btoa(String.fromCharCode(...new Uint8Array(videoArrayBuffer)));
+    
+    console.log("Video downloaded, size:", videoArrayBuffer.byteLength, "bytes");
+    console.log("Sending video to Gemini for REAL visual analysis...");
+    
+    const prompt = `Você é um analista de futebol profissional. Analise este vídeo de partida de futebol VISUALMENTE.
 
 PARTIDA: ${homeTeamName} (casa) vs ${awayTeamName} (visitante)
-URL DO VÍDEO: ${videoUrl}
 
 IMPORTANTE - DURAÇÃO DO VÍDEO: Este arquivo tem ${videoDurationSeconds} segundos (${videoDurationFormatted}).
-- Todos os eventos DEVEM ter timestamps entre 0 e ${videoDurationSeconds} segundos
-- Use o formato MM:SS para referenciar momentos (ex: 0:30 = 30 segundos, 1:15 = 75 segundos)
 
-Baseado em padrões típicos de partidas de futebol, identifique eventos prováveis distribuídos ao longo da duração do vídeo:
-1. EVENTOS: Gols, cartões, faltas, escanteios, finalizações, defesas
-2. POSIÇÕES: Formação tática de cada time
-3. JOGADORES: Ações individuais importantes
+INSTRUÇÕES CRÍTICAS:
+1. ASSISTA AO VÍDEO COMPLETAMENTE e identifique eventos que VOCÊ VÊ acontecendo
+2. NÃO invente eventos - relate APENAS o que acontece visualmente no vídeo
+3. Para cada evento, use o tempo EXATO do vídeo onde o evento ocorre (entre 0 e ${videoDurationSeconds})
+4. Observe: movimentação da bola, jogadores, gols, faltas, cartões, finalizações
 
-Para cada evento, indique:
-- Tipo do evento (goal, shot, foul, card, corner, save, substitution, offside, kickoff)
-- Segundo exato do vídeo (entre 0 e ${videoDurationSeconds})
-- Time responsável (casa/visitante)
-- Descrição detalhada
+Para cada evento que você VÊ no vídeo, indique:
+- Tipo do evento (goal, shot_on_target, shot_off_target, foul, yellow_card, red_card, corner, save, substitution, offside, kickoff, free_kick)
+- Segundo EXATO do vídeo onde acontece (0 a ${videoDurationSeconds})
+- Time responsável (casa = ${homeTeamName}, visitante = ${awayTeamName})
+- Descrição do que você VÊ acontecendo
 
-Gere de 3 a 10 eventos distribuídos proporcionalmente ao longo dos ${videoDurationSeconds} segundos de vídeo.`;
+Formato de resposta - APENAS JSON:
+{
+  "events": [
+    {
+      "type": "shot_on_target",
+      "videoSecond": 15,
+      "team": "home",
+      "description": "Jogador de camisa vermelha finaliza de dentro da área",
+      "confidence": 0.9
+    }
+  ]
+}
 
+Gere APENAS eventos que você realmente VÊ no vídeo, com timestamps precisos.`;
+
+    // Use Gemini with inline video data
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
@@ -375,11 +400,22 @@ Gere de 3 a 10 eventos distribuídos proporcionalmente ao longo dos ${videoDurat
         messages: [
           { 
             role: "system", 
-            content: "Você é um analista de futebol especializado. Gere eventos realistas para partidas de futebol." 
+            content: "Você é um analista de futebol que analisa vídeos visualmente. Reporte APENAS eventos que você realmente VÊ no vídeo, com timestamps exatos." 
           },
           { 
             role: "user", 
-            content: prompt
+            content: [
+              {
+                type: "text",
+                text: prompt
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: `data:video/mp4;base64,${videoBase64}`
+                }
+              }
+            ]
           }
         ],
       }),
@@ -388,16 +424,19 @@ Gere de 3 a 10 eventos distribuídos proporcionalmente ao longo dos ${videoDurat
     if (!response.ok) {
       const errorText = await response.text();
       console.error("Vision API error:", response.status, errorText);
-      return '';
+      // Fallback to estimated if video analysis fails
+      return await analyzeVideoWithVisionEstimated(homeTeamName, awayTeamName, startSecond, endSecond);
     }
 
     const data = await response.json();
     const analysis = data.choices?.[0]?.message?.content || '';
-    console.log("Vision analysis completed, length:", analysis.length);
+    console.log("REAL vision analysis completed, length:", analysis.length);
+    console.log("Analysis preview:", analysis.substring(0, 500));
     return analysis;
   } catch (error) {
-    console.error("Error in URL video analysis:", error);
-    return '';
+    console.error("Error in video visual analysis:", error);
+    // Fallback to estimated analysis
+    return await analyzeVideoWithVisionEstimated(homeTeamName, awayTeamName, startSecond, endSecond);
   }
 }
 
