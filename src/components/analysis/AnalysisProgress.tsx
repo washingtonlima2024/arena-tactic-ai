@@ -64,25 +64,31 @@ export function AnalysisProgress({ job }: AnalysisProgressProps) {
               )}
             >
               {getStepIcon(step.status)}
-              <div className="flex-1">
-                <p className={cn(
-                  "text-sm font-medium",
-                  step.status === 'pending' && "text-muted-foreground"
-                )}>
-                  {step.name}
-                </p>
-                {step.status === 'processing' && (
-                  <div className="mt-1">
-                    <Progress value={step.progress} className="h-1" />
-                  </div>
-                )}
+              <div className="flex-1 space-y-1">
+                <div className="flex items-center justify-between">
+                  <p className={cn(
+                    "text-sm font-medium",
+                    step.status === 'pending' && "text-muted-foreground"
+                  )}>
+                    {step.name}
+                  </p>
+                  <span className={cn(
+                    "text-xs tabular-nums",
+                    step.status === 'completed' && "text-success",
+                    step.status === 'processing' && "text-primary",
+                    step.status === 'pending' && "text-muted-foreground"
+                  )}>
+                    {step.progress}%
+                  </span>
+                </div>
+                <Progress 
+                  value={step.progress} 
+                  className={cn(
+                    "h-1.5",
+                    step.status === 'pending' && "opacity-40"
+                  )} 
+                />
               </div>
-              {step.status === 'completed' && (
-                <span className="text-xs text-success">Concluído</span>
-              )}
-              {step.status === 'processing' && (
-                <span className="text-xs text-primary">{step.progress}%</span>
-              )}
             </div>
           ))}
         </div>
