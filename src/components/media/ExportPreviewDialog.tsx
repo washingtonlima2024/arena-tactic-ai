@@ -660,19 +660,27 @@ export function ExportPreviewDialog({
                 </div>
               </div>
             ) : (
-              /* Device mockup with content - responsive sizing */
+              /* Device mockup with content - constrained sizing */
               <div 
-                className="relative transition-all duration-500 w-full max-w-fit"
+                className="relative transition-all duration-500 flex items-center justify-center"
               >
-                {/* Device frame - responsive dimensions */}
+                {/* Device frame - constrained to viewport */}
                 <div 
                   className={cn(
-                    "relative bg-gray-900 shadow-2xl border-4 border-gray-800 mx-auto",
+                    "relative bg-gray-900 shadow-2xl border-4 border-gray-800",
                     "transition-all duration-300"
                   )}
                   style={{
-                    width: `min(${selectedDevice.dimensions.lg.w}px, calc(100vw - 32px))`,
-                    maxHeight: `min(${selectedDevice.dimensions.lg.h}px, calc(100vh - 200px))`,
+                    width: selectedDevice.id === 'desktop' 
+                      ? 'min(600px, 80vw)' 
+                      : selectedDevice.id === 'tablet' 
+                      ? 'min(380px, 70vw)' 
+                      : 'min(280px, 60vw)',
+                    height: selectedDevice.id === 'desktop' 
+                      ? 'min(380px, 45vh)' 
+                      : selectedDevice.id === 'tablet' 
+                      ? 'min(500px, 55vh)' 
+                      : 'min(500px, 60vh)',
                     borderRadius: selectedDevice.borderRadius,
                     padding: selectedDevice.padding,
                   }}
