@@ -331,15 +331,15 @@ export function ClipVignette({
         />
       </div>
 
-      {/* Content with staggered animations */}
+      {/* Content with staggered animations - RESPONSIVE */}
       <div 
-        className={`absolute inset-0 flex flex-col items-center justify-center text-white z-10 transition-all duration-500 ${
+        className={`absolute inset-0 flex flex-col items-center justify-center text-white z-10 transition-all duration-500 px-2 ${
           phase === 'enter' ? 'translate-y-8 opacity-0' : 
           phase === 'hold' ? 'translate-y-0 opacity-100' : 
           '-translate-y-8 opacity-0'
         }`}
       >
-        {/* Event type badge with glow */}
+        {/* Event type badge with glow - responsive */}
         <div className="relative">
           <div 
             className={`absolute inset-0 blur-xl bg-primary/50 transition-all duration-500 ${
@@ -348,7 +348,7 @@ export function ClipVignette({
           />
           <Badge 
             variant="arena" 
-            className={`relative mb-4 text-lg px-6 py-2 uppercase tracking-widest border-primary/50 backdrop-blur-sm transition-all duration-500 ${
+            className={`relative mb-2 sm:mb-3 md:mb-4 text-[10px] sm:text-sm md:text-lg px-2 sm:px-4 md:px-6 py-1 sm:py-1.5 md:py-2 uppercase tracking-widest border-primary/50 backdrop-blur-sm transition-all duration-500 ${
               phase === 'hold' ? 'scale-100' : 'scale-0'
             }`}
             style={{
@@ -360,9 +360,9 @@ export function ClipVignette({
           </Badge>
         </div>
 
-        {/* Minute with dramatic reveal */}
+        {/* Minute with dramatic reveal - responsive */}
         <div 
-          className={`flex items-center gap-3 text-7xl font-black mb-6 transition-all duration-600 ${
+          className={`flex items-center gap-1.5 sm:gap-2 md:gap-3 text-3xl sm:text-5xl md:text-7xl font-black mb-2 sm:mb-4 md:mb-6 transition-all duration-600 ${
             phase === 'hold' ? 'scale-100 opacity-100' : 'scale-50 opacity-0'
           }`}
           style={{
@@ -370,7 +370,7 @@ export function ClipVignette({
             animation: phase === 'hold' ? 'slideUp 0.5s ease-out' : undefined,
           }}
         >
-          <Clock className="h-14 w-14 text-primary drop-shadow-[0_0_15px_hsl(var(--primary)/0.5)]" />
+          <Clock className="h-6 w-6 sm:h-10 sm:w-10 md:h-14 md:w-14 text-primary drop-shadow-[0_0_15px_hsl(var(--primary)/0.5)]" />
           <span 
             className="bg-gradient-to-r from-primary via-emerald-400 to-primary bg-clip-text text-transparent drop-shadow-lg"
             style={{
@@ -382,9 +382,9 @@ export function ClipVignette({
           </span>
         </div>
 
-        {/* Teams score with slide-in effect */}
+        {/* Teams score with slide-in effect - responsive */}
         <div 
-          className={`flex items-center gap-8 text-2xl font-semibold mb-4 transition-all duration-500 ${
+          className={`flex items-center gap-2 sm:gap-4 md:gap-8 text-xs sm:text-lg md:text-2xl font-semibold mb-2 sm:mb-3 md:mb-4 transition-all duration-500 ${
             phase === 'hold' ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
           }`}
           style={{
@@ -392,7 +392,7 @@ export function ClipVignette({
           }}
         >
           <span 
-            className="transition-transform duration-500"
+            className="transition-transform duration-500 max-w-[60px] sm:max-w-[100px] md:max-w-none truncate"
             style={{
               animation: phase === 'hold' ? 'slideInLeft 0.6s ease-out' : undefined,
             }}
@@ -401,12 +401,12 @@ export function ClipVignette({
           </span>
           <div className="relative">
             <div className="absolute inset-0 blur-lg bg-primary/40 animate-pulse" />
-            <span className="relative text-5xl font-black text-primary drop-shadow-[0_0_20px_hsl(var(--primary)/0.6)]">
+            <span className="relative text-xl sm:text-3xl md:text-5xl font-black text-primary drop-shadow-[0_0_20px_hsl(var(--primary)/0.6)]">
               {homeScore} - {awayScore}
             </span>
           </div>
           <span 
-            className="transition-transform duration-500"
+            className="transition-transform duration-500 max-w-[60px] sm:max-w-[100px] md:max-w-none truncate"
             style={{
               animation: phase === 'hold' ? 'slideInRight 0.6s ease-out' : undefined,
             }}
@@ -415,9 +415,9 @@ export function ClipVignette({
           </span>
         </div>
 
-        {/* Title with typewriter-like reveal */}
+        {/* Title with typewriter-like reveal - responsive */}
         <p 
-          className={`text-lg text-muted-foreground max-w-lg text-center px-4 transition-all duration-500 ${
+          className={`text-[10px] sm:text-sm md:text-lg text-muted-foreground max-w-[200px] sm:max-w-sm md:max-w-lg text-center px-2 transition-all duration-500 line-clamp-2 ${
             phase === 'hold' ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'
           }`}
           style={{
@@ -428,7 +428,7 @@ export function ClipVignette({
         </p>
       </div>
 
-      {/* Play icon burst animation */}
+      {/* Play icon burst animation - responsive */}
       <div 
         className={`absolute inset-0 flex items-center justify-center pointer-events-none z-20 transition-all duration-300 ${
           phase === 'exit' ? 'scale-100 opacity-100' : 'scale-0 opacity-0'
@@ -436,17 +436,17 @@ export function ClipVignette({
       >
         <div className="relative">
           {/* Multiple ripple rings */}
-          <div className="absolute inset-0 -m-8 bg-primary/20 rounded-full animate-[ripple_0.6s_ease-out]" />
-          <div className="absolute inset-0 -m-4 bg-primary/30 rounded-full animate-[ripple_0.4s_ease-out]" />
-          <div className="relative bg-primary p-8 rounded-full shadow-[0_0_40px_hsl(var(--primary)/0.8)]">
-            <Play className="h-16 w-16 text-white fill-white" />
+          <div className="absolute inset-0 -m-4 sm:-m-6 md:-m-8 bg-primary/20 rounded-full animate-[ripple_0.6s_ease-out]" />
+          <div className="absolute inset-0 -m-2 sm:-m-3 md:-m-4 bg-primary/30 rounded-full animate-[ripple_0.4s_ease-out]" />
+          <div className="relative bg-primary p-3 sm:p-5 md:p-8 rounded-full shadow-[0_0_40px_hsl(var(--primary)/0.8)]">
+            <Play className="h-6 w-6 sm:h-10 sm:w-10 md:h-16 md:w-16 text-white fill-white" />
           </div>
         </div>
       </div>
 
       {/* Progress bar at bottom */}
       <div 
-        className={`absolute bottom-[10%] left-0 right-0 h-1 bg-white/10 transition-opacity duration-300 ${
+        className={`absolute bottom-[10%] left-0 right-0 h-0.5 sm:h-1 bg-white/10 transition-opacity duration-300 ${
           phase === 'hold' ? 'opacity-100' : 'opacity-0'
         }`}
       >
@@ -458,26 +458,26 @@ export function ClipVignette({
         />
       </div>
 
-      {/* Corner decorations with animation */}
-      <div className={`absolute top-[12%] left-4 w-20 h-20 transition-all duration-700 ${
+      {/* Corner decorations with animation - responsive */}
+      <div className={`absolute top-[12%] left-2 sm:left-3 md:left-4 w-10 h-10 sm:w-14 sm:h-14 md:w-20 md:h-20 transition-all duration-700 ${
         phase === 'hold' ? 'opacity-100 scale-100' : 'opacity-0 scale-0'
       }`}>
         <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-primary to-transparent" />
         <div className="absolute top-0 left-0 h-full w-0.5 bg-gradient-to-b from-primary to-transparent" />
       </div>
-      <div className={`absolute top-[12%] right-4 w-20 h-20 transition-all duration-700 ${
+      <div className={`absolute top-[12%] right-2 sm:right-3 md:right-4 w-10 h-10 sm:w-14 sm:h-14 md:w-20 md:h-20 transition-all duration-700 ${
         phase === 'hold' ? 'opacity-100 scale-100' : 'opacity-0 scale-0'
       }`}>
         <div className="absolute top-0 right-0 w-full h-0.5 bg-gradient-to-l from-primary to-transparent" />
         <div className="absolute top-0 right-0 h-full w-0.5 bg-gradient-to-b from-primary to-transparent" />
       </div>
-      <div className={`absolute bottom-[12%] left-4 w-20 h-20 transition-all duration-700 ${
+      <div className={`absolute bottom-[12%] left-2 sm:left-3 md:left-4 w-10 h-10 sm:w-14 sm:h-14 md:w-20 md:h-20 transition-all duration-700 ${
         phase === 'hold' ? 'opacity-100 scale-100' : 'opacity-0 scale-0'
       }`}>
         <div className="absolute bottom-0 left-0 w-full h-0.5 bg-gradient-to-r from-primary to-transparent" />
         <div className="absolute bottom-0 left-0 h-full w-0.5 bg-gradient-to-t from-primary to-transparent" />
       </div>
-      <div className={`absolute bottom-[12%] right-4 w-20 h-20 transition-all duration-700 ${
+      <div className={`absolute bottom-[12%] right-2 sm:right-3 md:right-4 w-10 h-10 sm:w-14 sm:h-14 md:w-20 md:h-20 transition-all duration-700 ${
         phase === 'hold' ? 'opacity-100 scale-100' : 'opacity-0 scale-0'
       }`}>
         <div className="absolute bottom-0 right-0 w-full h-0.5 bg-gradient-to-l from-primary to-transparent" />
