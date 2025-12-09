@@ -482,22 +482,29 @@ export default function Media() {
                       });
                       return;
                     }
-                    if (!matchVideo?.file_url || matchVideo.start_minute == null || matchVideo.end_minute == null || !matchVideo.duration_seconds) {
+                    if (!matchVideo?.file_url) {
                       toast({
-                        title: "Dados de sincronização ausentes",
-                        description: "Configure os tempos de sincronização do vídeo na página de Upload",
+                        title: "Vídeo não encontrado",
+                        description: "Faça upload de um vídeo na página de Upload",
                         variant: "destructive"
                       });
                       return;
                     }
+                    // Use sensible defaults if sync data not configured
+                    const videoStartMs = (matchVideo.start_minute ?? 0) * 60 * 1000;
+                    const videoEndMs = (matchVideo.end_minute ?? 90) * 60 * 1000;
+                    const videoDurationMs = matchVideo.duration_seconds 
+                      ? matchVideo.duration_seconds * 1000
+                      : (videoEndMs - videoStartMs) || (90 * 60 * 1000);
+                    
                     const eventMs = (clip.minute * 60 + clip.second) * 1000;
                     await generateClip({
                       eventId: clip.id,
                       eventMinuteMs: eventMs,
                       videoUrl: matchVideo.file_url,
-                      videoStartMs: matchVideo.start_minute * 60 * 1000,
-                      videoEndMs: matchVideo.end_minute * 60 * 1000,
-                      videoDurationMs: matchVideo.duration_seconds * 1000,
+                      videoStartMs,
+                      videoEndMs,
+                      videoDurationMs,
                       matchId: matchId,
                       bufferBeforeMs: 3000,
                       bufferAfterMs: 3000
