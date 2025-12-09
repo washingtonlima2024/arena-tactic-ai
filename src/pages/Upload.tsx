@@ -122,6 +122,28 @@ export default function VideoUpload() {
     setIsDragging(false);
   }, []);
 
+  // Detect video duration using HTML5 video element
+  const detectVideoDuration = (file: File): Promise<number> => {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.preload = 'metadata';
+      
+      video.onloadedmetadata = () => {
+        window.URL.revokeObjectURL(video.src);
+        const duration = Math.floor(video.duration);
+        console.log('Detected video duration:', duration, 'seconds');
+        resolve(duration);
+      };
+      
+      video.onerror = () => {
+        console.warn('Could not detect video duration');
+        resolve(0);
+      };
+      
+      video.src = URL.createObjectURL(file);
+    });
+  };
+
   const uploadFile = async (file: File) => {
     const newFile: UploadedFile = {
       file,
@@ -135,6 +157,13 @@ export default function VideoUpload() {
     setFiles(prev => [...prev, newFile]);
 
     try {
+      // CRITICAL: Detect actual video duration BEFORE upload
+      const detectedDuration = await detectVideoDuration(file);
+      if (detectedDuration > 0) {
+        setUploadedFileDuration(String(detectedDuration));
+        console.log('Auto-detected duration:', detectedDuration, 'seconds');
+      }
+
       const sanitizedName = file.name
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
@@ -173,7 +202,7 @@ export default function VideoUpload() {
 
       toast({
         title: "Upload concluído",
-        description: `${file.name} foi enviado com sucesso.`
+        description: `${file.name} foi enviado com sucesso.${detectedDuration > 0 ? ` Duração: ${Math.floor(detectedDuration / 60)}:${String(detectedDuration % 60).padStart(2, '0')}` : ''}`
       });
 
     } catch (error: any) {
@@ -333,8 +362,10 @@ export default function VideoUpload() {
         });
       }
 
-      // Register uploaded files
+      // Register uploaded files with CORRECT duration
       const uploadedFile = files.find(f => f.status === 'complete');
+      const detectedDuration = uploadedFileDuration ? parseInt(uploadedFileDuration) : null;
+      
       if (uploadedFile?.url) {
         await supabase.from('videos').insert({
           match_id: match.id,
@@ -342,9 +373,11 @@ export default function VideoUpload() {
           file_name: uploadedFile.name,
           video_type: 'full',
           start_minute: 0,
-          end_minute: null,
+          end_minute: detectedDuration ? Math.ceil(detectedDuration / 60) : null,
+          duration_seconds: detectedDuration, // CRITICAL: Save actual video duration
           status: 'pending'
         });
+        console.log('Registered video with duration:', detectedDuration, 'seconds');
       }
 
       // Get primary video info for analysis
@@ -809,20 +842,40 @@ export default function VideoUpload() {
                         <div className="p-4 rounded-lg bg-primary/5 border border-primary/20 space-y-3">
                           <div className="flex items-center gap-2 text-sm font-medium text-primary">
                             <Clock className="h-4 w-4" />
-                            ⚠️ IMPORTANTE: Duração Real do Vídeo
+                            {uploadedFileDuration ? '✓ Duração Detectada' : '⚠️ Duração do Vídeo'}
                           </div>
-                          <p className="text-xs text-muted-foreground">
-                            Informe a duração EXATA do arquivo em segundos. 
-                            Vídeo de 1:17 = 77 seg | 2:30 = 150 seg | 5:00 = 300 seg
-                          </p>
-                          <Input
-                            type="number"
-                            placeholder="Duração em segundos (ex: 77 para 1:17)"
-                            min={1}
-                            value={uploadedFileDuration}
-                            onChange={(e) => setUploadedFileDuration(e.target.value)}
-                            className="text-lg font-mono"
-                          />
+                          {uploadedFileDuration ? (
+                            <div className="flex items-center gap-2">
+                              <Badge variant="outline" className="font-mono text-lg px-3 py-1">
+                                {Math.floor(parseInt(uploadedFileDuration) / 60)}:{String(parseInt(uploadedFileDuration) % 60).padStart(2, '0')}
+                              </Badge>
+                              <span className="text-sm text-muted-foreground">
+                                ({uploadedFileDuration} segundos)
+                              </span>
+                              <Button 
+                                variant="ghost" 
+                                size="sm"
+                                onClick={() => setUploadedFileDuration('')}
+                              >
+                                Editar
+                              </Button>
+                            </div>
+                          ) : (
+                            <>
+                              <p className="text-xs text-muted-foreground">
+                                Informe a duração EXATA do arquivo em segundos. 
+                                Vídeo de 1:17 = 77 seg | 2:30 = 150 seg | 5:00 = 300 seg
+                              </p>
+                              <Input
+                                type="number"
+                                placeholder="Duração em segundos (ex: 77 para 1:17)"
+                                min={1}
+                                value={uploadedFileDuration}
+                                onChange={(e) => setUploadedFileDuration(e.target.value)}
+                                className="text-lg font-mono"
+                              />
+                            </>
+                          )}
                         </div>
                       )}
                     </CardContent>
