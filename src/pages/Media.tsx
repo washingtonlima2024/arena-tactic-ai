@@ -100,7 +100,7 @@ export default function Media() {
     enabled: !!matchId
   });
 
-  // Generate clips from events (include clip_url from database)
+  // Generate clips from events (include clip_url and videoSecond from database)
   const clips = events?.map((event) => ({
     id: event.id,
     title: event.description || `${event.event_type} - ${event.minute}'`,
@@ -110,7 +110,8 @@ export default function Media() {
     description: `Minuto ${event.minute}' - ${event.event_type}`,
     minute: event.minute || 0,
     second: event.second || 0,
-    clipUrl: (event as any).clip_url as string | null
+    clipUrl: (event as any).clip_url as string | null,
+    videoSecond: ((event as any).metadata?.videoSecond as number | undefined)
   })) || [];
 
   const goalClips = clips.filter(c => c.type === 'goal');

@@ -14,8 +14,10 @@ interface VideoPlayerModalProps {
     title: string;
     type: string;
     minute: number;
+    second?: number;
     description: string;
     clipUrl?: string | null;
+    videoSecond?: number; // Real timestamp in the video file (in seconds)
   } | null;
   thumbnail?: {
     imageUrl: string;
@@ -60,19 +62,26 @@ export function VideoPlayerModal({
     (matchVideo.end_minute && matchVideo.end_minute > 0)
   );
 
-  // Calculate initial timestamp
+  // Calculate initial timestamp - prioritize videoSecond from event metadata
   const calculateInitialTimestamp = useCallback(() => {
-    if (!clip || !matchVideo || hasDirectClip) return 0;
+    if (!clip || hasDirectClip) return 0;
+    
+    // If we have a precise videoSecond from analysis, use it directly
+    if (clip.videoSecond !== undefined && clip.videoSecond >= 0) {
+      return Math.max(0, clip.videoSecond - 5); // 5 second buffer before event
+    }
+    
+    // Fallback: calculate from minute/second
+    if (!matchVideo) return 0;
     
     const videoStartMinute = matchVideo.start_minute ?? 0;
-    const videoEndMinute = matchVideo.end_minute ?? 90; // Default to 90 minutes
+    const videoEndMinute = matchVideo.end_minute ?? 90;
     const videoDuration = matchVideo.duration_seconds ?? ((videoEndMinute - videoStartMinute) * 60);
     
     const matchMinutesSpan = videoEndMinute - videoStartMinute;
     const eventMatchMinute = clip.minute;
     
     if (eventMatchMinute < videoStartMinute || eventMatchMinute > videoEndMinute || matchMinutesSpan <= 0) {
-      // If event is outside video range, estimate based on minute alone
       return Math.max(0, (eventMatchMinute * 60) - 10);
     }
     
