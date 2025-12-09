@@ -13,7 +13,7 @@ const corsHeaders = {
 const ANALYSIS_STEPS: string[] = [
   'Preparação do vídeo',
   'Detecção inteligente de cortes',
-  'Identificação de eventos',
+  'Salvando eventos',
   'Finalização',
 ];
 
@@ -23,11 +23,12 @@ serve(async (req) => {
   }
 
   try {
-    const { matchId, videoUrl, homeTeamId, awayTeamId, competition, startMinute, endMinute } = await req.json();
+    const { matchId, videoUrl, homeTeamId, awayTeamId, videoDurationSeconds } = await req.json();
     
-    console.log("Starting smart analysis for match:", matchId);
+    console.log("=== ANÁLISE INTELIGENTE ===");
+    console.log("Match ID:", matchId);
     console.log("Video URL:", videoUrl);
-    console.log("Video segment:", startMinute, "-", endMinute, "minutes");
+    console.log("Duração do vídeo em segundos:", videoDurationSeconds);
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -54,22 +55,20 @@ serve(async (req) => {
       .single();
 
     if (jobError) {
-      console.error("Error creating job:", jobError);
+      console.error("Erro ao criar job:", jobError);
       throw jobError;
     }
 
-    console.log("Analysis job created:", job.id);
+    console.log("Job criado:", job.id);
 
     // Process analysis in background
     EdgeRuntime.waitUntil(processSmartAnalysis(
       supabase, 
       job.id, 
       matchId, 
-      videoUrl, 
       homeTeamId, 
       awayTeamId,
-      startMinute ?? 0,
-      endMinute ?? 90
+      videoDurationSeconds || 600 // Default 10 minutos se não informado
     ));
 
     return new Response(JSON.stringify({ jobId: job.id, status: 'started' }), {
@@ -78,7 +77,7 @@ serve(async (req) => {
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error("Error in analyze-video:", errorMessage);
+    console.error("Erro:", errorMessage);
     return new Response(JSON.stringify({ error: errorMessage }), {
       status: 500,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
@@ -96,11 +95,9 @@ async function processSmartAnalysis(
   supabase: any, 
   jobId: string, 
   matchId: string, 
-  videoUrl: string,
   homeTeamId: string,
   awayTeamId: string,
-  startMinute: number,
-  endMinute: number
+  videoDurationSeconds: number
 ) {
   const steps: AnalysisStep[] = ANALYSIS_STEPS.map(name => ({
     name,
@@ -125,75 +122,77 @@ async function processSmartAnalysis(
     const homeTeamName = homeTeam?.name || 'Time Casa';
     const awayTeamName = awayTeam?.name || 'Time Visitante';
 
-    console.log("Analyzing match:", homeTeamName, "vs", awayTeamName);
-
-    // Calculate video duration in seconds
-    const videoDurationSeconds = (endMinute - startMinute) * 60;
+    console.log(`Analisando: ${homeTeamName} vs ${awayTeamName}`);
+    console.log(`Duração do vídeo: ${videoDurationSeconds} segundos`);
 
     // Step 1: Preparation
     steps[0].status = 'processing';
     await updateJobProgress(supabase, jobId, 10, steps[0].name, steps);
-    await delay(500);
+    await delay(300);
     steps[0].status = 'completed';
     steps[0].progress = 100;
 
-    // Step 2: Smart clip detection using AI
+    // Step 2: Smart clip detection - TUDO EM SEGUNDOS
     steps[1].status = 'processing';
     await updateJobProgress(supabase, jobId, 25, steps[1].name, steps);
 
-    const clips = await detectSmartClips(
+    const events = await detectEventsInSeconds(
       videoDurationSeconds,
-      startMinute,
-      endMinute,
       homeTeamName,
       awayTeamName
     );
 
-    console.log(`Detected ${clips.length} clips`);
+    console.log(`Detectados ${events.length} eventos`);
     steps[1].status = 'completed';
     steps[1].progress = 100;
 
-    // Step 3: Convert clips to match events
+    // Step 3: Save events - USANDO SEGUNDOS
     steps[2].status = 'processing';
     await updateJobProgress(supabase, jobId, 60, steps[2].name, steps);
 
     let eventsInserted = 0;
-    for (const clip of clips) {
+    for (const event of events) {
+      // Converter segundos para minuto:segundo para exibição
+      const minute = Math.floor(event.second / 60);
+      const second = event.second % 60;
+
       const { error: insertError } = await supabase.from('match_events').insert({
         match_id: matchId,
-        event_type: mapClipTypeToEventType(clip.event_type),
-        minute: clip.minute,
-        second: clip.second || 0,
-        description: clip.title,
+        event_type: event.event_type,
+        minute: minute,
+        second: second,
+        description: event.description,
         metadata: { 
-          team: clip.team,
-          teamName: clip.team === 'home' ? homeTeamName : awayTeamName,
+          team: event.team,
+          teamName: event.team === 'home' ? homeTeamName : awayTeamName,
           aiGenerated: true,
           smartClip: true,
-          startSecond: clip.start_second,
-          endSecond: clip.end_second,
-          confidence: clip.confidence
+          // Timestamps em segundos para extração de clips
+          videoSecondStart: Math.max(0, event.second - 3), // 3s antes
+          videoSecondEnd: event.second + 5, // 5s depois
+          confidence: event.confidence
         },
-        position_x: Math.random() * 100,
-        position_y: Math.random() * 100,
-        is_highlight: clip.event_type === 'destaque' || clip.event_type === 'climax',
+        position_x: event.position_x,
+        position_y: event.position_y,
+        is_highlight: event.is_highlight,
       });
       
       if (!insertError) {
         eventsInserted++;
+        console.log(`Evento salvo: ${event.event_type} no segundo ${event.second}`);
       } else {
-        console.error("Error inserting event:", insertError);
+        console.error("Erro ao inserir evento:", insertError);
       }
     }
 
-    console.log(`Inserted ${eventsInserted} events`);
+    console.log(`Total inserido: ${eventsInserted} eventos`);
     steps[2].status = 'completed';
     steps[2].progress = 100;
 
     // Step 4: Finalization
     steps[3].status = 'processing';
     await updateJobProgress(supabase, jobId, 90, steps[3].name, steps);
-    await delay(300);
+    await delay(200);
     steps[3].status = 'completed';
     steps[3].progress = 100;
 
@@ -208,8 +207,8 @@ async function processSmartAnalysis(
         result: { 
           steps, 
           eventsGenerated: eventsInserted,
-          clipsDetected: clips.length,
-          method: 'smart_clip_detection'
+          videoDurationSeconds,
+          method: 'smart_seconds_based'
         }
       })
       .eq('id', jobId);
@@ -220,11 +219,11 @@ async function processSmartAnalysis(
       .update({ status: 'completed' })
       .eq('id', matchId);
 
-    console.log("Smart analysis completed for job:", jobId);
+    console.log("=== ANÁLISE CONCLUÍDA ===");
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-    console.error("Error processing analysis:", errorMessage);
+    console.error("Erro no processamento:", errorMessage);
     await supabase
       .from('analysis_jobs')
       .update({
@@ -236,62 +235,58 @@ async function processSmartAnalysis(
   }
 }
 
-async function detectSmartClips(
-  durationSeconds: number,
-  startMinute: number,
-  endMinute: number,
-  homeTeamName: string,
-  awayTeamName: string
-): Promise<Array<{
-  start_second: number;
-  end_second: number;
-  minute: number;
-  second: number;
-  title: string;
+interface SmartEvent {
+  second: number; // Posição no vídeo em segundos
   event_type: string;
+  description: string;
   team: 'home' | 'away';
   confidence: number;
-}>> {
+  position_x: number;
+  position_y: number;
+  is_highlight: boolean;
+}
+
+async function detectEventsInSeconds(
+  videoDurationSeconds: number,
+  homeTeamName: string,
+  awayTeamName: string
+): Promise<SmartEvent[]> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
 
-  // Calculate number of clips based on duration
-  const targetClips = Math.min(15, Math.max(5, Math.floor(durationSeconds / 120)));
+  // Quantidade de eventos baseada na duração
+  const targetEvents = Math.min(12, Math.max(4, Math.floor(videoDurationSeconds / 60)));
 
-  const prompt = `Você é um analista de futebol profissional. Gere eventos inteligentes para uma partida entre ${homeTeamName} (casa) e ${awayTeamName} (visitante).
+  const prompt = `Você é um analista de futebol. Gere ${targetEvents} eventos para uma partida entre ${homeTeamName} e ${awayTeamName}.
 
-CONFIGURAÇÕES:
-- Duração do trecho: ${durationSeconds} segundos (${Math.floor(durationSeconds / 60)} minutos)
-- Período do jogo: minuto ${startMinute} ao ${endMinute}
-- Quantidade de eventos: ${targetClips}
+DURAÇÃO DO VÍDEO: ${videoDurationSeconds} segundos
 
-REGRAS:
-1. Os eventos devem ter minutos ENTRE ${startMinute} e ${endMinute}
-2. Distribua os eventos uniformemente ao longo do período
-3. Inclua mix de: gols (1-2), cartões amarelos (1-2), faltas (2-3), finalizações (2-3), escanteios (1-2)
-4. Alterne entre times (home/away)
-5. Cada evento deve ter 3 segundos antes e 5 depois para o clip
+REGRAS IMPORTANTES:
+1. O campo "second" deve ser a posição exata no vídeo em SEGUNDOS (0 a ${videoDurationSeconds})
+2. Distribua os eventos ao longo do vídeo
+3. Cada evento representa um momento do jogo
 
-RETORNE APENAS um array JSON, sem markdown:
+RETORNE APENAS um array JSON válido (sem markdown):
 [
-  {"minute": N, "second": N, "title": "Descrição", "event_type": "tipo", "team": "home|away", "confidence": 0.X}
+  {
+    "second": 45,
+    "event_type": "goal",
+    "description": "Gol de ${homeTeamName}",
+    "team": "home",
+    "confidence": 0.9,
+    "position_x": 85,
+    "position_y": 50,
+    "is_highlight": true
+  }
 ]
 
-event_type válidos: "goal", "yellow_card", "foul", "shot_on_target", "corner", "save", "highlight"
-confidence entre 0.7 e 0.95`;
+Tipos válidos: goal, shot_on_target, foul, yellow_card, corner, save, highlight
+Alterne entre "home" e "away" nos times.`;
 
-  let clips: Array<{
-    start_second: number;
-    end_second: number;
-    minute: number;
-    second: number;
-    title: string;
-    event_type: string;
-    team: 'home' | 'away';
-    confidence: number;
-  }> = [];
+  let events: SmartEvent[] = [];
 
   if (LOVABLE_API_KEY) {
     try {
+      console.log("Chamando IA para detectar eventos...");
       const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -307,119 +302,67 @@ confidence entre 0.7 e 0.95`;
       if (response.ok) {
         const data = await response.json();
         const content = data.choices?.[0]?.message?.content || '';
-        console.log('AI response length:', content.length);
+        console.log('Resposta IA:', content.substring(0, 200));
 
-        // Parse JSON
+        // Extrair JSON
         const jsonMatch = content.match(/\[[\s\S]*?\]/);
         if (jsonMatch) {
           const parsed = JSON.parse(jsonMatch[0]);
-          clips = parsed.map((event: any) => {
-            const eventSecond = (event.minute - startMinute) * 60 + (event.second || 0);
-            return {
-              ...event,
-              start_second: Math.max(0, eventSecond - 3), // 3 segundos antes
-              end_second: eventSecond + 5, // 5 segundos depois
-            };
-          }).filter((c: any) => 
-            c.minute >= startMinute && 
-            c.minute <= endMinute
+          events = parsed.filter((e: any) => 
+            e.second >= 0 && e.second <= videoDurationSeconds
           );
-          console.log(`Parsed ${clips.length} clips from AI`);
+          console.log(`IA retornou ${events.length} eventos válidos`);
         }
       } else {
-        console.error('AI API error:', response.status);
+        console.error('Erro na API:', response.status);
       }
     } catch (error) {
-      console.error('AI request failed:', error);
+      console.error('Erro ao chamar IA:', error);
     }
   }
 
-  // Fallback if AI fails
-  if (clips.length === 0) {
-    console.log('Using fallback clip generation...');
-    clips = generateFallbackClips(durationSeconds, startMinute, endMinute, targetClips);
+  // Fallback se IA falhar
+  if (events.length === 0) {
+    console.log('Usando eventos de fallback...');
+    events = generateFallbackEvents(videoDurationSeconds);
   }
 
-  return clips;
+  return events;
 }
 
-function generateFallbackClips(
-  durationSeconds: number,
-  startMinute: number,
-  endMinute: number,
-  count: number
-): Array<{
-  start_second: number;
-  end_second: number;
-  minute: number;
-  second: number;
-  title: string;
-  event_type: string;
-  team: 'home' | 'away';
-  confidence: number;
-}> {
-  const clips: Array<{
-    start_second: number;
-    end_second: number;
-    minute: number;
-    second: number;
-    title: string;
-    event_type: string;
-    team: 'home' | 'away';
-    confidence: number;
-  }> = [];
-
-  const eventTemplates = [
-    { type: 'foul', title: 'Falta no meio-campo' },
-    { type: 'shot_on_target', title: 'Finalização no gol' },
-    { type: 'corner', title: 'Escanteio cobrado' },
-    { type: 'save', title: 'Defesa do goleiro' },
-    { type: 'yellow_card', title: 'Cartão amarelo' },
-    { type: 'highlight', title: 'Lance importante' },
-    { type: 'goal', title: 'Gol marcado!' },
+function generateFallbackEvents(videoDurationSeconds: number): SmartEvent[] {
+  const events: SmartEvent[] = [];
+  const count = Math.min(8, Math.max(3, Math.floor(videoDurationSeconds / 90)));
+  
+  const templates = [
+    { type: 'foul', desc: 'Falta no meio-campo', highlight: false },
+    { type: 'shot_on_target', desc: 'Finalização no gol', highlight: true },
+    { type: 'corner', desc: 'Escanteio cobrado', highlight: false },
+    { type: 'save', desc: 'Defesa do goleiro', highlight: true },
+    { type: 'yellow_card', desc: 'Cartão amarelo', highlight: false },
+    { type: 'goal', desc: 'Gol marcado!', highlight: true },
+    { type: 'highlight', desc: 'Lance importante', highlight: true },
   ];
 
-  const segmentDuration = endMinute - startMinute;
-  const interval = segmentDuration / count;
+  const interval = videoDurationSeconds / count;
 
   for (let i = 0; i < count; i++) {
-    const minute = Math.floor(startMinute + (i * interval) + (Math.random() * interval * 0.5));
-    const second = Math.floor(Math.random() * 60);
-    const eventSecond = (minute - startMinute) * 60 + second;
-    const template = eventTemplates[i % eventTemplates.length];
+    const second = Math.floor(i * interval + Math.random() * (interval * 0.5));
+    const template = templates[i % templates.length];
     
-    clips.push({
-      minute,
-      second,
-      start_second: Math.max(0, eventSecond - 3),
-      end_second: eventSecond + 5,
-      title: template.title,
+    events.push({
+      second: Math.min(second, videoDurationSeconds - 5),
       event_type: template.type,
+      description: template.desc,
       team: i % 2 === 0 ? 'home' : 'away',
-      confidence: 0.7 + Math.random() * 0.2
+      confidence: 0.7 + Math.random() * 0.2,
+      position_x: 30 + Math.random() * 40,
+      position_y: 20 + Math.random() * 60,
+      is_highlight: template.highlight
     });
   }
 
-  return clips;
-}
-
-function mapClipTypeToEventType(clipType: string): string {
-  const mapping: Record<string, string> = {
-    'abertura': 'highlight',
-    'desenvolvimento': 'foul',
-    'destaque': 'shot_on_target',
-    'climax': 'goal',
-    'fechamento': 'corner',
-    'goal': 'goal',
-    'yellow_card': 'yellow_card',
-    'red_card': 'red_card',
-    'foul': 'foul',
-    'corner': 'corner',
-    'shot_on_target': 'shot_on_target',
-    'save': 'save',
-    'highlight': 'highlight',
-  };
-  return mapping[clipType] || clipType;
+  return events;
 }
 
 async function updateJobProgress(supabase: any, jobId: string, progress: number, currentStep: string, steps: any[]) {

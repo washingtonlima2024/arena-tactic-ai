@@ -100,7 +100,7 @@ export default function Media() {
     enabled: !!matchId
   });
 
-  // Generate clips from events (include clip_url from database)
+  // Generate clips from events (include clip_url and metadata from database)
   const clips = events?.map((event) => ({
     id: event.id,
     title: event.description || `${event.event_type} - ${event.minute}'`,
@@ -110,7 +110,8 @@ export default function Media() {
     description: `Minuto ${event.minute}' - ${event.event_type}`,
     minute: event.minute || 0,
     second: event.second || 0,
-    clipUrl: (event as any).clip_url as string | null
+    clipUrl: (event as any).clip_url as string | null,
+    metadata: event.metadata as Record<string, any> | null
   })) || [];
 
   const goalClips = clips.filter(c => c.type === 'goal');
@@ -259,16 +260,17 @@ export default function Media() {
                         }
                         const clipsToGenerate = clips
                           .filter(c => !c.clipUrl)
-                          .map(c => ({
-                            eventId: c.id,
-                            eventMinute: c.minute,
-                            eventSecond: c.second,
-                            videoUrl: matchVideo.file_url,
-                            videoStartMinute: matchVideo.start_minute || 0,
-                            videoEndMinute: matchVideo.end_minute || 90,
-                            videoDurationSeconds: matchVideo.duration_seconds || 5400,
-                            matchId: matchId
-                          }));
+                          .map(c => {
+                            const eventMetadata = c.metadata as any;
+                            const eventSecondInVideo = c.minute * 60 + c.second;
+                            return {
+                              eventId: c.id,
+                              videoSecondStart: eventMetadata?.videoSecondStart ?? Math.max(0, eventSecondInVideo - 3),
+                              videoSecondEnd: eventMetadata?.videoSecondEnd ?? (eventSecondInVideo + 5),
+                              videoUrl: matchVideo.file_url,
+                              matchId: matchId
+                            };
+                          });
                         await generateAllClips(clipsToGenerate);
                         refetchEvents();
                       }}
@@ -481,14 +483,13 @@ export default function Media() {
                       });
                       return;
                     }
+                    const eventMetadata = clip.metadata as any;
+                    const eventSecondInVideo = clip.minute * 60 + clip.second;
                     await generateClip({
                       eventId: clip.id,
-                      eventMinute: clip.minute,
-                      eventSecond: clip.second,
+                      videoSecondStart: eventMetadata?.videoSecondStart ?? Math.max(0, eventSecondInVideo - 3),
+                      videoSecondEnd: eventMetadata?.videoSecondEnd ?? (eventSecondInVideo + 5),
                       videoUrl: matchVideo.file_url,
-                      videoStartMinute: matchVideo.start_minute,
-                      videoEndMinute: matchVideo.end_minute,
-                      videoDurationSeconds: matchVideo.duration_seconds,
                       matchId: matchId
                     });
                     refetchEvents();
