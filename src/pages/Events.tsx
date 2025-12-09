@@ -191,21 +191,18 @@ export default function Events() {
       return;
     }
 
-    const videoStartMinute = matchVideo.start_minute ?? 0;
-    const videoEndMinute = matchVideo.end_minute ?? 90;
-    const videoDuration = matchVideo.duration_seconds ?? ((videoEndMinute - videoStartMinute) * 60);
+    // Usar segundos diretos do metadata do evento ou calcular
+    const eventMetadata = event.metadata as any;
+    const eventSecondInVideo = (event.minute || 0) * 60 + (event.second || 0);
+    const videoSecondStart = eventMetadata?.videoSecondStart ?? Math.max(0, eventSecondInVideo - 10);
+    const videoSecondEnd = eventMetadata?.videoSecondEnd ?? (eventSecondInVideo + 10);
 
     await generateClip({
       eventId: event.id,
-      eventMinute: event.minute || 0,
-      eventSecond: event.second || 0,
+      videoSecondStart,
+      videoSecondEnd,
       videoUrl: matchVideo.file_url,
-      videoStartMinute,
-      videoEndMinute,
-      videoDurationSeconds: videoDuration,
-      matchId: currentMatchId!,
-      bufferBefore: 10,
-      bufferAfter: 10
+      matchId: currentMatchId!
     });
 
     queryClient.invalidateQueries({ queryKey: ['match-events', currentMatchId] });
@@ -224,22 +221,18 @@ export default function Events() {
       return;
     }
 
-    const videoStartMinute = matchVideo.start_minute ?? 0;
-    const videoEndMinute = matchVideo.end_minute ?? 90;
-    const videoDuration = matchVideo.duration_seconds ?? ((videoEndMinute - videoStartMinute) * 60);
-
     for (const event of eventsWithoutClips) {
+      const eventMetadata = event.metadata as any;
+      const eventSecondInVideo = (event.minute || 0) * 60 + (event.second || 0);
+      const videoSecondStart = eventMetadata?.videoSecondStart ?? Math.max(0, eventSecondInVideo - 10);
+      const videoSecondEnd = eventMetadata?.videoSecondEnd ?? (eventSecondInVideo + 10);
+
       await generateClip({
         eventId: event.id,
-        eventMinute: event.minute || 0,
-        eventSecond: event.second || 0,
+        videoSecondStart,
+        videoSecondEnd,
         videoUrl: matchVideo.file_url,
-        videoStartMinute,
-        videoEndMinute,
-        videoDurationSeconds: videoDuration,
-        matchId: currentMatchId!,
-        bufferBefore: 10,
-        bufferAfter: 10
+        matchId: currentMatchId!
       });
     }
 
