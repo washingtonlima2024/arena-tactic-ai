@@ -613,12 +613,20 @@ IMPORTANTE - DURAÇÃO DO VÍDEO: ${videoDurationSeconds} segundos (${videoDurat
 - Este é o TEMPO DO ARQUIVO DE VÍDEO, não o tempo de jogo
 ${analysisContext}
 
+REGRA CRÍTICA PARA DESCRIÇÕES:
+1. A "description" de cada evento DEVE ser extraída DIRETAMENTE da transcrição/narração acima
+2. Use as PALAVRAS EXATAS que o narrador disse no momento do evento
+3. Se a transcrição diz "[0:45] Gol do Flamengo! Gabigol marca de cabeça!" - a description deve ser "Gol do Flamengo! Gabigol marca de cabeça!"
+4. NÃO invente descrições genéricas como "Falta no meio-campo" - COPIE o que foi dito
+5. Cada description deve ter no máximo 100 caracteres, extraídos da fala do narrador
+6. Se não houver transcrição clara para um momento, use a descrição visual ou pule o evento
+
 Baseado na análise acima, gere eventos de futebol detectados.
 
-REGRAS CRÍTICAS:
-1. "videoSecond" DEVE estar entre 0 e ${videoDurationSeconds} (tempo do arquivo de vídeo)
-2. ${isRealAnalysis ? 'Baseie-se APENAS no que foi detectado na análise visual e transcrição' : 'Gere eventos conservadores e realistas'}
-3. Distribua os eventos proporcionalmente ao longo da duração do vídeo
+REGRAS DE TEMPO:
+1. "videoSecond" DEVE estar entre 0 e ${videoDurationSeconds}
+2. Use os timestamps [MM:SS] da transcrição para calcular videoSecond
+3. Distribua eventos proporcionalmente ao longo do vídeo
 
 Gere entre 3-10 eventos para este vídeo de ${videoDurationSeconds} segundos.
 
@@ -626,11 +634,12 @@ Retorne APENAS JSON válido (sem markdown):
 {
   "events": [
     {
-      "type": "foul",
+      "type": "goal",
       "videoSecond": 45,
       "team": "home",
-      "description": "Falta no meio-campo",
-      "confidence": 0.85
+      "description": "Gol do Flamengo! Gabigol marca de cabeça!",
+      "narration": "trecho exato da narração usada",
+      "confidence": 0.95
     }
   ]
 }
@@ -650,7 +659,16 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
         messages: [
           { 
             role: "system", 
-            content: "Você é um sistema de detecção de eventos de futebol. Analise dados visuais e de áudio para identificar eventos precisos. Retorne APENAS JSON válido." 
+            content: `Você é um sistema de detecção de eventos de futebol especializado em extrair legendas da narração.
+
+REGRAS OBRIGATÓRIAS:
+1. A "description" de cada evento DEVE ser copiada EXATAMENTE da transcrição do narrador
+2. NÃO invente ou parafraseie - use as palavras exatas do áudio transcrito
+3. Se a transcrição mostra "[0:30] Que chute! O goleiro defende!" - use exatamente "Que chute! O goleiro defende!" como description
+4. Legendas devem ser curtas (max 100 caracteres) e impactantes
+5. Priorize trechos emocionantes da narração
+
+Retorne APENAS JSON válido.` 
           },
           { role: "user", content: prompt }
         ],
@@ -707,12 +725,15 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
       const displayMinute = Math.floor(eventSecond / 60);
       const displaySecond = Math.floor(eventSecond % 60);
       
+      // Use narration text as description, fallback to event description
+      const eventDescription = event.narration || event.description || '';
+      
       const { error } = await supabase.from('match_events').insert({
         match_id: matchId,
         event_type: event.type,
         minute: displayMinute,
         second: displaySecond,
-        description: event.description,
+        description: eventDescription,
         is_highlight: ['goal', 'red_card', 'penalty'].includes(event.type),
         metadata: { 
           team: event.team, 
@@ -720,6 +741,7 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
           confidence: event.confidence || 0.7,
           source: event.source || (isRealAnalysis ? 'real_analysis' : 'estimated'),
           analysisMethod: isRealAnalysis ? 'vision+transcription' : 'ai_inference',
+          narration: event.narration || '',
           // Store video time in seconds and milliseconds for precise clip extraction
           videoSecond: eventSecond,
           eventMs: eventMs,
