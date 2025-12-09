@@ -305,7 +305,7 @@ export function PlaylistPlayer({
   return (
     <div 
       ref={containerRef}
-      className="fixed inset-0 z-50 bg-black flex flex-col"
+      className="fixed inset-0 z-[100] bg-black flex flex-col"
       onMouseMove={resetControlsTimeout}
       onClick={resetControlsTimeout}
     >
