@@ -321,6 +321,7 @@ async function processAnalysis(
 
 // Analyze video directly by downloading and sending to Gemini with video file
 // CRITICAL: startSecond and endSecond are VIDEO TIME, not game time
+// NOTE: Videos larger than 50MB will use estimated analysis due to memory limits
 async function analyzeVideoWithURL(
   videoUrl: string,
   homeTeamName: string,
@@ -337,25 +338,62 @@ async function analyzeVideoWithURL(
 
   const videoDurationSeconds = endSecond - startSecond;
   const videoDurationFormatted = `${Math.floor(videoDurationSeconds / 60)}:${String(videoDurationSeconds % 60).padStart(2, '0')}`;
+  const MAX_VIDEO_SIZE = 50 * 1024 * 1024; // 50MB max for direct analysis
 
   try {
-    console.log("Downloading video for visual analysis...");
+    console.log("Checking video size before download...");
     console.log("Video duration:", videoDurationSeconds, "seconds (", videoDurationFormatted, ")");
     
-    // Download the video file
-    const videoResponse = await fetch(videoUrl);
-    if (!videoResponse.ok) {
-      console.error("Failed to download video:", videoResponse.status);
+    // First, do a HEAD request to check file size
+    const headResponse = await fetch(videoUrl, { method: 'HEAD' });
+    const contentLength = headResponse.headers.get('content-length');
+    const videoSize = contentLength ? parseInt(contentLength, 10) : 0;
+    
+    console.log("Video size from headers:", videoSize, "bytes (", Math.round(videoSize / 1024 / 1024), "MB)");
+    
+    // If video is too large, use estimated analysis
+    if (videoSize > MAX_VIDEO_SIZE) {
+      console.log("Video too large for direct analysis (>50MB), using estimated analysis");
       return await analyzeVideoWithVisionEstimated(homeTeamName, awayTeamName, startSecond, endSecond);
     }
     
-    const videoArrayBuffer = await videoResponse.arrayBuffer();
-    const videoBase64 = btoa(String.fromCharCode(...new Uint8Array(videoArrayBuffer)));
+    // If we couldn't get size from headers, try downloading with timeout
+    console.log("Downloading video for visual analysis...");
     
-    console.log("Video downloaded, size:", videoArrayBuffer.byteLength, "bytes");
-    console.log("Sending video to Gemini for REAL visual analysis...");
+    // Create an AbortController for timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
     
-    const prompt = `Você é um analista de futebol profissional. Analise este vídeo de partida de futebol VISUALMENTE.
+    try {
+      const videoResponse = await fetch(videoUrl, { signal: controller.signal });
+      clearTimeout(timeoutId);
+      
+      if (!videoResponse.ok) {
+        console.error("Failed to download video:", videoResponse.status);
+        return await analyzeVideoWithVisionEstimated(homeTeamName, awayTeamName, startSecond, endSecond);
+      }
+      
+      const videoArrayBuffer = await videoResponse.arrayBuffer();
+      
+      // Check size after download
+      if (videoArrayBuffer.byteLength > MAX_VIDEO_SIZE) {
+        console.log("Downloaded video too large (", videoArrayBuffer.byteLength, "bytes), using estimated analysis");
+        return await analyzeVideoWithVisionEstimated(homeTeamName, awayTeamName, startSecond, endSecond);
+      }
+      
+      // Convert to base64 in chunks to avoid memory issues
+      const uint8Array = new Uint8Array(videoArrayBuffer);
+      let videoBase64 = '';
+      const chunkSize = 32768; // 32KB chunks
+      for (let i = 0; i < uint8Array.length; i += chunkSize) {
+        const chunk = uint8Array.slice(i, Math.min(i + chunkSize, uint8Array.length));
+        videoBase64 += btoa(String.fromCharCode.apply(null, Array.from(chunk)));
+      }
+      
+      console.log("Video downloaded, size:", videoArrayBuffer.byteLength, "bytes");
+      console.log("Sending video to Gemini for REAL visual analysis...");
+      
+      const prompt = `Você é um analista de futebol profissional. Analise este vídeo de partida de futebol VISUALMENTE.
 
 PARTIDA: ${homeTeamName} (casa) vs ${awayTeamName} (visitante)
 
@@ -388,51 +426,66 @@ Formato de resposta - APENAS JSON:
 
 Gere APENAS eventos que você realmente VÊ no vídeo, com timestamps precisos.`;
 
-    // Use Gemini with inline video data
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${LOVABLE_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
-        messages: [
-          { 
-            role: "system", 
-            content: "Você é um analista de futebol que analisa vídeos visualmente. Reporte APENAS eventos que você realmente VÊ no vídeo, com timestamps exatos." 
-          },
-          { 
-            role: "user", 
-            content: [
-              {
-                type: "text",
-                text: prompt
-              },
-              {
-                type: "image_url",
-                image_url: {
-                  url: `data:video/mp4;base64,${videoBase64}`
+      // Use Gemini with inline video data - with timeout
+      const aiController = new AbortController();
+      const aiTimeoutId = setTimeout(() => aiController.abort(), 120000); // 2 minute timeout for AI
+      
+      const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${LOVABLE_API_KEY}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.5-flash",
+          messages: [
+            { 
+              role: "system", 
+              content: "Você é um analista de futebol que analisa vídeos visualmente. Reporte APENAS eventos que você realmente VÊ no vídeo, com timestamps exatos." 
+            },
+            { 
+              role: "user", 
+              content: [
+                {
+                  type: "text",
+                  text: prompt
+                },
+                {
+                  type: "image_url",
+                  image_url: {
+                    url: `data:video/mp4;base64,${videoBase64}`
+                  }
                 }
-              }
-            ]
-          }
-        ],
-      }),
-    });
+              ]
+            }
+          ],
+        }),
+        signal: aiController.signal
+      });
+      
+      clearTimeout(aiTimeoutId);
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Vision API error:", response.status, errorText);
-      // Fallback to estimated if video analysis fails
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Vision API error:", response.status, errorText);
+        // Fallback to estimated if video analysis fails
+        return await analyzeVideoWithVisionEstimated(homeTeamName, awayTeamName, startSecond, endSecond);
+      }
+
+      const data = await response.json();
+      const analysis = data.choices?.[0]?.message?.content || '';
+      console.log("REAL vision analysis completed, length:", analysis.length);
+      console.log("Analysis preview:", analysis.substring(0, 500));
+      return analysis;
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      if ((fetchError as Error).name === 'AbortError') {
+        console.error("Video download timed out after 60 seconds");
+      } else {
+        console.error("Error downloading video:", fetchError);
+      }
       return await analyzeVideoWithVisionEstimated(homeTeamName, awayTeamName, startSecond, endSecond);
     }
-
-    const data = await response.json();
-    const analysis = data.choices?.[0]?.message?.content || '';
-    console.log("REAL vision analysis completed, length:", analysis.length);
-    console.log("Analysis preview:", analysis.substring(0, 500));
-    return analysis;
   } catch (error) {
     console.error("Error in video visual analysis:", error);
     // Fallback to estimated analysis
