@@ -435,8 +435,8 @@ export default function Events() {
           )}
         </div>
 
-        {/* Clip Extraction Progress */}
-        {isExtractingClips && (
+        {/* Clip Extraction Progress - only show when actively extracting, not during idle */}
+        {isExtractingClips && clipProgress.stage !== 'idle' && clipProgress.message && (
           <Card variant="glow" className="border-primary/30">
             <CardContent className="flex items-center gap-4 py-4">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
