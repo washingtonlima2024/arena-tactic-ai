@@ -77,7 +77,7 @@ export function VideoPlayerModal({
     
     // If we have a precise videoSecond from analysis, use it directly
     if (clip.videoSecond !== undefined && clip.videoSecond >= 0) {
-      const targetTs = Math.max(0, clip.videoSecond - 5); // 5 second buffer before event
+      const targetTs = Math.max(0, clip.videoSecond - 3); // 3 second buffer before event
       // CRITICAL: Clamp to video duration to prevent seeking beyond end
       return Math.min(targetTs, Math.max(0, videoDuration - 1));
     }
@@ -100,7 +100,7 @@ export function VideoPlayerModal({
     
     const relativePosition = (eventMatchMinute - videoStartMinute) / matchMinutesSpan;
     const eventVideoSeconds = relativePosition * videoDuration;
-    const targetTs = Math.max(0, eventVideoSeconds - 10);
+    const targetTs = Math.max(0, eventVideoSeconds - 3); // 3 second buffer before event
     
     // CRITICAL: Clamp to video duration
     return Math.min(targetTs, Math.max(0, videoDuration - 1));
