@@ -369,6 +369,177 @@ export type Database = {
         }
         Relationships: []
       }
+      smart_edit_clips: {
+        Row: {
+          confidence: number | null
+          created_at: string | null
+          end_second: number
+          event_type: string | null
+          id: string
+          is_enabled: boolean | null
+          project_id: string | null
+          sort_order: number | null
+          start_second: number
+          title: string | null
+        }
+        Insert: {
+          confidence?: number | null
+          created_at?: string | null
+          end_second: number
+          event_type?: string | null
+          id?: string
+          is_enabled?: boolean | null
+          project_id?: string | null
+          sort_order?: number | null
+          start_second: number
+          title?: string | null
+        }
+        Update: {
+          confidence?: number | null
+          created_at?: string | null
+          end_second?: number
+          event_type?: string | null
+          id?: string
+          is_enabled?: boolean | null
+          project_id?: string | null
+          sort_order?: number | null
+          start_second?: number
+          title?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "smart_edit_clips_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "smart_edit_projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      smart_edit_projects: {
+        Row: {
+          created_at: string | null
+          id: string
+          language: string | null
+          source_video_url: string
+          status: string | null
+          title: string
+          transcription: string | null
+          updated_at: string | null
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          language?: string | null
+          source_video_url: string
+          status?: string | null
+          title: string
+          transcription?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          language?: string | null
+          source_video_url?: string
+          status?: string | null
+          title?: string
+          transcription?: string | null
+          updated_at?: string | null
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      smart_edit_renders: {
+        Row: {
+          created_at: string | null
+          error_message: string | null
+          id: string
+          progress: number | null
+          project_id: string | null
+          status: string | null
+          video_url: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          progress?: number | null
+          project_id?: string | null
+          status?: string | null
+          video_url?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          error_message?: string | null
+          id?: string
+          progress?: number | null
+          project_id?: string | null
+          status?: string | null
+          video_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "smart_edit_renders_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "smart_edit_projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      smart_edit_settings: {
+        Row: {
+          channel_name: string | null
+          closing_text: string | null
+          created_at: string | null
+          cut_intensity: string | null
+          id: string
+          max_clip_duration: number | null
+          max_clips: number | null
+          min_clip_duration: number | null
+          opening_text: string | null
+          project_id: string | null
+          transition_text: string | null
+        }
+        Insert: {
+          channel_name?: string | null
+          closing_text?: string | null
+          created_at?: string | null
+          cut_intensity?: string | null
+          id?: string
+          max_clip_duration?: number | null
+          max_clips?: number | null
+          min_clip_duration?: number | null
+          opening_text?: string | null
+          project_id?: string | null
+          transition_text?: string | null
+        }
+        Update: {
+          channel_name?: string | null
+          closing_text?: string | null
+          created_at?: string | null
+          cut_intensity?: string | null
+          id?: string
+          max_clip_duration?: number | null
+          max_clips?: number | null
+          min_clip_duration?: number | null
+          opening_text?: string | null
+          project_id?: string | null
+          transition_text?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "smart_edit_settings_project_id_fkey"
+            columns: ["project_id"]
+            isOneToOne: false
+            referencedRelation: "smart_edit_projects"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       teams: {
         Row: {
           created_at: string

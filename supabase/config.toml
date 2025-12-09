@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.transcribe-audio]
 verify_jwt = false
+
+[functions.analyze-smart-video]
+verify_jwt = false
