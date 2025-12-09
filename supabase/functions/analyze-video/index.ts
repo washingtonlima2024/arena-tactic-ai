@@ -678,6 +678,9 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
     
     let insertedCount = 0;
     for (const event of validEvents) {
+      // Convert minute/second to milliseconds for precision
+      const eventMs = ((event.minute || 0) * 60 + (event.second || 0)) * 1000;
+      
       const { error } = await supabase.from('match_events').insert({
         match_id: matchId,
         event_type: event.type,
@@ -690,7 +693,11 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
           teamName: event.team === 'home' ? homeTeamName : awayTeamName,
           confidence: event.confidence || 0.7,
           source: event.source || (isRealAnalysis ? 'real_analysis' : 'estimated'),
-          analysisMethod: isRealAnalysis ? 'vision+transcription' : 'ai_inference'
+          analysisMethod: isRealAnalysis ? 'vision+transcription' : 'ai_inference',
+          // Store milliseconds for precise clip extraction
+          eventMs: eventMs,
+          bufferBeforeMs: 3000, // 3 seconds before
+          bufferAfterMs: 3000   // 3 seconds after
         },
         position_x: Math.random() * 100,
         position_y: Math.random() * 100,
@@ -742,20 +749,28 @@ async function generateFallbackEvents(
   for (let i = 0; i < eventCount; i++) {
     const template = templates[i % templates.length];
     const minute = startMinute + Math.floor((i + 1) * (segmentDuration / (eventCount + 1)));
+    const second = Math.floor(Math.random() * 60);
     const team = Math.random() > 0.5 ? 'home' : 'away';
+    
+    // Convert to milliseconds for precision
+    const eventMs = (Math.min(minute, endMinute) * 60 + second) * 1000;
     
     const { error } = await supabase.from('match_events').insert({
       match_id: matchId,
       event_type: template.type,
       minute: Math.min(minute, endMinute),
-      second: Math.floor(Math.random() * 60),
+      second: second,
       description: template.description,
       is_highlight: template.highlight,
       metadata: { 
         team,
         teamName: team === 'home' ? homeTeamName : awayTeamName,
         source: 'fallback',
-        analysisMethod: 'pattern_based'
+        analysisMethod: 'pattern_based',
+        // Store milliseconds for precise clip extraction
+        eventMs: eventMs,
+        bufferBeforeMs: 3000, // 3 seconds before
+        bufferAfterMs: 3000   // 3 seconds after
       },
       position_x: Math.random() * 100,
       position_y: Math.random() * 100,

@@ -4,17 +4,35 @@ import { toBlobURL } from '@ffmpeg/util';
 import { toast } from 'sonner';
 import { supabase } from '@/integrations/supabase/client';
 
+// All timing is in MILLISECONDS for precision
+export const CLIP_BUFFER_BEFORE_MS = 3000; // 3 seconds before event
+export const CLIP_BUFFER_AFTER_MS = 3000;  // 3 seconds after event
+
 export interface ClipConfig {
   eventId: string;
-  eventMinute: number;
-  eventSecond?: number;
+  eventMinuteMs: number; // Event time in milliseconds from match start
   videoUrl: string;
-  videoStartMinute: number;
-  videoEndMinute: number;
-  videoDurationSeconds: number;
+  videoStartMs: number;  // Video start in milliseconds
+  videoEndMs: number;    // Video end in milliseconds
+  videoDurationMs: number; // Total video duration in milliseconds
   matchId: string;
-  bufferBefore?: number;
-  bufferAfter?: number;
+  bufferBeforeMs?: number; // Buffer before event in milliseconds (default: 3000)
+  bufferAfterMs?: number;  // Buffer after event in milliseconds (default: 3000)
+}
+
+// Helper: Convert minute + second to milliseconds
+export function toMs(minute: number, second: number = 0): number {
+  return (minute * 60 + second) * 1000;
+}
+
+// Helper: Convert minutes to milliseconds
+export function minutesToMs(minutes: number): number {
+  return minutes * 60 * 1000;
+}
+
+// Helper: Convert seconds to milliseconds
+export function secondsToMs(seconds: number): number {
+  return seconds * 1000;
 }
 
 export interface ClipGenerationProgress {
@@ -81,20 +99,25 @@ export function useClipGeneration() {
     }
   }, [isLoaded]);
 
-  const calculateVideoTimestamp = (
-    eventMinute: number,
-    eventSecond: number,
-    videoStartMinute: number,
-    videoEndMinute: number,
-    videoDurationSeconds: number
+  // Calculate video timestamp in MILLISECONDS
+  const calculateVideoTimestampMs = (
+    eventMs: number,
+    videoStartMs: number,
+    videoEndMs: number,
+    videoDurationMs: number
   ): number => {
-    const eventTotalMinutes = eventMinute + (eventSecond / 60);
-    const videoRangeMinutes = videoEndMinute - videoStartMinute;
+    const videoRangeMs = videoEndMs - videoStartMs;
     
-    if (videoRangeMinutes <= 0) return 0;
+    if (videoRangeMs <= 0) return 0;
     
-    const positionRatio = (eventTotalMinutes - videoStartMinute) / videoRangeMinutes;
-    return Math.max(0, positionRatio * videoDurationSeconds);
+    // Position ratio within the video range
+    const positionRatio = (eventMs - videoStartMs) / videoRangeMs;
+    return Math.max(0, positionRatio * videoDurationMs);
+  };
+  
+  // Convert milliseconds to seconds string for FFmpeg
+  const msToSeconds = (ms: number): string => {
+    return (ms / 1000).toFixed(3);
   };
 
   // Cancel current operation
@@ -177,7 +200,7 @@ export function useClipGeneration() {
     }
   }, [isCancelled]);
 
-  // Extract single clip from already loaded video
+  // Extract single clip from already loaded video (all timing in MILLISECONDS)
   const extractSingleClip = useCallback(async (
     ffmpeg: FFmpeg,
     config: ClipConfig,
@@ -186,28 +209,31 @@ export function useClipGeneration() {
   ): Promise<string | null> => {
     const {
       eventId,
-      eventMinute,
-      eventSecond = 0,
-      videoStartMinute,
-      videoEndMinute,
-      videoDurationSeconds,
+      eventMinuteMs,
+      videoStartMs,
+      videoEndMs,
+      videoDurationMs,
       matchId,
-      bufferBefore = 10,
-      bufferAfter = 10
+      bufferBeforeMs = CLIP_BUFFER_BEFORE_MS,
+      bufferAfterMs = CLIP_BUFFER_AFTER_MS
     } = config;
 
-    const eventVideoSeconds = calculateVideoTimestamp(
-      eventMinute,
-      eventSecond,
-      videoStartMinute,
-      videoEndMinute,
-      videoDurationSeconds
+    // Calculate event position in video (milliseconds)
+    const eventVideoMs = calculateVideoTimestampMs(
+      eventMinuteMs,
+      videoStartMs,
+      videoEndMs,
+      videoDurationMs
     );
 
-    const startTime = Math.max(0, eventVideoSeconds - bufferBefore);
-    const duration = bufferBefore + bufferAfter;
+    // Calculate start time and duration in milliseconds
+    const startTimeMs = Math.max(0, eventVideoMs - bufferBeforeMs);
+    const durationMs = bufferBeforeMs + bufferAfterMs;
 
-    console.log(`[ClipGen] Extracting clip ${clipIndex + 1}/${totalClips}: event=${eventId}, start=${startTime.toFixed(1)}s, duration=${duration}s`);
+    console.log(`[ClipGen] Extracting clip ${clipIndex + 1}/${totalClips}: event=${eventId}`);
+    console.log(`[ClipGen] Event at ${eventMinuteMs}ms, video position ${eventVideoMs}ms`);
+    console.log(`[ClipGen] Clip: start=${msToSeconds(startTimeMs)}s, duration=${msToSeconds(durationMs)}s`);
+    console.log(`[ClipGen] Buffer: ${bufferBeforeMs}ms before, ${bufferAfterMs}ms after`);
 
     const baseProgress = 30 + ((clipIndex / totalClips) * 50); // 30-80%
     
@@ -221,10 +247,11 @@ export function useClipGeneration() {
 
     const outputFile = `clip_${clipIndex}.mp4`;
     
+    // Use precise millisecond timing for FFmpeg
     await ffmpeg.exec([
-      '-ss', startTime.toString(),
+      '-ss', msToSeconds(startTimeMs),
       '-i', 'input.mp4',
-      '-t', duration.toString(),
+      '-t', msToSeconds(durationMs),
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-crf', '23',
