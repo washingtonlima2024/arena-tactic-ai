@@ -1,8 +1,11 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Upload, Image, Loader2 } from 'lucide-react';
+import { supabase } from '@/integrations/supabase/client';
+import { toast } from 'sonner';
 import type { Team, TeamInsert, TeamUpdate } from '@/hooks/useTeams';
 
 interface TeamFormDialogProps {
@@ -25,6 +28,8 @@ export function TeamFormDialog({
   const [primaryColor, setPrimaryColor] = useState('#10b981');
   const [secondaryColor, setSecondaryColor] = useState('#ffffff');
   const [logoUrl, setLogoUrl] = useState('');
+  const [isUploading, setIsUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (team) {
@@ -41,6 +46,49 @@ export function TeamFormDialog({
       setLogoUrl('');
     }
   }, [team, open]);
+
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Por favor, selecione um arquivo de imagem');
+      return;
+    }
+
+    // Validate file size (max 2MB)
+    if (file.size > 2 * 1024 * 1024) {
+      toast.error('A imagem deve ter no máximo 2MB');
+      return;
+    }
+
+    setIsUploading(true);
+
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
+      const filePath = `team-logos/${fileName}`;
+
+      const { error: uploadError } = await supabase.storage
+        .from('thumbnails')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage
+        .from('thumbnails')
+        .getPublicUrl(filePath);
+
+      setLogoUrl(publicUrl);
+      toast.success('Logo carregada com sucesso!');
+    } catch (error) {
+      console.error('Error uploading logo:', error);
+      toast.error('Erro ao fazer upload da logo');
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -130,8 +178,52 @@ export function TeamFormDialog({
             </div>
           </div>
 
+          {/* Logo Upload Section */}
           <div className="space-y-2">
-            <Label htmlFor="logoUrl">URL do Logo</Label>
+            <Label>Logo do Time</Label>
+            <div className="flex gap-3">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileUpload}
+                className="hidden"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+                className="flex-1"
+              >
+                {isUploading ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Enviando...
+                  </>
+                ) : (
+                  <>
+                    <Upload className="h-4 w-4 mr-2" />
+                    Upload de Imagem
+                  </>
+                )}
+              </Button>
+              
+              {logoUrl && (
+                <div className="h-10 w-10 rounded border border-border overflow-hidden bg-muted flex items-center justify-center">
+                  <img 
+                    src={logoUrl} 
+                    alt="Logo preview" 
+                    className="h-8 w-8 object-contain"
+                  />
+                </div>
+              )}
+            </div>
+            
+            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+              <Image className="h-3 w-3" />
+              <span>ou cole uma URL:</span>
+            </div>
             <Input
               id="logoUrl"
               value={logoUrl}
@@ -141,10 +233,11 @@ export function TeamFormDialog({
             />
           </div>
 
+          {/* Preview */}
           {(logoUrl || primaryColor) && (
             <div className="flex items-center gap-4 p-4 rounded-lg bg-muted/50">
               <div 
-                className="h-12 w-12 rounded-full flex items-center justify-center text-lg font-bold"
+                className="h-12 w-12 rounded-full flex items-center justify-center text-lg font-bold overflow-hidden"
                 style={{ 
                   backgroundColor: primaryColor,
                   color: secondaryColor
@@ -174,7 +267,7 @@ export function TeamFormDialog({
             <Button 
               type="submit" 
               variant="arena" 
-              disabled={isLoading || !name}
+              disabled={isLoading || !name || isUploading}
             >
               {isLoading ? 'Salvando...' : (team ? 'Salvar' : 'Criar Time')}
             </Button>
