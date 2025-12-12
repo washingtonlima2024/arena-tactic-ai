@@ -41,14 +41,22 @@ export function MatchSetupCard({ data, onChange, onContinue }: MatchSetupCardPro
             {/* Home Team Badge */}
             <div className="flex flex-col items-center">
               <div 
-                className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold border-2"
+                className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold border-2 overflow-hidden"
                 style={{ 
                   backgroundColor: homeTeam?.primary_color || 'hsl(var(--muted))',
                   borderColor: homeTeam?.secondary_color || 'hsl(var(--border))',
                   color: homeTeam?.secondary_color || 'hsl(var(--foreground))'
                 }}
               >
-                {homeTeam?.short_name?.[0] || '🏠'}
+                {homeTeam?.logo_url ? (
+                  <img 
+                    src={homeTeam.logo_url} 
+                    alt={homeTeam.name} 
+                    className="w-12 h-12 object-contain"
+                  />
+                ) : (
+                  homeTeam?.short_name?.[0] || '🏠'
+                )}
               </div>
               <span className="text-xs text-muted-foreground mt-1">Casa</span>
             </div>
@@ -58,14 +66,22 @@ export function MatchSetupCard({ data, onChange, onContinue }: MatchSetupCardPro
             {/* Away Team Badge */}
             <div className="flex flex-col items-center">
               <div 
-                className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold border-2"
+                className="w-16 h-16 rounded-full flex items-center justify-center text-2xl font-bold border-2 overflow-hidden"
                 style={{ 
                   backgroundColor: awayTeam?.primary_color || 'hsl(var(--muted))',
                   borderColor: awayTeam?.secondary_color || 'hsl(var(--border))',
                   color: awayTeam?.secondary_color || 'hsl(var(--foreground))'
                 }}
               >
-                {awayTeam?.short_name?.[0] || '🏃'}
+                {awayTeam?.logo_url ? (
+                  <img 
+                    src={awayTeam.logo_url} 
+                    alt={awayTeam.name} 
+                    className="w-12 h-12 object-contain"
+                  />
+                ) : (
+                  awayTeam?.short_name?.[0] || '🏃'
+                )}
               </div>
               <span className="text-xs text-muted-foreground mt-1">Visitante</span>
             </div>
@@ -94,10 +110,18 @@ export function MatchSetupCard({ data, onChange, onContinue }: MatchSetupCardPro
                 {teams?.map((team) => (
                   <SelectItem key={team.id} value={team.id} disabled={team.id === data.awayTeamId}>
                     <div className="flex items-center gap-2">
-                      <div 
-                        className="w-4 h-4 rounded-full"
-                        style={{ backgroundColor: team.primary_color || '#10b981' }}
-                      />
+                      {team.logo_url ? (
+                        <img 
+                          src={team.logo_url} 
+                          alt={team.name} 
+                          className="w-5 h-5 object-contain rounded"
+                        />
+                      ) : (
+                        <div 
+                          className="w-5 h-5 rounded-full"
+                          style={{ backgroundColor: team.primary_color || '#10b981' }}
+                        />
+                      )}
                       {team.name}
                     </div>
                   </SelectItem>
@@ -123,10 +147,18 @@ export function MatchSetupCard({ data, onChange, onContinue }: MatchSetupCardPro
                 {teams?.map((team) => (
                   <SelectItem key={team.id} value={team.id} disabled={team.id === data.homeTeamId}>
                     <div className="flex items-center gap-2">
-                      <div 
-                        className="w-4 h-4 rounded-full"
-                        style={{ backgroundColor: team.primary_color || '#10b981' }}
-                      />
+                      {team.logo_url ? (
+                        <img 
+                          src={team.logo_url} 
+                          alt={team.name} 
+                          className="w-5 h-5 object-contain rounded"
+                        />
+                      ) : (
+                        <div 
+                          className="w-5 h-5 rounded-full"
+                          style={{ backgroundColor: team.primary_color || '#10b981' }}
+                        />
+                      )}
                       {team.name}
                     </div>
                   </SelectItem>
