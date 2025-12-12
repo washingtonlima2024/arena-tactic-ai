@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { z } from 'zod';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from 'sonner';
-import { Loader2, Shield } from 'lucide-react';
+import { Loader2, Shield, ArrowLeft, Mail } from 'lucide-react';
 import arenaIcon from '@/assets/arena-play-icon.png';
 import arenaWordmark from '@/assets/arena-play-wordmark.png';
 
@@ -20,13 +20,32 @@ const authSchema = z.object({
   displayName: z.string().optional(),
 });
 
+const resetEmailSchema = z.object({
+  email: z.string().email('Email inválido'),
+});
+
+const newPasswordSchema = z.object({
+  password: z.string().min(6, 'A senha deve ter pelo menos 6 caracteres'),
+  confirmPassword: z.string().min(6, 'A senha deve ter pelo menos 6 caracteres'),
+}).refine((data) => data.password === data.confirmPassword, {
+  message: "As senhas não coincidem",
+  path: ["confirmPassword"],
+});
+
 type AuthForm = z.infer<typeof authSchema>;
+type ResetEmailForm = z.infer<typeof resetEmailSchema>;
+type NewPasswordForm = z.infer<typeof newPasswordSchema>;
 
 export default function Auth() {
   const navigate = useNavigate();
-  const { user, isLoading, signUp, signIn } = useAuth();
+  const [searchParams] = useSearchParams();
+  const isResetMode = searchParams.get('reset') === 'true';
+  
+  const { user, isLoading, signUp, signIn, resetPassword, updatePassword } = useAuth();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [activeTab, setActiveTab] = useState<'login' | 'signup'>('login');
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [resetEmailSent, setResetEmailSent] = useState(false);
 
   const form = useForm<AuthForm>({
     resolver: zodResolver(authSchema),
@@ -37,11 +56,21 @@ export default function Auth() {
     },
   });
 
+  const resetEmailForm = useForm<ResetEmailForm>({
+    resolver: zodResolver(resetEmailSchema),
+    defaultValues: { email: '' },
+  });
+
+  const newPasswordForm = useForm<NewPasswordForm>({
+    resolver: zodResolver(newPasswordSchema),
+    defaultValues: { password: '', confirmPassword: '' },
+  });
+
   useEffect(() => {
-    if (!isLoading && user) {
+    if (!isLoading && user && !isResetMode) {
       navigate('/');
     }
-  }, [user, isLoading, navigate]);
+  }, [user, isLoading, navigate, isResetMode]);
 
   const handleSubmit = async (values: AuthForm) => {
     setIsSubmitting(true);
@@ -78,10 +107,178 @@ export default function Auth() {
     }
   };
 
+  const handleResetEmail = async (values: ResetEmailForm) => {
+    setIsSubmitting(true);
+    try {
+      const { error } = await resetPassword(values.email);
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      setResetEmailSent(true);
+      toast.success('Email de recuperação enviado! Verifique sua caixa de entrada.');
+    } catch (err) {
+      toast.error('Erro ao enviar email. Tente novamente.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleNewPassword = async (values: NewPasswordForm) => {
+    setIsSubmitting(true);
+    try {
+      const { error } = await updatePassword(values.password);
+      if (error) {
+        toast.error(error.message);
+        return;
+      }
+      toast.success('Senha atualizada com sucesso!');
+      navigate('/');
+    } catch (err) {
+      toast.error('Erro ao atualizar senha. Tente novamente.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-primary/5">
         <Loader2 className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  // Reset password mode - user clicked on email link
+  if (isResetMode && user) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 p-4">
+        <Card className="w-full max-w-md border-primary/20 bg-card/80 backdrop-blur-sm">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4 flex flex-col items-center gap-2">
+              <img src={arenaIcon} alt="Arena Play" className="h-14 w-14 object-contain" />
+              <img src={arenaWordmark} alt="Arena Play" className="h-8 object-contain" />
+            </div>
+            <CardTitle>Definir Nova Senha</CardTitle>
+            <CardDescription>
+              Digite sua nova senha abaixo
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Form {...newPasswordForm}>
+              <form onSubmit={newPasswordForm.handleSubmit(handleNewPassword)} className="space-y-4">
+                <FormField
+                  control={newPasswordForm.control}
+                  name="password"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Nova Senha</FormLabel>
+                      <FormControl>
+                        <Input type="password" placeholder="••••••" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <FormField
+                  control={newPasswordForm.control}
+                  name="confirmPassword"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Confirmar Senha</FormLabel>
+                      <FormControl>
+                        <Input type="password" placeholder="••••••" {...field} />
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+                <Button type="submit" className="w-full" disabled={isSubmitting}>
+                  {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  Atualizar Senha
+                </Button>
+              </form>
+            </Form>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Forgot password form
+  if (showForgotPassword) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-background via-background to-primary/5 p-4">
+        <Card className="w-full max-w-md border-primary/20 bg-card/80 backdrop-blur-sm">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4 flex flex-col items-center gap-2">
+              <img src={arenaIcon} alt="Arena Play" className="h-14 w-14 object-contain" />
+              <img src={arenaWordmark} alt="Arena Play" className="h-8 object-contain" />
+            </div>
+            <CardTitle>Recuperar Senha</CardTitle>
+            <CardDescription>
+              {resetEmailSent 
+                ? 'Verifique sua caixa de entrada'
+                : 'Digite seu email para receber um link de recuperação'
+              }
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {resetEmailSent ? (
+              <div className="space-y-4 text-center">
+                <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-primary/10">
+                  <Mail className="h-8 w-8 text-primary" />
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Enviamos um link de recuperação para <strong>{resetEmailForm.getValues('email')}</strong>. 
+                  Clique no link para definir uma nova senha.
+                </p>
+                <Button 
+                  variant="outline" 
+                  className="w-full"
+                  onClick={() => {
+                    setShowForgotPassword(false);
+                    setResetEmailSent(false);
+                  }}
+                >
+                  <ArrowLeft className="mr-2 h-4 w-4" />
+                  Voltar ao login
+                </Button>
+              </div>
+            ) : (
+              <Form {...resetEmailForm}>
+                <form onSubmit={resetEmailForm.handleSubmit(handleResetEmail)} className="space-y-4">
+                  <FormField
+                    control={resetEmailForm.control}
+                    name="email"
+                    render={({ field }) => (
+                      <FormItem>
+                        <FormLabel>Email</FormLabel>
+                        <FormControl>
+                          <Input type="email" placeholder="seu@email.com" {...field} />
+                        </FormControl>
+                        <FormMessage />
+                      </FormItem>
+                    )}
+                  />
+                  <Button type="submit" className="w-full" disabled={isSubmitting}>
+                    {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                    Enviar link de recuperação
+                  </Button>
+                  <Button 
+                    type="button"
+                    variant="ghost" 
+                    className="w-full"
+                    onClick={() => setShowForgotPassword(false)}
+                  >
+                    <ArrowLeft className="mr-2 h-4 w-4" />
+                    Voltar ao login
+                  </Button>
+                </form>
+              </Form>
+            )}
+          </CardContent>
+        </Card>
       </div>
     );
   }
@@ -163,6 +360,17 @@ export default function Auth() {
                   ) : null}
                   {activeTab === 'login' ? 'Entrar' : 'Criar conta'}
                 </Button>
+
+                {activeTab === 'login' && (
+                  <Button 
+                    type="button"
+                    variant="link" 
+                    className="w-full text-muted-foreground"
+                    onClick={() => setShowForgotPassword(true)}
+                  >
+                    Esqueci minha senha
+                  </Button>
+                )}
               </form>
             </Form>
           </Tabs>
