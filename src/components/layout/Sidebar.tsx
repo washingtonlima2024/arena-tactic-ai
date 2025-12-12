@@ -9,12 +9,14 @@ import {
   Settings, 
   ChevronLeft,
   ChevronRight,
-  Radio
+  Radio,
+  ShieldCheck
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useSidebarContext } from '@/contexts/SidebarContext';
+import { useAuth } from '@/hooks/useAuth';
 import arenaIcon from '@/assets/arena-play-icon.png';
 import arenaWordmark from '@/assets/arena-play-wordmark.png';
 import kakttusLogo from '@/assets/logo-kakttus.png';
@@ -31,7 +33,12 @@ const navItems = [
   { icon: Settings, label: 'Configurações', path: '/settings' },
 ];
 
+const adminItems = [
+  { icon: ShieldCheck, label: 'Administração', path: '/admin' },
+];
+
 export function Sidebar() {
+  const { isAdmin } = useAuth();
   const { collapsed, toggle } = useSidebarContext();
 
   return (
@@ -89,6 +96,41 @@ export function Sidebar() {
             </li>
           ))}
         </ul>
+
+        {/* Admin Section */}
+        {isAdmin && (
+          <>
+            <div className="my-3 px-3">
+              {!collapsed && (
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Admin
+                </span>
+              )}
+              {collapsed && <div className="h-px bg-border" />}
+            </div>
+            <ul className="space-y-1">
+              {adminItems.map((item) => (
+                <li key={item.path}>
+                  <NavLink
+                    to={item.path}
+                    className={({ isActive }) =>
+                      cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                        "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                        isActive
+                          ? "bg-primary/10 text-primary shadow-sm arena-glow-subtle"
+                          : "text-sidebar-foreground"
+                      )
+                    }
+                  >
+                    <item.icon className="h-5 w-5 shrink-0" />
+                    {!collapsed && <span>{item.label}</span>}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </nav>
 
       {/* Kakttus Solutions Branding */}
