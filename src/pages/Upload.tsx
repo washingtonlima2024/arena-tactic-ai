@@ -40,6 +40,9 @@ import { MatchSetupCard, MatchSetupData } from '@/components/upload/MatchSetupCa
 import { VideoSegmentCard, VideoSegment, VideoType } from '@/components/upload/VideoSegmentCard';
 import { CoverageTimeline } from '@/components/upload/CoverageTimeline';
 import { AnalysisSummary } from '@/components/upload/AnalysisSummary';
+import { MatchTimesConfig, defaultMatchTimes, MatchTimes } from '@/components/upload/MatchTimesConfig';
+import { HalfDropzone, getDefaultVideoType, getDefaultMinutes } from '@/components/upload/HalfDropzone';
+import { SubtitlesUpload } from '@/components/upload/SubtitlesUpload';
 import { cn } from '@/lib/utils';
 
 // Helper to extract embed URL from various formats
@@ -82,10 +85,16 @@ export default function VideoUpload() {
     venue: '',
   });
 
+  // Match times configuration
+  const [matchTimes, setMatchTimes] = useState<MatchTimes>(defaultMatchTimes);
+
   // Video segments
   const [segments, setSegments] = useState<VideoSegment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadMode, setUploadMode] = useState<'file' | 'link'>('file');
+  
+  // Subtitles
+  const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
   
   // Link input state
   const [newLinkInput, setNewLinkInput] = useState('');
@@ -123,15 +132,15 @@ export default function VideoUpload() {
     });
   };
 
-  const uploadFile = async (file: File) => {
+  const uploadFile = async (file: File, half?: 'first' | 'second') => {
     const segmentId = crypto.randomUUID();
-    const suggestedType = suggestVideoType(file.name);
-    const defaultConfig = {
+    const suggestedType = half ? getDefaultVideoType(half) : suggestVideoType(file.name);
+    const defaultMins = half ? getDefaultMinutes(half) : {
       full: { start: 0, end: 90 },
       first_half: { start: 0, end: 45 },
       second_half: { start: 45, end: 90 },
       clip: { start: 0, end: 10 },
-    };
+    }[suggestedType];
 
     const newSegment: VideoSegment = {
       id: segmentId,
@@ -140,11 +149,12 @@ export default function VideoUpload() {
       videoType: suggestedType,
       title: file.name.replace(/\.[^/.]+$/, ''),
       durationSeconds: null,
-      startMinute: defaultConfig[suggestedType].start,
-      endMinute: defaultConfig[suggestedType].end,
+      startMinute: defaultMins.start,
+      endMinute: defaultMins.end,
       progress: 0,
       status: 'uploading',
       isLink: false,
+      half,
     };
 
     setSegments(prev => [...prev, newSegment]);
@@ -215,6 +225,20 @@ export default function VideoUpload() {
     }
   };
 
+  // Handle files dropped on half dropzones
+  const handleHalfDrop = useCallback((files: File[], half: 'first' | 'second') => {
+    const videoFiles = files.filter(file => file.type.startsWith('video/'));
+    if (videoFiles.length === 0) {
+      toast({
+        title: "Formato inválido",
+        description: "Por favor, envie apenas arquivos de vídeo.",
+        variant: "destructive"
+      });
+      return;
+    }
+    videoFiles.forEach(file => uploadFile(file, half));
+  }, []);
+
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(true);
@@ -242,12 +266,12 @@ export default function VideoUpload() {
       return;
     }
 
-    droppedFiles.forEach(uploadFile);
+    droppedFiles.forEach(file => uploadFile(file));
   }, []);
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
-      Array.from(e.target.files).forEach(uploadFile);
+      Array.from(e.target.files).forEach(file => uploadFile(file));
     }
   };
 
@@ -292,6 +316,7 @@ export default function VideoUpload() {
       progress: 100,
       status: 'ready',
       isLink: true,
+      half: newLinkType === 'first_half' ? 'first' : newLinkType === 'second_half' ? 'second' : undefined,
     };
 
     setSegments(prev => [...prev, newSegment]);
@@ -379,6 +404,10 @@ export default function VideoUpload() {
   };
 
   const analysisCompleted = analysisJob?.status === 'completed';
+
+  // Count videos per half
+  const firstHalfCount = segments.filter(s => s.half === 'first' || s.videoType === 'first_half').length;
+  const secondHalfCount = segments.filter(s => s.half === 'second' || s.videoType === 'second_half').length;
 
   // Show analysis progress
   if (currentJobId && analysisJob) {
@@ -509,12 +538,15 @@ export default function VideoUpload() {
 
           {/* Step 2: Videos */}
           {currentStep === 'videos' && (
-            <div className="max-w-3xl mx-auto space-y-6">
+            <div className="max-w-4xl mx-auto space-y-6">
               {/* Back Button */}
               <Button variant="ghost" onClick={() => setCurrentStep('match')} className="gap-2">
                 <ArrowLeft className="h-4 w-4" />
                 Voltar para Partida
               </Button>
+
+              {/* Match Times Config */}
+              <MatchTimesConfig times={matchTimes} onChange={setMatchTimes} />
 
               {/* Upload Mode Tabs */}
               <Tabs value={uploadMode} onValueChange={(v) => setUploadMode(v as 'file' | 'link')}>
@@ -529,26 +561,40 @@ export default function VideoUpload() {
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="file" className="mt-4">
-                  {/* Dropzone */}
-                  <Card variant="glass">
-                    <CardContent className="pt-6">
+                <TabsContent value="file" className="mt-4 space-y-4">
+                  {/* Half Dropzones */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <HalfDropzone 
+                      half="first" 
+                      videoCount={firstHalfCount}
+                      onFileDrop={handleHalfDrop}
+                    />
+                    <HalfDropzone 
+                      half="second" 
+                      videoCount={secondHalfCount}
+                      onFileDrop={handleHalfDrop}
+                    />
+                  </div>
+
+                  {/* Generic Dropzone for full/clips */}
+                  <Card variant="glass" className="border-emerald-500/30">
+                    <CardContent className="pt-4">
                       <div
                         onDragOver={handleDragOver}
                         onDragLeave={handleDragLeave}
                         onDrop={handleDrop}
                         className={cn(
-                          "relative flex min-h-[150px] flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 transition-all",
+                          "relative flex min-h-[100px] flex-col items-center justify-center rounded-xl border-2 border-dashed p-4 transition-all",
                           isDragging 
-                            ? "border-primary bg-primary/5 scale-[1.02]" 
-                            : "border-border hover:border-primary/50"
+                            ? "border-emerald-400 bg-emerald-500/10 scale-[1.02]" 
+                            : "border-border/50 hover:border-emerald-500/50"
                         )}
                       >
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 mb-3">
-                          <UploadIcon className="h-6 w-6 text-primary" />
+                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-500/10 mb-2">
+                          <UploadIcon className="h-5 w-5 text-emerald-400" />
                         </div>
-                        <p className="font-medium">Arraste e solte vídeos aqui</p>
-                        <p className="text-sm text-muted-foreground">ou clique para selecionar</p>
+                        <p className="font-medium text-sm text-emerald-400">Partida Completa ou Trecho</p>
+                        <p className="text-xs text-muted-foreground">Arraste ou clique para selecionar</p>
                         <input
                           type="file"
                           accept="video/*"
@@ -559,6 +605,9 @@ export default function VideoUpload() {
                       </div>
                     </CardContent>
                   </Card>
+
+                  {/* Subtitles Upload */}
+                  <SubtitlesUpload file={subtitleFile} onFileChange={setSubtitleFile} />
                 </TabsContent>
 
                 <TabsContent value="link" className="mt-4">
@@ -691,9 +740,11 @@ export default function VideoUpload() {
                   onClick={() => setCurrentStep('summary')}
                   disabled={readySegments.length === 0}
                   size="lg"
+                  variant="arena"
+                  className="gap-2"
                 >
+                  <Zap className="h-5 w-5" />
                   Continuar para Análise
-                  <Zap className="ml-2 h-5 w-5" />
                 </Button>
               </div>
             </div>

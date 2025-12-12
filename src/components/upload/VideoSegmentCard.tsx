@@ -7,6 +7,8 @@ import { Progress } from '@/components/ui/progress';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { Film, Trash2, Clock, FileVideo, Link2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { TimeInput, formatTimeFromSeconds } from './TimeInput';
+import { SyncSlider } from './SyncSlider';
 
 export type VideoType = 'full' | 'first_half' | 'second_half' | 'clip';
 
@@ -23,6 +25,7 @@ export interface VideoSegment {
   progress: number;
   status: 'uploading' | 'processing' | 'complete' | 'error' | 'ready';
   isLink?: boolean;
+  half?: 'first' | 'second'; // Which half this video belongs to
 }
 
 interface VideoSegmentCardProps {
@@ -59,9 +62,7 @@ export function VideoSegmentCard({ segment, onChange, onRemove, index }: VideoSe
 
   const formatDuration = (seconds: number | null) => {
     if (!seconds) return '--:--';
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
+    return formatTimeFromSeconds(seconds);
   };
 
   const formatSize = (bytes?: number) => {
@@ -70,6 +71,17 @@ export function VideoSegmentCard({ segment, onChange, onRemove, index }: VideoSe
     return `${mb.toFixed(1)} MB`;
   };
 
+  // Suggest sync based on video duration
+  const getSuggestion = () => {
+    if (!segment.durationSeconds) return null;
+    const mins = Math.floor(segment.durationSeconds / 60);
+    if (mins >= 40 && mins <= 50) return 'Este vídeo parece ser 1 tempo (~45 min)';
+    if (mins >= 85 && mins <= 100) return 'Este vídeo parece ser a partida completa (~90 min)';
+    if (mins < 15) return `Trecho de ${mins} minutos`;
+    return null;
+  };
+
+  const suggestion = getSuggestion();
   const isUploading = segment.status === 'uploading';
   const isComplete = segment.status === 'complete' || segment.status === 'ready';
 
@@ -77,10 +89,15 @@ export function VideoSegmentCard({ segment, onChange, onRemove, index }: VideoSe
     <Card variant="glass" className={cn(
       "relative transition-all",
       isUploading && "border-primary/50",
-      segment.status === 'error' && "border-destructive/50"
+      segment.status === 'error' && "border-destructive/50",
+      segment.half === 'first' && "border-l-4 border-l-blue-500",
+      segment.half === 'second' && "border-l-4 border-l-orange-500"
     )}>
       {/* Index Badge */}
-      <div className="absolute -top-2 -left-2 w-6 h-6 rounded-full bg-primary text-primary-foreground flex items-center justify-center text-xs font-bold">
+      <div className={cn(
+        "absolute -top-2 -left-2 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold text-white",
+        segment.half === 'first' ? 'bg-blue-500' : segment.half === 'second' ? 'bg-orange-500' : 'bg-primary'
+      )}>
         {index + 1}
       </div>
 
@@ -91,7 +108,10 @@ export function VideoSegmentCard({ segment, onChange, onRemove, index }: VideoSe
             {segment.isLink ? (
               <Link2 className="h-5 w-5 text-blue-400 shrink-0" />
             ) : (
-              <FileVideo className="h-5 w-5 text-emerald-400 shrink-0" />
+              <FileVideo className={cn(
+                "h-5 w-5 shrink-0",
+                segment.half === 'first' ? 'text-blue-400' : segment.half === 'second' ? 'text-orange-400' : 'text-emerald-400'
+              )} />
             )}
             <div className="min-w-0 flex-1">
               <p className="font-medium truncate">{segment.name}</p>
@@ -133,6 +153,14 @@ export function VideoSegmentCard({ segment, onChange, onRemove, index }: VideoSe
         {/* Configuration (only when upload complete) */}
         {isComplete && (
           <>
+            {/* Suggestion */}
+            {suggestion && (
+              <div className="text-xs text-primary bg-primary/10 rounded-lg px-3 py-2 flex items-center gap-2">
+                <Clock className="h-3 w-3" />
+                {suggestion}
+              </div>
+            )}
+
             {/* Video Type Selector */}
             <div className="space-y-2">
               <Label className="text-xs text-muted-foreground">Tipo do Vídeo</Label>
@@ -142,10 +170,18 @@ export function VideoSegmentCard({ segment, onChange, onRemove, index }: VideoSe
                 onValueChange={(v) => v && handleTypeChange(v as VideoType)}
                 className="justify-start"
               >
-                <ToggleGroupItem value="first_half" size="sm">1º Tempo</ToggleGroupItem>
-                <ToggleGroupItem value="second_half" size="sm">2º Tempo</ToggleGroupItem>
-                <ToggleGroupItem value="full" size="sm">Completo</ToggleGroupItem>
-                <ToggleGroupItem value="clip" size="sm">Trecho</ToggleGroupItem>
+                <ToggleGroupItem value="first_half" size="sm" className="data-[state=on]:bg-blue-500 data-[state=on]:text-white">
+                  1º Tempo
+                </ToggleGroupItem>
+                <ToggleGroupItem value="second_half" size="sm" className="data-[state=on]:bg-orange-500 data-[state=on]:text-white">
+                  2º Tempo
+                </ToggleGroupItem>
+                <ToggleGroupItem value="full" size="sm" className="data-[state=on]:bg-emerald-500 data-[state=on]:text-white">
+                  Completo
+                </ToggleGroupItem>
+                <ToggleGroupItem value="clip" size="sm" className="data-[state=on]:bg-purple-500 data-[state=on]:text-white">
+                  Trecho
+                </ToggleGroupItem>
               </ToggleGroup>
             </div>
 
@@ -159,34 +195,35 @@ export function VideoSegmentCard({ segment, onChange, onRemove, index }: VideoSe
               />
             </div>
 
-            {/* Synchronization */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Film className="h-3 w-3" />
-                  Minuto Inicial do Jogo
-                </Label>
-                <Input
-                  type="number"
-                  min={0}
-                  max={120}
-                  value={segment.startMinute}
-                  onChange={(e) => updateField('startMinute', parseInt(e.target.value) || 0)}
-                />
+            {/* Synchronization with Slider */}
+            <div className="space-y-3 p-3 rounded-lg bg-muted/20 border border-border/50">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Film className="h-4 w-4 text-primary" />
+                Sincronização com o Jogo
               </div>
-              <div className="space-y-2">
-                <Label className="text-xs text-muted-foreground flex items-center gap-1">
-                  <Film className="h-3 w-3" />
-                  Minuto Final do Jogo
-                </Label>
-                <Input
-                  type="number"
-                  min={segment.startMinute}
-                  max={120}
-                  value={segment.endMinute || ''}
-                  onChange={(e) => updateField('endMinute', parseInt(e.target.value) || null)}
-                  placeholder="90"
+
+              <SyncSlider
+                startMinute={segment.startMinute}
+                endMinute={segment.endMinute || 90}
+                onStartChange={(v) => updateField('startMinute', v)}
+                onEndChange={(v) => updateField('endMinute', v)}
+              />
+
+              {/* Mini Timeline Preview */}
+              <div className="relative h-2 bg-muted rounded-full overflow-hidden">
+                <div 
+                  className={cn(
+                    "absolute top-0 bottom-0 rounded-full",
+                    segment.videoType === 'first_half' ? 'bg-blue-500' :
+                    segment.videoType === 'second_half' ? 'bg-orange-500' :
+                    segment.videoType === 'full' ? 'bg-emerald-500' : 'bg-purple-500'
+                  )}
+                  style={{
+                    left: `${(segment.startMinute / 90) * 100}%`,
+                    width: `${(((segment.endMinute || 90) - segment.startMinute) / 90) * 100}%`,
+                  }}
                 />
+                <div className="absolute top-0 bottom-0 left-1/2 w-px bg-border/50" />
               </div>
             </div>
           </>
