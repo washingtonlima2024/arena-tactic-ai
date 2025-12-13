@@ -1,6 +1,8 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Link2, Camera, Radio } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Link2, Camera, Radio, Settings } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LiveStreamInput } from "@/components/live/LiveStreamInput";
 import { LiveCameraInput } from "@/components/live/LiveCameraInput";
@@ -12,6 +14,7 @@ import { LiveTranscript } from "@/components/live/LiveTranscript";
 import { useLiveBroadcast } from "@/hooks/useLiveBroadcast";
 
 const Live = () => {
+  const navigate = useNavigate();
   const [inputMode, setInputMode] = useState<"stream" | "camera">("stream");
   const {
     matchInfo,
@@ -65,6 +68,15 @@ const Live = () => {
               <span className="text-red-500 font-semibold">AO VIVO</span>
             </div>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => navigate("/live/config")}
+            className="ml-auto"
+          >
+            <Settings className="h-4 w-4 mr-2" />
+            Configuração Avançada
+          </Button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
