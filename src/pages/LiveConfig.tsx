@@ -1,11 +1,15 @@
+import { useState } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LiveStreamConfig } from "@/components/live/config/LiveStreamConfig";
-import { Settings, ArrowLeft } from "lucide-react";
+import { StreamDashboardPanel } from "@/components/live/config/StreamDashboardPanel";
+import { Settings, ArrowLeft, Activity, Sliders } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useNavigate } from "react-router-dom";
 
 export default function LiveConfig() {
   const navigate = useNavigate();
+  const [activeTab, setActiveTab] = useState("dashboard");
 
   return (
     <AppLayout>
@@ -32,8 +36,27 @@ export default function LiveConfig() {
           </div>
         </div>
 
-        {/* Main Config Component */}
-        <LiveStreamConfig />
+        {/* Tabs for Dashboard vs Config */}
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList className="grid w-full max-w-md grid-cols-2">
+            <TabsTrigger value="dashboard" className="flex items-center gap-2">
+              <Activity className="h-4 w-4" />
+              Painel de Acompanhamento
+            </TabsTrigger>
+            <TabsTrigger value="config" className="flex items-center gap-2">
+              <Sliders className="h-4 w-4" />
+              Configurações
+            </TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="dashboard" className="mt-6">
+            <StreamDashboardPanel isLive={false} />
+          </TabsContent>
+
+          <TabsContent value="config" className="mt-6">
+            <LiveStreamConfig />
+          </TabsContent>
+        </Tabs>
 
         {/* Troubleshooting Section */}
         <div className="p-4 rounded-lg bg-muted/30 border">
