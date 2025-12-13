@@ -540,6 +540,77 @@ export type Database = {
           },
         ]
       }
+      stream_configurations: {
+        Row: {
+          audio_channels: Json | null
+          created_at: string | null
+          id: string
+          is_active: boolean | null
+          match_id: string | null
+          ntp_last_sync: string | null
+          ntp_offset_ms: number | null
+          ntp_server: string | null
+          stream_url: string
+          updated_at: string | null
+          validation_errors: Json | null
+          validation_status: string | null
+          video_aspect_ratio: string | null
+          video_bitrate: number | null
+          video_codec: string | null
+          video_frame_rate: number | null
+          video_resolution: string | null
+          video_scan_type: string | null
+        }
+        Insert: {
+          audio_channels?: Json | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          match_id?: string | null
+          ntp_last_sync?: string | null
+          ntp_offset_ms?: number | null
+          ntp_server?: string | null
+          stream_url: string
+          updated_at?: string | null
+          validation_errors?: Json | null
+          validation_status?: string | null
+          video_aspect_ratio?: string | null
+          video_bitrate?: number | null
+          video_codec?: string | null
+          video_frame_rate?: number | null
+          video_resolution?: string | null
+          video_scan_type?: string | null
+        }
+        Update: {
+          audio_channels?: Json | null
+          created_at?: string | null
+          id?: string
+          is_active?: boolean | null
+          match_id?: string | null
+          ntp_last_sync?: string | null
+          ntp_offset_ms?: number | null
+          ntp_server?: string | null
+          stream_url?: string
+          updated_at?: string | null
+          validation_errors?: Json | null
+          validation_status?: string | null
+          video_aspect_ratio?: string | null
+          video_bitrate?: number | null
+          video_codec?: string | null
+          video_frame_rate?: number | null
+          video_resolution?: string | null
+          video_scan_type?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stream_configurations_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       teams: {
         Row: {
           created_at: string
