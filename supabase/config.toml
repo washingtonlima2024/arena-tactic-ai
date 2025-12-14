@@ -24,6 +24,9 @@ verify_jwt = false
 [functions.generate-thumbnail]
 verify_jwt = false
 
+[functions.refine-events]
+verify_jwt = false
+
 [functions.team-chatbot]
 verify_jwt = false
 

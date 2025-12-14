@@ -26,7 +26,8 @@ import {
   XCircle,
   Play,
   Scissors,
-  AlertCircle
+  AlertCircle,
+  Sparkles
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -36,11 +37,13 @@ import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
+import { useRefineEvents } from '@/hooks/useRefineEvents';
 import { toast } from 'sonner';
 
 export default function Events() {
   const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
+  const { refineEvents, isRefining } = useRefineEvents();
   
   // Centralized match selection
   const { currentMatchId, selectedMatch, matches, isLoading: matchesLoading, setSelectedMatch } = useMatchSelection();
@@ -52,7 +55,17 @@ export default function Events() {
   const [showVignette, setShowVignette] = useState(true);
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
   
-  const { data: events = [], isLoading: eventsLoading } = useMatchEvents(currentMatchId);
+  const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useMatchEvents(currentMatchId);
+
+  // Handle refine events
+  const handleRefineEvents = async () => {
+    if (!currentMatchId) return;
+    const result = await refineEvents(currentMatchId);
+    if (result) {
+      refetchEvents();
+      queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
+    }
+  };
 
   // Fetch match video
   const { data: matchVideo } = useQuery({
@@ -263,10 +276,24 @@ export default function Events() {
               </SelectContent>
             </Select>
             {isAdmin && (
-              <Button variant="arena" onClick={handleCreateEvent}>
-                <Plus className="mr-2 h-4 w-4" />
-                Novo Evento
-              </Button>
+              <>
+                <Button variant="arena" onClick={handleCreateEvent}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Novo Evento
+                </Button>
+                <Button 
+                  variant="arena-outline" 
+                  onClick={handleRefineEvents}
+                  disabled={isRefining || events.length === 0}
+                >
+                  {isRefining ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Sparkles className="mr-2 h-4 w-4" />
+                  )}
+                  Refinar com IA
+                </Button>
+              </>
             )}
             <Button variant="arena-outline">
               <Download className="mr-2 h-4 w-4" />
