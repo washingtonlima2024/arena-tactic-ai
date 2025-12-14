@@ -10,7 +10,8 @@ import {
   ChevronLeft,
   ChevronRight,
   Radio,
-  ShieldCheck
+  ShieldCheck,
+  Ruler
 } from 'lucide-react';
 import { NavLink } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -30,6 +31,7 @@ const navItems = [
   { icon: Calendar, label: 'Eventos', path: '/events' },
   { icon: Scissors, label: 'Cortes & Mídia', path: '/media' },
   { icon: Mic, label: 'Podcast & Locução', path: '/audio' },
+  { icon: Ruler, label: 'Campo FIFA', path: '/field' },
   { icon: Settings, label: 'Configurações', path: '/settings' },
 ];
 

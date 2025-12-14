@@ -16,6 +16,7 @@ import Media from "./pages/Media";
 import Audio from "./pages/Audio";
 import Settings from "./pages/Settings";
 import Auth from "./pages/Auth";
+import Field from "./pages/Field";
 import NotFound from "./pages/NotFound";
 import { ArenaChatbot } from "./components/chatbot/ArenaChatbot";
 import { RequireAuth } from "./components/auth/RequireAuth";
@@ -42,6 +43,7 @@ const App = () => (
             <Route path="/media" element={<RequireAuth><Media /></RequireAuth>} />
             <Route path="/audio" element={<RequireAuth><Audio /></RequireAuth>} />
             <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
+            <Route path="/field" element={<RequireAuth><Field /></RequireAuth>} />
             <Route path="*" element={<NotFound />} />
           </Routes>
           <ArenaChatbot />
