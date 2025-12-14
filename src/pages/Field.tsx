@@ -1,15 +1,32 @@
-import { useState } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
-import { Ruler, Box, Grid3X3, Eye, RotateCcw } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Ruler, Box, Grid3X3, Eye, RotateCcw, Play, Target, AlertCircle } from 'lucide-react';
 import { OfficialFootballField } from '@/components/tactical/OfficialFootballField';
 import { OfficialField3D } from '@/components/tactical/OfficialField3D';
 import { FieldMeasurementsOverlay } from '@/components/tactical/FieldMeasurementsOverlay';
+import { GoalPlayAnimation, generateMockGoalPlay } from '@/components/tactical/GoalPlayAnimation';
 import { FIFA_FIELD } from '@/constants/fieldDimensions';
+import { supabase } from '@/integrations/supabase/client';
+import { useQuery } from '@tanstack/react-query';
+
+interface GoalEvent {
+  id: string;
+  minute: number;
+  second: number;
+  description: string;
+  team: 'home' | 'away';
+  matchId: string;
+  homeTeam: string;
+  awayTeam: string;
+  homeColor: string;
+  awayColor: string;
+}
 
 const Field = () => {
   const [showMeasurements, setShowMeasurements] = useState(true);
@@ -17,6 +34,55 @@ const Field = () => {
   const [theme2D, setTheme2D] = useState<'grass' | 'tactical' | 'minimal'>('grass');
   const [cameraPreset, setCameraPreset] = useState<'tv' | 'tactical' | 'corner' | 'goal'>('tv');
   const [autoRotate, setAutoRotate] = useState(false);
+  const [selectedGoal, setSelectedGoal] = useState<GoalEvent | null>(null);
+
+  // Fetch goal events from database
+  const { data: goalEvents = [], isLoading } = useQuery({
+    queryKey: ['goal-events'],
+    queryFn: async () => {
+      const { data: events, error } = await supabase
+        .from('match_events')
+        .select(`
+          id,
+          minute,
+          second,
+          description,
+          metadata,
+          match_id,
+          matches!inner(
+            id,
+            home_team_id,
+            away_team_id,
+            home_team:teams!matches_home_team_id_fkey(name, primary_color),
+            away_team:teams!matches_away_team_id_fkey(name, primary_color)
+          )
+        `)
+        .eq('event_type', 'goal')
+        .order('created_at', { ascending: false })
+        .limit(10);
+
+      if (error) throw error;
+
+      return (events || []).map((e: any) => ({
+        id: e.id,
+        minute: e.minute || 0,
+        second: e.second || 0,
+        description: e.description || 'Gol',
+        team: (e.metadata?.team === 'away' ? 'away' : 'home') as 'home' | 'away',
+        matchId: e.match_id,
+        homeTeam: e.matches?.home_team?.name || 'Time Casa',
+        awayTeam: e.matches?.away_team?.name || 'Time Fora',
+        homeColor: e.matches?.home_team?.primary_color || '#10b981',
+        awayColor: e.matches?.away_team?.primary_color || '#ef4444',
+      })) as GoalEvent[];
+    }
+  });
+
+  // Generate animation frames for selected goal
+  const animationFrames = useMemo(() => {
+    if (!selectedGoal) return generateMockGoalPlay('home');
+    return generateMockGoalPlay(selectedGoal.team);
+  }, [selectedGoal]);
 
   const measurements = [
     { label: 'Comprimento do campo', value: `${FIFA_FIELD.length}m`, desc: '100-110m permitido' },
@@ -47,7 +113,7 @@ const Field = () => {
         </div>
 
         <Tabs defaultValue="2d" className="space-y-4">
-          <TabsList className="grid w-full max-w-md grid-cols-3">
+          <TabsList className="grid w-full max-w-2xl grid-cols-4">
             <TabsTrigger value="2d" className="flex items-center gap-2">
               <Grid3X3 className="h-4 w-4" />
               Campo 2D
@@ -55,6 +121,10 @@ const Field = () => {
             <TabsTrigger value="3d" className="flex items-center gap-2">
               <Box className="h-4 w-4" />
               Campo 3D
+            </TabsTrigger>
+            <TabsTrigger value="animation" className="flex items-center gap-2">
+              <Play className="h-4 w-4" />
+              Animação Gol
             </TabsTrigger>
             <TabsTrigger value="measures" className="flex items-center gap-2">
               <Ruler className="h-4 w-4" />
@@ -170,6 +240,124 @@ const Field = () => {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* Goal Animation Tab */}
+          <TabsContent value="animation" className="space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+              {/* Goal Selector */}
+              <Card className="bg-card/50 backdrop-blur border-border/50">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Target className="h-5 w-5 text-primary" />
+                    Gols Detectados
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  {isLoading ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      Carregando gols...
+                    </div>
+                  ) : goalEvents.length === 0 ? (
+                    <div className="text-center py-8 space-y-3">
+                      <AlertCircle className="h-12 w-12 mx-auto text-muted-foreground/50" />
+                      <p className="text-muted-foreground text-sm">
+                        Nenhum gol detectado ainda
+                      </p>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setSelectedGoal({
+                          id: 'demo',
+                          minute: 45,
+                          second: 0,
+                          description: 'Gol de demonstração',
+                          team: 'home',
+                          matchId: 'demo',
+                          homeTeam: 'Time Casa',
+                          awayTeam: 'Time Visitante',
+                          homeColor: '#10b981',
+                          awayColor: '#ef4444'
+                        })}
+                      >
+                        <Play className="mr-2 h-4 w-4" />
+                        Ver Demo
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {goalEvents.map((goal) => (
+                        <Button
+                          key={goal.id}
+                          variant={selectedGoal?.id === goal.id ? "default" : "outline"}
+                          className="w-full justify-start text-left h-auto py-3"
+                          onClick={() => setSelectedGoal(goal)}
+                        >
+                          <div className="flex items-center gap-3 w-full">
+                            <Badge 
+                              variant="secondary"
+                              style={{ 
+                                backgroundColor: goal.team === 'home' ? goal.homeColor : goal.awayColor,
+                                color: '#fff'
+                              }}
+                            >
+                              {goal.minute}'
+                            </Badge>
+                            <div className="flex-1 min-w-0">
+                              <p className="font-medium truncate text-sm">
+                                {goal.team === 'home' ? goal.homeTeam : goal.awayTeam}
+                              </p>
+                              <p className="text-xs text-muted-foreground truncate">
+                                vs {goal.team === 'home' ? goal.awayTeam : goal.homeTeam}
+                              </p>
+                            </div>
+                          </div>
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Animation Player */}
+              <div className="lg:col-span-3">
+                <Card className="bg-card/50 backdrop-blur border-border/50">
+                  <CardHeader className="pb-2">
+                    <div className="flex items-center justify-between">
+                      <CardTitle className="text-lg flex items-center gap-2">
+                        <Play className="h-5 w-5 text-primary" />
+                        Animação da Jogada
+                      </CardTitle>
+                      <Badge variant="outline" className="font-mono">
+                        YOLOv8 + OpenCV
+                      </Badge>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {selectedGoal ? (
+                      <GoalPlayAnimation
+                        frames={animationFrames}
+                        homeTeamColor={selectedGoal.homeColor}
+                        awayTeamColor={selectedGoal.awayColor}
+                        goalMinute={selectedGoal.minute}
+                        goalTeam={selectedGoal.team}
+                        description={`${selectedGoal.team === 'home' ? selectedGoal.homeTeam : selectedGoal.awayTeam} - ${selectedGoal.description}`}
+                      />
+                    ) : (
+                      <div className="flex flex-col items-center justify-center py-20 text-center">
+                        <Play className="h-16 w-16 text-muted-foreground/30 mb-4" />
+                        <p className="text-muted-foreground">
+                          Selecione um gol para visualizar a animação da jogada
+                        </p>
+                        <p className="text-xs text-muted-foreground/70 mt-2">
+                          A animação simula dados de detecção YOLO para posições de jogadores e bola
+                        </p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
           </TabsContent>
 
           {/* Measurements Tab */}
