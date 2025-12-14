@@ -238,63 +238,228 @@ export function OfficialFootballField({
           <path d={`M ${m(FIFA_FIELD.length)} ${m(FIFA_FIELD.width - FIFA_FIELD.cornerArcRadius)} A ${m(FIFA_FIELD.cornerArcRadius)} ${m(FIFA_FIELD.cornerArcRadius)} 0 0 0 ${m(FIFA_FIELD.length - FIFA_FIELD.cornerArcRadius)} ${m(FIFA_FIELD.width)}`} />
         </g>
 
-        {/* Goals */}
+        {/* Goals with goal line highlight */}
         <g>
-          {/* Left goal */}
+          {/* LEFT GOAL */}
+          {/* Goal line highlight - THE LINE WHERE BALL CROSSES = GOAL */}
+          <line
+            x1={m(0)}
+            y1={m(FIELD_CALCULATIONS.goalPostLeft)}
+            x2={m(0)}
+            y2={m(FIELD_CALCULATIONS.goalPostRight)}
+            stroke="hsl(var(--destructive))"
+            strokeWidth="4"
+            strokeLinecap="round"
+          />
+          {/* Goal line indicator arrows */}
+          <g className="goal-line-indicator">
+            <polygon
+              points={`${m(0.5)},${m(FIELD_CALCULATIONS.halfWidth)} ${m(1.5)},${m(FIELD_CALCULATIONS.halfWidth - 0.8)} ${m(1.5)},${m(FIELD_CALCULATIONS.halfWidth + 0.8)}`}
+              fill="hsl(var(--destructive))"
+            />
+            <text
+              x={m(2.5)}
+              y={m(FIELD_CALCULATIONS.halfWidth)}
+              fontSize="8"
+              fill="hsl(var(--destructive))"
+              dominantBaseline="middle"
+              fontWeight="bold"
+            >
+              GOL
+            </text>
+          </g>
+          
+          {/* Net background */}
           <rect
             x={m(-FIFA_FIELD.goalDepth)}
             y={m(FIELD_CALCULATIONS.goalPostLeft)}
             width={m(FIFA_FIELD.goalDepth)}
             height={m(FIFA_FIELD.goalWidth)}
             fill="url(#goal-net)"
-            stroke={c.goal}
-            strokeWidth="3"
           />
-          {/* Left goal posts */}
-          <line
-            x1={m(0)}
-            y1={m(FIELD_CALCULATIONS.goalPostLeft)}
-            x2={m(-FIFA_FIELD.goalDepth)}
-            y2={m(FIELD_CALCULATIONS.goalPostLeft)}
+          
+          {/* Goal posts (traves) - white cylindrical posts */}
+          <rect
+            x={m(-FIFA_FIELD.goalDepth)}
+            y={m(FIELD_CALCULATIONS.goalPostLeft - FIFA_FIELD.postDiameter / 2)}
+            width={m(FIFA_FIELD.goalDepth)}
+            height={m(FIFA_FIELD.postDiameter)}
+            fill={c.goal}
+            rx="2"
+          />
+          <rect
+            x={m(-FIFA_FIELD.goalDepth)}
+            y={m(FIELD_CALCULATIONS.goalPostRight - FIFA_FIELD.postDiameter / 2)}
+            width={m(FIFA_FIELD.goalDepth)}
+            height={m(FIFA_FIELD.postDiameter)}
+            fill={c.goal}
+            rx="2"
+          />
+          
+          {/* Front posts (vertical) */}
+          <rect
+            x={m(-FIFA_FIELD.postDiameter / 2)}
+            y={m(FIELD_CALCULATIONS.goalPostLeft - FIFA_FIELD.postDiameter / 2)}
+            width={m(FIFA_FIELD.postDiameter)}
+            height={m(FIFA_FIELD.goalWidth + FIFA_FIELD.postDiameter)}
+            fill="none"
             stroke={c.goal}
             strokeWidth="4"
           />
+          
+          {/* Crossbar (travessão) */}
           <line
-            x1={m(0)}
-            y1={m(FIELD_CALCULATIONS.goalPostRight)}
+            x1={m(-FIFA_FIELD.goalDepth)}
+            y1={m(FIELD_CALCULATIONS.goalPostLeft)}
             x2={m(-FIFA_FIELD.goalDepth)}
             y2={m(FIELD_CALCULATIONS.goalPostRight)}
             stroke={c.goal}
             strokeWidth="4"
+            strokeLinecap="round"
           />
+          
+          {/* Goal width measurement (7.32m) */}
+          <g className="goal-measurement">
+            <line
+              x1={m(-FIFA_FIELD.goalDepth - 1)}
+              y1={m(FIELD_CALCULATIONS.goalPostLeft)}
+              x2={m(-FIFA_FIELD.goalDepth - 1)}
+              y2={m(FIELD_CALCULATIONS.goalPostRight)}
+              stroke="hsl(var(--primary))"
+              strokeWidth="1"
+              markerEnd="url(#measure-arrow)"
+              markerStart="url(#measure-arrow-start)"
+            />
+            <rect
+              x={m(-FIFA_FIELD.goalDepth - 3)}
+              y={m(FIELD_CALCULATIONS.halfWidth - 1.5)}
+              width={m(3)}
+              height={m(3)}
+              fill="hsl(var(--background))"
+              rx="2"
+            />
+            <text
+              x={m(-FIFA_FIELD.goalDepth - 1.5)}
+              y={m(FIELD_CALCULATIONS.halfWidth)}
+              fontSize="9"
+              fill="hsl(var(--primary))"
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontWeight="bold"
+            >
+              7.32m
+            </text>
+          </g>
 
-          {/* Right goal */}
+          {/* RIGHT GOAL */}
+          {/* Goal line highlight - THE LINE WHERE BALL CROSSES = GOAL */}
+          <line
+            x1={m(FIFA_FIELD.length)}
+            y1={m(FIELD_CALCULATIONS.goalPostLeft)}
+            x2={m(FIFA_FIELD.length)}
+            y2={m(FIELD_CALCULATIONS.goalPostRight)}
+            stroke="hsl(var(--destructive))"
+            strokeWidth="4"
+            strokeLinecap="round"
+          />
+          {/* Goal line indicator arrows */}
+          <g className="goal-line-indicator">
+            <polygon
+              points={`${m(FIFA_FIELD.length - 0.5)},${m(FIELD_CALCULATIONS.halfWidth)} ${m(FIFA_FIELD.length - 1.5)},${m(FIELD_CALCULATIONS.halfWidth - 0.8)} ${m(FIFA_FIELD.length - 1.5)},${m(FIELD_CALCULATIONS.halfWidth + 0.8)}`}
+              fill="hsl(var(--destructive))"
+            />
+            <text
+              x={m(FIFA_FIELD.length - 2.5)}
+              y={m(FIELD_CALCULATIONS.halfWidth)}
+              fontSize="8"
+              fill="hsl(var(--destructive))"
+              dominantBaseline="middle"
+              textAnchor="end"
+              fontWeight="bold"
+            >
+              GOL
+            </text>
+          </g>
+          
+          {/* Net background */}
           <rect
             x={m(FIFA_FIELD.length)}
             y={m(FIELD_CALCULATIONS.goalPostLeft)}
             width={m(FIFA_FIELD.goalDepth)}
             height={m(FIFA_FIELD.goalWidth)}
             fill="url(#goal-net)"
-            stroke={c.goal}
-            strokeWidth="3"
           />
-          {/* Right goal posts */}
-          <line
-            x1={m(FIFA_FIELD.length)}
-            y1={m(FIELD_CALCULATIONS.goalPostLeft)}
-            x2={m(FIFA_FIELD.length + FIFA_FIELD.goalDepth)}
-            y2={m(FIELD_CALCULATIONS.goalPostLeft)}
+          
+          {/* Goal posts (traves) */}
+          <rect
+            x={m(FIFA_FIELD.length)}
+            y={m(FIELD_CALCULATIONS.goalPostLeft - FIFA_FIELD.postDiameter / 2)}
+            width={m(FIFA_FIELD.goalDepth)}
+            height={m(FIFA_FIELD.postDiameter)}
+            fill={c.goal}
+            rx="2"
+          />
+          <rect
+            x={m(FIFA_FIELD.length)}
+            y={m(FIELD_CALCULATIONS.goalPostRight - FIFA_FIELD.postDiameter / 2)}
+            width={m(FIFA_FIELD.goalDepth)}
+            height={m(FIFA_FIELD.postDiameter)}
+            fill={c.goal}
+            rx="2"
+          />
+          
+          {/* Front posts (vertical) */}
+          <rect
+            x={m(FIFA_FIELD.length - FIFA_FIELD.postDiameter / 2)}
+            y={m(FIELD_CALCULATIONS.goalPostLeft - FIFA_FIELD.postDiameter / 2)}
+            width={m(FIFA_FIELD.postDiameter)}
+            height={m(FIFA_FIELD.goalWidth + FIFA_FIELD.postDiameter)}
+            fill="none"
             stroke={c.goal}
             strokeWidth="4"
           />
+          
+          {/* Crossbar (travessão) */}
           <line
-            x1={m(FIFA_FIELD.length)}
-            y1={m(FIELD_CALCULATIONS.goalPostRight)}
+            x1={m(FIFA_FIELD.length + FIFA_FIELD.goalDepth)}
+            y1={m(FIELD_CALCULATIONS.goalPostLeft)}
             x2={m(FIFA_FIELD.length + FIFA_FIELD.goalDepth)}
             y2={m(FIELD_CALCULATIONS.goalPostRight)}
             stroke={c.goal}
             strokeWidth="4"
+            strokeLinecap="round"
           />
+          
+          {/* Goal width measurement (7.32m) */}
+          <g className="goal-measurement">
+            <line
+              x1={m(FIFA_FIELD.length + FIFA_FIELD.goalDepth + 1)}
+              y1={m(FIELD_CALCULATIONS.goalPostLeft)}
+              x2={m(FIFA_FIELD.length + FIFA_FIELD.goalDepth + 1)}
+              y2={m(FIELD_CALCULATIONS.goalPostRight)}
+              stroke="hsl(var(--primary))"
+              strokeWidth="1"
+            />
+            <rect
+              x={m(FIFA_FIELD.length + FIFA_FIELD.goalDepth)}
+              y={m(FIELD_CALCULATIONS.halfWidth - 1.5)}
+              width={m(3)}
+              height={m(3)}
+              fill="hsl(var(--background))"
+              rx="2"
+            />
+            <text
+              x={m(FIFA_FIELD.length + FIFA_FIELD.goalDepth + 1.5)}
+              y={m(FIELD_CALCULATIONS.halfWidth)}
+              fontSize="9"
+              fill="hsl(var(--primary))"
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontWeight="bold"
+            >
+              7.32m
+            </text>
+          </g>
         </g>
 
         {/* Measurements overlay */}

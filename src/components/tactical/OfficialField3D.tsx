@@ -57,8 +57,8 @@ function Arc({
   return <FieldLine points={points} color={color} />;
 }
 
-// Goal posts and net
-function Goal({ position, rotation = 0 }: { position: [number, number, number]; rotation?: number }) {
+// Goal posts, net, and goal line highlight
+function Goal({ position, rotation = 0, showMeasurements = false }: { position: [number, number, number]; rotation?: number; showMeasurements?: boolean }) {
   const postRadius = FIFA_FIELD.postDiameter / 2;
   const goalWidth = FIFA_FIELD.goalWidth;
   const goalHeight = FIFA_FIELD.goalHeight;
@@ -66,57 +66,150 @@ function Goal({ position, rotation = 0 }: { position: [number, number, number]; 
 
   return (
     <group position={position} rotation={[0, rotation, 0]}>
-      {/* Left post */}
+      {/* GOAL LINE - Red line where ball crosses = GOAL */}
+      <Line
+        points={[
+          [0, 0.03, -goalWidth / 2],
+          [0, 0.03, goalWidth / 2],
+        ]}
+        color="#ef4444"
+        lineWidth={4}
+      />
+      
+      {/* Goal line ground highlight */}
+      <mesh position={[0.05, 0.01, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.15, goalWidth]} />
+        <meshStandardMaterial color="#ef4444" transparent opacity={0.6} />
+      </mesh>
+
+      {/* Left post (vertical) */}
       <mesh position={[0, goalHeight / 2, -goalWidth / 2]}>
         <cylinderGeometry args={[postRadius, postRadius, goalHeight, 16]} />
         <meshStandardMaterial color="#ffffff" metalness={0.8} roughness={0.2} />
       </mesh>
 
-      {/* Right post */}
+      {/* Right post (vertical) */}
       <mesh position={[0, goalHeight / 2, goalWidth / 2]}>
         <cylinderGeometry args={[postRadius, postRadius, goalHeight, 16]} />
         <meshStandardMaterial color="#ffffff" metalness={0.8} roughness={0.2} />
       </mesh>
 
-      {/* Crossbar */}
+      {/* Crossbar (travessão) */}
       <mesh position={[0, goalHeight, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <cylinderGeometry args={[postRadius, postRadius, goalWidth, 16]} />
+        <cylinderGeometry args={[postRadius, postRadius, goalWidth + postRadius * 2, 16]} />
         <meshStandardMaterial color="#ffffff" metalness={0.8} roughness={0.2} />
       </mesh>
 
+      {/* Back crossbar */}
+      <mesh position={[-goalDepth, goalHeight, 0]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[postRadius * 0.8, postRadius * 0.8, goalWidth, 16]} />
+        <meshStandardMaterial color="#cccccc" metalness={0.6} roughness={0.3} />
+      </mesh>
+
+      {/* Back posts */}
+      <mesh position={[-goalDepth, goalHeight / 2, -goalWidth / 2]}>
+        <cylinderGeometry args={[postRadius * 0.8, postRadius * 0.8, goalHeight, 16]} />
+        <meshStandardMaterial color="#cccccc" metalness={0.6} roughness={0.3} />
+      </mesh>
+      <mesh position={[-goalDepth, goalHeight / 2, goalWidth / 2]}>
+        <cylinderGeometry args={[postRadius * 0.8, postRadius * 0.8, goalHeight, 16]} />
+        <meshStandardMaterial color="#cccccc" metalness={0.6} roughness={0.3} />
+      </mesh>
+
+      {/* Diagonal support bars */}
+      <mesh position={[-goalDepth / 2, goalHeight, -goalWidth / 2]} rotation={[0, 0, Math.PI / 4]}>
+        <cylinderGeometry args={[postRadius * 0.5, postRadius * 0.5, goalDepth * 1.5, 8]} />
+        <meshStandardMaterial color="#cccccc" metalness={0.5} roughness={0.4} />
+      </mesh>
+      <mesh position={[-goalDepth / 2, goalHeight, goalWidth / 2]} rotation={[0, 0, Math.PI / 4]}>
+        <cylinderGeometry args={[postRadius * 0.5, postRadius * 0.5, goalDepth * 1.5, 8]} />
+        <meshStandardMaterial color="#cccccc" metalness={0.5} roughness={0.4} />
+      </mesh>
+
       {/* Net - back */}
+      <mesh position={[-goalDepth, goalHeight / 2, 0]}>
+        <planeGeometry args={[0.1, goalHeight, 1, 20]} />
+        <meshStandardMaterial 
+          color="#ffffff" 
+          transparent 
+          opacity={0.4} 
+          side={THREE.DoubleSide}
+          wireframe
+        />
+      </mesh>
+      
+      {/* Net mesh - detailed */}
       <mesh position={[-goalDepth / 2, goalHeight / 2, 0]}>
-        <planeGeometry args={[goalDepth, goalHeight]} />
+        <boxGeometry args={[goalDepth, goalHeight, goalWidth]} />
         <meshStandardMaterial 
           color="#ffffff" 
           transparent 
-          opacity={0.3} 
-          side={THREE.DoubleSide}
+          opacity={0.15} 
+          side={THREE.BackSide}
           wireframe
+          wireframeLinewidth={0.5}
         />
       </mesh>
 
-      {/* Net - top */}
-      <mesh position={[-goalDepth / 2, goalHeight, 0]} rotation={[Math.PI / 2, 0, 0]}>
-        <planeGeometry args={[goalDepth, goalWidth]} />
-        <meshStandardMaterial 
-          color="#ffffff" 
-          transparent 
-          opacity={0.3} 
-          side={THREE.DoubleSide}
-          wireframe
-        />
-      </mesh>
-
-      {/* Net - sides */}
-      <mesh position={[-goalDepth / 2, goalHeight / 2, -goalWidth / 2]} rotation={[0, Math.PI / 2, 0]}>
-        <planeGeometry args={[goalDepth, goalHeight]} />
-        <meshStandardMaterial color="#ffffff" transparent opacity={0.2} side={THREE.DoubleSide} wireframe />
-      </mesh>
-      <mesh position={[-goalDepth / 2, goalHeight / 2, goalWidth / 2]} rotation={[0, Math.PI / 2, 0]}>
-        <planeGeometry args={[goalDepth, goalHeight]} />
-        <meshStandardMaterial color="#ffffff" transparent opacity={0.2} side={THREE.DoubleSide} wireframe />
-      </mesh>
+      {/* Goal width measurement (7.32m) */}
+      {showMeasurements && (
+        <group>
+          {/* Measurement line */}
+          <Line
+            points={[
+              [-goalDepth - 0.5, 0.1, -goalWidth / 2],
+              [-goalDepth - 0.5, 0.1, goalWidth / 2],
+            ]}
+            color="#22c55e"
+            lineWidth={2}
+          />
+          {/* End markers */}
+          <Line
+            points={[
+              [-goalDepth - 0.5, 0.1, -goalWidth / 2],
+              [-goalDepth - 0.3, 0.1, -goalWidth / 2],
+            ]}
+            color="#22c55e"
+            lineWidth={2}
+          />
+          <Line
+            points={[
+              [-goalDepth - 0.5, 0.1, goalWidth / 2],
+              [-goalDepth - 0.3, 0.1, goalWidth / 2],
+            ]}
+            color="#22c55e"
+            lineWidth={2}
+          />
+          <Text
+            position={[-goalDepth - 0.5, 0.3, 0]}
+            fontSize={0.5}
+            color="#22c55e"
+            anchorX="center"
+            rotation={[-Math.PI / 2, 0, 0]}
+          >
+            7.32m
+          </Text>
+          
+          {/* Goal height measurement (2.44m) */}
+          <Line
+            points={[
+              [0.3, 0, -goalWidth / 2 - 0.3],
+              [0.3, goalHeight, -goalWidth / 2 - 0.3],
+            ]}
+            color="#22c55e"
+            lineWidth={2}
+          />
+          <Text
+            position={[0.5, goalHeight / 2, -goalWidth / 2 - 0.5]}
+            fontSize={0.4}
+            color="#22c55e"
+            anchorX="center"
+            rotation={[0, 0, Math.PI / 2]}
+          >
+            2.44m
+          </Text>
+        </group>
+      )}
     </group>
   );
 }
@@ -306,9 +399,9 @@ function Field({ showMeasurements, showGrid }: { showMeasurements?: boolean; sho
         color={lineColor}
       />
 
-      {/* Goals */}
-      <Goal position={[-halfLength, 0, 0]} rotation={0} />
-      <Goal position={[halfLength, 0, 0]} rotation={Math.PI} />
+      {/* Goals with goal line */}
+      <Goal position={[-halfLength, 0, 0]} rotation={0} showMeasurements={showMeasurements} />
+      <Goal position={[halfLength, 0, 0]} rotation={Math.PI} showMeasurements={showMeasurements} />
 
       {/* Corner flags */}
       <CornerFlag position={[-halfLength, 0, -halfWidth]} />
