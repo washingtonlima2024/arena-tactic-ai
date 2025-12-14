@@ -32,3 +32,6 @@ verify_jwt = false
 
 [functions.transcribe-audio]
 verify_jwt = false
+
+[functions.detect-players]
+verify_jwt = false
