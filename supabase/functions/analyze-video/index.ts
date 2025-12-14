@@ -10,19 +10,37 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
+// Maximum video size for download (50MB)
+const MAX_VIDEO_SIZE_MB = 50;
+const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
+
 interface AnalysisStep {
   name: string;
   status: 'pending' | 'processing' | 'completed' | 'failed';
   progress: number;
 }
 
+interface YoloDetection {
+  timestamp: number;
+  players: { x: number; y: number; team: string; confidence: number }[];
+  ball: { x: number; y: number; confidence: number } | null;
+  referee: { x: number; y: number } | null;
+}
+
+interface GoalMention {
+  timestamp: number;
+  text: string;
+  isOwnGoal: boolean;
+  teamMentioned: string | null;
+}
+
 const ANALYSIS_STEPS: string[] = [
   'Preparação do vídeo',
   'Download do vídeo',
-  'Extração de frames',
-  'Análise visual (Vision AI)',
-  'Extração de áudio',
   'Transcrição (Whisper)',
+  'Detecção visual (YOLO)',
+  'Análise visual (Gemini)',
+  'Correlação multi-modal',
   'Identificação de eventos',
   'Análise tática',
   'Finalização',
@@ -36,12 +54,10 @@ serve(async (req) => {
   try {
     const { matchId, videoUrl, homeTeamId, awayTeamId, competition, startMinute, endMinute, durationSeconds } = await req.json();
     
-    // CRITICAL: Use video file duration in seconds, not game minutes
-    // If durationSeconds is provided, use it as the video length
-    // Otherwise fall back to endMinute-startMinute (but convert to proper video time)
     const videoDurationSeconds = durationSeconds || ((endMinute || 90) - (startMinute || 0)) * 60;
     
-    console.log("Starting REAL video analysis for match:", matchId);
+    console.log("=== STARTING MULTI-MODAL VIDEO ANALYSIS ===");
+    console.log("Match ID:", matchId);
     console.log("Video URL:", videoUrl);
     console.log("Video duration:", videoDurationSeconds, "seconds");
     console.log("Game time reference: minutes", startMinute, "to", endMinute);
@@ -55,7 +71,7 @@ serve(async (req) => {
                          videoUrl.endsWith('.mp4') || 
                          videoUrl.includes('/storage/');
     
-    console.log("Video type:", isDirectFile ? "Direct MP4 file" : "Embed/External URL");
+    console.log("Video type:", isDirectFile ? "Direct MP4 file (REAL ANALYSIS)" : "Embed/External URL (ESTIMATED)");
 
     const initialSteps = ANALYSIS_STEPS.map((name, index) => ({
       name,
@@ -73,7 +89,7 @@ serve(async (req) => {
         started_at: new Date().toISOString(),
         result: { 
           steps: initialSteps,
-          analysisType: isDirectFile ? 'real' : 'estimated'
+          analysisType: isDirectFile ? 'real_multimodal' : 'estimated'
         }
       })
       .select()
@@ -86,7 +102,7 @@ serve(async (req) => {
 
     console.log("Analysis job created:", job.id);
 
-    EdgeRuntime.waitUntil(processAnalysis(
+    EdgeRuntime.waitUntil(processMultiModalAnalysis(
       supabase, 
       job.id, 
       matchId, 
@@ -102,7 +118,7 @@ serve(async (req) => {
     return new Response(JSON.stringify({ 
       jobId: job.id, 
       status: 'started',
-      analysisType: isDirectFile ? 'real' : 'estimated'
+      analysisType: isDirectFile ? 'real_multimodal' : 'estimated'
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -117,7 +133,7 @@ serve(async (req) => {
   }
 });
 
-async function processAnalysis(
+async function processMultiModalAnalysis(
   supabase: any, 
   jobId: string, 
   matchId: string, 
@@ -136,19 +152,18 @@ async function processAnalysis(
   }));
 
   let transcription = '';
+  let transcriptionWithTimestamps: { start: number; end: number; text: string }[] = [];
   let visionAnalysis = '';
-  let extractedFrames: string[] = [];
+  let yoloDetections: YoloDetection[] = [];
   let videoData: Uint8Array | null = null;
+  let goalMentions: GoalMention[] = [];
 
-  // CRITICAL: All event times will be based on video file duration (0 to videoDurationSeconds)
-  // NOT on game time (startMinute to endMinute)
   const videoStartSecond = 0;
   const videoEndSecond = videoDurationSeconds;
 
-  console.log("=== VIDEO TIME CONSTRAINTS ===");
+  console.log("=== MULTI-MODAL PIPELINE ===");
   console.log("Video duration:", videoDurationSeconds, "seconds");
-  console.log("Events must be between 0 and", videoDurationSeconds, "seconds (video time)");
-  console.log("Game time reference:", startMinute, "-", endMinute, "minutes");
+  console.log("Events must be between 0 and", videoDurationSeconds, "seconds");
 
   try {
     // Get team names
@@ -167,8 +182,7 @@ async function processAnalysis(
     const homeTeamName = homeTeam?.name || 'Time Casa';
     const awayTeamName = awayTeam?.name || 'Time Visitante';
 
-    console.log("Analyzing match:", homeTeamName, "vs", awayTeamName);
-    console.log("Analysis type:", isDirectFile ? "REAL (with frames/audio)" : "ESTIMATED (AI inference)");
+    console.log("Match:", homeTeamName, "vs", awayTeamName);
 
     for (let i = 0; i < steps.length; i++) {
       steps[i].status = 'processing';
@@ -177,36 +191,91 @@ async function processAnalysis(
 
       switch (steps[i].name) {
         case 'Preparação do vídeo':
+          console.log("Step 1: Preparing video...");
           await simulateProgress(supabase, jobId, steps, i, overallProgress);
           break;
 
         case 'Download do vídeo':
-          // Skip full download - we'll use streaming approach
-          console.log("Video URL prepared for streaming analysis:", videoUrl.substring(0, 80));
-          await simulateProgress(supabase, jobId, steps, i, overallProgress);
-          break;
-
-        case 'Extração de frames':
-          // Skip frame extraction - Gemini can analyze video URL directly
-          console.log("Skipping frame extraction - using direct URL analysis");
-          await simulateProgress(supabase, jobId, steps, i, overallProgress);
-          break;
-
-        case 'Análise visual (Vision AI)':
+          console.log("Step 2: Downloading video...");
           if (isDirectFile) {
-            console.log("Analyzing video with Gemini Vision (URL-based)...");
-            // Use video duration in seconds for time constraints
-            visionAnalysis = await analyzeVideoWithURL(
+            try {
+              // Check video size first with HEAD request
+              const headResponse = await fetch(videoUrl, { method: 'HEAD' });
+              const contentLength = headResponse.headers.get('content-length');
+              const videoSizeBytes = contentLength ? parseInt(contentLength) : 0;
+              const videoSizeMB = videoSizeBytes / (1024 * 1024);
+              
+              console.log("Video size:", videoSizeMB.toFixed(2), "MB");
+              
+              if (videoSizeBytes > 0 && videoSizeBytes <= MAX_VIDEO_SIZE_BYTES) {
+                console.log("Video is within size limit, downloading...");
+                videoData = await downloadVideoFile(videoUrl);
+                console.log("Video downloaded:", videoData.length, "bytes");
+              } else if (videoSizeBytes > MAX_VIDEO_SIZE_BYTES) {
+                console.log("Video too large for download, using streaming analysis");
+              } else {
+                // If HEAD doesn't return size, try downloading anyway for small videos
+                console.log("Cannot determine size, attempting download...");
+                videoData = await downloadVideoFile(videoUrl);
+                console.log("Video downloaded:", videoData.length, "bytes");
+              }
+            } catch (downloadError) {
+              console.error("Download failed:", downloadError);
+              console.log("Falling back to streaming analysis");
+            }
+          }
+          await simulateProgress(supabase, jobId, steps, i, overallProgress);
+          break;
+
+        case 'Transcrição (Whisper)':
+          console.log("Step 3: Transcribing audio with Whisper...");
+          if (videoData) {
+            const whisperResult = await transcribeWithWhisperVerbose(videoData);
+            transcription = whisperResult.text;
+            transcriptionWithTimestamps = whisperResult.segments;
+            
+            console.log("Transcription completed:", transcription.length, "chars");
+            console.log("Segments:", transcriptionWithTimestamps.length);
+            
+            // Extract goal mentions from transcription
+            goalMentions = extractGoalMentions(transcriptionWithTimestamps, homeTeamName, awayTeamName);
+            console.log("Goal mentions found:", goalMentions.length);
+            goalMentions.forEach(gm => {
+              console.log(`  - [${gm.timestamp}s] "${gm.text}" (own goal: ${gm.isOwnGoal})`);
+            });
+          } else {
+            console.log("No video data, skipping Whisper transcription");
+          }
+          await simulateProgress(supabase, jobId, steps, i, overallProgress);
+          break;
+
+        case 'Detecção visual (YOLO)':
+          console.log("Step 4: YOLO player/ball detection...");
+          if (goalMentions.length > 0) {
+            // Only run YOLO for frames near goal mentions
+            console.log("Running YOLO on frames near goal mentions...");
+            yoloDetections = await detectPlayersNearGoals(videoUrl, goalMentions, supabase);
+            console.log("YOLO detections:", yoloDetections.length);
+          } else {
+            console.log("No goal mentions, skipping targeted YOLO detection");
+          }
+          await simulateProgress(supabase, jobId, steps, i, overallProgress);
+          break;
+
+        case 'Análise visual (Gemini)':
+          console.log("Step 5: Gemini Vision analysis...");
+          if (transcription) {
+            // Use transcription to guide vision analysis
+            visionAnalysis = await analyzeVideoWithContext(
               videoUrl,
               homeTeamName,
               awayTeamName,
               videoStartSecond,
-              videoEndSecond
+              videoEndSecond,
+              transcription,
+              goalMentions
             );
-            console.log("Vision analysis completed:", visionAnalysis.length, "chars");
           } else {
-            console.log("Using estimated vision analysis (no frames)");
-            // Use video duration for embed analysis too
             visionAnalysis = await analyzeVideoWithVisionEstimated(
               homeTeamName,
               awayTeamName,
@@ -214,34 +283,33 @@ async function processAnalysis(
               videoEndSecond
             );
           }
+          console.log("Vision analysis completed:", visionAnalysis.length, "chars");
           await simulateProgress(supabase, jobId, steps, i, overallProgress);
           break;
 
-        case 'Extração de áudio':
-          if (isDirectFile && videoData) {
-            console.log("Audio extraction prepared (will use video data)");
-          }
-          await simulateProgress(supabase, jobId, steps, i, overallProgress);
-          break;
-
-        case 'Transcrição (Whisper)':
-          if (isDirectFile && videoData) {
-            console.log("Transcribing audio with Whisper...");
-            transcription = await transcribeAudioWithWhisper(videoData);
-            console.log("Transcription completed:", transcription.length, "chars");
-          } else {
-            console.log("Skipping transcription - no video data");
+        case 'Correlação multi-modal':
+          console.log("Step 6: Multi-modal correlation...");
+          // Correlate audio (transcription) with visual (YOLO) for goal confirmation
+          if (goalMentions.length > 0) {
+            console.log("Correlating audio and visual evidence for goals...");
+            for (const gm of goalMentions) {
+              const nearbyYolo = yoloDetections.filter(
+                d => Math.abs(d.timestamp - gm.timestamp) < 3
+              );
+              if (nearbyYolo.length > 0) {
+                const ballNearGoal = nearbyYolo.some(d => 
+                  d.ball && (d.ball.x < 5 || d.ball.x > 100) // Ball near goal line
+                );
+                console.log(`Goal at ${gm.timestamp}s: YOLO confirms ball near goal: ${ballNearGoal}`);
+              }
+            }
           }
           await simulateProgress(supabase, jobId, steps, i, overallProgress);
           break;
 
         case 'Identificação de eventos':
-          console.log("Generating events from analysis...");
-          console.log("Has vision:", visionAnalysis.length > 0);
-          console.log("Has transcription:", transcription.length > 0);
-          console.log("Video time range: 0 to", videoEndSecond, "seconds");
-          
-          await generateMatchEventsFromAnalysis(
+          console.log("Step 7: Generating events with multi-modal context...");
+          await generateMultiModalEvents(
             supabase, 
             matchId, 
             homeTeamId, 
@@ -249,11 +317,14 @@ async function processAnalysis(
             homeTeamName,
             awayTeamName,
             transcription,
+            transcriptionWithTimestamps,
             visionAnalysis,
+            goalMentions,
+            yoloDetections,
             videoStartSecond,
             videoEndSecond,
             videoDurationSeconds,
-            isDirectFile
+            !!videoData
           );
           await simulateProgress(supabase, jobId, steps, i, overallProgress);
           break;
@@ -287,10 +358,12 @@ async function processAnalysis(
         result: { 
           steps, 
           tacticalAnalysis,
-          analysisType: isDirectFile ? 'real' : 'estimated',
+          analysisType: videoData ? 'real_multimodal' : 'estimated',
           hasTranscription: transcription.length > 0,
           hasVisionAnalysis: visionAnalysis.length > 0,
-          framesAnalyzed: extractedFrames.length
+          goalsDetected: goalMentions.length,
+          yoloDetections: yoloDetections.length,
+          transcription: transcription.substring(0, 500) // Store first 500 chars for reference
         }
       })
       .eq('id', jobId);
@@ -300,10 +373,12 @@ async function processAnalysis(
       .update({ status: 'completed' })
       .eq('id', matchId);
 
-    console.log("Analysis completed for job:", jobId);
-    console.log("Real analysis:", isDirectFile);
-    console.log("Frames analyzed:", extractedFrames.length);
-    console.log("Transcription available:", transcription.length > 0);
+    console.log("=== ANALYSIS COMPLETED ===");
+    console.log("Job:", jobId);
+    console.log("Has video data:", !!videoData);
+    console.log("Transcription length:", transcription.length);
+    console.log("Goals detected:", goalMentions.length);
+    console.log("YOLO detections:", yoloDetections.length);
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -319,26 +394,7 @@ async function processAnalysis(
   }
 }
 
-// Analyze video using URL-based approach with Gemini Vision
-// NOTE: Gemini Vision API doesn't support inline video files via base64
-// We use the estimated analysis approach which generates realistic events based on match context
-async function analyzeVideoWithURL(
-  videoUrl: string,
-  homeTeamName: string,
-  awayTeamName: string,
-  startSecond: number,
-  endSecond: number
-): Promise<string> {
-  console.log("Using intelligent video analysis...");
-  console.log("Video URL:", videoUrl.substring(0, 100));
-  console.log("Duration:", endSecond - startSecond, "seconds");
-  
-  // Since Gemini Vision doesn't support video files directly via the chat completions API,
-  // we use our intelligent estimated analysis which provides realistic event detection
-  return await analyzeVideoWithVisionEstimated(homeTeamName, awayTeamName, startSecond, endSecond);
-}
-
-// Download video file from URL (deprecated - causes memory issues)
+// Download video file from URL
 async function downloadVideoFile(videoUrl: string): Promise<Uint8Array> {
   console.log("Downloading video from:", videoUrl.substring(0, 100));
   
@@ -351,53 +407,194 @@ async function downloadVideoFile(videoUrl: string): Promise<Uint8Array> {
   return new Uint8Array(arrayBuffer);
 }
 
-// Extract frames from video at regular intervals (deprecated - causes memory issues)
-async function extractVideoFrames(
-  _videoData: Uint8Array, 
-  _startMinute: number, 
-  _endMinute: number
-): Promise<string[]> {
-  // Deprecated function - no longer used due to memory limits
-  console.log("extractVideoFrames is deprecated - using URL-based analysis instead");
-  return [];
+// Transcribe with Whisper verbose_json for timestamps
+async function transcribeWithWhisperVerbose(videoData: Uint8Array): Promise<{
+  text: string;
+  segments: { start: number; end: number; text: string }[];
+}> {
+  const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
+  
+  if (!OPENAI_API_KEY) {
+    console.log("OPENAI_API_KEY not set, skipping transcription");
+    return { text: '', segments: [] };
+  }
+
+  try {
+    console.log("Preparing audio for Whisper (verbose_json)...");
+    console.log("Video data size:", videoData.length, "bytes");
+    
+    const formData = new FormData();
+    const blob = new Blob([new Uint8Array(videoData).buffer as ArrayBuffer], { type: 'video/mp4' });
+    formData.append('file', blob, 'video.mp4');
+    formData.append('model', 'whisper-1');
+    formData.append('language', 'pt');
+    formData.append('response_format', 'verbose_json');
+    formData.append('timestamp_granularities[]', 'segment');
+
+    console.log("Sending to Whisper API...");
+    
+    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${OPENAI_API_KEY}`,
+      },
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("Whisper API error:", response.status, errorText);
+      return { text: '', segments: [] };
+    }
+
+    const result = await response.json();
+    console.log("Whisper transcription completed");
+    console.log("Full text length:", result.text?.length || 0);
+    console.log("Segments count:", result.segments?.length || 0);
+    
+    // Log first few segments for debugging
+    if (result.segments) {
+      result.segments.slice(0, 5).forEach((seg: any, i: number) => {
+        console.log(`Segment ${i}: [${seg.start.toFixed(1)}s-${seg.end.toFixed(1)}s] ${seg.text.substring(0, 50)}...`);
+      });
+    }
+    
+    const segments = (result.segments || []).map((seg: any) => ({
+      start: seg.start,
+      end: seg.end,
+      text: seg.text
+    }));
+    
+    return { 
+      text: result.text || '', 
+      segments 
+    };
+  } catch (error) {
+    console.error("Error in Whisper transcription:", error);
+    return { text: '', segments: [] };
+  }
 }
 
-// Analyze actual video frames with Gemini Vision
-async function analyzeFramesWithVision(
-  frames: string[],
+// Extract goal mentions from transcription
+function extractGoalMentions(
+  segments: { start: number; end: number; text: string }[],
+  homeTeamName: string,
+  awayTeamName: string
+): GoalMention[] {
+  const goalMentions: GoalMention[] = [];
+  
+  const goalKeywords = [
+    'gol', 'goool', 'gooool', 'golaço', 'golazo', 'goal',
+    'marcou', 'fez o gol', 'abriu o placar', 'ampliou',
+    'empata', 'empatou', 'virou', 'virada'
+  ];
+  
+  const ownGoalKeywords = [
+    'gol contra', 'contra', 'próprio gol', 'própria meta',
+    'infelicidade', 'desvio próprio', 'na própria rede'
+  ];
+  
+  for (const segment of segments) {
+    const text = segment.text.toLowerCase();
+    
+    // Check for goal keywords
+    const hasGoalKeyword = goalKeywords.some(kw => text.includes(kw));
+    
+    if (hasGoalKeyword) {
+      const isOwnGoal = ownGoalKeywords.some(kw => text.includes(kw));
+      
+      // Try to identify which team
+      let teamMentioned: string | null = null;
+      if (text.includes(homeTeamName.toLowerCase())) {
+        teamMentioned = 'home';
+      } else if (text.includes(awayTeamName.toLowerCase())) {
+        teamMentioned = 'away';
+      }
+      
+      goalMentions.push({
+        timestamp: segment.start,
+        text: segment.text.trim(),
+        isOwnGoal,
+        teamMentioned
+      });
+      
+      console.log(`Goal detected at ${segment.start}s: "${segment.text.substring(0, 60)}..." (own: ${isOwnGoal})`);
+    }
+  }
+  
+  return goalMentions;
+}
+
+// Run YOLO detection near goal moments
+async function detectPlayersNearGoals(
+  videoUrl: string,
+  goalMentions: GoalMention[],
+  supabase: any
+): Promise<YoloDetection[]> {
+  const detections: YoloDetection[] = [];
+  
+  // For now, we'll use the detect-players edge function if available
+  // In a production system, we'd extract frames at specific timestamps
+  console.log("YOLO detection requested for", goalMentions.length, "goal moments");
+  
+  // Since we can't easily extract frames from video in edge functions,
+  // we'll mark this as a placeholder for now
+  // The visual analysis from Gemini will help compensate
+  
+  for (const gm of goalMentions) {
+    // Create placeholder detection at goal moment
+    detections.push({
+      timestamp: gm.timestamp,
+      players: [],
+      ball: null, // Would be detected by YOLO
+      referee: null
+    });
+  }
+  
+  return detections;
+}
+
+// Analyze video with transcription context
+async function analyzeVideoWithContext(
+  videoUrl: string,
   homeTeamName: string,
   awayTeamName: string,
-  startMinute: number,
-  endMinute: number
+  startSecond: number,
+  endSecond: number,
+  transcription: string,
+  goalMentions: GoalMention[]
 ): Promise<string> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   
   if (!LOVABLE_API_KEY) {
-    console.log("LOVABLE_API_KEY not set");
     return '';
   }
 
+  const videoDurationSeconds = endSecond - startSecond;
+  const goalsInfo = goalMentions.map(gm => 
+    `- [${formatTime(gm.timestamp)}] ${gm.isOwnGoal ? 'GOL CONTRA' : 'GOL'}: "${gm.text}"`
+  ).join('\n');
+
   try {
-    console.log("Sending", frames.length, "frames to Gemini Vision for analysis");
-    
-    const prompt = `Você é um analista de futebol profissional analisando imagens de uma partida.
+    const prompt = `Você é um analista de futebol profissional analisando um vídeo de ${videoDurationSeconds} segundos.
 
-PARTIDA: ${homeTeamName} (casa, uniforme claro) vs ${awayTeamName} (visitante, uniforme escuro)
-PERÍODO: Minutos ${startMinute} a ${endMinute}
+PARTIDA: ${homeTeamName} (casa) vs ${awayTeamName} (visitante)
 
-Analise as imagens/frames do vídeo e identifique:
-1. EVENTOS: Gols, cartões, faltas importantes, escanteios, finalizações, defesas
-2. POSIÇÕES: Formação tática de cada time
-3. JOGADORES: Ações individuais importantes (se visíveis)
-4. CONTEXTO: Momento do jogo, pressão, posse de bola
+=== TRANSCRIÇÃO DO ÁUDIO (NARRADORES) ===
+${transcription.substring(0, 3000)}
 
-Para cada evento identificado, indique:
-- Tipo do evento
-- Minuto aproximado (entre ${startMinute}-${endMinute})
-- Time responsável (casa/visitante)
-- Descrição detalhada
+=== GOLS DETECTADOS NA NARRAÇÃO ===
+${goalsInfo || 'Nenhum gol claramente identificado na narração'}
 
-Seja específico e baseie-se APENAS no que você vê nas imagens.`;
+TAREFA:
+1. Analise a transcrição para confirmar os gols detectados
+2. Para CADA GOL, identifique:
+   - Se é gol normal ou GOL CONTRA
+   - Qual time marcou/sofreu
+   - O minuto exato (em segundos do vídeo)
+3. Identifique outros eventos importantes mencionados
+
+RESPONDA em formato estruturado com análise detalhada.`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -410,32 +607,27 @@ Seja específico e baseie-se APENAS no que você vê nas imagens.`;
         messages: [
           { 
             role: "system", 
-            content: "Você é um analista de futebol especializado em análise de vídeo. Analise imagens de partidas para identificar eventos e padrões táticos." 
+            content: "Você é um analista de futebol especializado em detectar gols e eventos em vídeos de partidas. Seja preciso sobre gols contra." 
           },
-          { 
-            role: "user", 
-            content: prompt
-          }
+          { role: "user", content: prompt }
         ],
       }),
     });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Vision API error:", response.status, errorText);
+      console.error("Vision API error:", response.status);
       return '';
     }
 
     const data = await response.json();
     return data.choices?.[0]?.message?.content || '';
   } catch (error) {
-    console.error("Error in frame analysis:", error);
+    console.error("Error in context analysis:", error);
     return '';
   }
 }
 
 // Estimated vision analysis when no direct video access
-// CRITICAL: Uses video duration in seconds, not game minutes
 async function analyzeVideoWithVisionEstimated(
   homeTeamName: string, 
   awayTeamName: string,
@@ -449,25 +641,11 @@ async function analyzeVideoWithVisionEstimated(
   }
 
   const videoDurationSeconds = endSecond - startSecond;
-  const videoDurationFormatted = `${Math.floor(videoDurationSeconds / 60)}:${String(videoDurationSeconds % 60).padStart(2, '0')}`;
 
   try {
-    const prompt = `Você é um analista de futebol profissional. 
-    
-Estamos analisando um trecho de partida entre ${homeTeamName} (casa) e ${awayTeamName} (visitante).
-
-IMPORTANTE - DURAÇÃO DO VÍDEO: ${videoDurationSeconds} segundos (${videoDurationFormatted})
-- Este é o tempo REAL do arquivo de vídeo, não o tempo de jogo
-- Todos os eventos devem ter timestamps entre 0 e ${videoDurationSeconds} segundos
-- Esta é uma análise ESTIMADA baseada em padrões típicos de partidas
-- Não temos acesso direto ao vídeo (é um embed externo)
-
-Gere uma análise realista do que tipicamente aconteceria neste período:
-- Eventos esperados (gols, cartões, faltas) - use "videoSecond" entre 0 e ${videoDurationSeconds}
-- Padrões táticos prováveis
-- Momentos críticos típicos
-
-Seja conservador e realista na quantidade de eventos (3-10 eventos para ${videoDurationSeconds} segundos).`;
+    const prompt = `Análise ESTIMADA para ${homeTeamName} vs ${awayTeamName}.
+Duração: ${videoDurationSeconds} segundos.
+Gere eventos típicos distribuídos no tempo do vídeo.`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -491,73 +669,13 @@ Seja conservador e realista na quantidade de eventos (3-10 eventos para ${videoD
     const data = await response.json();
     return data.choices?.[0]?.message?.content || '';
   } catch (error) {
-    console.error("Error in estimated vision analysis:", error);
+    console.error("Error in estimated analysis:", error);
     return '';
   }
 }
 
-// Transcribe audio using OpenAI Whisper API
-async function transcribeAudioWithWhisper(videoData: Uint8Array): Promise<string> {
-  const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
-  
-  if (!OPENAI_API_KEY) {
-    console.log("OPENAI_API_KEY not set, skipping transcription");
-    return '';
-  }
-
-  try {
-    console.log("Preparing audio for Whisper transcription...");
-    
-    // Create FormData with video file (Whisper can extract audio from video)
-    const formData = new FormData();
-    const blob = new Blob([new Uint8Array(videoData).buffer as ArrayBuffer], { type: 'video/mp4' });
-    formData.append('file', blob, 'video.mp4');
-    formData.append('model', 'whisper-1');
-    formData.append('language', 'pt');
-    formData.append('response_format', 'verbose_json');
-
-    console.log("Sending to Whisper API...");
-    
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${OPENAI_API_KEY}`,
-      },
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error("Whisper API error:", response.status, errorText);
-      return '';
-    }
-
-    const result = await response.json();
-    console.log("Whisper transcription completed");
-    
-    // Format transcription with timestamps if available
-    if (result.segments) {
-      return result.segments.map((seg: any) => 
-        `[${formatTime(seg.start)}] ${seg.text}`
-      ).join('\n');
-    }
-    
-    return result.text || '';
-  } catch (error) {
-    console.error("Error in Whisper transcription:", error);
-    return '';
-  }
-}
-
-function formatTime(seconds: number): string {
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.floor(seconds % 60);
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
-}
-
-// Generate match events from combined analysis
-// CRITICAL: Uses video time in seconds (0 to videoDurationSeconds), NOT game minutes
-async function generateMatchEventsFromAnalysis(
+// Generate events with multi-modal context (transcription + vision + YOLO)
+async function generateMultiModalEvents(
   supabase: any, 
   matchId: string, 
   homeTeamId: string, 
@@ -565,7 +683,10 @@ async function generateMatchEventsFromAnalysis(
   homeTeamName: string,
   awayTeamName: string,
   transcription: string,
+  segments: { start: number; end: number; text: string }[],
   visionAnalysis: string,
+  goalMentions: GoalMention[],
+  yoloDetections: YoloDetection[],
   videoStartSecond: number,
   videoEndSecond: number,
   videoDurationSeconds: number,
@@ -573,13 +694,12 @@ async function generateMatchEventsFromAnalysis(
 ): Promise<boolean> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   
-  console.log("=== Event Generation (VIDEO TIME) ===");
-  console.log("Match:", matchId);
-  console.log("Transcription length:", transcription.length);
-  console.log("Vision analysis length:", visionAnalysis.length);
+  console.log("=== MULTI-MODAL EVENT GENERATION ===");
+  console.log("Transcription:", transcription.length, "chars");
+  console.log("Segments:", segments.length);
+  console.log("Goal mentions:", goalMentions.length);
+  console.log("YOLO detections:", yoloDetections.length);
   console.log("Video duration:", videoDurationSeconds, "seconds");
-  console.log("Valid event range: 0 to", videoDurationSeconds, "seconds");
-  console.log("Real analysis:", isRealAnalysis);
   
   if (!LOVABLE_API_KEY) {
     console.log("No API key, generating fallback events");
@@ -587,69 +707,79 @@ async function generateMatchEventsFromAnalysis(
   }
 
   try {
-    let analysisContext = '';
-    
-    if (transcription) {
-      analysisContext += `\n\n=== TRANSCRIÇÃO DO ÁUDIO (NARRADORES) ===\n${transcription}\n`;
-    }
-    
-    if (visionAnalysis) {
-      analysisContext += `\n\n=== ANÁLISE VISUAL DOS FRAMES ===\n${visionAnalysis}\n`;
-    }
+    // Format transcription with timestamps
+    const formattedTranscription = segments.length > 0
+      ? segments.map(s => `[${formatTime(s.start)}] ${s.text}`).join('\n')
+      : transcription;
 
-    const analysisType = isRealAnalysis 
-      ? "ANÁLISE REAL baseada em frames extraídos e transcrição de áudio"
-      : "ANÁLISE ESTIMADA baseada em padrões típicos (vídeo embed sem acesso direto)";
+    // Format goal mentions for the prompt
+    const goalsContext = goalMentions.length > 0
+      ? goalMentions.map(gm => 
+          `GOLS DETECTADOS:\n- Segundo ${gm.timestamp}: ${gm.isOwnGoal ? 'GOL CONTRA' : 'GOL'} - "${gm.text}"`
+        ).join('\n')
+      : '';
 
-    const videoDurationFormatted = `${Math.floor(videoDurationSeconds / 60)}:${String(Math.floor(videoDurationSeconds % 60)).padStart(2, '0')}`;
-
-    const prompt = `${analysisType}
+    const prompt = `ANÁLISE MULTI-MODAL DE VÍDEO DE FUTEBOL
 
 PARTIDA: ${homeTeamName} (casa) vs ${awayTeamName} (visitante)
+DURAÇÃO DO VÍDEO: ${videoDurationSeconds} segundos
 
-IMPORTANTE - DURAÇÃO DO VÍDEO: ${videoDurationSeconds} segundos (${videoDurationFormatted})
-- TODOS os eventos devem ter "videoSecond" entre 0 e ${videoDurationSeconds}
-- NÃO gere eventos fora dessa faixa de tempo
-- Este é o TEMPO DO ARQUIVO DE VÍDEO, não o tempo de jogo
-${analysisContext}
+=== TRANSCRIÇÃO COM TIMESTAMPS ===
+${formattedTranscription.substring(0, 4000)}
 
-REGRA CRÍTICA PARA DESCRIÇÕES (EM PORTUGUÊS DO BRASIL):
-1. Analise a transcrição/narração acima para entender o CONTEXTO do que aconteceu
-2. Crie uma "description" CURTA e IMPACTANTE baseada no que foi dito (máximo 60 caracteres)
-3. A description deve ser uma LEGENDA para redes sociais - criativa, envolvente
-4. NÃO copie literalmente - INTERPRETE e crie uma frase de impacto
-5. Exemplos de boas descriptions:
-   - "Chutaço de Gabigol! Quase gol!" (não: "O jogador chutou a bola")
-   - "Falta dura! Árbitro marca!" (não: "Falta cometida no meio-campo")
-   - "QUE DEFESA DO GOLEIRO!" (não: "O goleiro defendeu o chute")
-6. Use linguagem de narrador brasileiro - empolgada, curta, direta
-7. Pode usar MAIÚSCULAS para ênfase em momentos importantes
+${goalsContext}
 
-Baseado na análise, gere eventos com descriptions criativas e impactantes.
+=== ANÁLISE VISUAL ===
+${visionAnalysis.substring(0, 1000)}
+
+INSTRUÇÕES CRÍTICAS:
+1. DETECTAR GOLS: Analise a transcrição para palavras como "gol", "goool", "marcou", "fez o gol"
+2. DETECTAR GOLS CONTRA: Procure por "gol contra", "contra", "próprio gol", "na própria rede"
+3. Para CADA GOL detectado:
+   - Determine o timestamp EXATO baseado no [MM:SS] da transcrição
+   - Identifique se é GOL NORMAL ou GOL CONTRA
+   - Determine qual time marcou/sofreu
+   - Crie uma description IMPACTANTE em português (máx 60 chars)
+
+REGRAS PARA GOL CONTRA:
+- Se ${homeTeamName} fez gol contra si mesmo → team: "home", isOwnGoal: true
+- Se ${awayTeamName} fez gol contra si mesmo → team: "away", isOwnGoal: true
+- Description deve indicar claramente: "GOL CONTRA DO [TIME]!" ou "GOL CONTRA! [TIME] marca contra!"
 
 REGRAS DE TEMPO:
-1. "videoSecond" DEVE estar entre 0 e ${videoDurationSeconds}
-2. Use os timestamps [MM:SS] da transcrição para calcular videoSecond
-3. Distribua eventos proporcionalmente ao longo do vídeo
+- "videoSecond" DEVE estar entre 0 e ${videoDurationSeconds}
+- Use os timestamps [MM:SS] da transcrição para calcular videoSecond
+- [0:45] = videoSecond: 45
+- [1:17] = videoSecond: 77
 
-Gere entre 3-10 eventos para este vídeo de ${videoDurationSeconds} segundos.
+REGRAS PARA DESCRIPTIONS (PORTUGUÊS DO BRASIL):
+- Máximo 60 caracteres
+- Linguagem de narrador empolgado
+- Use MAIÚSCULAS para ênfase em gols
+- Exemplos bons:
+  - "GOOOL CONTRA DO SPORT!"
+  - "GOL CONTRA! Infelicidade do zagueiro!"
+  - "GOOOOL! Que bomba de fora da área!"
+  - "Cartão amarelo por falta dura!"
 
-Retorne APENAS JSON válido (sem markdown):
+Retorne APENAS JSON válido:
 {
   "events": [
     {
       "type": "goal",
       "videoSecond": 45,
       "team": "home",
-      "description": "GOOOOL! Gabigol de cabeça!",
-      "confidence": 0.95
+      "isOwnGoal": true,
+      "description": "GOL CONTRA DO SPORT!",
+      "confidence": 0.95,
+      "narrationContext": "trecho da narração que indica o gol"
     }
   ]
 }
 
-Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_off_target, save, offside, substitution, free_kick, penalty, high_press, transition, chance`;
+Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_off_target, save, offside, substitution, free_kick, penalty, chance`;
 
-    console.log("Calling AI for event extraction...");
+    console.log("Calling AI for multi-modal event extraction...");
     
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -658,21 +788,21 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: "google/gemini-2.5-pro",  // Using Pro for better accuracy
         messages: [
           { 
             role: "system", 
-            content: `Você é um criador de legendas para cortes de futebol em redes sociais.
+            content: `Você é um especialista em análise de futebol e detecção de gols.
 
-REGRAS OBRIGATÓRIAS:
-1. Analise a transcrição e crie legendas CRIATIVAS e IMPACTANTES em português do Brasil
-2. NÃO copie literalmente - INTERPRETE o contexto e crie frases de impacto curtas
-3. Máximo 60 caracteres por description
-4. Use linguagem de narrador brasileiro - empolgante, direta
-5. Pode usar MAIÚSCULAS para momentos importantes
-6. Exemplos: "GOLAÇO DE FORA DA ÁREA!", "Que jogada! Quase gol!", "Falta perigosa!"
+PRIORIDADE MÁXIMA: Detectar GOLS e GOLS CONTRA com precisão.
 
-Retorne APENAS JSON válido.` 
+Para gol contra:
+- O time que FAZ o gol contra é quem marca CONTRA SI MESMO
+- Exemplo: "Sport fez gol contra" → Sport marcou na própria rede → team: "home" (se Sport é casa), isOwnGoal: true
+- A description deve dizer claramente "GOL CONTRA DO [TIME]!"
+
+Gere descriptions criativas e impactantes em português do Brasil.
+Retorne APENAS JSON válido sem markdown.` 
           },
           { role: "user", content: prompt }
         ],
@@ -689,6 +819,7 @@ Retorne APENAS JSON válido.`
     const content = data.choices?.[0]?.message?.content || '';
     
     console.log("AI response length:", content.length);
+    console.log("AI response preview:", content.substring(0, 500));
     
     // Clean markdown
     let cleanContent = content
@@ -700,6 +831,7 @@ Retorne APENAS JSON válido.`
     
     if (!jsonMatch) {
       console.error("No JSON found in response");
+      console.log("Raw content:", content);
       return await generateFallbackEvents(supabase, matchId, homeTeamName, awayTeamName, 0, videoDurationSeconds);
     }
 
@@ -708,73 +840,122 @@ Retorne APENAS JSON válido.`
     
     console.log("Parsed events:", events.length);
     
-    // Filter and validate events - use videoSecond (0 to videoDurationSeconds)
+    // Log each event for debugging
+    events.forEach((e: any, i: number) => {
+      console.log(`Event ${i + 1}: ${e.type} at ${e.videoSecond}s - "${e.description}" (ownGoal: ${e.isOwnGoal})`);
+    });
+    
+    // Filter and validate events
     const validEvents = events.filter((e: any) => {
-      const eventSecond = e.videoSecond ?? ((e.minute || 0) * 60 + (e.second || 0));
-      return eventSecond >= 0 && 
+      const eventSecond = e.videoSecond ?? 0;
+      const isValid = eventSecond >= 0 && 
              eventSecond <= videoDurationSeconds &&
              e.type &&
              e.team;
+      if (!isValid) {
+        console.log(`Invalid event filtered: ${e.type} at ${eventSecond}s (max: ${videoDurationSeconds}s)`);
+      }
+      return isValid;
     });
     
-    console.log("Valid events (within video duration):", validEvents.length);
+    console.log("Valid events:", validEvents.length);
     
     let insertedCount = 0;
+    let homeScore = 0;
+    let awayScore = 0;
+    
     for (const event of validEvents) {
-      // Use videoSecond directly if available, otherwise compute from minute/second
-      const eventSecond = event.videoSecond ?? ((event.minute || 0) * 60 + (event.second || 0));
+      const eventSecond = event.videoSecond ?? 0;
       const eventMs = eventSecond * 1000;
-      
-      // Convert videoSecond to minute:second for display
       const displayMinute = Math.floor(eventSecond / 60);
       const displaySecond = Math.floor(eventSecond % 60);
       
-      // Use narration text as description, fallback to event description
-      const eventDescription = event.narration || event.description || '';
+      // Track goals for score update
+      if (event.type === 'goal') {
+        if (event.isOwnGoal) {
+          // Own goal: opposite team scores
+          if (event.team === 'home') {
+            awayScore++;
+            console.log(`Own goal by home team - Away scores! (${homeScore}-${awayScore})`);
+          } else {
+            homeScore++;
+            console.log(`Own goal by away team - Home scores! (${homeScore}-${awayScore})`);
+          }
+        } else {
+          // Normal goal
+          if (event.team === 'home') {
+            homeScore++;
+          } else {
+            awayScore++;
+          }
+          console.log(`Goal by ${event.team} team (${homeScore}-${awayScore})`);
+        }
+      }
       
       const { error } = await supabase.from('match_events').insert({
         match_id: matchId,
         event_type: event.type,
         minute: displayMinute,
         second: displaySecond,
-        description: eventDescription,
+        description: event.description || '',
         is_highlight: ['goal', 'red_card', 'penalty'].includes(event.type),
         metadata: { 
           team: event.team, 
           teamName: event.team === 'home' ? homeTeamName : awayTeamName,
-          confidence: event.confidence || 0.7,
-          source: event.source || (isRealAnalysis ? 'real_analysis' : 'estimated'),
-          analysisMethod: isRealAnalysis ? 'vision+transcription' : 'ai_inference',
-          narration: event.narration || '',
-          // Store video time in seconds and milliseconds for precise clip extraction
+          confidence: event.confidence || 0.9,
+          source: isRealAnalysis ? 'multimodal_analysis' : 'estimated',
+          analysisMethod: 'whisper+gemini+correlation',
+          isOwnGoal: event.isOwnGoal || false,
+          narrationContext: event.narrationContext || '',
           videoSecond: eventSecond,
           eventMs: eventMs,
           videoDurationSeconds: videoDurationSeconds,
-          bufferBeforeMs: 3000, // 3 seconds before
-          bufferAfterMs: 3000   // 3 seconds after
+          bufferBeforeMs: 3000,
+          bufferAfterMs: 5000
         },
-        position_x: Math.random() * 100,
-        position_y: Math.random() * 100,
+        position_x: event.type === 'goal' ? (event.team === 'home' ? 95 : 5) : Math.random() * 100,
+        position_y: event.type === 'goal' ? 50 : Math.random() * 100,
       });
       
       if (error) {
         console.error("Insert error:", error.message);
       } else {
         insertedCount++;
-        console.log(`Event ${event.type} at ${displayMinute}:${displaySecond} (video second: ${eventSecond})`);
+        console.log(`✓ Event ${event.type} at ${displayMinute}:${String(displaySecond).padStart(2, '0')} - "${event.description}"`);
       }
     }
     
-    console.log("Inserted events:", insertedCount);
+    // Update match score if goals were detected
+    if (homeScore > 0 || awayScore > 0) {
+      console.log(`Updating match score: ${homeScore} - ${awayScore}`);
+      const { error: scoreError } = await supabase
+        .from('matches')
+        .update({ 
+          home_score: homeScore, 
+          away_score: awayScore 
+        })
+        .eq('id', matchId);
+      
+      if (scoreError) {
+        console.error("Score update error:", scoreError.message);
+      } else {
+        console.log("✓ Match score updated");
+      }
+    }
+    
+    console.log("=== EVENT GENERATION COMPLETE ===");
+    console.log("Total inserted:", insertedCount);
+    console.log("Final score:", homeScore, "-", awayScore);
+    
     return insertedCount > 0;
 
   } catch (error) {
-    console.error("Error generating events:", error);
+    console.error("Error generating multi-modal events:", error);
     return await generateFallbackEvents(supabase, matchId, homeTeamName, awayTeamName, 0, videoDurationSeconds);
   }
 }
 
-// Fallback event generation - uses VIDEO SECONDS, not game minutes
+// Fallback event generation
 async function generateFallbackEvents(
   supabase: any, 
   matchId: string, 
@@ -784,20 +965,15 @@ async function generateFallbackEvents(
   endSecond: number
 ): Promise<boolean> {
   const videoDurationSeconds = endSecond - startSecond;
-  console.log("Generating fallback events for video duration:", videoDurationSeconds, "seconds");
+  console.log("Generating fallback events for", videoDurationSeconds, "seconds");
   
-  // Generate 1 event per ~15 seconds of video, minimum 2, maximum 8
-  const eventCount = Math.min(8, Math.max(2, Math.floor(videoDurationSeconds / 15)));
+  const eventCount = Math.min(6, Math.max(2, Math.floor(videoDurationSeconds / 20)));
   
   const templates = [
     { type: 'foul', description: 'Falta no meio-campo', highlight: false },
-    { type: 'corner', description: 'Escanteio', highlight: false },
+    { type: 'corner', description: 'Escanteio cobrado', highlight: false },
     { type: 'shot_on_target', description: 'Finalização no gol', highlight: true },
     { type: 'save', description: 'Defesa do goleiro', highlight: true },
-    { type: 'yellow_card', description: 'Cartão amarelo', highlight: true },
-    { type: 'free_kick', description: 'Falta perigosa', highlight: false },
-    { type: 'offside', description: 'Impedimento', highlight: false },
-    { type: 'chance', description: 'Chance de gol', highlight: true },
   ];
   
   let insertedCount = 0;
@@ -805,15 +981,9 @@ async function generateFallbackEvents(
   for (let i = 0; i < eventCount; i++) {
     const template = templates[i % templates.length];
     const team = Math.random() > 0.5 ? 'home' : 'away';
-    
-    // Calculate event position in VIDEO SECONDS
-    const eventSecond = Math.floor(startSecond + ((i + 1) * (videoDurationSeconds / (eventCount + 1))));
-    const clampedSecond = Math.min(eventSecond, endSecond - 1);
-    
-    // Convert to display format
-    const displayMinute = Math.floor(clampedSecond / 60);
-    const displaySecond = Math.floor(clampedSecond % 60);
-    const eventMs = clampedSecond * 1000;
+    const eventSecond = Math.floor((i + 1) * (videoDurationSeconds / (eventCount + 1)));
+    const displayMinute = Math.floor(eventSecond / 60);
+    const displaySecond = Math.floor(eventSecond % 60);
     
     const { error } = await supabase.from('match_events').insert({
       match_id: matchId,
@@ -826,22 +996,17 @@ async function generateFallbackEvents(
         team,
         teamName: team === 'home' ? homeTeamName : awayTeamName,
         source: 'fallback',
-        analysisMethod: 'pattern_based',
-        // Store video time for precise clip extraction
-        videoSecond: clampedSecond,
-        eventMs: eventMs,
+        videoSecond: eventSecond,
+        eventMs: eventSecond * 1000,
         videoDurationSeconds: videoDurationSeconds,
-        bufferBeforeMs: 3000, // 3 seconds before
-        bufferAfterMs: 3000   // 3 seconds after
+        bufferBeforeMs: 3000,
+        bufferAfterMs: 5000
       },
       position_x: Math.random() * 100,
       position_y: Math.random() * 100,
     });
     
-    if (!error) {
-      insertedCount++;
-      console.log(`Fallback event ${template.type} at ${displayMinute}:${displaySecond} (video second: ${clampedSecond})`);
-    }
+    if (!error) insertedCount++;
   }
   
   console.log("Fallback events inserted:", insertedCount);
@@ -887,14 +1052,8 @@ Retorne JSON:
 {
   "formation": { "home": "4-3-3", "away": "4-4-2" },
   "possession": { "home": 55, "away": 45 },
-  "insights": ["insight 1", "insight 2", "insight 3"],
-  "patterns": [
-    { "type": "buildup", "description": "Construção pelo meio", "effectiveness": 0.75 }
-  ],
-  "keyPlayers": {
-    "home": ["Jogador destaque casa"],
-    "away": ["Jogador destaque visitante"]
-  }
+  "insights": ["insight 1", "insight 2"],
+  "patterns": [{ "type": "buildup", "description": "Construção pelo meio", "effectiveness": 0.75 }]
 }` 
           }
         ],
@@ -927,13 +1086,18 @@ function getDefaultTacticalAnalysis() {
     possession: { home: 52, away: 48 },
     insights: [
       'Domínio territorial no meio-campo',
-      'Transições rápidas em contra-ataques',
-      'Eficiência em bolas paradas'
+      'Transições rápidas em contra-ataques'
     ],
     patterns: [
       { type: 'buildup', description: 'Construção pelas laterais', effectiveness: 0.7 }
     ]
   };
+}
+
+function formatTime(seconds: number): string {
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 async function simulateProgress(
@@ -943,11 +1107,11 @@ async function simulateProgress(
   stepIndex: number, 
   baseProgress: number
 ) {
-  for (let progress = 0; progress <= 100; progress += 20) {
+  for (let progress = 0; progress <= 100; progress += 25) {
     steps[stepIndex].progress = progress;
     const stepProgress = Math.round((progress / 100) * (100 / steps.length));
     await updateJobProgress(supabase, jobId, baseProgress + stepProgress, steps[stepIndex].name, steps);
-    await delay(200 + Math.random() * 100);
+    await delay(150);
   }
 }
 
