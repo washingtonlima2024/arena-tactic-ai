@@ -16,6 +16,7 @@ import { FIFA_FIELD, metersToSvg } from '@/constants/fieldDimensions';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { usePlayerDetection } from '@/hooks/usePlayerDetection';
+import { AppLayout } from '@/components/layout/AppLayout';
 
 interface GoalEvent {
   id: string;
@@ -188,8 +189,9 @@ const Field = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-background p-6">
-      <div className="max-w-7xl mx-auto space-y-6">
+    <AppLayout>
+      <div className="p-6">
+        <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -616,8 +618,9 @@ const Field = () => {
             </div>
           </TabsContent>
         </Tabs>
+        </div>
       </div>
-    </div>
+    </AppLayout>
   );
 };
 
