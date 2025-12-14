@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -6,14 +6,16 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { Ruler, Box, Grid3X3, Eye, RotateCcw, Play, Target, AlertCircle } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Ruler, Box, Grid3X3, Eye, RotateCcw, Play, Target, AlertCircle, Camera, Loader2, Upload } from 'lucide-react';
 import { OfficialFootballField } from '@/components/tactical/OfficialFootballField';
 import { OfficialField3D } from '@/components/tactical/OfficialField3D';
 import { FieldMeasurementsOverlay } from '@/components/tactical/FieldMeasurementsOverlay';
 import { GoalPlayAnimation, generateMockGoalPlay } from '@/components/tactical/GoalPlayAnimation';
-import { FIFA_FIELD } from '@/constants/fieldDimensions';
+import { FIFA_FIELD, metersToSvg } from '@/constants/fieldDimensions';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
+import { usePlayerDetection } from '@/hooks/usePlayerDetection';
 
 interface GoalEvent {
   id: string;
@@ -35,6 +37,11 @@ const Field = () => {
   const [cameraPreset, setCameraPreset] = useState<'tv' | 'tactical' | 'corner' | 'goal'>('tv');
   const [autoRotate, setAutoRotate] = useState(false);
   const [selectedGoal, setSelectedGoal] = useState<GoalEvent | null>(null);
+  
+  // YOLO detection state
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [uploadedImage, setUploadedImage] = useState<string | null>(null);
+  const { detectFromImage, isDetecting, lastResult } = usePlayerDetection();
 
   // Fetch goal events from database
   const { data: goalEvents = [], isLoading } = useQuery({
@@ -84,6 +91,89 @@ const Field = () => {
     return generateMockGoalPlay(selectedGoal.team);
   }, [selectedGoal]);
 
+  // Handle image upload for YOLO detection
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      const dataUrl = event.target?.result as string;
+      setUploadedImage(dataUrl);
+      
+      // Extract base64 without prefix
+      const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
+      await detectFromImage(base64, 0);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Render detected players on field
+  const renderDetectionOverlay = () => {
+    if (!lastResult) return null;
+
+    return (
+      <g>
+        {/* Detected players */}
+        {lastResult.players.map((player) => {
+          const px = metersToSvg(player.x);
+          const py = metersToSvg(player.y);
+          const color = player.team === 'home' ? '#10b981' : player.team === 'away' ? '#ef4444' : '#888888';
+
+          return (
+            <g key={player.id}>
+              <circle
+                cx={px}
+                cy={py}
+                r={12}
+                fill={color}
+                stroke="#ffffff"
+                strokeWidth={2}
+                opacity={player.confidence}
+              />
+              <text
+                x={px}
+                y={py + 4}
+                textAnchor="middle"
+                fill="#ffffff"
+                fontSize="8"
+                fontWeight="bold"
+              >
+                {Math.round(player.confidence * 100)}%
+              </text>
+            </g>
+          );
+        })}
+
+        {/* Detected ball */}
+        {lastResult.ball && (
+          <g>
+            <circle
+              cx={metersToSvg(lastResult.ball.x)}
+              cy={metersToSvg(lastResult.ball.y)}
+              r={8}
+              fill="#ffffff"
+              stroke="#000000"
+              strokeWidth={1}
+            />
+          </g>
+        )}
+
+        {/* Referee */}
+        {lastResult.referee && (
+          <circle
+            cx={metersToSvg(lastResult.referee.x)}
+            cy={metersToSvg(lastResult.referee.y)}
+            r={10}
+            fill="#fbbf24"
+            stroke="#000000"
+            strokeWidth={2}
+          />
+        )}
+      </g>
+    );
+  };
+
   const measurements = [
     { label: 'Comprimento do campo', value: `${FIFA_FIELD.length}m`, desc: '100-110m permitido' },
     { label: 'Largura do campo', value: `${FIFA_FIELD.width}m`, desc: '64-75m permitido' },
@@ -113,7 +203,7 @@ const Field = () => {
         </div>
 
         <Tabs defaultValue="2d" className="space-y-4">
-          <TabsList className="grid w-full max-w-2xl grid-cols-4">
+          <TabsList className="grid w-full max-w-3xl grid-cols-5">
             <TabsTrigger value="2d" className="flex items-center gap-2">
               <Grid3X3 className="h-4 w-4" />
               Campo 2D
@@ -121,6 +211,10 @@ const Field = () => {
             <TabsTrigger value="3d" className="flex items-center gap-2">
               <Box className="h-4 w-4" />
               Campo 3D
+            </TabsTrigger>
+            <TabsTrigger value="detection" className="flex items-center gap-2">
+              <Camera className="h-4 w-4" />
+              Detecção YOLO
             </TabsTrigger>
             <TabsTrigger value="animation" className="flex items-center gap-2">
               <Play className="h-4 w-4" />
@@ -240,6 +334,135 @@ const Field = () => {
                 </div>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* YOLO Detection Tab */}
+          <TabsContent value="detection" className="space-y-4">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Image Upload & Preview */}
+              <Card className="bg-card/50 backdrop-blur border-border/50">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <Camera className="h-5 w-5 text-primary" />
+                    Imagem de Entrada
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <div className="flex gap-2">
+                    <Input
+                      ref={fileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleImageUpload}
+                      className="hidden"
+                    />
+                    <Button
+                      onClick={() => fileInputRef.current?.click()}
+                      disabled={isDetecting}
+                      className="flex-1"
+                    >
+                      {isDetecting ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Detectando...
+                        </>
+                      ) : (
+                        <>
+                          <Upload className="mr-2 h-4 w-4" />
+                          Enviar Imagem
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                  
+                  {uploadedImage ? (
+                    <div className="relative rounded-lg overflow-hidden border border-border">
+                      <img 
+                        src={uploadedImage} 
+                        alt="Frame de vídeo" 
+                        className="w-full h-auto"
+                      />
+                      {isDetecting && (
+                        <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
+                          <div className="text-center space-y-2">
+                            <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+                            <p className="text-sm text-muted-foreground">Processando com YOLO...</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="border-2 border-dashed border-border rounded-lg p-12 text-center">
+                      <Camera className="h-12 w-12 mx-auto text-muted-foreground/30 mb-4" />
+                      <p className="text-muted-foreground">
+                        Envie uma imagem de partida de futebol para detectar jogadores
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Detection Stats */}
+                  {lastResult && (
+                    <div className="grid grid-cols-3 gap-2">
+                      <div className="bg-primary/10 rounded-lg p-3 text-center">
+                        <p className="text-2xl font-bold text-primary">{lastResult.players.length}</p>
+                        <p className="text-xs text-muted-foreground">Jogadores</p>
+                      </div>
+                      <div className="bg-secondary/50 rounded-lg p-3 text-center">
+                        <p className="text-2xl font-bold">{lastResult.ball ? '1' : '0'}</p>
+                        <p className="text-xs text-muted-foreground">Bola</p>
+                      </div>
+                      <div className="bg-muted rounded-lg p-3 text-center">
+                        <p className="text-2xl font-bold">{lastResult.processingTimeMs}ms</p>
+                        <p className="text-xs text-muted-foreground">Tempo</p>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              {/* Field Visualization */}
+              <Card className="bg-card/50 backdrop-blur border-border/50">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Target className="h-5 w-5 text-primary" />
+                      Posições Detectadas
+                    </CardTitle>
+                    <Badge variant="outline" className="font-mono">
+                      Roboflow API
+                    </Badge>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="rounded-lg overflow-hidden border border-border/50">
+                    <OfficialFootballField
+                      theme="tactical"
+                      showMeasurements={false}
+                      showGrid={true}
+                    >
+                      {renderDetectionOverlay()}
+                    </OfficialFootballField>
+                  </div>
+                  
+                  {lastResult && (
+                    <div className="mt-4 flex gap-4 justify-center text-sm">
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-primary" />
+                        <span className="text-muted-foreground">Time Casa ({lastResult.players.filter(p => p.team === 'home').length})</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-destructive" />
+                        <span className="text-muted-foreground">Time Fora ({lastResult.players.filter(p => p.team === 'away').length})</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <div className="w-3 h-3 rounded-full bg-yellow-500" />
+                        <span className="text-muted-foreground">Árbitro</span>
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
           {/* Goal Animation Tab */}
