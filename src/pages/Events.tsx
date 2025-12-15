@@ -27,7 +27,8 @@ import {
   Play,
   Scissors,
   AlertCircle,
-  Sparkles
+  Sparkles,
+  RefreshCw
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -38,12 +39,14 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
 import { useRefineEvents } from '@/hooks/useRefineEvents';
+import { useStartAnalysis } from '@/hooks/useAnalysisJob';
 import { toast } from 'sonner';
 
 export default function Events() {
   const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const { refineEvents, isRefining } = useRefineEvents();
+  const { startAnalysis, isLoading: isReanalyzing } = useStartAnalysis();
   
   // Centralized match selection
   const { currentMatchId, selectedMatch, matches, isLoading: matchesLoading, setSelectedMatch } = useMatchSelection();
@@ -65,6 +68,51 @@ export default function Events() {
       refetchEvents();
       queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
     }
+  };
+
+  // Handle re-analyze match
+  const handleReanalyze = async () => {
+    if (!currentMatchId || !selectedMatch) return;
+    
+    // Get video for this match
+    const { data: videos } = await supabase
+      .from('videos')
+      .select('*')
+      .eq('match_id', currentMatchId)
+      .order('start_minute', { ascending: true });
+    
+    if (!videos || videos.length === 0) {
+      toast.error('Nenhum vídeo encontrado para esta partida. Importe um vídeo primeiro.');
+      return;
+    }
+
+    // Delete old events first
+    await supabase
+      .from('match_events')
+      .delete()
+      .eq('match_id', currentMatchId);
+
+    toast.info('Re-análise iniciada. Isso pode levar alguns minutos...');
+
+    // Start analysis for each video segment
+    for (const video of videos) {
+      await startAnalysis({
+        matchId: currentMatchId,
+        videoUrl: video.file_url,
+        homeTeamId: selectedMatch.home_team_id || '',
+        awayTeamId: selectedMatch.away_team_id || '',
+        competition: selectedMatch.competition || undefined,
+        startMinute: video.start_minute || 0,
+        endMinute: video.end_minute || 90,
+        durationSeconds: video.duration_seconds || undefined,
+      });
+    }
+
+    // Refresh events after a delay
+    setTimeout(() => {
+      refetchEvents();
+      queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
+    }, 5000);
   };
 
   // Fetch match videos (may have multiple segments)
@@ -283,6 +331,18 @@ export default function Events() {
                 <Button variant="arena" onClick={handleCreateEvent}>
                   <Plus className="mr-2 h-4 w-4" />
                   Novo Evento
+                </Button>
+                <Button 
+                  variant="secondary" 
+                  onClick={handleReanalyze}
+                  disabled={isReanalyzing}
+                >
+                  {isReanalyzing ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Re-analisar
                 </Button>
                 <Button 
                   variant="arena-outline" 
