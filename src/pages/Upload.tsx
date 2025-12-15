@@ -42,7 +42,6 @@ import { CoverageTimeline } from '@/components/upload/CoverageTimeline';
 import { AnalysisSummary } from '@/components/upload/AnalysisSummary';
 import { MatchTimesConfig, defaultMatchTimes, MatchTimes } from '@/components/upload/MatchTimesConfig';
 import { HalfDropzone, getDefaultVideoType, getDefaultMinutes } from '@/components/upload/HalfDropzone';
-import { SubtitlesUpload } from '@/components/upload/SubtitlesUpload';
 import { cn } from '@/lib/utils';
 
 // Helper to extract embed URL from various formats
@@ -92,9 +91,6 @@ export default function VideoUpload() {
   const [segments, setSegments] = useState<VideoSegment[]>([]);
   const [isDragging, setIsDragging] = useState(false);
   const [uploadMode, setUploadMode] = useState<'file' | 'link'>('file');
-  
-  // Subtitles
-  const [subtitleFile, setSubtitleFile] = useState<File | null>(null);
   
   // Link input state
   const [newLinkInput, setNewLinkInput] = useState('');
@@ -605,9 +601,6 @@ export default function VideoUpload() {
                       </div>
                     </CardContent>
                   </Card>
-
-                  {/* Subtitles Upload */}
-                  <SubtitlesUpload file={subtitleFile} onFileChange={setSubtitleFile} />
                 </TabsContent>
 
                 <TabsContent value="link" className="mt-4">
