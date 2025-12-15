@@ -67,20 +67,23 @@ export default function Events() {
     }
   };
 
-  // Fetch match video
-  const { data: matchVideo } = useQuery({
-    queryKey: ['match-video', currentMatchId],
+  // Fetch match videos (may have multiple segments)
+  const { data: matchVideos } = useQuery({
+    queryKey: ['match-videos', currentMatchId],
     queryFn: async () => {
-      if (!currentMatchId) return null;
+      if (!currentMatchId) return [];
       const { data } = await supabase
         .from('videos')
         .select('*')
         .eq('match_id', currentMatchId)
-        .maybeSingle();
-      return data;
+        .order('start_minute', { ascending: true });
+      return data || [];
     },
     enabled: !!currentMatchId
   });
+  
+  // Use first video as primary for playback
+  const matchVideo = matchVideos?.[0] || null;
 
   // Fetch thumbnails for events
   const { data: thumbnails = [] } = useQuery({
