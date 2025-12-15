@@ -1,3 +1,4 @@
+import { useState, useCallback } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
@@ -5,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { Film, Trash2, Clock, FileVideo, Link2 } from 'lucide-react';
+import { Film, Trash2, Clock, FileVideo, Link2, Subtitles, Upload, X, FileText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { TimeInput, formatTimeFromSeconds } from './TimeInput';
 import { SyncSlider } from './SyncSlider';
@@ -26,6 +27,7 @@ export interface VideoSegment {
   status: 'uploading' | 'processing' | 'complete' | 'error' | 'ready';
   isLink?: boolean;
   half?: 'first' | 'second'; // Which half this video belongs to
+  subtitleFile?: File | null; // SRT/VTT file for this segment
 }
 
 interface VideoSegmentCardProps {
@@ -226,9 +228,103 @@ export function VideoSegmentCard({ segment, onChange, onRemove, index }: VideoSe
                 <div className="absolute top-0 bottom-0 left-1/2 w-px bg-border/50" />
               </div>
             </div>
+
+            {/* Subtitles Upload per Segment */}
+            <SubtitleUploadInline 
+              file={segment.subtitleFile || null}
+              onFileChange={(file) => updateField('subtitleFile', file)}
+            />
           </>
         )}
       </CardContent>
     </Card>
+  );
+}
+
+// Inline subtitle upload component for each segment
+function SubtitleUploadInline({ file, onFileChange }: { file: File | null; onFileChange: (file: File | null) => void }) {
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    const droppedFile = e.dataTransfer.files[0];
+    if (droppedFile && isSubtitleFile(droppedFile.name)) {
+      onFileChange(droppedFile);
+    }
+  }, [onFileChange]);
+
+  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = e.target.files?.[0];
+    if (selectedFile) {
+      onFileChange(selectedFile);
+    }
+    e.target.value = '';
+  };
+
+  const isSubtitleFile = (filename: string): boolean => {
+    const ext = filename.toLowerCase().split('.').pop();
+    return ext === 'srt' || ext === 'vtt';
+  };
+
+  return (
+    <div className="space-y-2 p-3 rounded-lg bg-muted/10 border border-border/30">
+      <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+        <Subtitles className="h-3 w-3" />
+        Legenda (SRT/VTT)
+      </div>
+      
+      {file ? (
+        <div className="flex items-center justify-between p-2 rounded-md bg-muted/30 border border-border/50">
+          <div className="flex items-center gap-2">
+            <FileText className="h-4 w-4 text-primary" />
+            <span className="text-sm truncate max-w-[200px]">{file.name}</span>
+            <Badge variant="secondary" className="text-xs">
+              {file.name.split('.').pop()?.toUpperCase()}
+            </Badge>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-6 w-6"
+            onClick={() => onFileChange(null)}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
+      ) : (
+        <div
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onDrop={handleDrop}
+          className={cn(
+            "relative flex items-center justify-center py-2 px-3 rounded-md border-2 border-dashed transition-all cursor-pointer",
+            isDragging 
+              ? "border-primary bg-primary/5" 
+              : "border-border/40 hover:border-primary/40"
+          )}
+        >
+          <Upload className="h-4 w-4 text-muted-foreground mr-2" />
+          <span className="text-xs text-muted-foreground">Arraste SRT ou VTT</span>
+          <input
+            type="file"
+            accept=".srt,.vtt"
+            onChange={handleFileSelect}
+            className="absolute inset-0 cursor-pointer opacity-0"
+          />
+        </div>
+      )}
+    </div>
   );
 }
