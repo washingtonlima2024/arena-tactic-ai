@@ -10,8 +10,8 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Maximum video size for download (50MB)
-const MAX_VIDEO_SIZE_MB = 50;
+// Maximum video size for download (300MB) - increased to support longer match videos
+const MAX_VIDEO_SIZE_MB = 300;
 const MAX_VIDEO_SIZE_BYTES = MAX_VIDEO_SIZE_MB * 1024 * 1024;
 
 interface AnalysisStep {
