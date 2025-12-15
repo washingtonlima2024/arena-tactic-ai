@@ -77,21 +77,24 @@ export default function Media() {
   
   const { data: events, refetch: refetchEvents } = useMatchEvents(matchId);
   
-  // Fetch video for the match
-  const { data: matchVideo } = useQuery({
-    queryKey: ['match-video', matchId],
+  // Fetch videos for the match (may have multiple segments)
+  const { data: matchVideos } = useQuery({
+    queryKey: ['match-videos', matchId],
     queryFn: async () => {
-      if (!matchId) return null;
+      if (!matchId) return [];
       const { data, error } = await supabase
         .from('videos')
         .select('*')
         .eq('match_id', matchId)
-        .single();
-      if (error) return null;
-      return data;
+        .order('start_minute', { ascending: true });
+      if (error) return [];
+      return data || [];
     },
     enabled: !!matchId
   });
+  
+  // Use first video as primary for playback, or find by event timestamp
+  const matchVideo = matchVideos?.[0] || null;
 
   // Generate clips from events - Use eventMs from metadata as primary timestamp source
   const clips = events?.map((event) => {
