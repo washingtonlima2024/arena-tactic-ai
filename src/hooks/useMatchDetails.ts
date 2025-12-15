@@ -17,6 +17,7 @@ export interface MatchWithDetails {
     short_name: string;
     primary_color: string;
     secondary_color: string;
+    logo_url: string | null;
   } | null;
   away_team: {
     id: string;
@@ -24,6 +25,7 @@ export interface MatchWithDetails {
     short_name: string;
     primary_color: string;
     secondary_color: string;
+    logo_url: string | null;
   } | null;
 }
 
