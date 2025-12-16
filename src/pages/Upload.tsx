@@ -386,19 +386,14 @@ export default function VideoUpload() {
           durationSeconds = (primarySegment.endMinute - primarySegment.startMinute) * 60;
         }
 
-        // Read SRT content if subtitle file exists
-        let transcription: string | undefined;
-        if (primarySegment.subtitleFile) {
-          try {
-            transcription = await readSrtFile(primarySegment.subtitleFile);
-            console.log('SRT content loaded:', transcription.length, 'chars');
-            toast({
-              title: "Legendas carregadas",
-              description: `Usando arquivo SRT para análise (${transcription.length} caracteres)`,
-            });
-          } catch (err) {
-            console.error('Failed to read SRT file:', err);
-          }
+        // Use transcription from segment if available
+        const transcription = primarySegment.transcription || undefined;
+        if (transcription) {
+          console.log('Transcription content loaded:', transcription.length, 'chars');
+          toast({
+            title: "Transcrição carregada",
+            description: `Usando transcrição para análise (${transcription.length} caracteres)`,
+          });
         }
 
         const result = await startAnalysis({
