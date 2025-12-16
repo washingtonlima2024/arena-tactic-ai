@@ -107,7 +107,8 @@ export function useStartAnalysis() {
     competition?: string;
     startMinute?: number;
     endMinute?: number;
-    durationSeconds?: number; // Duração real do arquivo de vídeo em segundos
+    durationSeconds?: number;
+    transcription?: string; // SRT content if provided
   }) => {
     setIsLoading(true);
     
