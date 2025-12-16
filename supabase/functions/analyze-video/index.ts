@@ -52,7 +52,7 @@ serve(async (req) => {
   }
 
   try {
-    const { matchId, videoUrl, homeTeamId, awayTeamId, competition, startMinute, endMinute, durationSeconds } = await req.json();
+    const { matchId, videoUrl, homeTeamId, awayTeamId, competition, startMinute, endMinute, durationSeconds, transcription: providedTranscription } = await req.json();
     
     const videoDurationSeconds = durationSeconds || ((endMinute || 90) - (startMinute || 0)) * 60;
     
@@ -61,6 +61,7 @@ serve(async (req) => {
     console.log("Video URL:", videoUrl);
     console.log("Video duration:", videoDurationSeconds, "seconds");
     console.log("Game time reference: minutes", startMinute, "to", endMinute);
+    console.log("Provided transcription (SRT):", providedTranscription ? `${providedTranscription.length} chars` : "NONE");
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -71,7 +72,11 @@ serve(async (req) => {
                          videoUrl.endsWith('.mp4') || 
                          videoUrl.includes('/storage/');
     
-    console.log("Video type:", isDirectFile ? "Direct MP4 file (REAL ANALYSIS)" : "Embed/External URL (ESTIMATED)");
+    // If transcription provided, we can skip video download
+    const hasSrtTranscription = !!providedTranscription && providedTranscription.length > 50;
+    
+    console.log("Video type:", isDirectFile ? "Direct MP4 file" : "Embed/External URL");
+    console.log("Analysis mode:", hasSrtTranscription ? "SRT-BASED (skip video download)" : (isDirectFile ? "REAL ANALYSIS" : "ESTIMATED"));
 
     const initialSteps = ANALYSIS_STEPS.map((name, index) => ({
       name,
@@ -89,7 +94,7 @@ serve(async (req) => {
         started_at: new Date().toISOString(),
         result: { 
           steps: initialSteps,
-          analysisType: isDirectFile ? 'real_multimodal' : 'estimated'
+          analysisType: hasSrtTranscription ? 'srt_based' : (isDirectFile ? 'real_multimodal' : 'estimated')
         }
       })
       .select()
@@ -112,13 +117,14 @@ serve(async (req) => {
       startMinute ?? 0,
       endMinute ?? 90,
       videoDurationSeconds,
-      isDirectFile
+      isDirectFile,
+      providedTranscription // Pass SRT content
     ));
 
     return new Response(JSON.stringify({ 
       jobId: job.id, 
       status: 'started',
-      analysisType: isDirectFile ? 'real_multimodal' : 'estimated'
+      analysisType: hasSrtTranscription ? 'srt_based' : (isDirectFile ? 'real_multimodal' : 'estimated')
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
@@ -143,7 +149,8 @@ async function processMultiModalAnalysis(
   startMinute: number,
   endMinute: number,
   videoDurationSeconds: number,
-  isDirectFile: boolean
+  isDirectFile: boolean,
+  providedTranscription?: string // SRT content if provided
 ) {
   const steps: AnalysisStep[] = ANALYSIS_STEPS.map(name => ({
     name,
@@ -151,7 +158,7 @@ async function processMultiModalAnalysis(
     progress: 0,
   }));
 
-  let transcription = '';
+  let transcription = providedTranscription || '';
   let transcriptionWithTimestamps: { start: number; end: number; text: string }[] = [];
   let visionAnalysis = '';
   let yoloDetections: YoloDetection[] = [];
@@ -160,10 +167,13 @@ async function processMultiModalAnalysis(
 
   const videoStartSecond = 0;
   const videoEndSecond = videoDurationSeconds;
+  
+  const hasSrtContent = !!providedTranscription && providedTranscription.length > 50;
 
   console.log("=== MULTI-MODAL PIPELINE ===");
   console.log("Video duration:", videoDurationSeconds, "seconds");
   console.log("Events must be between 0 and", videoDurationSeconds, "seconds");
+  console.log("Using SRT transcription:", hasSrtContent);
 
   try {
     // Get team names
@@ -197,7 +207,10 @@ async function processMultiModalAnalysis(
 
         case 'Download do vídeo':
           console.log("Step 2: Downloading video...");
-          if (isDirectFile) {
+          // Skip download if we have SRT transcription
+          if (hasSrtContent) {
+            console.log("SRT provided, skipping video download");
+          } else if (isDirectFile) {
             try {
               // Check video size first with HEAD request
               const headResponse = await fetch(videoUrl, { method: 'HEAD' });
@@ -228,13 +241,27 @@ async function processMultiModalAnalysis(
           break;
 
         case 'Transcrição (Whisper)':
-          console.log("Step 3: Transcribing audio with Whisper...");
-          if (videoData) {
+          console.log("Step 3: Processing transcription...");
+          
+          // If SRT provided, parse it instead of using Whisper
+          if (hasSrtContent) {
+            console.log("Using provided SRT transcription");
+            transcriptionWithTimestamps = parseSrtContent(transcription, videoDurationSeconds);
+            console.log("SRT parsed:", transcriptionWithTimestamps.length, "segments");
+            
+            // Extract goal mentions from parsed SRT
+            goalMentions = extractGoalMentions(transcriptionWithTimestamps, homeTeamName, awayTeamName);
+            console.log("Goal mentions found from SRT:", goalMentions.length);
+            goalMentions.forEach(gm => {
+              console.log(`  - [${gm.timestamp}s] "${gm.text}" (own goal: ${gm.isOwnGoal})`);
+            });
+          } else if (videoData) {
+            // Use Whisper for transcription
             const whisperResult = await transcribeWithWhisperVerbose(videoData);
             transcription = whisperResult.text;
             transcriptionWithTimestamps = whisperResult.segments;
             
-            console.log("Transcription completed:", transcription.length, "chars");
+            console.log("Whisper transcription completed:", transcription.length, "chars");
             console.log("Segments:", transcriptionWithTimestamps.length);
             
             // Extract goal mentions from transcription
@@ -244,7 +271,7 @@ async function processMultiModalAnalysis(
               console.log(`  - [${gm.timestamp}s] "${gm.text}" (own goal: ${gm.isOwnGoal})`);
             });
           } else {
-            console.log("No video data, skipping Whisper transcription");
+            console.log("No transcription available");
           }
           await simulateProgress(supabase, jobId, steps, i, overallProgress);
           break;
@@ -473,6 +500,61 @@ async function transcribeWithWhisperVerbose(videoData: Uint8Array): Promise<{
     console.error("Error in Whisper transcription:", error);
     return { text: '', segments: [] };
   }
+}
+
+// Parse SRT content into segments with timestamps
+function parseSrtContent(srtContent: string, videoDurationSeconds: number): { start: number; end: number; text: string }[] {
+  const segments: { start: number; end: number; text: string }[] = [];
+  
+  // SRT format: index, timestamp line (00:00:00,000 --> 00:00:00,000), text lines, blank line
+  const blocks = srtContent.trim().split(/\n\s*\n/);
+  
+  for (const block of blocks) {
+    const lines = block.trim().split('\n');
+    if (lines.length < 2) continue;
+    
+    // Find timestamp line (contains -->)
+    const timestampLine = lines.find(line => line.includes('-->'));
+    if (!timestampLine) continue;
+    
+    const timestampMatch = timestampLine.match(
+      /(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})\s*-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{3})/
+    );
+    
+    if (!timestampMatch) continue;
+    
+    // Parse start time
+    const startHours = parseInt(timestampMatch[1]);
+    const startMins = parseInt(timestampMatch[2]);
+    const startSecs = parseInt(timestampMatch[3]);
+    const startMs = parseInt(timestampMatch[4]);
+    const start = startHours * 3600 + startMins * 60 + startSecs + startMs / 1000;
+    
+    // Parse end time
+    const endHours = parseInt(timestampMatch[5]);
+    const endMins = parseInt(timestampMatch[6]);
+    const endSecs = parseInt(timestampMatch[7]);
+    const endMs = parseInt(timestampMatch[8]);
+    const end = endHours * 3600 + endMins * 60 + endSecs + endMs / 1000;
+    
+    // Get text (lines after timestamp, before next block)
+    const timestampIndex = lines.indexOf(timestampLine);
+    const textLines = lines.slice(timestampIndex + 1);
+    const text = textLines.join(' ').trim();
+    
+    // Only include if within video duration
+    if (start <= videoDurationSeconds && text) {
+      segments.push({ start, end: Math.min(end, videoDurationSeconds), text });
+    }
+  }
+  
+  console.log(`Parsed ${segments.length} SRT segments`);
+  if (segments.length > 0) {
+    console.log(`First segment: [${segments[0].start.toFixed(1)}s] ${segments[0].text.substring(0, 50)}...`);
+    console.log(`Last segment: [${segments[segments.length - 1].start.toFixed(1)}s] ${segments[segments.length - 1].text.substring(0, 50)}...`);
+  }
+  
+  return segments;
 }
 
 // Extract goal mentions from transcription

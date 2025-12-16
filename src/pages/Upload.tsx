@@ -336,6 +336,16 @@ export default function VideoUpload() {
     setSegments(prev => prev.filter(s => s.id !== id));
   };
 
+  // Helper to read SRT file content
+  const readSrtFile = async (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => resolve(e.target?.result as string || '');
+      reader.onerror = () => reject(new Error('Failed to read SRT file'));
+      reader.readAsText(file);
+    });
+  };
+
   const handleStartAnalysis = async () => {
     try {
       // Create match
@@ -376,6 +386,21 @@ export default function VideoUpload() {
           durationSeconds = (primarySegment.endMinute - primarySegment.startMinute) * 60;
         }
 
+        // Read SRT content if subtitle file exists
+        let transcription: string | undefined;
+        if (primarySegment.subtitleFile) {
+          try {
+            transcription = await readSrtFile(primarySegment.subtitleFile);
+            console.log('SRT content loaded:', transcription.length, 'chars');
+            toast({
+              title: "Legendas carregadas",
+              description: `Usando arquivo SRT para análise (${transcription.length} caracteres)`,
+            });
+          } catch (err) {
+            console.error('Failed to read SRT file:', err);
+          }
+        }
+
         const result = await startAnalysis({
           matchId: match.id,
           videoUrl: primarySegment.url || '',
@@ -385,6 +410,7 @@ export default function VideoUpload() {
           startMinute: primarySegment.startMinute,
           endMinute: primarySegment.endMinute || 90,
           durationSeconds: durationSeconds || 0,
+          transcription, // Pass SRT content if available
         });
 
         setCurrentJobId(result.jobId);
