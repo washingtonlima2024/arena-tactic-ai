@@ -28,7 +28,8 @@ import {
   Scissors,
   AlertCircle,
   Sparkles,
-  RefreshCw
+  RefreshCw,
+  FileText
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -40,6 +41,7 @@ import { useAuth } from '@/hooks/useAuth';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
 import { useRefineEvents } from '@/hooks/useRefineEvents';
 import { useStartAnalysis } from '@/hooks/useAnalysisJob';
+import { TranscriptionAnalysisDialog } from '@/components/events/TranscriptionAnalysisDialog';
 import { toast } from 'sonner';
 
 export default function Events() {
@@ -326,24 +328,26 @@ export default function Events() {
                 ))}
               </SelectContent>
             </Select>
-            {isAdmin && (
+            {isAdmin && currentMatchId && (
               <>
                 <Button variant="arena" onClick={handleCreateEvent}>
                   <Plus className="mr-2 h-4 w-4" />
                   Novo Evento
                 </Button>
-                <Button 
-                  variant="secondary" 
-                  onClick={handleReanalyze}
-                  disabled={isReanalyzing}
+                <TranscriptionAnalysisDialog
+                  matchId={currentMatchId}
+                  homeTeamName={selectedMatch?.home_team?.name || 'Casa'}
+                  awayTeamName={selectedMatch?.away_team?.name || 'Visitante'}
+                  onAnalysisComplete={() => {
+                    refetchEvents();
+                    queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
+                  }}
                 >
-                  {isReanalyzing ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                  )}
-                  Re-analisar
-                </Button>
+                  <Button variant="secondary">
+                    <FileText className="mr-2 h-4 w-4" />
+                    Analisar Áudio
+                  </Button>
+                </TranscriptionAnalysisDialog>
                 <Button 
                   variant="arena-outline" 
                   onClick={handleRefineEvents}
