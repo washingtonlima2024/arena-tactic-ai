@@ -102,6 +102,7 @@ export function useStartAnalysis() {
   const startAnalysis = async (params: {
     matchId: string;
     videoUrl: string;
+    videoId?: string; // NOVO: ID do vídeo específico
     homeTeamId?: string;
     awayTeamId?: string;
     competition?: string;

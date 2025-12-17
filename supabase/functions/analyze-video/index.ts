@@ -46,13 +46,14 @@ serve(async (req) => {
   }
 
   try {
-    const { matchId, videoUrl, homeTeamId, awayTeamId, competition, startMinute, endMinute, durationSeconds, transcription: providedTranscription, audioUrl } = await req.json();
+    const { matchId, videoUrl, videoId: providedVideoId, homeTeamId, awayTeamId, competition, startMinute, endMinute, durationSeconds, transcription: providedTranscription, audioUrl } = await req.json();
     
     const videoDurationSeconds = durationSeconds || ((endMinute || 90) - (startMinute || 0)) * 60;
     
     console.log("=== INICIANDO PIPELINE DE ANÁLISE EM 7 ETAPAS ===");
     console.log("Match ID:", matchId);
     console.log("Video URL:", videoUrl);
+    console.log("Video ID (fornecido):", providedVideoId || "não fornecido");
     console.log("Audio URL (pré-extraído):", audioUrl || "não fornecido");
     console.log("Duração do vídeo:", videoDurationSeconds, "segundos");
     console.log("Tempo de jogo: minutos", startMinute, "a", endMinute);
@@ -60,6 +61,18 @@ serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
     const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
     const supabase = createClient(supabaseUrl, supabaseKey);
+
+    // Buscar video_id se não fornecido
+    let resolvedVideoId = providedVideoId;
+    if (!resolvedVideoId && videoUrl) {
+      const { data: video } = await supabase
+        .from('videos')
+        .select('id')
+        .eq('file_url', videoUrl)
+        .single();
+      resolvedVideoId = video?.id || null;
+      console.log("Video ID (resolvido):", resolvedVideoId);
+    }
 
     const isDirectFile = videoUrl.includes('supabase') || 
                          videoUrl.endsWith('.mp4') || 
@@ -75,6 +88,7 @@ serve(async (req) => {
       .from('analysis_jobs')
       .insert({
         match_id: matchId,
+        video_id: resolvedVideoId, // NOVO: vincular ao vídeo específico
         status: 'processing',
         progress: 0,
         current_step: ANALYSIS_STEPS[0],
@@ -82,6 +96,9 @@ serve(async (req) => {
         result: { 
           steps: initialSteps,
           pipelineVersion: '7-stages-v2',
+          videoId: resolvedVideoId,
+          startMinute,
+          endMinute,
           // Intermediate products will be saved here
           audioUrl: null,
           fullTranscription: null,
@@ -101,7 +118,7 @@ serve(async (req) => {
       throw jobError;
     }
 
-    console.log("Job criado:", job.id);
+    console.log("Job criado:", job.id, "| Video ID:", resolvedVideoId);
 
     EdgeRuntime.waitUntil(runSevenStagePipeline(
       supabase, 
@@ -299,15 +316,23 @@ async function runSevenStagePipeline(
         videoDurationSeconds
       );
       
-      // Log all categories
+      // Log all categories with total count
       console.log("Eventos categorizados:");
+      let totalCategorized = 0;
       for (const cat of EVENT_CATEGORIES) {
         const count = eventCategories[cat]?.length || 0;
+        totalCategorized += count;
         if (count > 0) {
           console.log(`  - ${cat}: ${count} eventos`);
         }
       }
+      console.log(`📊 TOTAL CATEGORIZADO: ${totalCategorized} eventos`);
+      
+      if (totalCategorized === 0) {
+        console.warn("⚠️ ALERTA: Nenhum evento foi categorizado! Verifique a transcrição e o prompt.");
+      }
     } else {
+      console.warn("⚠️ Transcrição muito curta para categorização:", fullTranscription.length, "caracteres");
       eventCategories = getEmptyEventCategories();
     }
 
@@ -441,22 +466,38 @@ async function extractAndSaveAudio(supabase: any, matchId: string, videoUrl: str
   try {
     console.log("Salvando referência de áudio para match:", matchId);
     
-    // For now, we save the video URL as the audio source
-    // In production, we would extract actual audio file
+    // UPSERT para evitar erro de duplicação
     const { data, error } = await supabase
       .from('generated_audio')
-      .insert({
+      .upsert({
         match_id: matchId,
         audio_type: 'narration',
-        audio_url: videoUrl, // Reference to source video
+        audio_url: videoUrl,
         voice: 'original',
-        script: 'Locução original da partida'
+        script: 'Locução original da partida',
+        updated_at: new Date().toISOString()
+      }, { 
+        onConflict: 'match_id,audio_type,voice',
+        ignoreDuplicates: false 
       })
       .select()
       .single();
 
     if (error) {
       console.error("Erro ao salvar áudio:", error);
+      // Tentar buscar o registro existente
+      const { data: existingAudio } = await supabase
+        .from('generated_audio')
+        .select('audio_url')
+        .eq('match_id', matchId)
+        .eq('audio_type', 'narration')
+        .eq('voice', 'original')
+        .single();
+      
+      if (existingAudio) {
+        console.log("Usando áudio existente:", existingAudio.audio_url);
+        return existingAudio.audio_url;
+      }
       return null;
     }
 
