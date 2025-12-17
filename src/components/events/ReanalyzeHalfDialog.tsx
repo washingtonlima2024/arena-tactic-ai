@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -16,12 +16,20 @@ import {
   RefreshCw, 
   AlertTriangle, 
   FileText,
-  Trash2
+  Trash2,
+  Upload,
+  X,
+  File
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { useStartAnalysis } from '@/hooks/useAnalysisJob';
+
+interface UploadedFile {
+  name: string;
+  content: string;
+}
 
 interface ReanalyzeHalfDialogProps {
   isOpen: boolean;
@@ -47,10 +55,64 @@ export function ReanalyzeHalfDialog({
   const queryClient = useQueryClient();
   const { startAnalysis, isLoading } = useStartAnalysis();
   const [transcription, setTranscription] = useState('');
+  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   const halfLabel = half === 'first' ? '1º Tempo' : '2º Tempo';
   const minuteRange = half === 'first' ? '0-44' : '45-90';
+
+  const handleFileRead = useCallback((file: File) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const content = e.target?.result as string;
+      setUploadedFiles(prev => {
+        // Avoid duplicates
+        if (prev.some(f => f.name === file.name)) {
+          return prev;
+        }
+        return [...prev, { name: file.name, content }];
+      });
+    };
+    reader.readAsText(file);
+  }, []);
+
+  const handleFileDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    setIsDragging(false);
+    
+    const files = Array.from(e.dataTransfer.files).filter(
+      f => f.name.endsWith('.srt') || f.name.endsWith('.vtt') || f.name.endsWith('.txt')
+    );
+    
+    files.forEach(handleFileRead);
+  }, [handleFileRead]);
+
+  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    files.forEach(handleFileRead);
+    e.target.value = '';
+  }, [handleFileRead]);
+
+  const removeFile = (fileName: string) => {
+    setUploadedFiles(prev => prev.filter(f => f.name !== fileName));
+  };
+
+  const getCombinedTranscription = () => {
+    const parts: string[] = [];
+    
+    // Add uploaded files content
+    uploadedFiles.forEach(file => {
+      parts.push(`--- ${file.name} ---\n${file.content}`);
+    });
+    
+    // Add manual text
+    if (transcription.trim()) {
+      parts.push(`--- Texto Manual ---\n${transcription}`);
+    }
+    
+    return parts.join('\n\n');
+  };
 
   const handleReanalyze = async () => {
     try {
@@ -122,6 +184,9 @@ export function ReanalyzeHalfDialog({
 
       toast.info(`Re-análise do ${halfLabel} iniciada...`);
 
+      // Combine all transcription sources
+      const combinedTranscription = getCombinedTranscription();
+
       // Start new analysis
       await startAnalysis({
         matchId,
@@ -132,7 +197,7 @@ export function ReanalyzeHalfDialog({
         startMinute: halfVideo.start_minute || (half === 'first' ? 0 : 45),
         endMinute: halfVideo.end_minute || (half === 'first' ? 45 : 90),
         durationSeconds: halfVideo.duration_seconds || undefined,
-        transcription: transcription || undefined,
+        transcription: combinedTranscription || undefined,
       });
 
       queryClient.invalidateQueries({ queryKey: ['match-events', matchId] });
@@ -141,6 +206,10 @@ export function ReanalyzeHalfDialog({
       toast.success(`Re-análise do ${halfLabel} em andamento`);
       onComplete();
       onClose();
+      
+      // Reset state
+      setTranscription('');
+      setUploadedFiles([]);
 
     } catch (error) {
       console.error('Reanalyze error:', error);
@@ -152,7 +221,7 @@ export function ReanalyzeHalfDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-md">
+      <DialogContent className="max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <RefreshCw className="h-5 w-5 text-primary" />
@@ -177,22 +246,86 @@ export function ReanalyzeHalfDialog({
             </div>
           </div>
 
-          {/* Optional transcription */}
+          {/* File Upload Dropzone */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2">
+              <Upload className="h-4 w-4" />
+              Arquivos de Transcrição (opcional)
+            </Label>
+            <div
+              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleFileDrop}
+              className={`
+                border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer
+                ${isDragging ? 'border-primary bg-primary/10' : 'border-muted-foreground/30 hover:border-primary/50'}
+              `}
+              onClick={() => document.getElementById('file-upload')?.click()}
+            >
+              <input
+                id="file-upload"
+                type="file"
+                multiple
+                accept=".srt,.vtt,.txt"
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">
+                Arraste arquivos ou clique para selecionar
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                SRT, VTT, TXT (múltiplos arquivos)
+              </p>
+            </div>
+          </div>
+
+          {/* Uploaded Files List */}
+          {uploadedFiles.length > 0 && (
+            <div className="space-y-2">
+              <Label className="text-xs text-muted-foreground">
+                {uploadedFiles.length} arquivo(s) carregado(s)
+              </Label>
+              <div className="space-y-1">
+                {uploadedFiles.map(file => (
+                  <div 
+                    key={file.name}
+                    className="flex items-center justify-between p-2 rounded-md bg-muted/50"
+                  >
+                    <div className="flex items-center gap-2 text-sm">
+                      <File className="h-4 w-4 text-primary" />
+                      <span className="truncate max-w-[200px]">{file.name}</span>
+                      <Badge variant="outline" className="text-xs">
+                        {(file.content.length / 1024).toFixed(1)} KB
+                      </Badge>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6"
+                      onClick={() => removeFile(file.name)}
+                    >
+                      <X className="h-3 w-3" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Manual transcription textarea */}
           <div className="space-y-2">
             <Label className="flex items-center gap-2">
               <FileText className="h-4 w-4" />
-              Transcrição (opcional)
+              Texto Adicional (opcional)
             </Label>
             <Textarea
-              placeholder="Cole aqui a transcrição/SRT do vídeo para melhorar a detecção de eventos..."
+              placeholder="Cole texto adicional aqui..."
               value={transcription}
               onChange={(e) => setTranscription(e.target.value)}
-              rows={5}
+              rows={3}
               className="resize-none font-mono text-xs"
             />
-            <p className="text-xs text-muted-foreground">
-              Fornecer uma transcrição melhora significativamente a detecção de gols e eventos importantes.
-            </p>
           </div>
 
           {/* Info badges */}
@@ -205,6 +338,12 @@ export function ReanalyzeHalfDialog({
               <RefreshCw className="h-3 w-3 mr-1" />
               Nova análise
             </Badge>
+            {(uploadedFiles.length > 0 || transcription) && (
+              <Badge variant="secondary">
+                <FileText className="h-3 w-3 mr-1" />
+                {uploadedFiles.length} arquivo(s) + texto
+              </Badge>
+            )}
           </div>
         </div>
 
