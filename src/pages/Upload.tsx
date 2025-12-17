@@ -92,6 +92,13 @@ export default function VideoUpload() {
   const [isDragging, setIsDragging] = useState(false);
   const [uploadMode, setUploadMode] = useState<'file' | 'link'>('file');
   
+  // SRT files per half
+  const [firstHalfSrt, setFirstHalfSrt] = useState<File | null>(null);
+  const [secondHalfSrt, setSecondHalfSrt] = useState<File | null>(null);
+  
+  // Analysis jobs for each half
+  const [analysisJobs, setAnalysisJobs] = useState<{ first?: string; second?: string }>({});
+  
   // Link input state
   const [newLinkInput, setNewLinkInput] = useState('');
   const [newLinkType, setNewLinkType] = useState<VideoType>('full');
@@ -358,6 +365,48 @@ export default function VideoUpload() {
     });
   };
 
+  // Handle SRT file drop per half
+  const handleSrtDrop = async (file: File, half: 'first' | 'second') => {
+    if (half === 'first') {
+      setFirstHalfSrt(file);
+    } else {
+      setSecondHalfSrt(file);
+    }
+    
+    // Read and attach to corresponding segments
+    const srtContent = await readSrtFile(file);
+    
+    setSegments(prev => prev.map(s => {
+      if ((half === 'first' && (s.half === 'first' || s.videoType === 'first_half')) ||
+          (half === 'second' && (s.half === 'second' || s.videoType === 'second_half'))) {
+        return { ...s, transcription: srtContent };
+      }
+      return s;
+    }));
+    
+    toast({
+      title: "Legenda carregada",
+      description: `${file.name} para ${half === 'first' ? '1º' : '2º'} tempo`,
+    });
+  };
+  
+  const handleSrtRemove = (half: 'first' | 'second') => {
+    if (half === 'first') {
+      setFirstHalfSrt(null);
+    } else {
+      setSecondHalfSrt(null);
+    }
+    
+    // Remove transcription from corresponding segments
+    setSegments(prev => prev.map(s => {
+      if ((half === 'first' && (s.half === 'first' || s.videoType === 'first_half')) ||
+          (half === 'second' && (s.half === 'second' || s.videoType === 'second_half'))) {
+        return { ...s, transcription: undefined };
+      }
+      return s;
+    }));
+  };
+
   const handleStartAnalysis = async () => {
     try {
       // Create match
@@ -389,38 +438,134 @@ export default function VideoUpload() {
         }
       }
 
-      // Get primary video for analysis (first complete segment)
-      const primarySegment = segments.find(s => s.status === 'complete' || s.status === 'ready');
-      
-      if (primarySegment) {
-        let durationSeconds = primarySegment.durationSeconds;
-        if (!durationSeconds && primarySegment.endMinute) {
-          durationSeconds = (primarySegment.endMinute - primarySegment.startMinute) * 60;
+      // Group segments by half
+      const firstHalfSegments = segments.filter(s => 
+        (s.half === 'first' || s.videoType === 'first_half') && 
+        (s.status === 'complete' || s.status === 'ready')
+      );
+      const secondHalfSegments = segments.filter(s => 
+        (s.half === 'second' || s.videoType === 'second_half') && 
+        (s.status === 'complete' || s.status === 'ready')
+      );
+
+      console.log('=== ANÁLISE SEPARADA POR TEMPO ===');
+      console.log('1º Tempo:', firstHalfSegments.length, 'segmentos');
+      console.log('2º Tempo:', secondHalfSegments.length, 'segmentos');
+
+      const jobs: { first?: string; second?: string } = {};
+
+      // Analyze first half
+      if (firstHalfSegments.length > 0) {
+        const segment = firstHalfSegments[0];
+        let durationSeconds = segment.durationSeconds;
+        if (!durationSeconds && segment.endMinute) {
+          durationSeconds = (segment.endMinute - segment.startMinute) * 60;
         }
 
-        // Use transcription from segment if available
-        const transcription = primarySegment.transcription || undefined;
-        if (transcription) {
-          console.log('Transcription content loaded:', transcription.length, 'chars');
-          toast({
-            title: "Transcrição carregada",
-            description: `Usando transcrição para análise (${transcription.length} caracteres)`,
-          });
+        // Use SRT transcription if available
+        let transcription = segment.transcription;
+        if (!transcription && firstHalfSrt) {
+          transcription = await readSrtFile(firstHalfSrt);
         }
+
+        console.log('Iniciando análise do 1º Tempo...');
+        console.log('  URL:', segment.url);
+        console.log('  Duração:', durationSeconds, 'segundos');
+        console.log('  Minutos do jogo:', segment.startMinute, '-', segment.endMinute);
+        console.log('  Transcrição:', transcription ? `${transcription.length} chars` : 'Nenhuma');
 
         const result = await startAnalysis({
           matchId: match.id,
-          videoUrl: primarySegment.url || '',
+          videoUrl: segment.url || '',
           homeTeamId: matchData.homeTeamId,
           awayTeamId: matchData.awayTeamId,
           competition: matchData.competition,
-          startMinute: primarySegment.startMinute,
-          endMinute: primarySegment.endMinute || 90,
+          startMinute: segment.startMinute ?? 0,
+          endMinute: segment.endMinute ?? 45,
           durationSeconds: durationSeconds || 0,
-          transcription, // Pass SRT content if available
+          transcription,
         });
-
+        
+        jobs.first = result.jobId;
         setCurrentJobId(result.jobId);
+        
+        toast({
+          title: "Análise do 1º Tempo iniciada",
+          description: `Job ID: ${result.jobId}`,
+        });
+      }
+
+      // Analyze second half (start after a delay to not overload)
+      if (secondHalfSegments.length > 0) {
+        const segment = secondHalfSegments[0];
+        let durationSeconds = segment.durationSeconds;
+        if (!durationSeconds && segment.endMinute) {
+          durationSeconds = (segment.endMinute - segment.startMinute) * 60;
+        }
+
+        // Use SRT transcription if available
+        let transcription = segment.transcription;
+        if (!transcription && secondHalfSrt) {
+          transcription = await readSrtFile(secondHalfSrt);
+        }
+
+        console.log('Iniciando análise do 2º Tempo...');
+        console.log('  URL:', segment.url);
+        console.log('  Duração:', durationSeconds, 'segundos');
+        console.log('  Minutos do jogo:', segment.startMinute, '-', segment.endMinute);
+        console.log('  Transcrição:', transcription ? `${transcription.length} chars` : 'Nenhuma');
+
+        // Start second half analysis
+        const result = await startAnalysis({
+          matchId: match.id,
+          videoUrl: segment.url || '',
+          homeTeamId: matchData.homeTeamId,
+          awayTeamId: matchData.awayTeamId,
+          competition: matchData.competition,
+          startMinute: segment.startMinute ?? 45,
+          endMinute: segment.endMinute ?? 90,
+          durationSeconds: durationSeconds || 0,
+          transcription,
+        });
+        
+        jobs.second = result.jobId;
+        
+        // If no first half, set this as current
+        if (!jobs.first) {
+          setCurrentJobId(result.jobId);
+        }
+        
+        toast({
+          title: "Análise do 2º Tempo iniciada",
+          description: `Job ID: ${result.jobId}`,
+        });
+      }
+
+      setAnalysisJobs(jobs);
+
+      // If no segments by half, fallback to any segment
+      if (!jobs.first && !jobs.second) {
+        const anySegment = segments.find(s => s.status === 'complete' || s.status === 'ready');
+        if (anySegment) {
+          let durationSeconds = anySegment.durationSeconds;
+          if (!durationSeconds && anySegment.endMinute) {
+            durationSeconds = (anySegment.endMinute - anySegment.startMinute) * 60;
+          }
+
+          const result = await startAnalysis({
+            matchId: match.id,
+            videoUrl: anySegment.url || '',
+            homeTeamId: matchData.homeTeamId,
+            awayTeamId: matchData.awayTeamId,
+            competition: matchData.competition,
+            startMinute: anySegment.startMinute ?? 0,
+            endMinute: anySegment.endMinute ?? 90,
+            durationSeconds: durationSeconds || 0,
+            transcription: anySegment.transcription,
+          });
+
+          setCurrentJobId(result.jobId);
+        }
       }
 
     } catch (error: any) {
@@ -596,12 +741,18 @@ export default function VideoUpload() {
                     <HalfDropzone 
                       half="first" 
                       videoCount={firstHalfCount}
+                      srtFile={firstHalfSrt}
                       onFileDrop={handleHalfDrop}
+                      onSrtDrop={handleSrtDrop}
+                      onSrtRemove={handleSrtRemove}
                     />
                     <HalfDropzone 
                       half="second" 
                       videoCount={secondHalfCount}
+                      srtFile={secondHalfSrt}
                       onFileDrop={handleHalfDrop}
+                      onSrtDrop={handleSrtDrop}
+                      onSrtRemove={handleSrtRemove}
                     />
                   </div>
 
