@@ -27,6 +27,7 @@ import { useDeleteMatch } from '@/hooks/useDeleteMatch';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { TeamBadge } from '@/components/teams/TeamBadge';
 
 export default function Matches() {
   const { data: matches = [], isLoading } = useMatches();
@@ -163,12 +164,16 @@ export default function Matches() {
                   <div className="flex items-center justify-between gap-4 mb-4">
                     {/* Home Team */}
                     <div className="flex-1 text-center">
-                      <div 
-                        className="w-12 h-12 mx-auto mb-2 rounded-full flex items-center justify-center text-white font-bold"
-                        style={{ backgroundColor: match.home_team?.primary_color || '#10b981' }}
-                      >
-                        {match.home_team?.short_name?.slice(0, 2) || 'HM'}
-                      </div>
+                      <TeamBadge 
+                        team={{
+                          name: match.home_team?.name || 'Casa',
+                          logo_url: match.home_team?.logo_url || undefined,
+                          short_name: match.home_team?.short_name || match.home_team?.name?.slice(0, 3),
+                          primary_color: match.home_team?.primary_color || undefined
+                        }} 
+                        size="lg" 
+                        className="mx-auto mb-2"
+                      />
                       <p className="text-sm font-medium truncate">{match.home_team?.name || 'Time Casa'}</p>
                     </div>
 
@@ -181,12 +186,16 @@ export default function Matches() {
 
                     {/* Away Team */}
                     <div className="flex-1 text-center">
-                      <div 
-                        className="w-12 h-12 mx-auto mb-2 rounded-full flex items-center justify-center text-white font-bold"
-                        style={{ backgroundColor: match.away_team?.primary_color || '#3b82f6' }}
-                      >
-                        {match.away_team?.short_name?.slice(0, 2) || 'AW'}
-                      </div>
+                      <TeamBadge 
+                        team={{
+                          name: match.away_team?.name || 'Visitante',
+                          logo_url: match.away_team?.logo_url || undefined,
+                          short_name: match.away_team?.short_name || match.away_team?.name?.slice(0, 3),
+                          primary_color: match.away_team?.primary_color || undefined
+                        }} 
+                        size="lg" 
+                        className="mx-auto mb-2"
+                      />
                       <p className="text-sm font-medium truncate">{match.away_team?.name || 'Time Visitante'}</p>
                     </div>
                   </div>
