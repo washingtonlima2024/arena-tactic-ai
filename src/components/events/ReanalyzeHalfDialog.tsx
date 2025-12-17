@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { 
   Loader2, 
   RefreshCw, 
@@ -19,7 +20,9 @@ import {
   Trash2,
   Upload,
   X,
-  File
+  File,
+  Mic,
+  Wand2
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -58,6 +61,8 @@ export function ReanalyzeHalfDialog({
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [extractProgress, setExtractProgress] = useState(0);
 
   const halfLabel = half === 'first' ? '1º Tempo' : '2º Tempo';
   const minuteRange = half === 'first' ? '0-44' : '45-90';
@@ -67,7 +72,6 @@ export function ReanalyzeHalfDialog({
     reader.onload = (e) => {
       const content = e.target?.result as string;
       setUploadedFiles(prev => {
-        // Avoid duplicates
         if (prev.some(f => f.name === file.name)) {
           return prev;
         }
@@ -98,27 +102,11 @@ export function ReanalyzeHalfDialog({
     setUploadedFiles(prev => prev.filter(f => f.name !== fileName));
   };
 
-  const getCombinedTranscription = () => {
-    const parts: string[] = [];
-    
-    // Add uploaded files content
-    uploadedFiles.forEach(file => {
-      parts.push(`--- ${file.name} ---\n${file.content}`);
-    });
-    
-    // Add manual text
-    if (transcription.trim()) {
-      parts.push(`--- Texto Manual ---\n${transcription}`);
-    }
-    
-    return parts.join('\n\n');
-  };
-
-  const handleReanalyze = async () => {
+  const handleExtractTranscription = async () => {
     try {
-      setIsDeleting(true);
+      setIsExtracting(true);
+      setExtractProgress(10);
 
-      // Get video for this half
       const { data: videos } = await supabase
         .from('videos')
         .select('*')
@@ -136,7 +124,77 @@ export function ReanalyzeHalfDialog({
         return;
       }
 
-      // Delete existing events for this half
+      setExtractProgress(30);
+      toast.info('Extraindo áudio do vídeo...');
+
+      const { data, error } = await supabase.functions.invoke('extract-audio-srt', {
+        body: { matchId, videoUrl: halfVideo.file_url }
+      });
+
+      setExtractProgress(80);
+
+      if (error) throw error;
+
+      if (data?.transcribedText) {
+        setUploadedFiles(prev => [
+          ...prev.filter(f => f.name !== 'whisper-transcription.txt'),
+          { name: 'whisper-transcription.txt', content: data.transcribedText }
+        ]);
+
+        if (data?.srtContent) {
+          setUploadedFiles(prev => [
+            ...prev.filter(f => f.name !== 'whisper-timestamps.srt'),
+            { name: 'whisper-timestamps.srt', content: data.srtContent }
+          ]);
+        }
+
+        toast.success(`Transcrição extraída: ${data.method === 'whisper' ? 'Whisper API' : 'Baseado em eventos'}`);
+      } else {
+        toast.warning('Transcrição vazia retornada');
+      }
+
+      setExtractProgress(100);
+    } catch (error) {
+      console.error('Error extracting transcription:', error);
+      toast.error('Erro ao extrair transcrição');
+    } finally {
+      setIsExtracting(false);
+      setExtractProgress(0);
+    }
+  };
+
+  const getCombinedTranscription = () => {
+    const parts: string[] = [];
+    uploadedFiles.forEach(file => {
+      parts.push(`--- ${file.name} ---\n${file.content}`);
+    });
+    if (transcription.trim()) {
+      parts.push(`--- Texto Manual ---\n${transcription}`);
+    }
+    return parts.join('\n\n');
+  };
+
+  const handleReanalyze = async () => {
+    try {
+      setIsDeleting(true);
+
+      const { data: videos } = await supabase
+        .from('videos')
+        .select('*')
+        .eq('match_id', matchId)
+        .order('start_minute', { ascending: true });
+
+      const halfVideo = videos?.find(v => {
+        const start = v.start_minute || 0;
+        if (half === 'first') return start < 45;
+        return start >= 45;
+      });
+
+      if (!halfVideo) {
+        toast.error(`Nenhum vídeo encontrado para o ${halfLabel}`);
+        return;
+      }
+
       const minMinute = half === 'first' ? 0 : 45;
       const maxMinute = half === 'first' ? 44 : 90;
 
@@ -155,7 +213,6 @@ export function ReanalyzeHalfDialog({
 
       setIsDeleting(false);
 
-      // Reset score for this half by recalculating from remaining events
       const { data: remainingGoals } = await supabase
         .from('match_events')
         .select('metadata')
@@ -184,10 +241,8 @@ export function ReanalyzeHalfDialog({
 
       toast.info(`Re-análise do ${halfLabel} iniciada...`);
 
-      // Combine all transcription sources
       const combinedTranscription = getCombinedTranscription();
 
-      // Start new analysis
       await startAnalysis({
         matchId,
         videoUrl: halfVideo.file_url,
@@ -207,7 +262,6 @@ export function ReanalyzeHalfDialog({
       onComplete();
       onClose();
       
-      // Reset state
       setTranscription('');
       setUploadedFiles([]);
 
@@ -221,7 +275,7 @@ export function ReanalyzeHalfDialog({
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <RefreshCw className="h-5 w-5 text-primary" />
@@ -233,7 +287,6 @@ export function ReanalyzeHalfDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {/* Warning */}
           <div className="rounded-lg border border-destructive/30 bg-destructive/10 p-3">
             <div className="flex items-start gap-2 text-sm">
               <AlertTriangle className="h-4 w-4 text-destructive mt-0.5" />
@@ -246,7 +299,35 @@ export function ReanalyzeHalfDialog({
             </div>
           </div>
 
-          {/* File Upload Dropzone */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2">
+              <Wand2 className="h-4 w-4" />
+              Extração Automática
+            </Label>
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={handleExtractTranscription}
+              disabled={isExtracting || isLoading || isDeleting}
+            >
+              {isExtracting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Extraindo com Whisper...
+                </>
+              ) : (
+                <>
+                  <Mic className="mr-2 h-4 w-4" />
+                  Extrair Transcrição do Vídeo (Whisper)
+                </>
+              )}
+            </Button>
+            {isExtracting && <Progress value={extractProgress} className="h-2" />}
+            <p className="text-xs text-muted-foreground">
+              Usa OpenAI Whisper para transcrever automaticamente o áudio do vídeo
+            </p>
+          </div>
+
           <div className="space-y-2">
             <Label className="flex items-center gap-2">
               <Upload className="h-4 w-4" />
@@ -256,10 +337,7 @@ export function ReanalyzeHalfDialog({
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
               onDragLeave={() => setIsDragging(false)}
               onDrop={handleFileDrop}
-              className={`
-                border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer
-                ${isDragging ? 'border-primary bg-primary/10' : 'border-muted-foreground/30 hover:border-primary/50'}
-              `}
+              className={`border-2 border-dashed rounded-lg p-4 text-center transition-colors cursor-pointer ${isDragging ? 'border-primary bg-primary/10' : 'border-muted-foreground/30 hover:border-primary/50'}`}
               onClick={() => document.getElementById('file-upload')?.click()}
             >
               <input
@@ -270,41 +348,28 @@ export function ReanalyzeHalfDialog({
                 onChange={handleFileSelect}
                 className="hidden"
               />
-              <Upload className="h-8 w-8 mx-auto mb-2 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">
-                Arraste arquivos ou clique para selecionar
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                SRT, VTT, TXT (múltiplos arquivos)
-              </p>
+              <Upload className="h-6 w-6 mx-auto mb-2 text-muted-foreground" />
+              <p className="text-sm text-muted-foreground">Arraste arquivos ou clique para selecionar</p>
+              <p className="text-xs text-muted-foreground mt-1">SRT, VTT, TXT (múltiplos arquivos)</p>
             </div>
           </div>
 
-          {/* Uploaded Files List */}
           {uploadedFiles.length > 0 && (
             <div className="space-y-2">
               <Label className="text-xs text-muted-foreground">
                 {uploadedFiles.length} arquivo(s) carregado(s)
               </Label>
-              <div className="space-y-1">
+              <div className="space-y-1 max-h-32 overflow-y-auto">
                 {uploadedFiles.map(file => (
-                  <div 
-                    key={file.name}
-                    className="flex items-center justify-between p-2 rounded-md bg-muted/50"
-                  >
-                    <div className="flex items-center gap-2 text-sm">
-                      <File className="h-4 w-4 text-primary" />
-                      <span className="truncate max-w-[200px]">{file.name}</span>
-                      <Badge variant="outline" className="text-xs">
+                  <div key={file.name} className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+                    <div className="flex items-center gap-2 text-sm min-w-0">
+                      <File className="h-4 w-4 text-primary shrink-0" />
+                      <span className="truncate">{file.name}</span>
+                      <Badge variant="outline" className="text-xs shrink-0">
                         {(file.content.length / 1024).toFixed(1)} KB
                       </Badge>
                     </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-6 w-6"
-                      onClick={() => removeFile(file.name)}
-                    >
+                    <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => removeFile(file.name)}>
                       <X className="h-3 w-3" />
                     </Button>
                   </div>
@@ -313,7 +378,6 @@ export function ReanalyzeHalfDialog({
             </div>
           )}
 
-          {/* Manual transcription textarea */}
           <div className="space-y-2">
             <Label className="flex items-center gap-2">
               <FileText className="h-4 w-4" />
@@ -328,7 +392,6 @@ export function ReanalyzeHalfDialog({
             />
           </div>
 
-          {/* Info badges */}
           <div className="flex flex-wrap gap-2">
             <Badge variant="outline">
               <Trash2 className="h-3 w-3 mr-1" />
@@ -341,21 +404,17 @@ export function ReanalyzeHalfDialog({
             {(uploadedFiles.length > 0 || transcription) && (
               <Badge variant="secondary">
                 <FileText className="h-3 w-3 mr-1" />
-                {uploadedFiles.length} arquivo(s) + texto
+                {uploadedFiles.length} arquivo(s)
               </Badge>
             )}
           </div>
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isLoading || isDeleting}>
+          <Button variant="outline" onClick={onClose} disabled={isLoading || isDeleting || isExtracting}>
             Cancelar
           </Button>
-          <Button 
-            variant="destructive" 
-            onClick={handleReanalyze}
-            disabled={isLoading || isDeleting}
-          >
+          <Button variant="destructive" onClick={handleReanalyze} disabled={isLoading || isDeleting || isExtracting}>
             {(isLoading || isDeleting) ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
