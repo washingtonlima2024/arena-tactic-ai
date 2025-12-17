@@ -2,13 +2,11 @@ import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
-import { Progress } from '@/components/ui/progress';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   FileText, 
   Upload, 
   X, 
-  Mic, 
   ClipboardPaste, 
   CheckCircle2, 
   AlertCircle,
@@ -22,7 +20,6 @@ import {
   type ParseResult,
   type DetectedEvent 
 } from '@/lib/transcriptionParser';
-import { useTranscriptionExtract } from '@/hooks/useTranscriptionExtract';
 
 interface TranscriptionImportProps {
   value: string;
@@ -48,8 +45,6 @@ const acceptedExtensions = ['.srt', '.vtt', '.txt', '.json'];
 export function TranscriptionImport({
   value,
   onChange,
-  videoUrl,
-  matchId,
   videoDurationSeconds,
   className,
   compact = false,
@@ -58,8 +53,6 @@ export function TranscriptionImport({
   const [fileName, setFileName] = useState<string | null>(null);
   const [parseResult, setParseResult] = useState<ParseResult | null>(null);
   const [activeTab, setActiveTab] = useState<'file' | 'paste'>('file');
-  
-  const { extractFromVideo, extractFromEmbed, isExtracting, progress } = useTranscriptionExtract();
 
   const handleParse = useCallback((content: string, source?: string) => {
     if (!content.trim()) {
@@ -119,21 +112,6 @@ export function TranscriptionImport({
     return acceptedExtensions.includes(ext);
   };
 
-  const handleExtract = async () => {
-    if (!videoUrl && !matchId) return;
-    
-    let result;
-    if (videoUrl?.includes('embed') || videoUrl?.includes('iframe')) {
-      result = await extractFromEmbed(videoUrl, matchId || '');
-    } else if (videoUrl) {
-      result = await extractFromVideo(videoUrl, matchId);
-    }
-    
-    if (result?.srtContent) {
-      handleParse(result.srtContent, `Extraído (${result.method})`);
-    }
-  };
-
   const handleClear = () => {
     setFileName(null);
     setParseResult(null);
@@ -153,26 +131,9 @@ export function TranscriptionImport({
             <FileText className="h-3 w-3" />
             Transcrição (SRT/VTT/TXT/JSON)
           </div>
-          {(videoUrl || matchId) && !value && (
-            <Button 
-              variant="ghost" 
-              size="sm" 
-              className="h-6 text-xs"
-              onClick={handleExtract}
-              disabled={isExtracting}
-            >
-              <Mic className="h-3 w-3 mr-1" />
-              Extrair
-            </Button>
-          )}
         </div>
         
-        {isExtracting ? (
-          <div className="space-y-1">
-            <Progress value={progress} className="h-1.5" />
-            <p className="text-xs text-muted-foreground text-center">Extraindo... {progress}%</p>
-          </div>
-        ) : value ? (
+        {value ? (
           <div className="flex items-center justify-between p-2 rounded-md bg-muted/30 border border-border/50">
             <div className="flex items-center gap-2 flex-1 min-w-0">
               <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
@@ -225,39 +186,16 @@ export function TranscriptionImport({
   return (
     <div className={cn("space-y-4", className)}>
       <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as 'file' | 'paste')}>
-        <div className="flex items-center justify-between">
-          <TabsList className="h-9">
-            <TabsTrigger value="file" className="text-xs">
-              <Upload className="h-3 w-3 mr-1" />
-              Importar Arquivo
-            </TabsTrigger>
-            <TabsTrigger value="paste" className="text-xs">
-              <ClipboardPaste className="h-3 w-3 mr-1" />
-              Colar Texto
-            </TabsTrigger>
-          </TabsList>
-          
-          {(videoUrl || matchId) && (
-            <Button 
-              variant="outline" 
-              size="sm"
-              onClick={handleExtract}
-              disabled={isExtracting}
-            >
-              <Mic className="h-4 w-4 mr-2" />
-              Extrair do Vídeo
-            </Button>
-          )}
-        </div>
-
-        {isExtracting && (
-          <div className="space-y-2 p-4 rounded-lg bg-muted/20">
-            <Progress value={progress} className="h-2" />
-            <p className="text-sm text-muted-foreground text-center">
-              Extraindo transcrição do vídeo... {progress}%
-            </p>
-          </div>
-        )}
+        <TabsList className="h-9">
+          <TabsTrigger value="file" className="text-xs">
+            <Upload className="h-3 w-3 mr-1" />
+            Importar Arquivo
+          </TabsTrigger>
+          <TabsTrigger value="paste" className="text-xs">
+            <ClipboardPaste className="h-3 w-3 mr-1" />
+            Colar Texto
+          </TabsTrigger>
+        </TabsList>
 
         <TabsContent value="file" className="mt-4">
           <div
