@@ -811,93 +811,63 @@ async function generateMultiModalEvents(
     console.log("Last 300 chars:", formattedTranscription.substring(formattedTranscription.length - 300));
     console.log("Vision analysis length:", visionAnalysis.length, "chars");
 
-    const prompt = `ANÁLISE MULTI-MODAL DE VÍDEO DE FUTEBOL
+    // ============================================
+    // ETAPA 1: ANÁLISE TÁTICA COMPLETA
+    // ============================================
+    console.log("=== ETAPA 1: ANÁLISE TÁTICA ===");
+    
+    const tacticalPrompt = `ANÁLISE TÁTICA COMPLETA - ${homeTeamName} vs ${awayTeamName}
 
-PARTIDA: ${homeTeamName} (casa) vs ${awayTeamName} (visitante)
-DURAÇÃO DO VÍDEO: ${videoDurationSeconds} segundos
+Você é um comentarista esportivo profissional. Leia TODA a transcrição abaixo e faça uma análise tática completa do jogo.
 
-=== TRANSCRIÇÃO COMPLETA COM TIMESTAMPS ===
-${formattedTranscription.substring(0, 50000)}
+=== TRANSCRIÇÃO COMPLETA ===
+${formattedTranscription.substring(0, 60000)}
 
-${goalsContext}
-
-=== ANÁLISE VISUAL ===
+=== ANÁLISE VISUAL (se disponível) ===
 ${visionAnalysis.substring(0, 5000)}
 
-⚠️ ATENÇÃO: ESTA PARTIDA PODE TER MÚLTIPLOS GOLS!
-- Leia a transcrição INTEIRA do início ao fim
-- Identifique TODOS os gols mencionados, não apenas o primeiro
-- Procure por: "primeiro gol", "segundo gol", "terceiro gol"
-- Procure por placares parciais: "1 a 0", "2 a 0", "3 a 0"
-- Procure por nomes de jogadores + "marcou", "fez", "gol"
+INSTRUÇÕES:
+1. Leia a transcrição INTEIRA do início ao fim
+2. Identifique o PLACAR FINAL mencionado pelo narrador
+3. Liste CADA GOL que aconteceu, em ordem cronológica:
+   - Quem marcou (jogador)
+   - Qual time marcou
+   - Se foi gol contra
+   - O momento aproximado (timestamp da transcrição)
+4. Liste outros eventos importantes (cartões, pênaltis, substituições)
+5. Faça um resumo tático do jogo
 
-INSTRUÇÕES CRÍTICAS PARA DETECÇÃO DE GOLS:
-1. DETECTAR TODOS OS GOLS: Analise a transcrição INTEIRA para encontrar CADA gol
-   - Palavras que indicam gol: "gol", "goool", "marcou", "fez o gol", "balançou", "mandou pra dentro"
-   - "abriu o placar" = primeiro gol
-   - "empata", "vira o jogo" = mudança de placar
-   - "segundo gol", "terceiro gol" = gols adicionais
-   
-2. DETECTAR GOLS CONTRA: Procure por "gol contra", "contra", "próprio gol", "na própria rede"
+IMPORTANTE: Não invente gols! Só liste gols que o narrador CLARAMENTE descreve como acontecendo NAQUELE MOMENTO.
+- "GOOOL!" = gol acontecendo agora
+- "o gol do Neymar no primeiro tempo" = MENÇÃO de gol passado, NÃO é novo gol
+- "aos 24 do primeiro tempo" = REPLAY/RECAP, NÃO é novo gol
 
-3. Para CADA GOL detectado:
-   - Determine o timestamp EXATO baseado no [MM:SS] da transcrição
-   - Identifique se é GOL NORMAL ou GOL CONTRA
-   - Determine qual time marcou baseado no CONTEXTO (nomes de jogadores mencionados)
-   - Crie uma description IMPACTANTE em português (máx 60 chars)
-
-4. IDENTIFICAR TIME QUE MARCOU:
-   - Se o narrador menciona jogador do ${homeTeamName} → team: "home"
-   - Se o narrador menciona jogador do ${awayTeamName} → team: "away"
-   - Use o contexto da narração para determinar qual time está atacando
-
-REGRAS PARA GOL CONTRA:
-- Se ${homeTeamName} fez gol contra si mesmo → team: "home", isOwnGoal: true
-- Se ${awayTeamName} fez gol contra si mesmo → team: "away", isOwnGoal: true
-- Description deve indicar claramente: "GOL CONTRA DO [TIME]!"
-
-REGRAS DE TEMPO:
-- "videoSecond" DEVE estar entre 0 e ${videoDurationSeconds}
-- Use os timestamps [MM:SS] da transcrição para calcular videoSecond
-- [0:45] = videoSecond: 45
-- [1:17] = videoSecond: 77
-- [24:48] = videoSecond: 1488
-
-REGRAS PARA DESCRIPTIONS (PORTUGUÊS DO BRASIL):
-- Máximo 60 caracteres
-- Linguagem de narrador empolgado
-- Use MAIÚSCULAS para ênfase em gols
-- Mencione o nome do jogador quando possível
-- Exemplos bons:
-  - "GOOOL DE COUTINHO! Bomba no ângulo!"
-  - "GOLAÇO DE NEYMAR! 50º gol pela seleção!"
-  - "GOL DE PAULINHO! Amplia o placar!"
-  - "GOL CONTRA DO SPORT!"
-  - "Cartão amarelo por falta dura!"
-
-IMPORTANTE: Liste CADA gol como um evento separado. Se a partida teve 3 gols, retorne 3 eventos de gol.
-
-Retorne APENAS JSON válido:
+Retorne JSON:
 {
-  "events": [
-    {
-      "type": "goal",
-      "videoSecond": 45,
-      "team": "home",
-      "isOwnGoal": false,
-      "description": "GOOOL DE COUTINHO! Bomba no ângulo!",
-      "confidence": 0.95,
-      "narrationContext": "trecho da narração que indica o gol"
-    }
-  ]
-}
+  "tacticalAnalysis": {
+    "finalScore": {"home": 3, "away": 0},
+    "summary": "Resumo tático do jogo em 2-3 frases",
+    "goals": [
+      {
+        "order": 1,
+        "scorer": "Coutinho",
+        "team": "home",
+        "isOwnGoal": false,
+        "approximateTimestamp": "[24:15]",
+        "narrationExcerpt": "GOOOL! Coutinho chuta de fora da área!"
+      }
+    ],
+    "otherKeyMoments": [
+      {
+        "type": "yellow_card",
+        "description": "Cartão amarelo para jogador X",
+        "approximateTimestamp": "[15:30]"
+      }
+    ]
+  }
+}`;
 
-Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_off_target, save, offside, substitution, free_kick, penalty, chance`;
-
-    console.log("Calling AI for multi-modal event extraction...");
-    console.log("Prompt length:", prompt.length, "chars");
-    
-    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+    const tacticalResponse = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
       headers: {
         Authorization: `Bearer ${LOVABLE_API_KEY}`,
@@ -905,28 +875,123 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
       },
       body: JSON.stringify({
         model: "google/gemini-2.5-pro",
-        temperature: 0.1,  // Low temperature for deterministic responses
         messages: [
           { 
             role: "system", 
-            content: `Você é um especialista em análise de futebol e detecção de gols.
+            content: `Você é um analista tático de futebol profissional. Sua função é analisar transcrições de partidas e identificar APENAS os eventos que REALMENTE aconteceram.
 
-PRIORIDADE MÁXIMA: Detectar TODOS os GOLS da partida com precisão.
+REGRA DE OURO: Um gol só deve ser listado se o narrador está descrevendo o momento EXATO em que a bola entra no gol. 
+- Gritos de "GOOOL!" ou "GOL!" indicam gol acontecendo
+- Comentários como "o gol que aconteceu" ou "lembrando o gol" são MENÇÕES, não gols novos
+- Se o placar final é 3 a 0, devem existir EXATAMENTE 3 gols na lista
 
-REGRAS FUNDAMENTAIS:
-1. Leia a transcrição INTEIRA - não pare no primeiro gol
-2. Se a narração menciona "segundo gol", "terceiro gol" ou placares como "2 a 0", "3 a 0", existem MÚLTIPLOS GOLS
-3. Para cada gol, identifique o jogador que marcou pelo nome mencionado na narração
-4. Use o contexto da narração para determinar qual time marcou
-
-Para gol contra:
-- O time que FAZ o gol contra é quem marca CONTRA SI MESMO
-- Description deve dizer claramente "GOL CONTRA DO [TIME]!"
-
-Gere descriptions criativas e impactantes em português do Brasil.
-Retorne APENAS JSON válido sem markdown.` 
+Retorne APENAS JSON válido.` 
           },
-          { role: "user", content: prompt }
+          { role: "user", content: tacticalPrompt }
+        ],
+      }),
+    });
+
+    if (!tacticalResponse.ok) {
+      console.error("Tactical analysis failed:", await tacticalResponse.text());
+      return await generateFallbackEvents(supabase, matchId, homeTeamName, awayTeamName, 0, videoDurationSeconds);
+    }
+
+    const tacticalData = await tacticalResponse.json();
+    const tacticalContent = tacticalData.choices?.[0]?.message?.content || '';
+    
+    console.log("Tactical analysis received, length:", tacticalContent.length);
+    
+    // Parse tactical analysis
+    let cleanTactical = tacticalContent.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    const tacticalMatch = cleanTactical.match(/\{[\s\S]*\}/);
+    
+    if (!tacticalMatch) {
+      console.error("No JSON in tactical response");
+      return await generateFallbackEvents(supabase, matchId, homeTeamName, awayTeamName, 0, videoDurationSeconds);
+    }
+
+    const tacticalResult = JSON.parse(tacticalMatch[0]);
+    const analysis = tacticalResult.tacticalAnalysis;
+    
+    console.log("=== ANÁLISE TÁTICA RESULTADO ===");
+    console.log("Placar Final:", analysis.finalScore?.home, "-", analysis.finalScore?.away);
+    console.log("Gols detectados:", analysis.goals?.length || 0);
+    console.log("Resumo:", analysis.summary);
+    
+    // Validate goals count matches final score
+    const expectedGoals = (analysis.finalScore?.home || 0) + (analysis.finalScore?.away || 0);
+    const detectedGoals = analysis.goals?.length || 0;
+    
+    if (detectedGoals !== expectedGoals) {
+      console.warn(`⚠️ Inconsistência: ${detectedGoals} gols detectados, mas placar indica ${expectedGoals} gols`);
+    }
+
+    // ============================================
+    // ETAPA 2: CONVERTER ANÁLISE EM EVENTOS
+    // ============================================
+    console.log("=== ETAPA 2: GERANDO EVENTOS ===");
+
+    const eventsPrompt = `Converta a análise tática abaixo em eventos de match_events.
+
+ANÁLISE TÁTICA:
+${JSON.stringify(analysis, null, 2)}
+
+PARTIDA: ${homeTeamName} (casa) vs ${awayTeamName} (visitante)
+DURAÇÃO DO VÍDEO: ${videoDurationSeconds} segundos
+
+INSTRUÇÕES:
+1. Para cada GOL na análise, crie um evento com:
+   - type: "goal"
+   - videoSecond: calcule a partir do timestamp [MM:SS]
+   - team: "home" ou "away" baseado em qual time marcou
+   - isOwnGoal: true se foi gol contra
+   - description: frase impactante em português (máx 60 chars)
+
+2. Para cada momento-chave, crie o evento apropriado
+
+REGRAS DE TEMPO:
+- [0:45] = videoSecond: 45
+- [1:17] = videoSecond: 77
+- [24:48] = videoSecond: 1488
+- Máximo: ${videoDurationSeconds} segundos
+
+REGRAS DE DESCRIPTION:
+- Máximo 60 caracteres
+- Português do Brasil
+- Linguagem de narrador empolgado
+- Use MAIÚSCULAS para gols
+
+Retorne JSON:
+{
+  "events": [
+    {
+      "type": "goal",
+      "videoSecond": 1455,
+      "team": "home",
+      "isOwnGoal": false,
+      "description": "GOOOL DE COUTINHO! Bomba no ângulo!",
+      "confidence": 0.95
+    }
+  ]
+}`;
+
+    const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${LOVABLE_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash",
+        messages: [
+          { 
+            role: "system", 
+            content: `Você converte análises táticas em eventos estruturados para banco de dados.
+Retorne APENAS JSON válido sem markdown.
+O número de gols no JSON DEVE ser EXATAMENTE igual ao número de gols na análise tática.` 
+          },
+          { role: "user", content: eventsPrompt }
         ],
       }),
     });
