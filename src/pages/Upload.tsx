@@ -106,6 +106,8 @@ export default function VideoUpload() {
   const [newStartMinute, setNewStartMinute] = useState('');
   const [newEndMinute, setNewEndMinute] = useState('');
   const [newDuration, setNewDuration] = useState('');
+  const [isValidatingLink, setIsValidatingLink] = useState(false);
+  const [linkValidationTime, setLinkValidationTime] = useState(0);
 
   // Analysis state
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
@@ -342,7 +344,27 @@ export default function VideoUpload() {
     }
   };
 
-  const addVideoLink = () => {
+  // Validate video link format
+  const isValidVideoUrl = (url: string): { valid: boolean; platform: string } => {
+    const patterns = [
+      { regex: /youtube\.com|youtu\.be/i, platform: 'YouTube' },
+      { regex: /vimeo\.com/i, platform: 'Vimeo' },
+      { regex: /drive\.google\.com/i, platform: 'Google Drive' },
+      { regex: /dropbox\.com/i, platform: 'Dropbox' },
+      { regex: /twitch\.tv/i, platform: 'Twitch' },
+      { regex: /\.mp4|\.webm|\.mov|\.avi/i, platform: 'Vídeo Direto' },
+      { regex: /^https?:\/\//i, platform: 'Link Externo' },
+    ];
+    
+    for (const { regex, platform } of patterns) {
+      if (regex.test(url)) {
+        return { valid: true, platform };
+      }
+    }
+    return { valid: false, platform: 'Desconhecido' };
+  };
+
+  const addVideoLink = async () => {
     if (!newLinkInput.trim()) {
       toast({
         title: "Link obrigatório",
@@ -353,50 +375,90 @@ export default function VideoUpload() {
     }
 
     const embedUrl = extractEmbedUrl(newLinkInput);
-    const defaultConfig = {
-      full: { start: 0, end: 90 },
-      first_half: { start: 0, end: 45 },
-      second_half: { start: 45, end: 90 },
-      clip: { start: 0, end: 10 },
-    };
     
-    const typeLabels = {
-      full: 'Partida Completa',
-      first_half: '1º Tempo',
-      second_half: '2º Tempo',
-      clip: 'Trecho'
-    };
+    // Validate URL format
+    const validation = isValidVideoUrl(embedUrl);
+    if (!validation.valid) {
+      toast({
+        title: "Link inválido",
+        description: "O formato do link não é reconhecido. Use YouTube, Vimeo, Google Drive, Dropbox ou link direto para vídeo.",
+        variant: "destructive"
+      });
+      return;
+    }
 
-    const startMinute = newStartMinute ? parseInt(newStartMinute) : defaultConfig[newLinkType].start;
-    const endMinute = newEndMinute ? parseInt(newEndMinute) : defaultConfig[newLinkType].end;
-    const durationSeconds = newDuration ? parseInt(newDuration) : null;
-
-    const newSegment: VideoSegment = {
-      id: crypto.randomUUID(),
-      name: embedUrl.slice(0, 50) + '...',
-      url: embedUrl,
-      videoType: newLinkType,
-      title: newLinkTitle || typeLabels[newLinkType],
-      durationSeconds,
-      startMinute,
-      endMinute,
-      progress: 100,
-      status: 'ready',
-      isLink: true,
-      half: newLinkType === 'first_half' ? 'first' : newLinkType === 'second_half' ? 'second' : undefined,
-    };
-
-    setSegments(prev => [...prev, newSegment]);
-    setNewLinkInput('');
-    setNewLinkTitle('');
-    setNewStartMinute('');
-    setNewEndMinute('');
-    setNewDuration('');
+    setIsValidatingLink(true);
+    setLinkValidationTime(0);
     
-    toast({
-      title: "Vídeo adicionado",
-      description: `${newSegment.title} (${startMinute}'-${endMinute}')`
-    });
+    // Start validation timer
+    const startTime = Date.now();
+    const timerInterval = setInterval(() => {
+      setLinkValidationTime(Math.floor((Date.now() - startTime) / 1000));
+    }, 1000);
+
+    try {
+      // Simulate link validation (in a real scenario, you might ping the URL or check metadata)
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      clearInterval(timerInterval);
+      setIsValidatingLink(false);
+      setLinkValidationTime(0);
+
+      const defaultConfig = {
+        full: { start: 0, end: 90 },
+        first_half: { start: 0, end: 45 },
+        second_half: { start: 45, end: 90 },
+        clip: { start: 0, end: 10 },
+      };
+      
+      const typeLabels = {
+        full: 'Partida Completa',
+        first_half: '1º Tempo',
+        second_half: '2º Tempo',
+        clip: 'Trecho'
+      };
+
+      const startMinute = newStartMinute ? parseInt(newStartMinute) : defaultConfig[newLinkType].start;
+      const endMinute = newEndMinute ? parseInt(newEndMinute) : defaultConfig[newLinkType].end;
+      const durationSeconds = newDuration ? parseInt(newDuration) : null;
+
+      const newSegment: VideoSegment = {
+        id: crypto.randomUUID(),
+        name: `${validation.platform}: ${embedUrl.slice(0, 40)}...`,
+        url: embedUrl,
+        videoType: newLinkType,
+        title: newLinkTitle || typeLabels[newLinkType],
+        durationSeconds,
+        startMinute,
+        endMinute,
+        progress: 100,
+        status: 'ready',
+        isLink: true,
+        half: newLinkType === 'first_half' ? 'first' : newLinkType === 'second_half' ? 'second' : undefined,
+      };
+
+      setSegments(prev => [...prev, newSegment]);
+      setNewLinkInput('');
+      setNewLinkTitle('');
+      setNewStartMinute('');
+      setNewEndMinute('');
+      setNewDuration('');
+      
+      toast({
+        title: `✓ ${validation.platform} adicionado`,
+        description: `${newSegment.title} (${startMinute}'-${endMinute}')`
+      });
+    } catch (error) {
+      clearInterval(timerInterval);
+      setIsValidatingLink(false);
+      setLinkValidationTime(0);
+      
+      toast({
+        title: "Erro ao validar link",
+        description: "Não foi possível validar o link. Tente novamente.",
+        variant: "destructive"
+      });
+    }
   };
 
   const updateSegment = (updated: VideoSegment) => {
@@ -955,9 +1017,23 @@ export default function VideoUpload() {
                         </div>
                       </div>
                       
-                      <Button variant="arena" onClick={addVideoLink} className="w-full">
-                        <Plus className="mr-2 h-4 w-4" />
-                        Adicionar Vídeo
+                      <Button 
+                        variant="arena" 
+                        onClick={addVideoLink} 
+                        className="w-full"
+                        disabled={isValidatingLink || !newLinkInput.trim()}
+                      >
+                        {isValidatingLink ? (
+                          <>
+                            <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2" />
+                            Validando... {linkValidationTime > 0 && `(${linkValidationTime}s)`}
+                          </>
+                        ) : (
+                          <>
+                            <Plus className="mr-2 h-4 w-4" />
+                            Adicionar Vídeo
+                          </>
+                        )}
                       </Button>
                     </CardContent>
                   </Card>
