@@ -102,13 +102,14 @@ export function useStartAnalysis() {
   const startAnalysis = async (params: {
     matchId: string;
     videoUrl: string;
-    homeTeamId: string;
-    awayTeamId: string;
+    homeTeamId?: string;
+    awayTeamId?: string;
     competition?: string;
     startMinute?: number;
     endMinute?: number;
     durationSeconds?: number;
     transcription?: string; // SRT content if provided
+    audioUrl?: string; // Pre-extracted audio URL for large videos
   }) => {
     setIsLoading(true);
     
