@@ -51,6 +51,8 @@ interface ReanalyzeHalfDialogProps {
   half: 'first' | 'second';
   homeTeamId: string;
   awayTeamId: string;
+  homeTeamName?: string;
+  awayTeamName?: string;
   competition?: string;
   onComplete: () => void;
 }
@@ -62,6 +64,8 @@ export function ReanalyzeHalfDialog({
   half,
   homeTeamId,
   awayTeamId,
+  homeTeamName = 'Time Casa',
+  awayTeamName = 'Time Visitante',
   competition,
   onComplete
 }: ReanalyzeHalfDialogProps) {
@@ -330,17 +334,19 @@ export function ReanalyzeHalfDialog({
       toast.info(`Re-análise do ${halfLabel} iniciada...`);
 
       const combinedTranscription = getCombinedTranscription();
+      
+      if (!combinedTranscription) {
+        toast.error('Transcrição obrigatória para re-análise');
+        return;
+      }
 
       await startAnalysis({
         matchId,
-        videoUrl: halfVideo.file_url,
-        homeTeamId,
-        awayTeamId,
-        competition,
-        startMinute: halfVideo.start_minute || (half === 'first' ? 0 : 45),
-        endMinute: halfVideo.end_minute || (half === 'first' ? 45 : 90),
-        durationSeconds: halfVideo.duration_seconds || undefined,
-        transcription: combinedTranscription || undefined,
+        transcription: combinedTranscription,
+        homeTeam: homeTeamName,
+        awayTeam: awayTeamName,
+        gameStartMinute: half === 'first' ? 0 : 45,
+        gameEndMinute: half === 'first' ? 45 : 90,
       });
 
       queryClient.invalidateQueries({ queryKey: ['match-events', matchId] });
