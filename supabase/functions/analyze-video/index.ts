@@ -983,8 +983,18 @@ Retorne APENAS JSON válido sem markdown.`
     console.log("Valid events:", validEvents.length);
     
     let insertedCount = 0;
-    let homeScore = 0;
-    let awayScore = 0;
+    
+    // CRITICAL: Fetch CURRENT score from database to ACCUMULATE across halves
+    const { data: currentMatch } = await supabase
+      .from('matches')
+      .select('home_score, away_score')
+      .eq('id', matchId)
+      .single();
+    
+    let homeScore = currentMatch?.home_score || 0;
+    let awayScore = currentMatch?.away_score || 0;
+    
+    console.log(`Starting score from DB: ${homeScore} - ${awayScore}`);
     
     for (const event of validEvents) {
       const eventSecond = event.videoSecond ?? 0;

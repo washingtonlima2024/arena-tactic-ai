@@ -426,6 +426,34 @@ export default function VideoUpload() {
 
   const handleStartAnalysis = async () => {
     try {
+      // VALIDATION: Check teams are different
+      if (matchData.homeTeamId && matchData.awayTeamId && matchData.homeTeamId === matchData.awayTeamId) {
+        toast({
+          title: "Erro de validação",
+          description: "Os times da casa e visitante não podem ser iguais.",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // VALIDATION: Confirm teams exist
+      if (!matchData.homeTeamId || !matchData.awayTeamId) {
+        toast({
+          title: "Times não selecionados",
+          description: "Por favor, selecione os times da partida antes de iniciar a análise.",
+          variant: "destructive"
+        });
+        return;
+      }
+
+      // Get team names for confirmation
+      const homeTeam = teams.find(t => t.id === matchData.homeTeamId);
+      const awayTeam = teams.find(t => t.id === matchData.awayTeamId);
+
+      console.log('=== VALIDAÇÃO DE TIMES ===');
+      console.log('Time Casa:', homeTeam?.name || 'Não encontrado');
+      console.log('Time Visitante:', awayTeam?.name || 'Não encontrado');
+
       // Create match
       const matchDateTime = matchData.matchDate 
         ? new Date(`${matchData.matchDate}T${matchData.matchTime || '00:00'}`).toISOString()
