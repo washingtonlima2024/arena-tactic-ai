@@ -801,48 +801,78 @@ async function generateMultiModalEvents(
         ).join('\n')
       : '';
 
+    // Log transcription length for debugging
+    console.log("=== TRANSCRIPTION DEBUG ===");
+    console.log("Transcription length:", formattedTranscription.length, "chars");
+    console.log("First 300 chars:", formattedTranscription.substring(0, 300));
+    console.log("Last 300 chars:", formattedTranscription.substring(formattedTranscription.length - 300));
+    console.log("Vision analysis length:", visionAnalysis.length, "chars");
+
     const prompt = `ANÁLISE MULTI-MODAL DE VÍDEO DE FUTEBOL
 
 PARTIDA: ${homeTeamName} (casa) vs ${awayTeamName} (visitante)
 DURAÇÃO DO VÍDEO: ${videoDurationSeconds} segundos
 
-=== TRANSCRIÇÃO COM TIMESTAMPS ===
-${formattedTranscription.substring(0, 4000)}
+=== TRANSCRIÇÃO COMPLETA COM TIMESTAMPS ===
+${formattedTranscription.substring(0, 50000)}
 
 ${goalsContext}
 
 === ANÁLISE VISUAL ===
-${visionAnalysis.substring(0, 1000)}
+${visionAnalysis.substring(0, 5000)}
 
-INSTRUÇÕES CRÍTICAS:
-1. DETECTAR GOLS: Analise a transcrição para palavras como "gol", "goool", "marcou", "fez o gol"
+⚠️ ATENÇÃO: ESTA PARTIDA PODE TER MÚLTIPLOS GOLS!
+- Leia a transcrição INTEIRA do início ao fim
+- Identifique TODOS os gols mencionados, não apenas o primeiro
+- Procure por: "primeiro gol", "segundo gol", "terceiro gol"
+- Procure por placares parciais: "1 a 0", "2 a 0", "3 a 0"
+- Procure por nomes de jogadores + "marcou", "fez", "gol"
+
+INSTRUÇÕES CRÍTICAS PARA DETECÇÃO DE GOLS:
+1. DETECTAR TODOS OS GOLS: Analise a transcrição INTEIRA para encontrar CADA gol
+   - Palavras que indicam gol: "gol", "goool", "marcou", "fez o gol", "balançou", "mandou pra dentro"
+   - "abriu o placar" = primeiro gol
+   - "empata", "vira o jogo" = mudança de placar
+   - "segundo gol", "terceiro gol" = gols adicionais
+   
 2. DETECTAR GOLS CONTRA: Procure por "gol contra", "contra", "próprio gol", "na própria rede"
+
 3. Para CADA GOL detectado:
    - Determine o timestamp EXATO baseado no [MM:SS] da transcrição
    - Identifique se é GOL NORMAL ou GOL CONTRA
-   - Determine qual time marcou/sofreu
+   - Determine qual time marcou baseado no CONTEXTO (nomes de jogadores mencionados)
    - Crie uma description IMPACTANTE em português (máx 60 chars)
+
+4. IDENTIFICAR TIME QUE MARCOU:
+   - Se o narrador menciona jogador do ${homeTeamName} → team: "home"
+   - Se o narrador menciona jogador do ${awayTeamName} → team: "away"
+   - Use o contexto da narração para determinar qual time está atacando
 
 REGRAS PARA GOL CONTRA:
 - Se ${homeTeamName} fez gol contra si mesmo → team: "home", isOwnGoal: true
 - Se ${awayTeamName} fez gol contra si mesmo → team: "away", isOwnGoal: true
-- Description deve indicar claramente: "GOL CONTRA DO [TIME]!" ou "GOL CONTRA! [TIME] marca contra!"
+- Description deve indicar claramente: "GOL CONTRA DO [TIME]!"
 
 REGRAS DE TEMPO:
 - "videoSecond" DEVE estar entre 0 e ${videoDurationSeconds}
 - Use os timestamps [MM:SS] da transcrição para calcular videoSecond
 - [0:45] = videoSecond: 45
 - [1:17] = videoSecond: 77
+- [24:48] = videoSecond: 1488
 
 REGRAS PARA DESCRIPTIONS (PORTUGUÊS DO BRASIL):
 - Máximo 60 caracteres
 - Linguagem de narrador empolgado
 - Use MAIÚSCULAS para ênfase em gols
+- Mencione o nome do jogador quando possível
 - Exemplos bons:
-  - "GOOOL CONTRA DO SPORT!"
-  - "GOL CONTRA! Infelicidade do zagueiro!"
-  - "GOOOOL! Que bomba de fora da área!"
+  - "GOOOL DE COUTINHO! Bomba no ângulo!"
+  - "GOLAÇO DE NEYMAR! 50º gol pela seleção!"
+  - "GOL DE PAULINHO! Amplia o placar!"
+  - "GOL CONTRA DO SPORT!"
   - "Cartão amarelo por falta dura!"
+
+IMPORTANTE: Liste CADA gol como um evento separado. Se a partida teve 3 gols, retorne 3 eventos de gol.
 
 Retorne APENAS JSON válido:
 {
@@ -851,8 +881,8 @@ Retorne APENAS JSON válido:
       "type": "goal",
       "videoSecond": 45,
       "team": "home",
-      "isOwnGoal": true,
-      "description": "GOL CONTRA DO SPORT!",
+      "isOwnGoal": false,
+      "description": "GOOOL DE COUTINHO! Bomba no ângulo!",
       "confidence": 0.95,
       "narrationContext": "trecho da narração que indica o gol"
     }
@@ -862,6 +892,7 @@ Retorne APENAS JSON válido:
 Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_off_target, save, offside, substitution, free_kick, penalty, chance`;
 
     console.log("Calling AI for multi-modal event extraction...");
+    console.log("Prompt length:", prompt.length, "chars");
     
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -870,18 +901,24 @@ Tipos válidos: goal, yellow_card, red_card, foul, corner, shot_on_target, shot_
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-pro",  // Using Pro for better accuracy
+        model: "google/gemini-2.5-pro",
+        temperature: 0.1,  // Low temperature for deterministic responses
         messages: [
           { 
             role: "system", 
             content: `Você é um especialista em análise de futebol e detecção de gols.
 
-PRIORIDADE MÁXIMA: Detectar GOLS e GOLS CONTRA com precisão.
+PRIORIDADE MÁXIMA: Detectar TODOS os GOLS da partida com precisão.
+
+REGRAS FUNDAMENTAIS:
+1. Leia a transcrição INTEIRA - não pare no primeiro gol
+2. Se a narração menciona "segundo gol", "terceiro gol" ou placares como "2 a 0", "3 a 0", existem MÚLTIPLOS GOLS
+3. Para cada gol, identifique o jogador que marcou pelo nome mencionado na narração
+4. Use o contexto da narração para determinar qual time marcou
 
 Para gol contra:
 - O time que FAZ o gol contra é quem marca CONTRA SI MESMO
-- Exemplo: "Sport fez gol contra" → Sport marcou na própria rede → team: "home" (se Sport é casa), isOwnGoal: true
-- A description deve dizer claramente "GOL CONTRA DO [TIME]!"
+- Description deve dizer claramente "GOL CONTRA DO [TIME]!"
 
 Gere descriptions criativas e impactantes em português do Brasil.
 Retorne APENAS JSON válido sem markdown.` 
