@@ -56,6 +56,40 @@ export function useAudioExtraction() {
     setIsExtracting(true);
 
     try {
+      // Check file size first with HEAD request to avoid crashing browser
+      setExtractionProgress({ stage: 'loading', progress: 5, message: 'Verificando tamanho do vídeo...' });
+      
+      const MAX_SIZE_MB = 200; // Maximum size for browser-side extraction
+      let fileSize = 0;
+      
+      try {
+        const headResponse = await fetch(videoUrl, { method: 'HEAD' });
+        const contentLength = headResponse.headers.get('content-length');
+        if (contentLength) {
+          fileSize = parseInt(contentLength, 10);
+          const fileSizeMB = fileSize / (1024 * 1024);
+          console.log(`Tamanho do vídeo: ${fileSizeMB.toFixed(2)} MB`);
+          
+          if (fileSizeMB > MAX_SIZE_MB) {
+            console.warn(`Vídeo muito grande para extração no navegador (${fileSizeMB.toFixed(0)}MB > ${MAX_SIZE_MB}MB)`);
+            setExtractionProgress({ 
+              stage: 'error', 
+              progress: 0, 
+              message: `Vídeo muito grande (${fileSizeMB.toFixed(0)}MB). Análise será feita diretamente no servidor.` 
+            });
+            // Return empty URL - server will handle transcription directly
+            throw new Error(`VIDEO_TOO_LARGE:${fileSizeMB.toFixed(0)}`);
+          }
+        }
+      } catch (headError) {
+        // If HEAD request fails with VIDEO_TOO_LARGE, rethrow
+        if (headError instanceof Error && headError.message.startsWith('VIDEO_TOO_LARGE')) {
+          throw headError;
+        }
+        // Otherwise log and continue (some servers don't support HEAD)
+        console.warn('Não foi possível verificar tamanho do vídeo:', headError);
+      }
+
       // Load FFmpeg
       const ffmpeg = await loadFFmpeg();
 

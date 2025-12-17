@@ -82,9 +82,14 @@ export function ResetMatchDialog({
             audioUrls[video.id] = result.audioUrl;
             console.log(`Áudio extraído para vídeo ${video.id}:`, result.audioUrl);
           }
-        } catch (audioError) {
-          console.error(`Erro ao extrair áudio do vídeo ${video.id}:`, audioError);
-          // Continue without audio - will try to transcribe from video directly
+        } catch (audioError: any) {
+          // Check if it's a "too large" error - continue without extracted audio
+          if (audioError?.message?.startsWith('VIDEO_TOO_LARGE')) {
+            console.warn(`Vídeo ${video.id} muito grande - análise será feita no servidor`);
+          } else {
+            console.error(`Erro ao extrair áudio do vídeo ${video.id}:`, audioError);
+          }
+          // Continue without audio - server will transcribe from video directly
         }
       }
 
