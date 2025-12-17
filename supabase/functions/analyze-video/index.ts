@@ -967,19 +967,56 @@ async function insertOfficialEvents(
     emotionalMoments: 'buildup' // placeholder type
   };
 
+  // Offsets de reação do narrador em segundos
+  // O narrador reage DEPOIS do evento - precisamos subtrair para capturar o momento real
+  const NARRATOR_REACTION_OFFSETS: Record<string, number> = {
+    // Eventos de alta emoção (reação mais demorada)
+    goal: 7,
+    penalty: 6,
+    red_card: 5,
+    woodwork: 5,       // "NA TRAVE!"
+    
+    // Eventos de emoção média
+    save: 5,           // "QUE DEFESA!"
+    shot: 4,           // Finalização
+    yellow_card: 4,
+    
+    // Eventos rápidos (reação mais imediata)
+    foul: 3,           // Apito + narração
+    offside: 3,
+    corner: 2,
+    free_kick: 2,
+    substitution: 2,   // Já há antecipação
+    
+    // Eventos descritivos (sem offset)
+    transition: 0,
+    buildup: 0,
+    dribble: 1,
+    assist: 0          // Geralmente mencionado junto com gol
+  };
+
   for (const [category, eventType] of Object.entries(categoryMapping)) {
     const events = eventCategories[category] || [];
     
     for (const event of events) {
-      const timestamp = event.timestamp || 0;
+      const originalTimestamp = event.timestamp || 0;
       
       // Skip invalid timestamps
-      if (timestamp < 0 || timestamp > videoDurationSeconds) {
-        console.log(`Evento ignorado - timestamp inválido: ${timestamp}s (max: ${videoDurationSeconds}s)`);
+      if (originalTimestamp < 0 || originalTimestamp > videoDurationSeconds) {
+        console.log(`Evento ignorado - timestamp inválido: ${originalTimestamp}s (max: ${videoDurationSeconds}s)`);
         continue;
       }
 
-      const videoSecond = timestamp;
+      // APLICAR OFFSET DE REAÇÃO DO NARRADOR
+      // O narrador reage X segundos DEPOIS do evento real
+      const reactionOffset = NARRATOR_REACTION_OFFSETS[eventType] || 0;
+      const adjustedTimestamp = Math.max(0, originalTimestamp - reactionOffset);
+      
+      if (reactionOffset > 0) {
+        console.log(`${eventType}: narrador em ${originalTimestamp}s → real em ${adjustedTimestamp}s (offset: -${reactionOffset}s)`);
+      }
+
+      const videoSecond = adjustedTimestamp;
       const videoMinute = Math.floor(videoSecond / 60);
       const displayMinute = videoMinute + gameStartMinute;
       const displaySecond = Math.floor(videoSecond % 60);
@@ -1027,8 +1064,12 @@ async function insertOfficialEvents(
           result: event.result,
           in: event.in,
           out: event.out,
+          // Timestamps com offset de reação do narrador
+          originalTimestamp: originalTimestamp,     // Quando narrador falou
+          adjustedTimestamp: adjustedTimestamp,     // Quando evento realmente aconteceu
+          reactionOffset: reactionOffset,           // Offset aplicado
           videoSecond: videoSecond,
-          eventMs: videoSecond * 1000,
+          eventMs: adjustedTimestamp * 1000,
           videoDurationSeconds: videoDurationSeconds,
           bufferBeforeMs: 3000,
           bufferAfterMs: 5000,
