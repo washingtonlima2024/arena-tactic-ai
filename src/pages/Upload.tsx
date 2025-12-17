@@ -956,19 +956,40 @@ export default function VideoUpload() {
                 </div>
               )}
 
-              {/* Continue Button */}
-              <div className="flex justify-end">
-                <Button 
-                  onClick={() => setCurrentStep('summary')}
-                  disabled={readySegments.length === 0}
-                  size="lg"
-                  variant="arena"
-                  className="gap-2"
-                >
-                  <Zap className="h-5 w-5" />
-                  Continuar para Análise
-                </Button>
-              </div>
+              {/* Continue Button - Always Visible */}
+              <Card variant="glass" className="border-emerald-500/50 bg-emerald-500/5">
+                <CardContent className="pt-4 pb-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="flex-1">
+                      {segments.length === 0 ? (
+                        <p className="text-muted-foreground text-sm">
+                          Adicione pelo menos um vídeo para continuar
+                        </p>
+                      ) : readySegments.length === 0 ? (
+                        <div className="flex items-center gap-2 text-amber-400 text-sm">
+                          <div className="animate-spin h-4 w-4 border-2 border-amber-400 border-t-transparent rounded-full" />
+                          Aguardando uploads... ({segments.filter(s => s.status === 'uploading').length} em andamento)
+                        </div>
+                      ) : (
+                        <p className="text-emerald-400 text-sm flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4" />
+                          {readySegments.length} vídeo(s) pronto(s) para análise
+                        </p>
+                      )}
+                    </div>
+                    <Button 
+                      onClick={() => setCurrentStep('summary')}
+                      disabled={readySegments.length === 0}
+                      size="lg"
+                      variant="arena"
+                      className="gap-2 min-w-[200px]"
+                    >
+                      <Zap className="h-5 w-5" />
+                      Continuar para Análise
+                    </Button>
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           )}
 
