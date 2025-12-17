@@ -229,9 +229,17 @@ export default function VideoUpload() {
           s.id === segmentId ? { ...s, status: 'error' } : s
         )
       );
+      
+      // Check for timeout/large file errors
+      const isTimeout = error.message?.includes('<!DOCTYPE') || 
+                        error.message?.includes('timeout') ||
+                        error.message?.includes('524');
+      
       toast({
-        title: "Erro no upload",
-        description: error.message,
+        title: isTimeout ? "Arquivo muito grande" : "Erro no upload",
+        description: isTimeout 
+          ? `O arquivo ${file.name} (${fileSizeMB} MB) excedeu o tempo limite. Tente um arquivo menor ou use link externo.`
+          : error.message,
         variant: "destructive"
       });
     }
