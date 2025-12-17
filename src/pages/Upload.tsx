@@ -34,6 +34,7 @@ import { useStartAnalysis, useAnalysisJob } from '@/hooks/useAnalysisJob';
 import { AnalysisProgress } from '@/components/analysis/AnalysisProgress';
 import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { useQuery } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import arenaPlayWordmark from '@/assets/arena-play-wordmark.png';
 import { MatchSetupCard, MatchSetupData } from '@/components/upload/MatchSetupCard';
@@ -71,8 +72,27 @@ export default function VideoUpload() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
-  // Wizard state
-  const [currentStep, setCurrentStep] = useState<WizardStep>('match');
+  // Check for existing match ID (when reimporting)
+  const existingMatchId = searchParams.get('match');
+  
+  // Fetch existing match data if reimporting
+  const { data: existingMatch } = useQuery({
+    queryKey: ['match-for-reimport', existingMatchId],
+    queryFn: async () => {
+      if (!existingMatchId) return null;
+      const { data, error } = await supabase
+        .from('matches')
+        .select('*, home_team:teams!matches_home_team_id_fkey(*), away_team:teams!matches_away_team_id_fkey(*)')
+        .eq('id', existingMatchId)
+        .maybeSingle();
+      if (error || !data) return null;
+      return data;
+    },
+    enabled: !!existingMatchId
+  });
+  
+  // Wizard state - skip to 'videos' if reimporting existing match
+  const [currentStep, setCurrentStep] = useState<WizardStep>(existingMatchId ? 'videos' : 'match');
   
   // Match setup data
   const [matchData, setMatchData] = useState<MatchSetupData>({
@@ -523,52 +543,75 @@ export default function VideoUpload() {
 
   const handleStartAnalysis = async () => {
     try {
-      // VALIDATION: Check teams are different
-      if (matchData.homeTeamId && matchData.awayTeamId && matchData.homeTeamId === matchData.awayTeamId) {
-        toast({
-          title: "Erro de validação",
-          description: "Os times da casa e visitante não podem ser iguais.",
-          variant: "destructive"
+      let matchId: string;
+      let homeTeamId: string | null = null;
+      let awayTeamId: string | null = null;
+      let competition: string | null = null;
+
+      // If reimporting to existing match, use that match
+      if (existingMatchId && existingMatch) {
+        matchId = existingMatchId;
+        homeTeamId = existingMatch.home_team_id;
+        awayTeamId = existingMatch.away_team_id;
+        competition = existingMatch.competition;
+        
+        console.log('=== REIMPORTAÇÃO PARA PARTIDA EXISTENTE ===');
+        console.log('Match ID:', matchId);
+        console.log('Time Casa:', existingMatch.home_team?.name);
+        console.log('Time Visitante:', existingMatch.away_team?.name);
+      } else {
+        // VALIDATION: Check teams are different
+        if (matchData.homeTeamId && matchData.awayTeamId && matchData.homeTeamId === matchData.awayTeamId) {
+          toast({
+            title: "Erro de validação",
+            description: "Os times da casa e visitante não podem ser iguais.",
+            variant: "destructive"
+          });
+          return;
+        }
+
+        // VALIDATION: Confirm teams exist
+        if (!matchData.homeTeamId || !matchData.awayTeamId) {
+          toast({
+            title: "Times não selecionados",
+            description: "Por favor, selecione os times da partida antes de iniciar a análise.",
+            variant: "destructive"
+          });
+          return;
+        }
+
+        // Get team names for confirmation
+        const homeTeam = teams.find(t => t.id === matchData.homeTeamId);
+        const awayTeam = teams.find(t => t.id === matchData.awayTeamId);
+
+        console.log('=== VALIDAÇÃO DE TIMES ===');
+        console.log('Time Casa:', homeTeam?.name || 'Não encontrado');
+        console.log('Time Visitante:', awayTeam?.name || 'Não encontrado');
+
+        // Create match
+        const matchDateTime = matchData.matchDate 
+          ? new Date(`${matchData.matchDate}T${matchData.matchTime || '00:00'}`).toISOString()
+          : undefined;
+
+        const match = await createMatch.mutateAsync({
+          home_team_id: matchData.homeTeamId,
+          away_team_id: matchData.awayTeamId,
+          competition: matchData.competition || undefined,
+          match_date: matchDateTime,
+          venue: matchData.venue || undefined,
         });
-        return;
+        
+        matchId = match.id;
+        homeTeamId = matchData.homeTeamId;
+        awayTeamId = matchData.awayTeamId;
+        competition = matchData.competition || null;
       }
-
-      // VALIDATION: Confirm teams exist
-      if (!matchData.homeTeamId || !matchData.awayTeamId) {
-        toast({
-          title: "Times não selecionados",
-          description: "Por favor, selecione os times da partida antes de iniciar a análise.",
-          variant: "destructive"
-        });
-        return;
-      }
-
-      // Get team names for confirmation
-      const homeTeam = teams.find(t => t.id === matchData.homeTeamId);
-      const awayTeam = teams.find(t => t.id === matchData.awayTeamId);
-
-      console.log('=== VALIDAÇÃO DE TIMES ===');
-      console.log('Time Casa:', homeTeam?.name || 'Não encontrado');
-      console.log('Time Visitante:', awayTeam?.name || 'Não encontrado');
-
-      // Create match
-      const matchDateTime = matchData.matchDate 
-        ? new Date(`${matchData.matchDate}T${matchData.matchTime || '00:00'}`).toISOString()
-        : undefined;
-
-      const match = await createMatch.mutateAsync({
-        home_team_id: matchData.homeTeamId,
-        away_team_id: matchData.awayTeamId,
-        competition: matchData.competition || undefined,
-        match_date: matchDateTime,
-        venue: matchData.venue || undefined,
-      });
 
       // Register all video segments
       for (const segment of segments) {
         if (segment.status === 'complete' || segment.status === 'ready') {
           await supabase.from('videos').insert({
-            match_id: match.id,
+            match_id: matchId,
             file_url: segment.url || '',
             file_name: segment.title || segment.name,
             video_type: segment.videoType,
@@ -617,11 +660,11 @@ export default function VideoUpload() {
         console.log('  Transcrição:', transcription ? `${transcription.length} chars` : 'Nenhuma');
 
         const result = await startAnalysis({
-          matchId: match.id,
+          matchId,
           videoUrl: segment.url || '',
-          homeTeamId: matchData.homeTeamId,
-          awayTeamId: matchData.awayTeamId,
-          competition: matchData.competition,
+          homeTeamId: homeTeamId || undefined,
+          awayTeamId: awayTeamId || undefined,
+          competition: competition || undefined,
           startMinute: segment.startMinute ?? 0,
           endMinute: segment.endMinute ?? 45,
           durationSeconds: durationSeconds || 0,
@@ -659,11 +702,11 @@ export default function VideoUpload() {
 
         // Start second half analysis
         const result = await startAnalysis({
-          matchId: match.id,
+          matchId,
           videoUrl: segment.url || '',
-          homeTeamId: matchData.homeTeamId,
-          awayTeamId: matchData.awayTeamId,
-          competition: matchData.competition,
+          homeTeamId: homeTeamId || undefined,
+          awayTeamId: awayTeamId || undefined,
+          competition: competition || undefined,
           startMinute: segment.startMinute ?? 45,
           endMinute: segment.endMinute ?? 90,
           durationSeconds: durationSeconds || 0,
@@ -695,11 +738,11 @@ export default function VideoUpload() {
           }
 
           const result = await startAnalysis({
-            matchId: match.id,
+            matchId,
             videoUrl: anySegment.url || '',
-            homeTeamId: matchData.homeTeamId,
-            awayTeamId: matchData.awayTeamId,
-            competition: matchData.competition,
+            homeTeamId: homeTeamId || undefined,
+            awayTeamId: awayTeamId || undefined,
+            competition: competition || undefined,
             startMinute: anySegment.startMinute ?? 0,
             endMinute: anySegment.endMinute ?? 90,
             durationSeconds: durationSeconds || 0,
@@ -792,7 +835,10 @@ export default function VideoUpload() {
               className="h-12 md:h-16 mx-auto"
             />
             <p className="text-muted-foreground text-sm mt-1">
-              Nova Partida para Análise
+              {existingMatch 
+                ? `Reimportando: ${existingMatch.home_team?.short_name || 'Casa'} vs ${existingMatch.away_team?.short_name || 'Visitante'}`
+                : 'Nova Partida para Análise'
+              }
             </p>
           </div>
 
@@ -819,8 +865,9 @@ export default function VideoUpload() {
               <div key={step.id} className="flex items-center">
                 <button
                   onClick={() => {
-                    if (step.id === 'match') setCurrentStep('match');
-                    if (step.id === 'videos' && matchData.homeTeamId && matchData.awayTeamId) setCurrentStep('videos');
+                    // If reimporting, skip match step
+                    if (step.id === 'match' && !existingMatchId) setCurrentStep('match');
+                    if (step.id === 'videos' && (existingMatchId || (matchData.homeTeamId && matchData.awayTeamId))) setCurrentStep('videos');
                     if (step.id === 'summary' && readySegments.length > 0) setCurrentStep('summary');
                   }}
                   className={cn(
@@ -855,11 +902,29 @@ export default function VideoUpload() {
           {/* Step 2: Videos */}
           {currentStep === 'videos' && (
             <div className="max-w-4xl mx-auto space-y-6">
-              {/* Back Button */}
-              <Button variant="ghost" onClick={() => setCurrentStep('match')} className="gap-2">
-                <ArrowLeft className="h-4 w-4" />
-                Voltar para Partida
-              </Button>
+              {/* Back Button - only show if not reimporting */}
+              {!existingMatchId && (
+                <Button variant="ghost" onClick={() => setCurrentStep('match')} className="gap-2">
+                  <ArrowLeft className="h-4 w-4" />
+                  Voltar para Partida
+                </Button>
+              )}
+              
+              {/* Show reimport info banner */}
+              {existingMatch && (
+                <div className="bg-primary/10 border border-primary/30 rounded-lg p-4 flex items-center gap-3">
+                  <div className="h-10 w-10 rounded-full bg-primary/20 flex items-center justify-center">
+                    <UploadIcon className="h-5 w-5 text-primary" />
+                  </div>
+                  <div>
+                    <p className="font-medium">Reimportando vídeos</p>
+                    <p className="text-sm text-muted-foreground">
+                      {existingMatch.home_team?.name || 'Casa'} vs {existingMatch.away_team?.name || 'Visitante'}
+                      {existingMatch.competition && ` • ${existingMatch.competition}`}
+                    </p>
+                  </div>
+                </div>
+              )}
 
               {/* Match Times Config */}
               <MatchTimesConfig times={matchTimes} onChange={setMatchTimes} />
