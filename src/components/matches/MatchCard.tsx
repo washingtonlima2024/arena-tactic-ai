@@ -10,6 +10,7 @@ import { MatchEditDialog } from '@/components/matches/MatchEditDialog';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+import { TeamBadge } from '@/components/teams/TeamBadge';
 
 interface MatchCardProps {
   match: Match;
@@ -148,21 +149,11 @@ export function MatchCard({ match }: MatchCardProps) {
               <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-3">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <div 
-                      className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold"
-                      style={{ backgroundColor: match.homeTeam.primaryColor + '40', color: match.homeTeam.primaryColor }}
-                    >
-                      {match.homeTeam.shortName.slice(0, 2)}
-                    </div>
+                    <TeamBadge team={match.homeTeam} size="sm" />
                     <span className="text-sm font-bold text-white">
                       {match.score.home} - {match.score.away}
                     </span>
-                    <div 
-                      className="flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-bold"
-                      style={{ backgroundColor: match.awayTeam.primaryColor + '40', color: match.awayTeam.primaryColor }}
-                    >
-                      {match.awayTeam.shortName.slice(0, 2)}
-                    </div>
+                    <TeamBadge team={match.awayTeam} size="sm" />
                   </div>
                   <Badge variant="arena" className="text-[10px]">
                     {match.status === 'completed' ? 'Finalizado' : 'Ao vivo'}
@@ -183,12 +174,7 @@ export function MatchCard({ match }: MatchCardProps) {
               <div className="text-center">
                 <div className="mb-3 flex items-center justify-center gap-6">
                   <div className="flex flex-col items-center gap-1">
-                    <div 
-                      className="flex h-14 w-14 items-center justify-center rounded-full text-lg font-bold shadow-lg"
-                      style={{ backgroundColor: match.homeTeam.primaryColor + '30', color: match.homeTeam.primaryColor, boxShadow: `0 0 20px ${match.homeTeam.primaryColor}40` }}
-                    >
-                      {match.homeTeam.shortName.slice(0, 2)}
-                    </div>
+                    <TeamBadge team={match.homeTeam} size="xl" showGlow />
                     <span className="text-xs font-medium text-muted-foreground">{match.homeTeam.shortName}</span>
                   </div>
                   <div className="flex flex-col items-center">
@@ -200,12 +186,7 @@ export function MatchCard({ match }: MatchCardProps) {
                     </Badge>
                   </div>
                   <div className="flex flex-col items-center gap-1">
-                    <div 
-                      className="flex h-14 w-14 items-center justify-center rounded-full text-lg font-bold shadow-lg"
-                      style={{ backgroundColor: match.awayTeam.primaryColor + '30', color: match.awayTeam.primaryColor, boxShadow: `0 0 20px ${match.awayTeam.primaryColor}40` }}
-                    >
-                      {match.awayTeam.shortName.slice(0, 2)}
-                    </div>
+                    <TeamBadge team={match.awayTeam} size="xl" showGlow />
                     <span className="text-xs font-medium text-muted-foreground">{match.awayTeam.shortName}</span>
                   </div>
                 </div>
@@ -231,12 +212,7 @@ export function MatchCard({ match }: MatchCardProps) {
           {/* Teams */}
           <div className="flex items-center justify-between">
             <div className="flex flex-col items-center gap-2">
-              <div 
-                className="flex h-12 w-12 items-center justify-center rounded-full text-lg font-bold"
-                style={{ backgroundColor: match.homeTeam.primaryColor + '20', color: match.homeTeam.primaryColor }}
-              >
-                {match.homeTeam.shortName.slice(0, 2)}
-              </div>
+              <TeamBadge team={match.homeTeam} size="lg" />
               <span className="text-sm font-medium">{match.homeTeam.shortName}</span>
             </div>
 
@@ -279,12 +255,7 @@ export function MatchCard({ match }: MatchCardProps) {
             </div>
 
             <div className="flex flex-col items-center gap-2">
-              <div 
-                className="flex h-12 w-12 items-center justify-center rounded-full text-lg font-bold"
-                style={{ backgroundColor: match.awayTeam.primaryColor + '20', color: match.awayTeam.primaryColor }}
-              >
-                {match.awayTeam.shortName.slice(0, 2)}
-              </div>
+              <TeamBadge team={match.awayTeam} size="lg" />
               <span className="text-sm font-medium">{match.awayTeam.shortName}</span>
             </div>
           </div>

@@ -1,8 +1,8 @@
-import { MatchEvent } from '@/types/arena';
+import { MatchEvent, Team } from '@/types/arena';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { mockPlayers, mockTeams } from '@/data/mockData';
+import { TeamBadge } from '@/components/teams/TeamBadge';
 import { Star, Pencil, Play } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -12,6 +12,8 @@ interface EventTimelineProps {
   onEditEvent?: (event: MatchEvent) => void;
   onPlayVideo?: (eventId: string, eventMinute: number) => void;
   hasVideo?: boolean;
+  homeTeam?: Team | { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string };
+  awayTeam?: Team | { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string };
 }
 
 const eventIcons: Record<string, string> = {
@@ -67,16 +69,23 @@ const eventBadgeVariants: Record<string, any> = {
 // Events that should be highlighted
 const highlightEventTypes = ['goal', 'penalty'];
 
-export function EventTimeline({ events, className, onEditEvent, onPlayVideo, hasVideo }: EventTimelineProps) {
+export function EventTimeline({ events, className, onEditEvent, onPlayVideo, hasVideo, homeTeam, awayTeam }: EventTimelineProps) {
   const { isAdmin } = useAuth();
 
-  const getPlayer = (playerId?: string) => {
-    if (!playerId) return null;
-    return mockPlayers.find(p => p.id === playerId);
-  };
-
-  const getTeam = (teamId: string) => {
-    return mockTeams.find(t => t.id === teamId);
+  const getTeam = (event: MatchEvent) => {
+    // Try to get team from metadata first
+    const metadata = event.metadata as { team?: string; teamName?: string } | null;
+    
+    if (metadata?.team === 'home' && homeTeam) return homeTeam;
+    if (metadata?.team === 'away' && awayTeam) return awayTeam;
+    if (metadata?.teamName === homeTeam?.name && homeTeam) return homeTeam;
+    if (metadata?.teamName === awayTeam?.name && awayTeam) return awayTeam;
+    
+    // Fallback to teamId matching
+    if (event.teamId === homeTeam?.id) return homeTeam;
+    if (event.teamId === awayTeam?.id) return awayTeam;
+    
+    return null;
   };
 
   const isHighlightEvent = (eventType: string) => {
@@ -114,8 +123,7 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
   return (
     <div className={cn("space-y-3", className)}>
       {events.map((event, index) => {
-        const player = getPlayer(event.playerId);
-        const team = getTeam(event.teamId);
+        const team = getTeam(event);
         const isHighlight = isHighlightEvent(event.type);
         const timeDisplay = formatEventTime(event);
 
@@ -177,20 +185,14 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
                     {eventLabels[event.type] || event.type}
                   </Badge>
                   {team && (
-                    <span 
-                      className="rounded px-1.5 py-0.5 text-xs font-medium"
-                      style={{ backgroundColor: team.primaryColor + '20', color: team.primaryColor }}
-                    >
-                      {team.shortName}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <TeamBadge team={team} size="xs" />
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {'short_name' in team ? team.short_name : 'shortName' in team ? team.shortName : team.name}
+                      </span>
+                    </div>
                   )}
                 </div>
-                {player && (
-                  <p className="text-sm">
-                    <span className="font-medium">{player.name}</span>
-                    <span className="text-muted-foreground"> #{player.number}</span>
-                  </p>
-                )}
                 {event.description && (
                   <p className="text-xs text-muted-foreground">{event.description}</p>
                 )}
