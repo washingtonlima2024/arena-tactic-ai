@@ -36,6 +36,7 @@ import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { Link } from 'react-router-dom';
 import { EventEditDialog } from '@/components/events/EventEditDialog';
 import { ReanalyzeHalfDialog } from '@/components/events/ReanalyzeHalfDialog';
+import { ResetMatchDialog } from '@/components/events/ResetMatchDialog';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -178,6 +179,7 @@ export default function Events() {
   const [showVignette, setShowVignette] = useState(true);
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
   const [reanalyzeHalf, setReanalyzeHalf] = useState<'first' | 'second' | null>(null);
+  const [showResetDialog, setShowResetDialog] = useState(false);
   
   const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useMatchEvents(currentMatchId);
 
@@ -507,6 +509,14 @@ export default function Events() {
                     <Sparkles className="mr-2 h-4 w-4" />
                   )}
                   Refinar com IA
+                </Button>
+                <Button 
+                  variant="destructive" 
+                  onClick={() => setShowResetDialog(true)}
+                  disabled={!matchVideos || matchVideos.length === 0}
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Refazer Tudo
                 </Button>
               </>
             )}
@@ -969,6 +979,24 @@ export default function Events() {
             onComplete={() => {
               refetchEvents();
               queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
+            }}
+          />
+        )}
+
+        {/* Reset Match Dialog */}
+        {currentMatchId && selectedMatch && matchVideos && (
+          <ResetMatchDialog
+            isOpen={showResetDialog}
+            onClose={() => setShowResetDialog(false)}
+            matchId={currentMatchId}
+            videos={matchVideos}
+            homeTeamId={selectedMatch.home_team_id}
+            awayTeamId={selectedMatch.away_team_id}
+            competition={selectedMatch.competition}
+            onResetComplete={() => {
+              refetchEvents();
+              queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
+              queryClient.invalidateQueries({ queryKey: ['matches'] });
             }}
           />
         )}
