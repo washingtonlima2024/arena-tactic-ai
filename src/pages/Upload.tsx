@@ -145,6 +145,9 @@ export default function VideoUpload() {
       clip: { start: 0, end: 10 },
     }[suggestedType];
 
+    // Format file size for display
+    const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
+
     const newSegment: VideoSegment = {
       id: segmentId,
       name: file.name,
@@ -162,25 +165,38 @@ export default function VideoUpload() {
 
     setSegments(prev => [...prev, newSegment]);
 
+    // Show immediate feedback
+    toast({
+      title: "Upload iniciado",
+      description: `${file.name} (${fileSizeMB} MB)`,
+    });
+
     try {
-      // Detect duration
-      const detectedDuration = await detectVideoDuration(file);
-      
       const sanitizedName = file.name
         .normalize('NFD')
         .replace(/[\u0300-\u036f]/g, '')
         .replace(/[^a-zA-Z0-9._-]/g, '_');
       const fileName = `${Date.now()}-${sanitizedName}`;
       
+      // Start duration detection in parallel (don't wait)
+      detectVideoDuration(file).then(duration => {
+        setSegments(prev => 
+          prev.map(s => 
+            s.id === segmentId ? { ...s, durationSeconds: duration || null } : s
+          )
+        );
+      });
+
+      // Progress simulation (faster updates for better UX)
       const progressInterval = setInterval(() => {
         setSegments(prev => 
           prev.map(s => 
             s.id === segmentId && s.status === 'uploading'
-              ? { ...s, progress: Math.min(s.progress + 15, 90) }
+              ? { ...s, progress: Math.min(s.progress + 5, 95) }
               : s
           )
         );
-      }, 300);
+      }, 200);
 
       const { data, error } = await supabase.storage
         .from('match-videos')
@@ -197,21 +213,14 @@ export default function VideoUpload() {
       setSegments(prev => 
         prev.map(s => 
           s.id === segmentId 
-            ? { 
-                ...s, 
-                progress: 100, 
-                status: 'complete', 
-                url: urlData.publicUrl,
-                durationSeconds: detectedDuration || null,
-              }
+            ? { ...s, progress: 100, status: 'complete', url: urlData.publicUrl }
             : s
         )
       );
 
-      const durationStr = detectedDuration ? ` (${Math.floor(detectedDuration / 60)}:${String(detectedDuration % 60).padStart(2, '0')})` : '';
       toast({
         title: "Upload concluído",
-        description: `${file.name}${durationStr}`
+        description: `${file.name}`
       });
 
     } catch (error: any) {
