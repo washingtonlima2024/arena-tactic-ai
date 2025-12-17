@@ -783,6 +783,7 @@ CATEGORIAS DE EVENTOS:
 
 📍 FALTAS IMPORTANTES (fouls)
 - Faltas duras ou polêmicas
+- OBRIGATÓRIO: quem COMETEU (player), quem SOFREU (victim), time do autor
 
 📍 DRIBLES/FINTAS (dribbles)
 - Jogadas individuais de destaque
@@ -797,6 +798,7 @@ CATEGORIAS DE EVENTOS:
 
 📍 PÊNALTIS (penalties)
 - Pênaltis marcados e/ou cobrados
+- OBRIGATÓRIO: quem SOFREU a falta (victim), quem COMETEU (faultBy), quem COBROU (taker), resultado
 
 📍 COBRANÇAS DE FALTA (freeKicks)
 - Faltas frontais perigosas
@@ -824,14 +826,16 @@ Retorne JSON:
     {"goalkeeper": "Alisson", "team": "home", "against": "Biglia", "timestamp": 802, "description": "Defesa importante"}
   ],
   "yellowCards": [
-    {"player": "Fernandinho", "team": "home", "reason": "Falta no início", "timestamp": 300}
+    {"player": "Fernandinho", "team": "home", "victim": "Messi", "reason": "Falta em contra-ataque", "timestamp": 300}
   ],
-  "redCards": [],
+  "redCards": [
+    {"player": "Marcelo", "team": "home", "victim": "Di María", "reason": "Entrada violenta", "timestamp": 4500}
+  ],
   "substitutions": [
     {"in": "Agüero", "out": "Enzo Pérez", "team": "away", "timestamp": 2700}
   ],
   "fouls": [
-    {"player": "Funes Mori", "team": "away", "victim": "Neymar", "timestamp": 1200, "description": "Entrada na canela"}
+    {"player": "Funes Mori", "team": "away", "victim": "Neymar", "timestamp": 1200, "description": "Entrada na canela do atacante brasileiro"}
   ],
   "dribbles": [
     {"player": "Coutinho", "team": "home", "timestamp": 1450, "description": "Drible em 3 marcadores"}
@@ -841,7 +845,9 @@ Retorne JSON:
   ],
   "offsides": [],
   "corners": [],
-  "penalties": [],
+  "penalties": [
+    {"victim": "Neymar", "faultBy": "Otamendi", "taker": "Neymar", "team": "home", "result": "gol", "timestamp": 2100, "description": "Derrubado na área após drible"}
+  ],
   "freeKicks": [
     {"player": "Messi", "team": "away", "result": "na barreira", "timestamp": 2200}
   ],
@@ -871,7 +877,14 @@ REGRAS:
 - Um jogo típico tem 30-60 eventos
 - Todos os timestamps devem ser em SEGUNDOS (não minutos)
 - Timestamp deve estar dentro da duração do vídeo
-- Retorne APENAS JSON válido sem markdown` 
+- Retorne APENAS JSON válido sem markdown
+
+INFORMAÇÕES OBRIGATÓRIAS POR TIPO:
+- Gols: scorer, team, assist (se houver), isOwnGoal
+- Cartões: player (recebeu), team, victim (sofreu a falta que gerou cartão), reason
+- Faltas: player (COMETEU), victim (SOFREU), team (do que cometeu), description
+- Pênaltis: victim (SOFREU a falta), faultBy (COMETEU), taker (COBROU), team (beneficiado), result (gol/defendido/fora)
+- Defesas: goalkeeper, team, against (quem chutou), description`
           },
           { role: "user", content: prompt }
         ],
