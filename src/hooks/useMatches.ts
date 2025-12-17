@@ -14,8 +14,8 @@ export interface Match {
   status: string | null;
   created_at: string;
   updated_at: string;
-  home_team?: { id: string; name: string; short_name: string | null; primary_color: string | null; secondary_color: string | null };
-  away_team?: { id: string; name: string; short_name: string | null; primary_color: string | null; secondary_color: string | null };
+  home_team?: { id: string; name: string; short_name: string | null; primary_color: string | null; secondary_color: string | null; logo_url: string | null };
+  away_team?: { id: string; name: string; short_name: string | null; primary_color: string | null; secondary_color: string | null; logo_url: string | null };
 }
 
 export function useMatches() {
@@ -26,8 +26,8 @@ export function useMatches() {
         .from('matches')
         .select(`
           *,
-          home_team:teams!matches_home_team_id_fkey(id, name, short_name, primary_color, secondary_color),
-          away_team:teams!matches_away_team_id_fkey(id, name, short_name, primary_color, secondary_color)
+          home_team:teams!matches_home_team_id_fkey(id, name, short_name, primary_color, secondary_color, logo_url),
+          away_team:teams!matches_away_team_id_fkey(id, name, short_name, primary_color, secondary_color, logo_url)
         `)
         .order('match_date', { ascending: false });
 
