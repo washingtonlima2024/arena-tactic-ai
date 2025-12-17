@@ -221,9 +221,11 @@ export default function VideoUpload() {
     }
   };
 
-  // Handle files dropped on half dropzones
-  const handleHalfDrop = useCallback((files: File[], half: 'first' | 'second') => {
+  // Handle files dropped on half dropzones - process ALL files
+  const handleHalfDrop = (files: File[], half: 'first' | 'second') => {
     const videoFiles = files.filter(file => file.type.startsWith('video/'));
+    console.log(`Processing ${videoFiles.length} video files for ${half} half`);
+    
     if (videoFiles.length === 0) {
       toast({
         title: "Formato inválido",
@@ -232,8 +234,18 @@ export default function VideoUpload() {
       });
       return;
     }
-    videoFiles.forEach(file => uploadFile(file, half));
-  }, []);
+    
+    // Upload all files sequentially
+    videoFiles.forEach((file, index) => {
+      console.log(`Uploading file ${index + 1}/${videoFiles.length}: ${file.name}`);
+      uploadFile(file, half);
+    });
+    
+    toast({
+      title: `${videoFiles.length} arquivo(s) sendo enviado(s)`,
+      description: `Vídeos do ${half === 'first' ? '1º' : '2º'} tempo`,
+    });
+  };
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -245,7 +257,7 @@ export default function VideoUpload() {
     setIsDragging(false);
   }, []);
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
     
@@ -263,7 +275,7 @@ export default function VideoUpload() {
     }
 
     droppedFiles.forEach(file => uploadFile(file));
-  }, []);
+  };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files) {
