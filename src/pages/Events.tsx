@@ -35,6 +35,7 @@ import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { Link } from 'react-router-dom';
 import { EventEditDialog } from '@/components/events/EventEditDialog';
+import { ReanalyzeHalfDialog } from '@/components/events/ReanalyzeHalfDialog';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
@@ -176,6 +177,7 @@ export default function Events() {
   const [playingEvent, setPlayingEvent] = useState<any>(null);
   const [showVignette, setShowVignette] = useState(true);
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
+  const [reanalyzeHalf, setReanalyzeHalf] = useState<'first' | 'second' | null>(null);
   
   const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useMatchEvents(currentMatchId);
 
@@ -645,11 +647,24 @@ export default function Events() {
                     {/* 1º Tempo */}
                     {firstHalfEvents.length > 0 && (
                       <div className="space-y-3">
-                        <div className="flex items-center gap-2 sticky top-0 bg-background/80 backdrop-blur-sm py-2 z-10">
-                          <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/30">
-                            1º Tempo
-                          </Badge>
-                          <span className="text-sm text-muted-foreground">{firstHalfEvents.length} eventos</span>
+                        <div className="flex items-center justify-between sticky top-0 bg-background/80 backdrop-blur-sm py-2 z-10">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/30">
+                              1º Tempo
+                            </Badge>
+                            <span className="text-sm text-muted-foreground">{firstHalfEvents.length} eventos</span>
+                          </div>
+                          {isAdmin && (
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="h-7 text-xs"
+                              onClick={() => setReanalyzeHalf('first')}
+                            >
+                              <RefreshCw className="h-3 w-3 mr-1" />
+                              Re-analisar
+                            </Button>
+                          )}
                         </div>
                         {firstHalfEvents.map((event) => (
                           <EventRow 
@@ -681,11 +696,24 @@ export default function Events() {
                     {/* 2º Tempo */}
                     {secondHalfEvents.length > 0 && (
                       <div className="space-y-3">
-                        <div className="flex items-center gap-2 sticky top-0 bg-background/80 backdrop-blur-sm py-2 z-10">
-                          <Badge variant="outline" className="bg-orange-500/10 text-orange-500 border-orange-500/30">
-                            2º Tempo
-                          </Badge>
-                          <span className="text-sm text-muted-foreground">{secondHalfEvents.length} eventos</span>
+                        <div className="flex items-center justify-between sticky top-0 bg-background/80 backdrop-blur-sm py-2 z-10">
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="bg-orange-500/10 text-orange-500 border-orange-500/30">
+                              2º Tempo
+                            </Badge>
+                            <span className="text-sm text-muted-foreground">{secondHalfEvents.length} eventos</span>
+                          </div>
+                          {isAdmin && (
+                            <Button 
+                              variant="ghost" 
+                              size="sm" 
+                              className="h-7 text-xs"
+                              onClick={() => setReanalyzeHalf('second')}
+                            >
+                              <RefreshCw className="h-3 w-3 mr-1" />
+                              Re-analisar
+                            </Button>
+                          )}
                         </div>
                         {secondHalfEvents.map((event) => (
                           <EventRow 
@@ -927,6 +955,23 @@ export default function Events() {
           showVignette={showVignette}
           onVignetteComplete={() => setShowVignette(false)}
         />
+
+        {/* Re-analyze Half Dialog */}
+        {reanalyzeHalf && currentMatchId && selectedMatch && (
+          <ReanalyzeHalfDialog
+            isOpen={!!reanalyzeHalf}
+            onClose={() => setReanalyzeHalf(null)}
+            matchId={currentMatchId}
+            half={reanalyzeHalf}
+            homeTeamId={selectedMatch.home_team_id || ''}
+            awayTeamId={selectedMatch.away_team_id || ''}
+            competition={selectedMatch.competition || undefined}
+            onComplete={() => {
+              refetchEvents();
+              queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
+            }}
+          />
+        )}
       </div>
     </AppLayout>
   );
