@@ -340,6 +340,12 @@ export default function Events() {
 
   // Handle event click - open video
   const handleEventClick = (event: any) => {
+    // Check if videos are loaded
+    if (!matchVideos || matchVideos.length === 0) {
+      toast.error('Carregando vídeos... Tente novamente.');
+      return;
+    }
+    
     const eventVideo = getVideoForEvent(event);
     
     if (!eventVideo && !event.clip_url) {
@@ -356,8 +362,16 @@ export default function Events() {
       return;
     }
     
+    console.log('Opening video for event:', {
+      eventMinute: event.minute,
+      videoSecond: event.metadata?.videoSecond,
+      video: eventVideo?.file_url,
+      videoStart: eventVideo?.start_minute,
+      videoEnd: eventVideo?.end_minute
+    });
+    
     if (eventVideo || event.clip_url) {
-      setShowVignette(true);
+      setShowVignette(false); // Skip vignette, go directly to video
       setPlayingEvent({ ...event, _video: eventVideo });
     }
   };
