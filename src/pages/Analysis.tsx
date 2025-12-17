@@ -1,12 +1,13 @@
 import { useState, useRef } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FootballField } from '@/components/tactical/FootballField';
 import { AnimatedTacticalPlay } from '@/components/tactical/AnimatedTacticalPlay';
 import { Heatmap3D } from '@/components/tactical/Heatmap3D';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import { 
   Select, 
   SelectContent, 
@@ -26,9 +27,14 @@ import {
   Loader2,
   Video,
   Play,
-  Image
+  Image,
+  FileText,
+  Volume2,
+  Star,
+  Clock,
+  User
 } from 'lucide-react';
-import { useMatchAnalysis, useMatchEvents } from '@/hooks/useMatchDetails';
+import { useMatchAnalysis, useMatchEvents, ExtendedTacticalAnalysis } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
 import { Link } from 'react-router-dom';
@@ -66,7 +72,23 @@ export default function Analysis() {
     enabled: !!currentMatchId
   });
 
-  const tacticalAnalysis = analysis?.tacticalAnalysis;
+  // Fetch generated audio for the match
+  const { data: generatedAudio } = useQuery({
+    queryKey: ['generated-audio', currentMatchId],
+    queryFn: async () => {
+      if (!currentMatchId) return [];
+      const { data, error } = await supabase
+        .from('generated_audio')
+        .select('*')
+        .eq('match_id', currentMatchId)
+        .order('created_at', { ascending: false });
+      if (error) return [];
+      return data || [];
+    },
+    enabled: !!currentMatchId
+  });
+
+  const tacticalAnalysis = analysis?.tacticalAnalysis as ExtendedTacticalAnalysis | null;
 
   // Get important events (goals, shots, key moments, tactical events)
   const importantEvents = events.filter(e => 
@@ -433,16 +455,188 @@ export default function Analysis() {
               </CardContent>
             </Card>
 
+            {/* Match Summary Section */}
+            {(tacticalAnalysis?.matchSummary || tacticalAnalysis?.tacticalOverview) && (
+              <Card variant="glow">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <FileText className="h-5 w-5 text-primary" />
+                    Resumo da Partida
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  {/* Complete Analysis */}
+                  {tacticalAnalysis?.matchSummary && (
+                    <div className="space-y-2">
+                      <h4 className="font-semibold text-sm text-muted-foreground flex items-center gap-2">
+                        <BarChart3 className="h-4 w-4" />
+                        Análise Completa
+                      </h4>
+                      <p className="text-sm leading-relaxed bg-muted/30 p-4 rounded-lg">
+                        {tacticalAnalysis.matchSummary}
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Tactical Analysis */}
+                  {tacticalAnalysis?.tacticalOverview && (
+                    <div className="space-y-2">
+                      <h4 className="font-semibold text-sm text-muted-foreground flex items-center gap-2">
+                        <Target className="h-4 w-4" />
+                        Análise Tática
+                      </h4>
+                      <p className="text-sm leading-relaxed bg-muted/30 p-4 rounded-lg">
+                        {tacticalAnalysis.tacticalOverview}
+                      </p>
+                    </div>
+                  )}
+                  
+                  {/* Standout Players */}
+                  {tacticalAnalysis?.standoutPlayers && tacticalAnalysis.standoutPlayers.length > 0 && (
+                    <div className="space-y-2">
+                      <h4 className="font-semibold text-sm text-muted-foreground flex items-center gap-2">
+                        <Star className="h-4 w-4" />
+                        Jogadores em Destaque
+                      </h4>
+                      <div className="flex flex-wrap gap-2">
+                        {tacticalAnalysis.standoutPlayers.map((player, i) => (
+                          <Badge key={i} variant="arena" className="gap-1">
+                            <User className="h-3 w-3" />
+                            {player}
+                          </Badge>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Audio Player Section */}
+            {generatedAudio && generatedAudio.length > 0 && (
+              <Card variant="glass">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Volume2 className="h-5 w-5 text-primary" />
+                    Narração da Partida
+                  </CardTitle>
+                  <CardDescription>
+                    Áudios gerados para esta partida
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-4">
+                    {generatedAudio.map((audio) => (
+                      <div key={audio.id} className="flex items-center gap-4 p-4 rounded-lg bg-muted/30 border border-border/50">
+                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 shrink-0">
+                          <Volume2 className="h-6 w-6 text-primary" />
+                        </div>
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium capitalize">
+                            {audio.audio_type === 'narration' ? 'Narração' : 
+                             audio.audio_type === 'podcast' ? 'Podcast' : 
+                             audio.audio_type === 'summary' ? 'Resumo' : audio.audio_type}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {audio.voice ? `Voz: ${audio.voice}` : 'Locução Padrão'}
+                            {audio.duration_seconds && ` • ${Math.floor(audio.duration_seconds / 60)}:${String(audio.duration_seconds % 60).padStart(2, '0')}`}
+                          </p>
+                        </div>
+                        <audio 
+                          controls 
+                          src={audio.audio_url || ''} 
+                          className="h-10 max-w-[200px]"
+                        />
+                        <Button variant="outline" size="icon" asChild>
+                          <a href={audio.audio_url || ''} download target="_blank" rel="noopener noreferrer">
+                            <Download className="h-4 w-4" />
+                          </a>
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Tactical Patterns */}
             <Tabs defaultValue="insights" className="space-y-6">
               <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="insights">Insights</TabsTrigger>
+                <TabsTrigger value="insights">
+                  Insights {tacticalAnalysis?.keyMoments?.length ? `(${tacticalAnalysis.keyMoments.length})` : ''}
+                </TabsTrigger>
                 <TabsTrigger value="patterns">Padrões Táticos</TabsTrigger>
                 <TabsTrigger value="events">Eventos ({events.length})</TabsTrigger>
               </TabsList>
 
               <TabsContent value="insights" className="space-y-4">
-                {tacticalAnalysis?.insights && tacticalAnalysis.insights.length > 0 ? (
+                {tacticalAnalysis?.keyMoments && tacticalAnalysis.keyMoments.length > 0 ? (
+                  <ScrollArea className="h-[500px] pr-4">
+                    <div className="space-y-3">
+                      {tacticalAnalysis.keyMoments.map((moment, index) => {
+                        const typeLabels: Record<string, string> = {
+                          goal: 'Gol',
+                          assist: 'Assistência',
+                          shot: 'Finalização',
+                          save: 'Defesa',
+                          yellowCard: 'Cartão Amarelo',
+                          redCard: 'Cartão Vermelho',
+                          substitution: 'Substituição',
+                          foul: 'Falta',
+                          dribble: 'Drible',
+                          woodwork: 'Na Trave',
+                          offside: 'Impedimento',
+                          freeKick: 'Falta Direta',
+                          corner: 'Escanteio',
+                          penalty: 'Pênalti',
+                          transition: 'Transição',
+                          emotionalMoment: 'Momento Especial'
+                        };
+                        
+                        const typeColors: Record<string, string> = {
+                          goal: 'bg-green-500/20 text-green-400 border-green-500/30',
+                          assist: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
+                          yellowCard: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+                          redCard: 'bg-red-500/20 text-red-400 border-red-500/30',
+                          save: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
+                          penalty: 'bg-orange-500/20 text-orange-400 border-orange-500/30'
+                        };
+                        
+                        return (
+                          <Card key={index} variant="glass" className="hover:border-primary/50 transition-colors">
+                            <CardContent className="py-4">
+                              <div className="flex items-start gap-4">
+                                <Badge 
+                                  variant="outline" 
+                                  className={`shrink-0 font-mono ${typeColors[moment.type] || 'bg-muted'}`}
+                                >
+                                  <Clock className="h-3 w-3 mr-1" />
+                                  {moment.timestamp}
+                                </Badge>
+                                <div className="flex-1 min-w-0">
+                                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                    {moment.player && (
+                                      <span className="font-semibold text-foreground">{moment.player}</span>
+                                    )}
+                                    <Badge 
+                                      variant="secondary" 
+                                      className={`text-xs ${typeColors[moment.type] || ''}`}
+                                    >
+                                      {typeLabels[moment.type] || moment.type}
+                                    </Badge>
+                                  </div>
+                                  <p className="text-sm text-muted-foreground leading-relaxed">
+                                    {moment.description}
+                                  </p>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
+                        );
+                      })}
+                    </div>
+                  </ScrollArea>
+                ) : tacticalAnalysis?.insights && tacticalAnalysis.insights.length > 0 ? (
                   <div className="grid gap-4 md:grid-cols-2">
                     {tacticalAnalysis.insights.map((insight, index) => (
                       <Card key={index} variant="glow">
