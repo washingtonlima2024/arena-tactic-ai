@@ -46,13 +46,14 @@ serve(async (req) => {
   }
 
   try {
-    const { matchId, videoUrl, homeTeamId, awayTeamId, competition, startMinute, endMinute, durationSeconds, transcription: providedTranscription } = await req.json();
+    const { matchId, videoUrl, homeTeamId, awayTeamId, competition, startMinute, endMinute, durationSeconds, transcription: providedTranscription, audioUrl } = await req.json();
     
     const videoDurationSeconds = durationSeconds || ((endMinute || 90) - (startMinute || 0)) * 60;
     
     console.log("=== INICIANDO PIPELINE DE ANÁLISE EM 7 ETAPAS ===");
     console.log("Match ID:", matchId);
     console.log("Video URL:", videoUrl);
+    console.log("Audio URL (pré-extraído):", audioUrl || "não fornecido");
     console.log("Duração do vídeo:", videoDurationSeconds, "segundos");
     console.log("Tempo de jogo: minutos", startMinute, "a", endMinute);
 
@@ -113,7 +114,8 @@ serve(async (req) => {
       endMinute ?? 90,
       videoDurationSeconds,
       isDirectFile,
-      providedTranscription
+      providedTranscription,
+      audioUrl
     ));
 
     return new Response(JSON.stringify({ 
@@ -148,7 +150,8 @@ async function runSevenStagePipeline(
   endMinute: number,
   videoDurationSeconds: number,
   isDirectFile: boolean,
-  providedTranscription?: string
+  providedTranscription?: string,
+  audioUrl?: string
 ) {
   const steps: AnalysisStep[] = ANALYSIS_STEPS.map(name => ({
     name,
@@ -157,7 +160,7 @@ async function runSevenStagePipeline(
   }));
 
   // Intermediate products (will be persisted)
-  let audioUrl: string | null = null;
+  let savedAudioUrl: string | null = audioUrl || null; // Use provided audioUrl if available
   let fullTranscription = '';
   let srtContent = '';
   let transcriptionSegments: { start: number; end: number; text: string }[] = [];
@@ -188,14 +191,16 @@ async function runSevenStagePipeline(
     // ETAPA 1: EXTRAÇÃO DE ÁUDIO
     // ===========================================
     steps[0].status = 'processing';
-    await updateJobProgress(supabase, jobId, 5, steps[0].name, steps, { audioUrl: null });
+    await updateJobProgress(supabase, jobId, 5, steps[0].name, steps, { audioUrl: savedAudioUrl });
     console.log("\n=== ETAPA 1: EXTRAÇÃO DE ÁUDIO ===");
 
-    if (isDirectFile) {
+    if (savedAudioUrl) {
+      console.log("Usando áudio pré-extraído:", savedAudioUrl);
+    } else if (isDirectFile) {
       try {
         // Save audio as narration in storage
-        audioUrl = await extractAndSaveAudio(supabase, matchId, videoUrl);
-        console.log("Áudio extraído e salvo:", audioUrl);
+        savedAudioUrl = await extractAndSaveAudio(supabase, matchId, videoUrl);
+        console.log("Áudio extraído e salvo:", savedAudioUrl);
       } catch (audioError) {
         console.log("Extração de áudio falhou, continuando sem áudio persistido");
       }
@@ -203,7 +208,7 @@ async function runSevenStagePipeline(
 
     steps[0].status = 'completed';
     steps[0].progress = 100;
-    await updateJobProgress(supabase, jobId, 14, steps[0].name, steps, { audioUrl });
+    await updateJobProgress(supabase, jobId, 14, steps[0].name, steps, { audioUrl: savedAudioUrl });
 
     // ===========================================
     // ETAPA 2: TRANSCRIÇÃO COMPLETA
@@ -218,9 +223,17 @@ async function runSevenStagePipeline(
       fullTranscription = providedTranscription;
       srtContent = providedTranscription;
       transcriptionSegments = parseSrtContent(providedTranscription, videoDurationSeconds);
+    } else if (savedAudioUrl && savedAudioUrl.includes('.mp3')) {
+      // Transcribe pre-extracted audio (smaller file, avoids memory limit)
+      console.log("Transcrevendo áudio pré-extraído com Whisper API...");
+      const whisperResult = await transcribeWithWhisper(savedAudioUrl);
+      fullTranscription = whisperResult.text;
+      transcriptionSegments = whisperResult.segments;
+      srtContent = segmentsToSrt(transcriptionSegments);
+      console.log("Transcrição do áudio completa:", fullTranscription.length, "caracteres");
     } else if (isDirectFile) {
-      // Transcribe with Whisper
-      console.log("Transcrevendo com Whisper API...");
+      // Transcribe with Whisper from video (may fail for large videos)
+      console.log("Transcrevendo vídeo com Whisper API...");
       const whisperResult = await transcribeWithWhisper(videoUrl);
       fullTranscription = whisperResult.text;
       transcriptionSegments = whisperResult.segments;
@@ -378,7 +391,7 @@ async function runSevenStagePipeline(
           steps,
           pipelineVersion: '7-stages-v2',
           // All intermediate products
-          audioUrl,
+          audioUrl: savedAudioUrl,
           fullTranscription,
           srtContent,
           segmentsCount: transcriptionSegments.length,
