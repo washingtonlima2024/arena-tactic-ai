@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,12 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Switch } from '@/components/ui/switch';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
 import { 
   Loader2, 
   RefreshCw, 
@@ -22,7 +28,10 @@ import {
   X,
   File,
   Mic,
-  Wand2
+  Wand2,
+  FileCheck,
+  ChevronDown,
+  Database
 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
@@ -32,6 +41,7 @@ import { useStartAnalysis } from '@/hooks/useAnalysisJob';
 interface UploadedFile {
   name: string;
   content: string;
+  isOriginal?: boolean;
 }
 
 interface ReanalyzeHalfDialogProps {
@@ -63,19 +73,76 @@ export function ReanalyzeHalfDialog({
   const [isDragging, setIsDragging] = useState(false);
   const [isExtracting, setIsExtracting] = useState(false);
   const [extractProgress, setExtractProgress] = useState(0);
+  
+  // Estado para transcrição original
+  const [originalTranscription, setOriginalTranscription] = useState<string | null>(null);
+  const [useOriginal, setUseOriginal] = useState(true);
+  const [isLoadingOriginal, setIsLoadingOriginal] = useState(false);
 
   const halfLabel = half === 'first' ? '1º Tempo' : '2º Tempo';
   const minuteRange = half === 'first' ? '0-44' : '45-90';
+
+  // Carregar transcrição original ao abrir o dialog
+  useEffect(() => {
+    if (isOpen && matchId) {
+      loadExistingTranscription();
+    }
+  }, [isOpen, matchId]);
+
+  const loadExistingTranscription = async () => {
+    try {
+      setIsLoadingOriginal(true);
+      
+      const { data } = await supabase
+        .from('analysis_jobs')
+        .select('result')
+        .eq('match_id', matchId)
+        .eq('status', 'completed')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const result = data?.result as Record<string, any> | null;
+      
+      if (result?.fullTranscription) {
+        const transcriptionText = result.fullTranscription as string;
+        setOriginalTranscription(transcriptionText);
+        
+        // Adiciona automaticamente como arquivo original
+        setUploadedFiles(prev => {
+          const withoutOriginal = prev.filter(f => !f.isOriginal);
+          return [
+            { 
+              name: '📌 transcrição-original.srt', 
+              content: transcriptionText, 
+              isOriginal: true 
+            },
+            ...withoutOriginal
+          ];
+        });
+        
+        toast.success('Transcrição original carregada automaticamente');
+      } else {
+        setOriginalTranscription(null);
+      }
+    } catch (error) {
+      console.error('Error loading existing transcription:', error);
+    } finally {
+      setIsLoadingOriginal(false);
+    }
+  };
 
   const handleFileRead = useCallback((file: File) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       const content = e.target?.result as string;
       setUploadedFiles(prev => {
+        // Não permitir sobrescrever arquivos existentes
         if (prev.some(f => f.name === file.name)) {
+          toast.info(`Arquivo "${file.name}" já está na lista`);
           return prev;
         }
-        return [...prev, { name: file.name, content }];
+        return [...prev, { name: file.name, content, isOriginal: false }];
       });
     };
     reader.readAsText(file);
@@ -99,6 +166,10 @@ export function ReanalyzeHalfDialog({
   }, [handleFileRead]);
 
   const removeFile = (fileName: string) => {
+    const file = uploadedFiles.find(f => f.name === fileName);
+    if (file?.isOriginal) {
+      setUseOriginal(false);
+    }
     setUploadedFiles(prev => prev.filter(f => f.name !== fileName));
   };
 
@@ -136,17 +207,23 @@ export function ReanalyzeHalfDialog({
       if (error) throw error;
 
       if (data?.transcribedText) {
-        setUploadedFiles(prev => [
-          ...prev.filter(f => f.name !== 'whisper-transcription.txt'),
-          { name: 'whisper-transcription.txt', content: data.transcribedText }
-        ]);
+        setUploadedFiles(prev => {
+          const filtered = prev.filter(f => 
+            f.name !== '🎙️ whisper-transcription.txt' && 
+            f.name !== '🎙️ whisper-timestamps.srt'
+          );
+          
+          const newFiles: UploadedFile[] = [
+            ...filtered,
+            { name: '🎙️ whisper-transcription.txt', content: data.transcribedText, isOriginal: false }
+          ];
 
-        if (data?.srtContent) {
-          setUploadedFiles(prev => [
-            ...prev.filter(f => f.name !== 'whisper-timestamps.srt'),
-            { name: 'whisper-timestamps.srt', content: data.srtContent }
-          ]);
-        }
+          if (data?.srtContent) {
+            newFiles.push({ name: '🎙️ whisper-timestamps.srt', content: data.srtContent, isOriginal: false });
+          }
+          
+          return newFiles;
+        });
 
         toast.success(`Transcrição extraída: ${data.method === 'whisper' ? 'Whisper API' : 'Baseado em eventos'}`);
       } else {
@@ -165,12 +242,23 @@ export function ReanalyzeHalfDialog({
 
   const getCombinedTranscription = () => {
     const parts: string[] = [];
-    uploadedFiles.forEach(file => {
+    
+    // Transcrição original primeiro (se ativada)
+    const originalFile = uploadedFiles.find(f => f.isOriginal);
+    if (useOriginal && originalFile) {
+      parts.push(`--- TRANSCRIÇÃO ORIGINAL (Análise Anterior) ---\n${originalFile.content}`);
+    }
+    
+    // Arquivos importados adicionais
+    uploadedFiles.filter(f => !f.isOriginal).forEach(file => {
       parts.push(`--- ${file.name} ---\n${file.content}`);
     });
+    
+    // Texto manual
     if (transcription.trim()) {
-      parts.push(`--- Texto Manual ---\n${transcription}`);
+      parts.push(`--- TEXTO ADICIONAL ---\n${transcription}`);
     }
+    
     return parts.join('\n\n');
   };
 
@@ -264,6 +352,7 @@ export function ReanalyzeHalfDialog({
       
       setTranscription('');
       setUploadedFiles([]);
+      setOriginalTranscription(null);
 
     } catch (error) {
       console.error('Reanalyze error:', error);
@@ -272,6 +361,11 @@ export function ReanalyzeHalfDialog({
       setIsDeleting(false);
     }
   };
+
+  // Contadores
+  const originalFileCount = uploadedFiles.filter(f => f.isOriginal).length;
+  const additionalFileCount = uploadedFiles.filter(f => !f.isOriginal).length;
+  const totalSources = (useOriginal && originalFileCount > 0 ? 1 : 0) + additionalFileCount + (transcription.trim() ? 1 : 0);
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -299,6 +393,60 @@ export function ReanalyzeHalfDialog({
             </div>
           </div>
 
+          {/* Seção de Transcrição Original */}
+          {isLoadingOriginal ? (
+            <div className="rounded-lg border-2 border-muted p-4 flex items-center justify-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              <span className="text-sm text-muted-foreground">Carregando transcrição original...</span>
+            </div>
+          ) : originalTranscription ? (
+            <div className="rounded-lg border-2 border-primary/50 bg-primary/5 p-4 space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="flex items-center gap-2 font-semibold text-primary">
+                  <Database className="h-4 w-4" />
+                  Transcrição Original Disponível
+                </Label>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-muted-foreground">Usar</span>
+                  <Switch 
+                    checked={useOriginal} 
+                    onCheckedChange={(checked) => {
+                      setUseOriginal(checked);
+                      if (checked && !uploadedFiles.some(f => f.isOriginal)) {
+                        setUploadedFiles(prev => [
+                          { name: '📌 transcrição-original.srt', content: originalTranscription, isOriginal: true },
+                          ...prev
+                        ]);
+                      }
+                    }}
+                  />
+                </div>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {(originalTranscription.length / 1024).toFixed(1)} KB • Extraída na análise inicial
+              </p>
+              <Collapsible>
+                <CollapsibleTrigger className="flex items-center gap-1 text-xs text-primary hover:underline">
+                  <ChevronDown className="h-3 w-3" />
+                  Pré-visualizar conteúdo
+                </CollapsibleTrigger>
+                <CollapsibleContent>
+                  <pre className="mt-2 max-h-32 overflow-auto text-xs bg-background/50 p-2 rounded border whitespace-pre-wrap">
+                    {originalTranscription.slice(0, 2000)}
+                    {originalTranscription.length > 2000 && '...'}
+                  </pre>
+                </CollapsibleContent>
+              </Collapsible>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-muted bg-muted/30 p-3">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <FileCheck className="h-4 w-4" />
+                <span>Nenhuma transcrição original encontrada para esta partida</span>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-2">
             <Label className="flex items-center gap-2">
               <Wand2 className="h-4 w-4" />
@@ -318,20 +466,25 @@ export function ReanalyzeHalfDialog({
               ) : (
                 <>
                   <Mic className="mr-2 h-4 w-4" />
-                  Extrair Transcrição do Vídeo (Whisper)
+                  Extrair Nova Transcrição (Whisper)
                 </>
               )}
             </Button>
             {isExtracting && <Progress value={extractProgress} className="h-2" />}
             <p className="text-xs text-muted-foreground">
-              Usa OpenAI Whisper para transcrever automaticamente o áudio do vídeo
+              Gera nova transcrição do áudio - será adicionada à lista de arquivos
             </p>
           </div>
 
           <div className="space-y-2">
-            <Label className="flex items-center gap-2">
-              <Upload className="h-4 w-4" />
-              Arquivos de Transcrição (opcional)
+            <Label className="flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Upload className="h-4 w-4" />
+                Arquivos Adicionais
+              </span>
+              <Badge variant="outline" className="font-normal">
+                {uploadedFiles.length} arquivo(s)
+              </Badge>
             </Label>
             <div
               onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
@@ -349,27 +502,49 @@ export function ReanalyzeHalfDialog({
                 className="hidden"
               />
               <Upload className="h-6 w-6 mx-auto mb-2 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">Arraste arquivos ou clique para selecionar</p>
-              <p className="text-xs text-muted-foreground mt-1">SRT, VTT, TXT (múltiplos arquivos)</p>
+              <p className="text-sm text-muted-foreground">Arraste arquivos ou clique para adicionar</p>
+              <p className="text-xs text-muted-foreground mt-1">SRT, VTT, TXT • Múltiplos arquivos permitidos</p>
             </div>
           </div>
 
           {uploadedFiles.length > 0 && (
             <div className="space-y-2">
-              <Label className="text-xs text-muted-foreground">
-                {uploadedFiles.length} arquivo(s) carregado(s)
+              <Label className="text-xs text-muted-foreground flex items-center gap-2">
+                <FileText className="h-3 w-3" />
+                Lista de Arquivos ({uploadedFiles.length})
               </Label>
-              <div className="space-y-1 max-h-32 overflow-y-auto">
+              <div className="space-y-1 max-h-40 overflow-y-auto rounded-lg border p-2">
                 {uploadedFiles.map(file => (
-                  <div key={file.name} className="flex items-center justify-between p-2 rounded-md bg-muted/50">
+                  <div 
+                    key={file.name} 
+                    className={`flex items-center justify-between p-2 rounded-md ${
+                      file.isOriginal 
+                        ? 'bg-primary/10 border border-primary/30' 
+                        : 'bg-muted/50 hover:bg-muted'
+                    }`}
+                  >
                     <div className="flex items-center gap-2 text-sm min-w-0">
-                      <File className="h-4 w-4 text-primary shrink-0" />
+                      {file.isOriginal ? (
+                        <FileCheck className="h-4 w-4 text-primary shrink-0" />
+                      ) : (
+                        <File className="h-4 w-4 text-muted-foreground shrink-0" />
+                      )}
                       <span className="truncate">{file.name}</span>
+                      {file.isOriginal && (
+                        <Badge variant="default" className="text-xs shrink-0 bg-primary">
+                          Original
+                        </Badge>
+                      )}
                       <Badge variant="outline" className="text-xs shrink-0">
                         {(file.content.length / 1024).toFixed(1)} KB
                       </Badge>
                     </div>
-                    <Button variant="ghost" size="icon" className="h-6 w-6 shrink-0" onClick={() => removeFile(file.name)}>
+                    <Button 
+                      variant="ghost" 
+                      size="icon" 
+                      className="h-6 w-6 shrink-0" 
+                      onClick={() => removeFile(file.name)}
+                    >
                       <X className="h-3 w-3" />
                     </Button>
                   </div>
@@ -395,16 +570,16 @@ export function ReanalyzeHalfDialog({
           <div className="flex flex-wrap gap-2">
             <Badge variant="outline">
               <Trash2 className="h-3 w-3 mr-1" />
-              Deletar eventos: {minuteRange}'
+              Deletar: {minuteRange}'
             </Badge>
-            <Badge variant="outline">
-              <RefreshCw className="h-3 w-3 mr-1" />
-              Nova análise
+            <Badge variant="secondary">
+              <FileText className="h-3 w-3 mr-1" />
+              {totalSources} fonte(s) de texto
             </Badge>
-            {(uploadedFiles.length > 0 || transcription) && (
-              <Badge variant="secondary">
-                <FileText className="h-3 w-3 mr-1" />
-                {uploadedFiles.length} arquivo(s)
+            {useOriginal && originalTranscription && (
+              <Badge className="bg-primary">
+                <Database className="h-3 w-3 mr-1" />
+                Usando original
               </Badge>
             )}
           </div>
