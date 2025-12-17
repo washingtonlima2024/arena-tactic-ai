@@ -336,6 +336,7 @@ async function processMultiModalAnalysis(
 
         case 'Identificação de eventos':
           console.log("Step 7: Generating events with multi-modal context...");
+          console.log("Game time offset (startMinute):", startMinute);
           await generateMultiModalEvents(
             supabase, 
             matchId, 
@@ -351,7 +352,8 @@ async function processMultiModalAnalysis(
             videoStartSecond,
             videoEndSecond,
             videoDurationSeconds,
-            !!videoData
+            !!videoData,
+            startMinute // Pass game time offset
           );
           await simulateProgress(supabase, jobId, steps, i, overallProgress);
           break;
@@ -772,7 +774,8 @@ async function generateMultiModalEvents(
   videoStartSecond: number,
   videoEndSecond: number,
   videoDurationSeconds: number,
-  isRealAnalysis: boolean
+  isRealAnalysis: boolean,
+  gameStartMinute: number = 0 // Game time offset (0 for 1st half, 45 for 2nd half)
 ): Promise<boolean> {
   const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
   
@@ -986,8 +989,12 @@ Retorne APENAS JSON válido sem markdown.`
     for (const event of validEvents) {
       const eventSecond = event.videoSecond ?? 0;
       const eventMs = eventSecond * 1000;
-      const displayMinute = Math.floor(eventSecond / 60);
+      // Calculate game minute by adding gameStartMinute (for 2nd half videos, this adds 45)
+      const videoMinute = Math.floor(eventSecond / 60);
+      const displayMinute = videoMinute + gameStartMinute; // Add game time offset
       const displaySecond = Math.floor(eventSecond % 60);
+      
+      console.log(`Event mapping: videoSecond=${eventSecond} → gameMinute=${displayMinute} (gameStartMinute=${gameStartMinute})`);
       
       // Track goals for score update
       if (event.type === 'goal') {
