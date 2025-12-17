@@ -42,7 +42,6 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
 import { useMatchAnalysis } from '@/hooks/useMatchAnalysis';
-import { useStartAnalysis } from '@/hooks/useAnalysisJob';
 import { TranscriptionAnalysisDialog } from '@/components/events/TranscriptionAnalysisDialog';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -167,7 +166,6 @@ export default function Events() {
   const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const { analyzeWithTranscription, isAnalyzing: isRefining } = useMatchAnalysis();
-  const { startAnalysis, isLoading: isReanalyzing } = useStartAnalysis();
   
   // Centralized match selection
   const { currentMatchId, selectedMatch, matches, isLoading: matchesLoading, setSelectedMatch } = useMatchSelection();
@@ -188,49 +186,11 @@ export default function Events() {
     toast.info('Use o diálogo "Analisar Transcrição" para refinar eventos');
   };
 
-  // Handle re-analyze match
+  // Handle re-analyze match - now requires transcription
   const handleReanalyze = async () => {
     if (!currentMatchId || !selectedMatch) return;
     
-    // Get video for this match
-    const { data: videos } = await supabase
-      .from('videos')
-      .select('*')
-      .eq('match_id', currentMatchId)
-      .order('start_minute', { ascending: true });
-    
-    if (!videos || videos.length === 0) {
-      toast.error('Nenhum vídeo encontrado para esta partida. Importe um vídeo primeiro.');
-      return;
-    }
-
-    // Delete old events first
-    await supabase
-      .from('match_events')
-      .delete()
-      .eq('match_id', currentMatchId);
-
-    toast.info('Re-análise iniciada. Isso pode levar alguns minutos...');
-
-    // Start analysis for each video segment
-    for (const video of videos) {
-      await startAnalysis({
-        matchId: currentMatchId,
-        videoUrl: video.file_url,
-        homeTeamId: selectedMatch.home_team_id || '',
-        awayTeamId: selectedMatch.away_team_id || '',
-        competition: selectedMatch.competition || undefined,
-        startMinute: video.start_minute || 0,
-        endMinute: video.end_minute || 90,
-        durationSeconds: video.duration_seconds || undefined,
-      });
-    }
-
-    // Refresh events after a delay
-    setTimeout(() => {
-      refetchEvents();
-      queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
-    }, 5000);
+    toast.info('Use o diálogo "Analisar Transcrição" para re-analisar a partida com uma transcrição.');
   };
 
   // Fetch match videos (may have multiple segments)

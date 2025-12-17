@@ -544,21 +544,19 @@ export default function VideoUpload() {
   const handleStartAnalysis = async () => {
     try {
       let matchId: string;
-      let homeTeamId: string | null = null;
-      let awayTeamId: string | null = null;
-      let competition: string | null = null;
+      let homeTeamName: string = '';
+      let awayTeamName: string = '';
 
       // If reimporting to existing match, use that match
       if (existingMatchId && existingMatch) {
         matchId = existingMatchId;
-        homeTeamId = existingMatch.home_team_id;
-        awayTeamId = existingMatch.away_team_id;
-        competition = existingMatch.competition;
+        homeTeamName = existingMatch.home_team?.name || 'Time Casa';
+        awayTeamName = existingMatch.away_team?.name || 'Time Visitante';
         
         console.log('=== REIMPORTAÇÃO PARA PARTIDA EXISTENTE ===');
         console.log('Match ID:', matchId);
-        console.log('Time Casa:', existingMatch.home_team?.name);
-        console.log('Time Visitante:', existingMatch.away_team?.name);
+        console.log('Time Casa:', homeTeamName);
+        console.log('Time Visitante:', awayTeamName);
       } else {
         // VALIDATION: Check teams are different
         if (matchData.homeTeamId && matchData.awayTeamId && matchData.homeTeamId === matchData.awayTeamId) {
@@ -580,13 +578,15 @@ export default function VideoUpload() {
           return;
         }
 
-        // Get team names for confirmation
+        // Get team names
         const homeTeam = teams.find(t => t.id === matchData.homeTeamId);
         const awayTeam = teams.find(t => t.id === matchData.awayTeamId);
+        homeTeamName = homeTeam?.name || 'Time Casa';
+        awayTeamName = awayTeam?.name || 'Time Visitante';
 
-        console.log('=== VALIDAÇÃO DE TIMES ===');
-        console.log('Time Casa:', homeTeam?.name || 'Não encontrado');
-        console.log('Time Visitante:', awayTeam?.name || 'Não encontrado');
+        console.log('=== CRIANDO NOVA PARTIDA ===');
+        console.log('Time Casa:', homeTeamName);
+        console.log('Time Visitante:', awayTeamName);
 
         // Create match
         const matchDateTime = matchData.matchDate 
@@ -602,9 +602,6 @@ export default function VideoUpload() {
         });
         
         matchId = match.id;
-        homeTeamId = matchData.homeTeamId;
-        awayTeamId = matchData.awayTeamId;
-        competition = matchData.competition || null;
       }
 
       // Register all video segments
@@ -623,7 +620,19 @@ export default function VideoUpload() {
         }
       }
 
-      // Group segments by half
+      // Collect transcriptions
+      let firstHalfTranscription = '';
+      let secondHalfTranscription = '';
+
+      // Get transcription from SRT files or segments
+      if (firstHalfSrt) {
+        firstHalfTranscription = await readSrtFile(firstHalfSrt);
+      }
+      if (secondHalfSrt) {
+        secondHalfTranscription = await readSrtFile(secondHalfSrt);
+      }
+
+      // Also check segment transcriptions
       const firstHalfSegments = segments.filter(s => 
         (s.half === 'first' || s.videoType === 'first_half') && 
         (s.status === 'complete' || s.status === 'ready')
@@ -633,129 +642,92 @@ export default function VideoUpload() {
         (s.status === 'complete' || s.status === 'ready')
       );
 
-      console.log('=== ANÁLISE SEPARADA POR TEMPO ===');
-      console.log('1º Tempo:', firstHalfSegments.length, 'segmentos');
-      console.log('2º Tempo:', secondHalfSegments.length, 'segmentos');
-
-      const jobs: { first?: string; second?: string } = {};
-
-      // Analyze first half
-      if (firstHalfSegments.length > 0) {
-        const segment = firstHalfSegments[0];
-        let durationSeconds = segment.durationSeconds;
-        if (!durationSeconds && segment.endMinute) {
-          durationSeconds = (segment.endMinute - segment.startMinute) * 60;
-        }
-
-        // Use SRT transcription if available
-        let transcription = segment.transcription;
-        if (!transcription && firstHalfSrt) {
-          transcription = await readSrtFile(firstHalfSrt);
-        }
-
-        console.log('Iniciando análise do 1º Tempo...');
-        console.log('  URL:', segment.url);
-        console.log('  Duração:', durationSeconds, 'segundos');
-        console.log('  Minutos do jogo:', segment.startMinute, '-', segment.endMinute);
-        console.log('  Transcrição:', transcription ? `${transcription.length} chars` : 'Nenhuma');
-
-        const result = await startAnalysis({
-          matchId,
-          videoUrl: segment.url || '',
-          homeTeamId: homeTeamId || undefined,
-          awayTeamId: awayTeamId || undefined,
-          competition: competition || undefined,
-          startMinute: segment.startMinute ?? 0,
-          endMinute: segment.endMinute ?? 45,
-          durationSeconds: durationSeconds || 0,
-          transcription,
-        });
-        
-        jobs.first = result.jobId;
-        setCurrentJobId(result.jobId);
-        
-        toast({
-          title: "Análise do 1º Tempo iniciada",
-          description: `Job ID: ${result.jobId}`,
-        });
+      if (!firstHalfTranscription && firstHalfSegments[0]?.transcription) {
+        firstHalfTranscription = firstHalfSegments[0].transcription;
+      }
+      if (!secondHalfTranscription && secondHalfSegments[0]?.transcription) {
+        secondHalfTranscription = secondHalfSegments[0].transcription;
       }
 
-      // Analyze second half (start after a delay to not overload)
-      if (secondHalfSegments.length > 0) {
-        const segment = secondHalfSegments[0];
-        let durationSeconds = segment.durationSeconds;
-        if (!durationSeconds && segment.endMinute) {
-          durationSeconds = (segment.endMinute - segment.startMinute) * 60;
-        }
+      console.log('=== TRANSCRIÇÕES ===');
+      console.log('1º Tempo:', firstHalfTranscription ? `${firstHalfTranscription.length} chars` : 'Nenhuma');
+      console.log('2º Tempo:', secondHalfTranscription ? `${secondHalfTranscription.length} chars` : 'Nenhuma');
 
-        // Use SRT transcription if available
-        let transcription = segment.transcription;
-        if (!transcription && secondHalfSrt) {
-          transcription = await readSrtFile(secondHalfSrt);
-        }
-
-        console.log('Iniciando análise do 2º Tempo...');
-        console.log('  URL:', segment.url);
-        console.log('  Duração:', durationSeconds, 'segundos');
-        console.log('  Minutos do jogo:', segment.startMinute, '-', segment.endMinute);
-        console.log('  Transcrição:', transcription ? `${transcription.length} chars` : 'Nenhuma');
-
-        // Start second half analysis
-        const result = await startAnalysis({
-          matchId,
-          videoUrl: segment.url || '',
-          homeTeamId: homeTeamId || undefined,
-          awayTeamId: awayTeamId || undefined,
-          competition: competition || undefined,
-          startMinute: segment.startMinute ?? 45,
-          endMinute: segment.endMinute ?? 90,
-          durationSeconds: durationSeconds || 0,
-          transcription,
-        });
-        
-        jobs.second = result.jobId;
-        
-        // If no first half, set this as current
-        if (!jobs.first) {
-          setCurrentJobId(result.jobId);
-        }
-        
-        toast({
-          title: "Análise do 2º Tempo iniciada",
-          description: `Job ID: ${result.jobId}`,
-        });
-      }
-
-      setAnalysisJobs(jobs);
-
-      // If no segments by half, fallback to any segment
-      if (!jobs.first && !jobs.second) {
-        const anySegment = segments.find(s => s.status === 'complete' || s.status === 'ready');
-        if (anySegment) {
-          let durationSeconds = anySegment.durationSeconds;
-          if (!durationSeconds && anySegment.endMinute) {
-            durationSeconds = (anySegment.endMinute - anySegment.startMinute) * 60;
-          }
-
-          const result = await startAnalysis({
-            matchId,
-            videoUrl: anySegment.url || '',
-            homeTeamId: homeTeamId || undefined,
-            awayTeamId: awayTeamId || undefined,
-            competition: competition || undefined,
-            startMinute: anySegment.startMinute ?? 0,
-            endMinute: anySegment.endMinute ?? 90,
-            durationSeconds: durationSeconds || 0,
-            transcription: anySegment.transcription,
+      // Check if we have any transcription
+      const hasTranscription = firstHalfTranscription || secondHalfTranscription;
+      
+      if (!hasTranscription) {
+        // Check if we have embeds (which require SRT)
+        const hasEmbeds = segments.some(s => s.isLink);
+        if (hasEmbeds) {
+          toast({
+            title: "Transcrição obrigatória",
+            description: "Vídeos embed (YouTube, etc.) requerem arquivo de transcrição SRT/VTT.",
+            variant: "destructive"
           });
-
-          setCurrentJobId(result.jobId);
+          return;
         }
+        
+        toast({
+          title: "Transcrição necessária",
+          description: "Por favor, adicione um arquivo de transcrição (SRT/VTT) para análise.",
+          variant: "destructive"
+        });
+        return;
       }
+
+      // Analyze first half if has transcription
+      if (firstHalfTranscription) {
+        console.log('Iniciando análise do 1º Tempo...');
+        
+        const result = await startAnalysis({
+          matchId,
+          transcription: firstHalfTranscription,
+          homeTeam: homeTeamName,
+          awayTeam: awayTeamName,
+          gameStartMinute: 0,
+          gameEndMinute: 45,
+        });
+        
+        toast({
+          title: "1º Tempo analisado",
+          description: `${result.eventsDetected} eventos detectados`,
+        });
+      }
+
+      // Analyze second half if has transcription
+      if (secondHalfTranscription) {
+        console.log('Iniciando análise do 2º Tempo...');
+        
+        const result = await startAnalysis({
+          matchId,
+          transcription: secondHalfTranscription,
+          homeTeam: homeTeamName,
+          awayTeam: awayTeamName,
+          gameStartMinute: 45,
+          gameEndMinute: 90,
+        });
+        
+        toast({
+          title: "2º Tempo analisado",
+          description: `${result.eventsDetected} eventos detectados`,
+        });
+      }
+
+      // Success - redirect to events
+      toast({
+        title: "Análise completa!",
+        description: "Redirecionando para os eventos...",
+      });
+
+      setTimeout(() => {
+        navigate(`/events?match=${matchId}`);
+      }, 1500);
 
     } catch (error: any) {
+      console.error('Erro na análise:', error);
       toast({
-        title: "Erro ao iniciar análise",
+        title: "Erro ao analisar",
         description: error.message,
         variant: "destructive"
       });

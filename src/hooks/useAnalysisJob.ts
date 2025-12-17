@@ -24,13 +24,10 @@ interface DbAnalysisJob {
 
 function mapDbJobToAnalysisJob(dbJob: DbAnalysisJob): AnalysisJob {
   const defaultSteps: AnalysisStep[] = [
-    { name: 'Preparação do vídeo', status: 'pending', progress: 0 },
-    { name: 'Extração de áudio', status: 'pending', progress: 0 },
-    { name: 'Transcrição automática', status: 'pending', progress: 0 },
-    { name: 'Análise visual (Vision AI)', status: 'pending', progress: 0 },
-    { name: 'Identificação de eventos', status: 'pending', progress: 0 },
-    { name: 'Análise tática', status: 'pending', progress: 0 },
-    { name: 'Finalização', status: 'pending', progress: 0 },
+    { name: 'Processando transcrição', status: 'pending', progress: 0 },
+    { name: 'Analisando com IA', status: 'pending', progress: 0 },
+    { name: 'Detectando eventos', status: 'pending', progress: 0 },
+    { name: 'Finalizando', status: 'pending', progress: 0 },
   ];
 
   return {
@@ -101,37 +98,57 @@ export function useStartAnalysis() {
 
   const startAnalysis = async (params: {
     matchId: string;
-    videoUrl: string;
-    videoId?: string; // NOVO: ID do vídeo específico
-    homeTeamId?: string;
-    awayTeamId?: string;
-    competition?: string;
-    startMinute?: number;
-    endMinute?: number;
-    durationSeconds?: number;
-    transcription?: string; // SRT content if provided
-    audioUrl?: string; // Pre-extracted audio URL for large videos
+    transcription: string;
+    homeTeam: string;
+    awayTeam: string;
+    gameStartMinute?: number;
+    gameEndMinute?: number;
   }) => {
     setIsLoading(true);
     
     try {
-      const { data, error } = await supabase.functions.invoke('analyze-video', {
-        body: params,
+      console.log('Starting analysis with new pipeline:', {
+        matchId: params.matchId,
+        homeTeam: params.homeTeam,
+        awayTeam: params.awayTeam,
+        gameStartMinute: params.gameStartMinute,
+        gameEndMinute: params.gameEndMinute,
+        transcriptionLength: params.transcription?.length || 0,
+      });
+
+      const { data, error } = await supabase.functions.invoke('analyze-match', {
+        body: {
+          matchId: params.matchId,
+          transcription: params.transcription,
+          homeTeam: params.homeTeam,
+          awayTeam: params.awayTeam,
+          gameStartMinute: params.gameStartMinute || 0,
+          gameEndMinute: params.gameEndMinute || 90,
+        },
       });
 
       if (error) throw error;
 
+      if (!data?.success) {
+        throw new Error(data?.error || 'Análise falhou');
+      }
+
       toast({
-        title: 'Análise iniciada',
-        description: 'O processamento do vídeo começou. Você pode acompanhar o progresso.',
+        title: 'Análise completa!',
+        description: `${data.eventsDetected} eventos detectados. Placar: ${data.homeScore} x ${data.awayScore}`,
       });
 
-      return data;
+      return {
+        success: true,
+        eventsDetected: data.eventsDetected,
+        homeScore: data.homeScore,
+        awayScore: data.awayScore,
+      };
     } catch (error: any) {
-      console.error('Error starting analysis:', error);
+      console.error('Error in analysis:', error);
       toast({
-        title: 'Erro ao iniciar análise',
-        description: error.message || 'Ocorreu um erro ao iniciar a análise.',
+        title: 'Erro na análise',
+        description: error.message || 'Ocorreu um erro ao analisar a transcrição.',
         variant: 'destructive',
       });
       throw error;
@@ -156,6 +173,6 @@ export function useActiveAnalysisJobs() {
       if (error) throw error;
       return (data as DbAnalysisJob[]).map(mapDbJobToAnalysisJob);
     },
-    refetchInterval: 5000, // Refetch every 5 seconds for active jobs
+    refetchInterval: 5000,
   });
 }

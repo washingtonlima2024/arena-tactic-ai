@@ -33,6 +33,8 @@ interface ResetMatchDialogProps {
   }>;
   homeTeamId: string | null;
   awayTeamId: string | null;
+  homeTeamName?: string;
+  awayTeamName?: string;
   competition: string | null;
   onResetComplete: () => void;
 }
@@ -50,6 +52,8 @@ export function ResetMatchDialog({
   videos,
   homeTeamId,
   awayTeamId,
+  homeTeamName = 'Time Casa',
+  awayTeamName = 'Time Visitante',
   competition,
   onResetComplete,
 }: ResetMatchDialogProps) {
@@ -172,16 +176,18 @@ export function ResetMatchDialog({
         setCurrentStep(`Iniciando análise do vídeo ${i + 1} de ${videos.length}...`);
         setProgress(80 + (i / videos.length) * 15);
         
+        if (!srtData?.content) {
+          toast.error(`Vídeo ${i + 1} requer transcrição SRT`);
+          continue;
+        }
+        
         await startAnalysis({
           matchId,
-          videoUrl: video.file_url,
-          homeTeamId: homeTeamId || undefined,
-          awayTeamId: awayTeamId || undefined,
-          competition: competition || undefined,
-          startMinute: video.start_minute ?? 0,
-          endMinute: video.end_minute ?? 45,
-          durationSeconds: video.duration_seconds ?? undefined,
-          transcription: srtData?.content,
+          transcription: srtData.content,
+          homeTeam: homeTeamName,
+          awayTeam: awayTeamName,
+          gameStartMinute: video.start_minute ?? 0,
+          gameEndMinute: video.end_minute ?? 45,
         });
       }
 
