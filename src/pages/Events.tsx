@@ -43,6 +43,123 @@ import { useRefineEvents } from '@/hooks/useRefineEvents';
 import { useStartAnalysis } from '@/hooks/useAnalysisJob';
 import { TranscriptionAnalysisDialog } from '@/components/events/TranscriptionAnalysisDialog';
 import { toast } from 'sonner';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+
+// EventRow component for rendering individual events
+interface EventRowProps {
+  event: any;
+  matchVideo: any;
+  isAdmin: boolean;
+  getApprovalIcon: (status: string | null) => React.ReactNode;
+  formatTimestamp: (ms: number) => string;
+  getEventTimeMs: (event: any) => number;
+  handleEventClick: (event: any) => void;
+  handleEditClick: (e: React.MouseEvent, event: any) => void;
+  homeTeam?: any;
+  awayTeam?: any;
+}
+
+const EventRow = ({ 
+  event, 
+  matchVideo, 
+  isAdmin, 
+  getApprovalIcon, 
+  formatTimestamp, 
+  getEventTimeMs, 
+  handleEventClick, 
+  handleEditClick,
+  homeTeam,
+  awayTeam
+}: EventRowProps) => {
+  // Get team logo based on event metadata
+  const getTeamLogo = () => {
+    const teamName = event.metadata?.teamName;
+    const teamType = event.metadata?.team;
+    
+    if (teamType === 'home' && homeTeam?.logo_url) return homeTeam.logo_url;
+    if (teamType === 'away' && awayTeam?.logo_url) return awayTeam.logo_url;
+    if (teamName === homeTeam?.name && homeTeam?.logo_url) return homeTeam.logo_url;
+    if (teamName === awayTeam?.name && awayTeam?.logo_url) return awayTeam.logo_url;
+    return null;
+  };
+
+  const teamLogo = getTeamLogo();
+  const teamName = event.metadata?.teamName || (event.metadata?.team === 'home' ? homeTeam?.short_name : awayTeam?.short_name);
+
+  return (
+    <div 
+      className={`flex items-center gap-3 rounded-lg border p-3 transition-colors group cursor-pointer ${
+        event.approval_status === 'pending' || !event.approval_status
+          ? 'border-yellow-500/30 bg-yellow-500/5 hover:bg-yellow-500/10'
+          : event.approval_status === 'approved'
+          ? 'border-green-500/20 bg-muted/30 hover:bg-muted/50'
+          : 'border-red-500/20 bg-red-500/5 hover:bg-red-500/10'
+      }`}
+      onClick={() => handleEventClick(event)}
+    >
+      {/* Play icon for video */}
+      {(matchVideo || event.clip_url) && (
+        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/20 text-primary group-hover:bg-primary/30 transition-colors shrink-0">
+          <Play className="h-4 w-4" />
+        </div>
+      )}
+
+      {/* Team logo */}
+      {teamLogo ? (
+        <Avatar className="h-7 w-7 shrink-0">
+          <AvatarImage src={teamLogo} alt={teamName} className="object-contain" />
+          <AvatarFallback className="text-xs">{teamName?.slice(0, 2)}</AvatarFallback>
+        </Avatar>
+      ) : (
+        getApprovalIcon(event.approval_status)
+      )}
+      
+      <Badge 
+        variant={
+          event.event_type === 'goal' ? 'success' :
+          event.event_type.includes('card') ? 'destructive' :
+          event.event_type === 'foul' ? 'warning' : 'outline'
+        }
+        className="min-w-[50px] justify-center font-mono text-xs shrink-0"
+      >
+        {event.minute || 0}'
+      </Badge>
+      <div className="flex-1 min-w-0">
+        <p className="font-medium capitalize truncate text-sm">
+          {event.event_type.replace(/_/g, ' ')}
+        </p>
+        {event.description && (
+          <p className="text-xs text-muted-foreground truncate">
+            {event.description}
+          </p>
+        )}
+      </div>
+      {event.metadata?.edited && (
+        <Badge variant="secondary" className="shrink-0 text-xs">
+          Editado
+        </Badge>
+      )}
+      {/* Video indicator */}
+      {matchVideo && !event.clip_url && (
+        <Badge variant="outline" className="shrink-0 text-xs gap-1 hidden sm:flex">
+          <Play className="h-3 w-3" />
+          {formatTimestamp(getEventTimeMs(event))}
+        </Badge>
+      )}
+      {/* Edit button - only for admin */}
+      {isAdmin && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 h-7 w-7"
+          onClick={(e) => handleEditClick(e, event)}
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+      )}
+    </div>
+  );
+};
 
 export default function Events() {
   const { isAdmin } = useAuth();
@@ -132,7 +249,20 @@ export default function Events() {
     enabled: !!currentMatchId
   });
   
-  // Use first video as primary for playback
+  // Find correct video segment for a given event based on game minute
+  const getVideoForEvent = (event: any) => {
+    if (!matchVideos || matchVideos.length === 0) return null;
+    const eventMinute = event.minute || 0;
+    // Find video that contains this minute
+    const video = matchVideos.find(v => {
+      const start = v.start_minute || 0;
+      const end = v.end_minute || 90;
+      return eventMinute >= start && eventMinute < end;
+    });
+    return video || matchVideos[0];
+  };
+  
+  // Use first video as fallback for general display
   const matchVideo = matchVideos?.[0] || null;
 
   // Fetch thumbnails for events
@@ -193,9 +323,9 @@ export default function Events() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Group events by half (based on video seconds, not game minutes)
-  const firstHalfEvents = filteredEvents.filter(e => getEventTimeMs(e) <= 45 * 60 * 1000);
-  const secondHalfEvents = filteredEvents.filter(e => getEventTimeMs(e) > 45 * 60 * 1000);
+  // Group events by half (based on game minute field)
+  const firstHalfEvents = filteredEvents.filter(e => (e.minute || 0) < 45);
+  const secondHalfEvents = filteredEvents.filter(e => (e.minute || 0) >= 45);
 
   const getApprovalIcon = (status: string | null) => {
     switch (status) {
@@ -210,13 +340,15 @@ export default function Events() {
 
   // Handle event click - open video
   const handleEventClick = (event: any) => {
-    if (!matchVideo && !event.clip_url) {
+    const eventVideo = getVideoForEvent(event);
+    
+    if (!eventVideo && !event.clip_url) {
       toast.error('Nenhum vídeo vinculado a esta partida');
       return;
     }
     
     // Check if event is within video range (when we have duration info)
-    const videoDuration = matchVideo?.duration_seconds;
+    const videoDuration = eventVideo?.duration_seconds;
     const eventVideoSecond = event.metadata?.videoSecond;
     
     if (videoDuration && eventVideoSecond && eventVideoSecond > videoDuration) {
@@ -224,9 +356,9 @@ export default function Events() {
       return;
     }
     
-    if (matchVideo || event.clip_url) {
+    if (eventVideo || event.clip_url) {
       setShowVignette(true);
-      setPlayingEvent(event);
+      setPlayingEvent({ ...event, _video: eventVideo });
     }
   };
 
@@ -495,79 +627,76 @@ export default function Events() {
                     Nenhum evento encontrado
                   </div>
                 ) : (
-                  <div className="space-y-3">
-                    {filteredEvents.map((event) => (
-                      <div 
-                        key={event.id}
-                        className={`flex items-center gap-4 rounded-lg border p-3 transition-colors group cursor-pointer ${
-                          event.approval_status === 'pending' || !event.approval_status
-                            ? 'border-yellow-500/30 bg-yellow-500/5 hover:bg-yellow-500/10'
-                            : event.approval_status === 'approved'
-                            ? 'border-green-500/20 bg-muted/30 hover:bg-muted/50'
-                            : 'border-red-500/20 bg-red-500/5 hover:bg-red-500/10'
-                        }`}
-                        onClick={() => handleEventClick(event)}
-                      >
-                        {/* Play icon for video */}
-                        {(matchVideo || event.clip_url) && (
-                          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/20 text-primary group-hover:bg-primary/30 transition-colors">
-                            <Play className="h-4 w-4" />
-                          </div>
-                        )}
-
-                        {/* Approval status icon */}
-                        {getApprovalIcon(event.approval_status)}
-                        
-                        <Badge 
-                          variant={
-                            event.event_type === 'goal' ? 'success' :
-                            event.event_type.includes('card') ? 'destructive' :
-                            event.event_type === 'foul' ? 'warning' : 'outline'
-                          }
-                          className="min-w-[60px] justify-center font-mono"
-                        >
-                          {formatTimestamp(getEventTimeMs(event))}
-                        </Badge>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium capitalize truncate">
-                            {event.event_type.replace(/_/g, ' ')}
-                          </p>
-                          {event.description && (
-                            <p className="text-sm text-muted-foreground truncate">
-                              {event.description}
-                            </p>
-                          )}
+                  <div className="space-y-4">
+                    {/* 1º Tempo */}
+                    {firstHalfEvents.length > 0 && (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 sticky top-0 bg-background/80 backdrop-blur-sm py-2 z-10">
+                          <Badge variant="outline" className="bg-blue-500/10 text-blue-500 border-blue-500/30">
+                            1º Tempo
+                          </Badge>
+                          <span className="text-sm text-muted-foreground">{firstHalfEvents.length} eventos</span>
                         </div>
-                        {event.metadata?.team && (
-                          <Badge variant="outline" className="shrink-0">
-                            {event.metadata.team}
-                          </Badge>
-                        )}
-                        {event.metadata?.edited && (
-                          <Badge variant="secondary" className="shrink-0 text-xs">
-                            Editado
-                          </Badge>
-                        )}
-                        {/* Video indicator - shows that clip can be played */}
-                        {matchVideo && !event.clip_url && (
-                          <Badge variant="outline" className="shrink-0 text-xs gap-1">
-                            <Play className="h-3 w-3" />
-                            Timestamp
-                          </Badge>
-                        )}
-                        {/* Edit button - only for admin */}
-                        {isAdmin && (
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
-                            onClick={(e) => handleEditClick(e, event)}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
-                        )}
+                        {firstHalfEvents.map((event) => (
+                          <EventRow 
+                            key={event.id}
+                            event={event}
+                            matchVideo={getVideoForEvent(event)}
+                            isAdmin={isAdmin}
+                            getApprovalIcon={getApprovalIcon}
+                            formatTimestamp={formatTimestamp}
+                            getEventTimeMs={getEventTimeMs}
+                            handleEventClick={handleEventClick}
+                            handleEditClick={handleEditClick}
+                            homeTeam={selectedMatch?.home_team}
+                            awayTeam={selectedMatch?.away_team}
+                          />
+                        ))}
                       </div>
-                    ))}
+                    )}
+                    
+                    {/* Intervalo */}
+                    {firstHalfEvents.length > 0 && secondHalfEvents.length > 0 && (
+                      <div className="flex items-center gap-4 py-2">
+                        <div className="flex-1 h-px bg-border" />
+                        <span className="text-xs text-muted-foreground font-medium">INTERVALO</span>
+                        <div className="flex-1 h-px bg-border" />
+                      </div>
+                    )}
+                    
+                    {/* 2º Tempo */}
+                    {secondHalfEvents.length > 0 && (
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 sticky top-0 bg-background/80 backdrop-blur-sm py-2 z-10">
+                          <Badge variant="outline" className="bg-orange-500/10 text-orange-500 border-orange-500/30">
+                            2º Tempo
+                          </Badge>
+                          <span className="text-sm text-muted-foreground">{secondHalfEvents.length} eventos</span>
+                        </div>
+                        {secondHalfEvents.map((event) => (
+                          <EventRow 
+                            key={event.id}
+                            event={event}
+                            matchVideo={getVideoForEvent(event)}
+                            isAdmin={isAdmin}
+                            getApprovalIcon={getApprovalIcon}
+                            formatTimestamp={formatTimestamp}
+                            getEventTimeMs={getEventTimeMs}
+                            handleEventClick={handleEventClick}
+                            handleEditClick={handleEditClick}
+                            homeTeam={selectedMatch?.home_team}
+                            awayTeam={selectedMatch?.away_team}
+                          />
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* Caso não tenha eventos em nenhum tempo */}
+                    {firstHalfEvents.length === 0 && secondHalfEvents.length === 0 && (
+                      <div className="py-8 text-center text-muted-foreground">
+                        Nenhum evento encontrado
+                      </div>
+                    )}
                   </div>
                 )}
               </CardContent>
@@ -660,15 +789,25 @@ export default function Events() {
                     className="flex items-center justify-between rounded-lg p-3"
                     style={{ backgroundColor: selectedMatch.home_team.primary_color + '15' }}
                   >
-                    <div className="flex items-center gap-2">
-                      <div 
-                        className="h-3 w-3 rounded-full"
-                        style={{ backgroundColor: selectedMatch.home_team.primary_color }}
-                      />
+                    <div className="flex items-center gap-3">
+                      {selectedMatch.home_team.logo_url ? (
+                        <img 
+                          src={selectedMatch.home_team.logo_url} 
+                          alt={selectedMatch.home_team.name}
+                          className="h-8 w-8 object-contain"
+                        />
+                      ) : (
+                        <div 
+                          className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold"
+                          style={{ backgroundColor: selectedMatch.home_team.primary_color, color: '#fff' }}
+                        >
+                          {selectedMatch.home_team.short_name?.slice(0, 2)}
+                        </div>
+                      )}
                       <span className="font-medium">{selectedMatch.home_team.short_name}</span>
                     </div>
                     <span className="text-lg font-bold">
-                      {events.filter(e => e.metadata?.team === selectedMatch.home_team?.name).length}
+                      {events.filter(e => e.metadata?.team === 'home' || e.metadata?.teamName === selectedMatch.home_team?.name).length}
                     </span>
                   </div>
                 )}
@@ -677,15 +816,25 @@ export default function Events() {
                     className="flex items-center justify-between rounded-lg p-3"
                     style={{ backgroundColor: (selectedMatch.away_team.primary_color === '#FFFFFF' ? '#00529F' : selectedMatch.away_team.primary_color) + '15' }}
                   >
-                    <div className="flex items-center gap-2">
-                      <div 
-                        className="h-3 w-3 rounded-full"
-                        style={{ backgroundColor: selectedMatch.away_team.primary_color === '#FFFFFF' ? '#00529F' : selectedMatch.away_team.primary_color }}
-                      />
+                    <div className="flex items-center gap-3">
+                      {selectedMatch.away_team.logo_url ? (
+                        <img 
+                          src={selectedMatch.away_team.logo_url} 
+                          alt={selectedMatch.away_team.name}
+                          className="h-8 w-8 object-contain"
+                        />
+                      ) : (
+                        <div 
+                          className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold"
+                          style={{ backgroundColor: selectedMatch.away_team.primary_color === '#FFFFFF' ? '#00529F' : selectedMatch.away_team.primary_color, color: '#fff' }}
+                        >
+                          {selectedMatch.away_team.short_name?.slice(0, 2)}
+                        </div>
+                      )}
                       <span className="font-medium">{selectedMatch.away_team.short_name}</span>
                     </div>
                     <span className="text-lg font-bold">
-                      {events.filter(e => e.metadata?.team === selectedMatch.away_team?.name).length}
+                      {events.filter(e => e.metadata?.team === 'away' || e.metadata?.teamName === selectedMatch.away_team?.name).length}
                     </span>
                   </div>
                 )}
@@ -752,13 +901,11 @@ export default function Events() {
             second: playingEvent.second || 0,
             description: playingEvent.description || '',
             clipUrl: playingEvent.clip_url,
-            // Priority: use 'second' field directly (user edited), fallback to metadata.videoSecond
-            videoSecond: playingEvent.second !== undefined && playingEvent.second !== null 
-              ? playingEvent.second 
-              : (playingEvent.metadata?.videoSecond as number | undefined)
+            // Priority: use metadata.videoSecond for actual video position
+            videoSecond: playingEvent.metadata?.videoSecond as number | undefined
           } : null}
+          matchVideo={playingEvent?._video || matchVideo}
           thumbnail={playingEvent ? getEventThumbnail(playingEvent.id) : undefined}
-          matchVideo={matchVideo}
           homeTeam={selectedMatch?.home_team?.name || 'Casa'}
           awayTeam={selectedMatch?.away_team?.name || 'Visitante'}
           homeScore={selectedMatch?.home_score ?? 0}
