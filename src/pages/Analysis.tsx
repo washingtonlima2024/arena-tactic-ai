@@ -32,7 +32,8 @@ import {
   Volume2,
   Star,
   Clock,
-  User
+  User,
+  Trash2
 } from 'lucide-react';
 import { useMatchAnalysis, useMatchEvents, ExtendedTacticalAnalysis } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -42,6 +43,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
+import { ReimportMatchDialog } from '@/components/events/ReimportMatchDialog';
 
 export default function Analysis() {
   // Centralized match selection
@@ -50,6 +52,7 @@ export default function Analysis() {
   const [selectedEventForPlay, setSelectedEventForPlay] = useState<string | null>(null);
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [playingEventId, setPlayingEventId] = useState<string | null>(null);
+  const [reimportDialogOpen, setReimportDialogOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const { data: analysis, isLoading: analysisLoading } = useMatchAnalysis(currentMatchId);
@@ -222,12 +225,31 @@ export default function Analysis() {
                 ))}
               </SelectContent>
             </Select>
+            <Button 
+              variant="destructive" 
+              size="sm"
+              onClick={() => setReimportDialogOpen(true)}
+              disabled={!currentMatchId}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Reimportar Vídeos
+            </Button>
             <Button variant="arena-outline">
               <Download className="mr-2 h-4 w-4" />
               Exportar Relatório
             </Button>
           </div>
         </div>
+
+        {/* Reimport Dialog */}
+        {currentMatchId && selectedMatch && (
+          <ReimportMatchDialog
+            isOpen={reimportDialogOpen}
+            onClose={() => setReimportDialogOpen(false)}
+            matchId={currentMatchId}
+            matchName={`${selectedMatch.home_team?.short_name || 'Casa'} vs ${selectedMatch.away_team?.short_name || 'Visitante'}`}
+          />
+        )}
 
         {analysisLoading ? (
           <div className="flex items-center justify-center py-12">
