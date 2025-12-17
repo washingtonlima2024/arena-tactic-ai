@@ -135,6 +135,11 @@ export default function VideoUpload() {
     });
   };
 
+  // Large file threshold (50MB)
+  const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024;
+  // Upload timeout (60 seconds)
+  const UPLOAD_TIMEOUT = 60000;
+
   const uploadFile = async (file: File, half?: 'first' | 'second') => {
     const segmentId = crypto.randomUUID();
     const suggestedType = half ? getDefaultVideoType(half) : suggestVideoType(file.name);
@@ -147,6 +152,16 @@ export default function VideoUpload() {
 
     // Format file size for display
     const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
+    const isLargeFile = file.size > LARGE_FILE_THRESHOLD;
+
+    // Warn about large files
+    if (isLargeFile) {
+      toast({
+        title: "⚠️ Arquivo grande detectado",
+        description: `${file.name} (${fileSizeMB} MB) pode demorar ou falhar. Considere usar link externo para arquivos >50MB.`,
+        variant: "destructive",
+      });
+    }
 
     const newSegment: VideoSegment = {
       id: segmentId,
@@ -161,6 +176,7 @@ export default function VideoUpload() {
       status: 'uploading',
       isLink: false,
       half,
+      uploadStartTime: Date.now(),
     };
 
     setSegments(prev => [...prev, newSegment]);
@@ -187,16 +203,25 @@ export default function VideoUpload() {
         );
       });
 
-      // Progress simulation (faster updates for better UX)
+      // Timeout tracking - update progress indicator every second
+      const startTime = Date.now();
       const progressInterval = setInterval(() => {
+        const elapsed = Date.now() - startTime;
+        const elapsedSeconds = Math.floor(elapsed / 1000);
+        
         setSegments(prev => 
-          prev.map(s => 
-            s.id === segmentId && s.status === 'uploading'
-              ? { ...s, progress: Math.min(s.progress + 5, 95) }
-              : s
-          )
+          prev.map(s => {
+            if (s.id === segmentId && s.status === 'uploading') {
+              // Mark as timeout if exceeded
+              if (elapsed > UPLOAD_TIMEOUT) {
+                return { ...s, status: 'timeout', elapsedSeconds };
+              }
+              return { ...s, elapsedSeconds };
+            }
+            return s;
+          })
         );
-      }, 200);
+      }, 1000);
 
       const { data, error } = await supabase.storage
         .from('match-videos')
@@ -213,13 +238,13 @@ export default function VideoUpload() {
       setSegments(prev => 
         prev.map(s => 
           s.id === segmentId 
-            ? { ...s, progress: 100, status: 'complete', url: urlData.publicUrl }
+            ? { ...s, progress: 100, status: 'complete', url: urlData.publicUrl, elapsedSeconds: undefined }
             : s
         )
       );
 
       toast({
-        title: "Upload concluído",
+        title: "✓ Upload concluído",
         description: `${file.name}`
       });
 
@@ -236,13 +261,23 @@ export default function VideoUpload() {
                         error.message?.includes('524');
       
       toast({
-        title: isTimeout ? "Arquivo muito grande" : "Erro no upload",
+        title: isTimeout ? "⏱️ Timeout no upload" : "Erro no upload",
         description: isTimeout 
-          ? `O arquivo ${file.name} (${fileSizeMB} MB) excedeu o tempo limite. Tente um arquivo menor ou use link externo.`
+          ? `O arquivo ${file.name} (${fileSizeMB} MB) excedeu o tempo limite. Use link externo.`
           : error.message,
         variant: "destructive"
       });
     }
+  };
+
+  // Convert failed upload to external link
+  const convertToExternalLink = (segmentId: string) => {
+    setSegments(prev => prev.filter(s => s.id !== segmentId));
+    setUploadMode('link');
+    toast({
+      title: "Alternativa: Link Externo",
+      description: "Cole um link do YouTube, Google Drive ou Dropbox na aba 'Link Externo'",
+    });
   };
 
   // Handle files dropped on half dropzones - process ALL files
@@ -943,6 +978,7 @@ export default function VideoUpload() {
                       segment={segment}
                       onChange={updateSegment}
                       onRemove={() => removeSegment(segment.id)}
+                      onFallbackClick={() => convertToExternalLink(segment.id)}
                       index={index}
                     />
                   ))}

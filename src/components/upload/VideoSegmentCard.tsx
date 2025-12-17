@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
-import { Film, Trash2, Clock, FileVideo, Link2 } from 'lucide-react';
+import { Film, Trash2, Clock, FileVideo, Link2, AlertTriangle, ExternalLink } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { formatTimeFromSeconds } from './TimeInput';
 import { SyncSlider } from './SyncSlider';
@@ -25,17 +25,20 @@ export interface VideoSegment {
   startMinute: number;
   endMinute: number | null;
   progress: number;
-  status: 'uploading' | 'processing' | 'complete' | 'error' | 'ready';
+  status: 'uploading' | 'processing' | 'complete' | 'error' | 'ready' | 'timeout';
   isLink?: boolean;
   half?: 'first' | 'second';
   transcription?: string;
   transcriptionParseResult?: ParseResult;
+  uploadStartTime?: number;
+  elapsedSeconds?: number;
 }
 
 interface VideoSegmentCardProps {
   segment: VideoSegment;
   onChange: (segment: VideoSegment) => void;
   onRemove: () => void;
+  onFallbackClick?: () => void;
   index: number;
 }
 
@@ -46,7 +49,7 @@ const videoTypeConfig: Record<VideoType, { label: string; color: string; default
   clip: { label: 'Trecho', color: 'bg-purple-500', defaultStart: 0, defaultEnd: 10 },
 };
 
-export function VideoSegmentCard({ segment, onChange, onRemove, index }: VideoSegmentCardProps) {
+export function VideoSegmentCard({ segment, onChange, onRemove, onFallbackClick, index }: VideoSegmentCardProps) {
   const config = videoTypeConfig[segment.videoType];
 
   const updateField = <K extends keyof VideoSegment>(field: K, value: VideoSegment[K]) => {
@@ -87,12 +90,21 @@ export function VideoSegmentCard({ segment, onChange, onRemove, index }: VideoSe
 
   const suggestion = getSuggestion();
   const isUploading = segment.status === 'uploading';
+  const isTimeout = segment.status === 'timeout';
   const isComplete = segment.status === 'complete' || segment.status === 'ready';
+
+  const formatElapsedTime = (seconds?: number) => {
+    if (!seconds) return '';
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+  };
 
   return (
     <Card variant="glass" className={cn(
       "relative transition-all",
       isUploading && "border-primary/50",
+      isTimeout && "border-amber-500/50 bg-amber-500/5",
       segment.status === 'error' && "border-destructive/50",
       segment.half === 'first' && "border-l-4 border-l-blue-500",
       segment.half === 'second' && "border-l-4 border-l-orange-500"
@@ -146,11 +158,59 @@ export function VideoSegmentCard({ segment, onChange, onRemove, index }: VideoSe
 
         {/* Upload Progress */}
         {isUploading && (
-          <div className="space-y-1">
-            <Progress value={segment.progress} className="h-2" />
-            <p className="text-xs text-muted-foreground text-center">
-              Enviando... {segment.progress}%
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span className="flex items-center gap-1">
+                <div className="animate-spin h-3 w-3 border-2 border-primary border-t-transparent rounded-full" />
+                Enviando...
+              </span>
+              {segment.elapsedSeconds && (
+                <span className="text-amber-400">
+                  {formatElapsedTime(segment.elapsedSeconds)}
+                  {segment.elapsedSeconds > 30 && " (arquivo grande...)"}
+                </span>
+              )}
+            </div>
+            {segment.elapsedSeconds && segment.elapsedSeconds > 45 && (
+              <p className="text-xs text-amber-400">
+                ⚠️ Upload lento. Considere usar link externo se continuar.
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Timeout Status */}
+        {isTimeout && (
+          <div className="space-y-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
+            <div className="flex items-center gap-2 text-amber-400">
+              <AlertTriangle className="h-4 w-4" />
+              <span className="text-sm font-medium">Upload expirou após 60 segundos</span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Arquivos grandes (&gt;50MB) podem falhar no upload direto. Recomendamos usar link externo.
             </p>
+            <div className="flex gap-2">
+              {onFallbackClick && (
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  onClick={onFallbackClick}
+                  className="gap-2 border-amber-500/50 text-amber-400 hover:bg-amber-500/10"
+                >
+                  <ExternalLink className="h-3 w-3" />
+                  Usar Link Externo
+                </Button>
+              )}
+              <Button 
+                variant="ghost" 
+                size="sm" 
+                onClick={onRemove}
+                className="text-destructive"
+              >
+                <Trash2 className="h-3 w-3 mr-1" />
+                Remover
+              </Button>
+            </div>
           </div>
         )}
 
