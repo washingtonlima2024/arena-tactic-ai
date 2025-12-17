@@ -145,6 +145,19 @@ export function useMatchEvents(matchId: string | null) {
   });
 }
 
+// Extended tactical analysis interface with all fields from technicalAnalysis
+export interface ExtendedTacticalAnalysis extends TacticalAnalysis {
+  matchSummary?: string;
+  tacticalOverview?: string;
+  standoutPlayers?: string[];
+  keyMoments?: {
+    timestamp: string;
+    type: string;
+    player: string;
+    description: string;
+  }[];
+}
+
 export function useMatchAnalysis(matchId: string | null) {
   return useQuery({
     queryKey: ['match-analysis', matchId],
@@ -162,11 +175,44 @@ export function useMatchAnalysis(matchId: string | null) {
 
       if (error) throw error;
       
-      // Parse the result JSON - use unknown first for safe casting
-      const result = data.result as unknown as AnalysisResult | null;
+      // Parse the result JSON - check both technicalAnalysis and tacticalAnalysis
+      const result = data.result as unknown as {
+        technicalAnalysis?: {
+          matchSummary?: string;
+          tacticalOverview?: string;
+          formations?: { home: string; away: string };
+          possessionEstimate?: { home: number; away: number };
+          standoutPlayers?: string[];
+          keyMoments?: { timestamp: string; type: string; player: string; description: string }[];
+        };
+        tacticalAnalysis?: TacticalAnalysis;
+      } | null;
+      
+      // Map technicalAnalysis to the format expected by frontend
+      const techAnalysis = result?.technicalAnalysis;
+      const existingTactical = result?.tacticalAnalysis;
+      
+      const tacticalAnalysis: ExtendedTacticalAnalysis | null = techAnalysis ? {
+        formation: techAnalysis.formations || existingTactical?.formation || { home: '4-3-3', away: '4-4-2' },
+        possession: techAnalysis.possessionEstimate || existingTactical?.possession || { home: 50, away: 50 },
+        insights: techAnalysis.keyMoments?.map(m => m.description) || existingTactical?.insights || [],
+        patterns: existingTactical?.patterns || [],
+        matchSummary: techAnalysis.matchSummary,
+        tacticalOverview: techAnalysis.tacticalOverview,
+        standoutPlayers: techAnalysis.standoutPlayers || [],
+        keyMoments: techAnalysis.keyMoments || []
+      } : existingTactical ? {
+        ...existingTactical,
+        matchSummary: undefined,
+        tacticalOverview: undefined,
+        standoutPlayers: [],
+        keyMoments: []
+      } : null;
+      
       return {
         ...data,
-        tacticalAnalysis: result?.tacticalAnalysis || null,
+        tacticalAnalysis,
+        rawResult: result
       };
     },
     enabled: !!matchId,
