@@ -9,11 +9,11 @@ import {
   DialogTrigger,
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
+import { Textarea } from '@/components/ui/textarea';
 import { Loader2, FileText, Sparkles, AlertCircle } from 'lucide-react';
 import { toast } from 'sonner';
-import { useRefineEvents } from '@/hooks/useRefineEvents';
-import { TranscriptionImport } from '@/components/upload/TranscriptionImport';
-import { type ParseResult } from '@/lib/transcriptionParser';
+import { useMatchAnalysis } from '@/hooks/useMatchAnalysis';
+import { Progress } from '@/components/ui/progress';
 
 interface TranscriptionAnalysisDialogProps {
   matchId: string;
@@ -28,42 +28,38 @@ export function TranscriptionAnalysisDialog({
   matchId,
   homeTeamName,
   awayTeamName,
-  videoUrl,
   onAnalysisComplete,
   children
 }: TranscriptionAnalysisDialogProps) {
   const [open, setOpen] = useState(false);
   const [transcription, setTranscription] = useState('');
-  const [parseResult, setParseResult] = useState<ParseResult | null>(null);
-  const { refineEvents, isRefining, result } = useRefineEvents();
-
-  const handleTranscriptionChange = (value: string, result?: ParseResult) => {
-    setTranscription(value);
-    setParseResult(result || null);
-  };
+  const { analyzeWithTranscription, isAnalyzing, progress } = useMatchAnalysis();
 
   const handleAnalyze = async () => {
-    // Use raw text from parse result if available
-    const textToAnalyze = parseResult?.rawText || transcription;
-    
-    if (!textToAnalyze.trim()) {
-      toast.error('Importe ou cole a transcrição do áudio para analisar');
+    if (!transcription.trim()) {
+      toast.error('Cole a transcrição do áudio para analisar');
       return;
     }
 
-    if (textToAnalyze.length < 50) {
+    if (transcription.length < 50) {
       toast.error('Transcrição muito curta. Forneça o texto completo da narração.');
       return;
     }
 
-    const analysisResult = await refineEvents(matchId, textToAnalyze);
+    const result = await analyzeWithTranscription({
+      matchId,
+      transcription,
+      homeTeam: homeTeamName,
+      awayTeam: awayTeamName,
+      gameStartMinute: 0,
+      gameEndMinute: 90
+    });
     
-    if (analysisResult) {
-      toast.success(`Análise concluída! ${analysisResult.goalsDetected} gols detectados.`);
+    if (result?.success) {
+      toast.success(`Análise concluída! ${result.eventsDetected} eventos detectados.`);
       onAnalysisComplete();
       setOpen(false);
       setTranscription('');
-      setParseResult(null);
     }
   };
 
@@ -79,7 +75,7 @@ export function TranscriptionAnalysisDialog({
             Analisar Transcrição do Áudio
           </DialogTitle>
           <DialogDescription>
-            Importe ou cole a transcrição da narração. A IA vai identificar gols, cartões e outros eventos.
+            Cole a transcrição da narração. A IA vai identificar gols, cartões e outros eventos.
           </DialogDescription>
         </DialogHeader>
 
@@ -98,53 +94,27 @@ export function TranscriptionAnalysisDialog({
               <div className="text-sm text-muted-foreground">
                 <p className="font-medium text-yellow-500 mb-1">Dicas para melhor detecção:</p>
                 <ul className="list-disc list-inside space-y-1 text-xs">
-                  <li>Inclua timestamps quando possível [00:00]</li>
-                  <li>Mantenha menções aos times ({homeTeamName}, {awayTeamName})</li>
-                  <li>Formatos aceitos: SRT, VTT, TXT, JSON</li>
+                  <li>Cole o texto completo da transcrição</li>
                   <li>A IA procura por: "gol", "goool", "cartão", "falta", "pênalti"</li>
+                  <li>Quanto mais contexto, melhor a detecção</li>
                 </ul>
               </div>
             </div>
           </div>
 
-          {/* Transcription Import Component */}
-          <TranscriptionImport
+          {/* Transcription Input */}
+          <Textarea
             value={transcription}
-            onChange={handleTranscriptionChange}
-            videoUrl={videoUrl}
-            matchId={matchId}
+            onChange={(e) => setTranscription(e.target.value)}
+            placeholder="Cole a transcrição da narração aqui..."
+            className="min-h-[200px] font-mono text-sm"
           />
 
-          {/* Pre-detected events preview from import */}
-          {parseResult && parseResult.detectedEvents.length > 0 && (
-            <div className="text-sm text-muted-foreground">
-              <span className="text-primary font-medium">
-                {parseResult.detectedEvents.filter(e => e.type === 'goal').length} gols,{' '}
-                {parseResult.detectedEvents.filter(e => e.type === 'card').length} cartões,{' '}
-                {parseResult.detectedEvents.filter(e => e.type === 'foul').length} faltas
-              </span>{' '}
-              pré-detectados na transcrição
-            </div>
-          )}
-
-          {/* Result Preview */}
-          {result && (
-            <div className="rounded-lg border border-green-500/20 bg-green-500/5 p-3">
-              <p className="text-sm font-medium text-green-500 mb-2">Resultado da Análise:</p>
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                <div>Gols detectados: <span className="font-bold">{result.goalsDetected}</span></div>
-                <div>Eventos refinados: <span className="font-bold">{result.eventsRefined}</span></div>
-                {result.scoreUpdated && (
-                  <div className="col-span-2">
-                    Placar atualizado: <span className="font-bold">{result.homeScore} x {result.awayScore}</span>
-                  </div>
-                )}
-              </div>
-              {result.issues && result.issues.length > 0 && (
-                <div className="mt-2 text-xs text-muted-foreground">
-                  Problemas: {result.issues.join(', ')}
-                </div>
-              )}
+          {/* Progress */}
+          {isAnalyzing && (
+            <div className="space-y-2">
+              <Progress value={progress.progress} className="h-2" />
+              <p className="text-sm text-muted-foreground text-center">{progress.message}</p>
             </div>
           )}
         </div>
@@ -156,9 +126,9 @@ export function TranscriptionAnalysisDialog({
           <Button 
             variant="arena" 
             onClick={handleAnalyze}
-            disabled={isRefining || !transcription.trim()}
+            disabled={isAnalyzing || !transcription.trim()}
           >
-            {isRefining ? (
+            {isAnalyzing ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Analisando...

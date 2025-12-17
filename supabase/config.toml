@@ -1,15 +1,12 @@
 project_id = "wtpvajxekyfekdmypcok"
 
-[functions.analyze-video]
+[functions.analyze-match]
 verify_jwt = false
 
 [functions.arena-chatbot]
 verify_jwt = false
 
 [functions.arena-tts]
-verify_jwt = false
-
-[functions.extract-audio-srt]
 verify_jwt = false
 
 [functions.extract-live-events]
@@ -24,17 +21,8 @@ verify_jwt = false
 [functions.generate-thumbnail]
 verify_jwt = false
 
-[functions.refine-events]
-verify_jwt = false
-
 [functions.team-chatbot]
 verify_jwt = false
 
-[functions.transcribe-audio]
-verify_jwt = false
-
 [functions.transcribe-audio-whisper]
-verify_jwt = false
-
-[functions.detect-players]
 verify_jwt = false

@@ -41,7 +41,7 @@ import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
-import { useRefineEvents } from '@/hooks/useRefineEvents';
+import { useMatchAnalysis } from '@/hooks/useMatchAnalysis';
 import { useStartAnalysis } from '@/hooks/useAnalysisJob';
 import { TranscriptionAnalysisDialog } from '@/components/events/TranscriptionAnalysisDialog';
 import { toast } from 'sonner';
@@ -166,7 +166,7 @@ const EventRow = ({
 export default function Events() {
   const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
-  const { refineEvents, isRefining } = useRefineEvents();
+  const { analyzeWithTranscription, isAnalyzing: isRefining } = useMatchAnalysis();
   const { startAnalysis, isLoading: isReanalyzing } = useStartAnalysis();
   
   // Centralized match selection
@@ -183,14 +183,9 @@ export default function Events() {
   
   const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useMatchEvents(currentMatchId);
 
-  // Handle refine events
+  // Handle refine events - simplified
   const handleRefineEvents = async () => {
-    if (!currentMatchId) return;
-    const result = await refineEvents(currentMatchId);
-    if (result) {
-      refetchEvents();
-      queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
-    }
+    toast.info('Use o diálogo "Analisar Transcrição" para refinar eventos');
   };
 
   // Handle re-analyze match
