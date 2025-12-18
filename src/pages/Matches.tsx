@@ -199,7 +199,13 @@ export default function Matches() {
         description: `${analysisResult?.eventsCreated || 0} eventos detectados.`
       });
       
+      // Invalidar todas as queries relacionadas à partida
+      const reprocessedMatchId = matchToReprocess.id;
       queryClient.invalidateQueries({ queryKey: ['matches'] });
+      queryClient.invalidateQueries({ queryKey: ['match-events', reprocessedMatchId] });
+      queryClient.invalidateQueries({ queryKey: ['match-details', reprocessedMatchId] });
+      queryClient.invalidateQueries({ queryKey: ['match-analysis', reprocessedMatchId] });
+      queryClient.invalidateQueries({ queryKey: ['completed-matches'] });
       resetProgress();
       
       setTimeout(() => {
