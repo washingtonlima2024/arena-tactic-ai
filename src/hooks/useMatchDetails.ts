@@ -254,15 +254,21 @@ export function useAllCompletedMatches() {
           goalEvents.forEach(goal => {
             const metadata = goal.metadata as Record<string, any> | null;
             const team = metadata?.team || metadata?.scoring_team;
-            if (team === 'home' || team === match.home_team?.name) {
-              homeGoals++;
-            } else if (team === 'away' || team === match.away_team?.name) {
-              awayGoals++;
+            const isOwnGoal = metadata?.isOwnGoal === true;
+            
+            // Para gols contra, inverter o beneficiário
+            if (isOwnGoal) {
+              // Gol contra: beneficia o time ADVERSÁRIO
+              if (team === 'home') {
+                awayGoals++; // Gol contra do home = ponto para away
+              } else if (team === 'away') {
+                homeGoals++; // Gol contra do away = ponto para home
+              }
             } else {
-              // Default: alternate goals (fallback)
-              if (homeGoals <= awayGoals) {
+              // Gol normal
+              if (team === 'home' || team === match.home_team?.name) {
                 homeGoals++;
-              } else {
+              } else if (team === 'away' || team === match.away_team?.name) {
                 awayGoals++;
               }
             }
