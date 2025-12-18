@@ -397,6 +397,7 @@ export function ReanalyzeHalfDialog({
             <div className="rounded-lg border-2 border-muted p-4 flex items-center justify-center gap-2">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               <span className="text-sm text-muted-foreground">Carregando transcrição original...</span>
+              <Badge variant="outline" className="ml-2 text-xs">Preload ativo</Badge>
             </div>
           ) : originalTranscription ? (
             <div className="rounded-lg border-2 border-primary/50 bg-primary/5 p-4 space-y-3">
@@ -404,6 +405,7 @@ export function ReanalyzeHalfDialog({
                 <Label className="flex items-center gap-2 font-semibold text-primary">
                   <Database className="h-4 w-4" />
                   Transcrição Original Disponível
+                  <Badge variant="default" className="ml-2 text-xs bg-green-600">✓ Preload OK</Badge>
                 </Label>
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-muted-foreground">Usar</span>
@@ -422,7 +424,7 @@ export function ReanalyzeHalfDialog({
                 </div>
               </div>
               <p className="text-xs text-muted-foreground">
-                {(originalTranscription.length / 1024).toFixed(1)} KB • Extraída na análise inicial
+                {(originalTranscription.length / 1024).toFixed(1)} KB • {originalTranscription.length.toLocaleString()} caracteres • Extraída na análise inicial
               </p>
               <Collapsible>
                 <CollapsibleTrigger className="flex items-center gap-1 text-xs text-primary hover:underline">
@@ -438,11 +440,15 @@ export function ReanalyzeHalfDialog({
               </Collapsible>
             </div>
           ) : (
-            <div className="rounded-lg border border-muted bg-muted/30 p-3">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <FileCheck className="h-4 w-4" />
-                <span>Nenhuma transcrição original encontrada para esta partida</span>
+            <div className="rounded-lg border border-amber-500/30 bg-amber-500/10 p-3">
+              <div className="flex items-center gap-2 text-sm text-amber-600 dark:text-amber-400">
+                <AlertTriangle className="h-4 w-4" />
+                <span>Nenhuma transcrição original encontrada</span>
+                <Badge variant="outline" className="ml-auto text-xs border-amber-500/50">Preload: Vazio</Badge>
               </div>
+              <p className="text-xs text-muted-foreground mt-1">
+                Esta partida não tem transcrição salva. Use "Extrair Nova Transcrição" ou importe um arquivo SRT.
+              </p>
             </div>
           )}
 
