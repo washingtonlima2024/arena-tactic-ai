@@ -3,6 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Progress } from '@/components/ui/progress';
 import { 
   Scissors, 
   Play, 
@@ -17,7 +18,8 @@ import {
   Loader2,
   Pause,
   Film,
-  CheckCircle
+  CheckCircle,
+  X
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -30,6 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
+import { useClipGeneration } from '@/hooks/useClipGeneration';
 
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -74,6 +77,15 @@ export default function Media() {
   const queryClient = useQueryClient();
   
   const { thumbnails, generateThumbnail, generateAllThumbnails, extractFrameFromVideo, extractAllFrames, isGenerating, isExtracting, getThumbnail, generatingIds, extractingIds } = useThumbnailGeneration(matchId);
+  
+  // Clip generation hook for FFmpeg extraction
+  const { 
+    isGenerating: isGeneratingClips, 
+    progress: clipProgress, 
+    generateAllClips,
+    isGeneratingEvent: isGeneratingClip,
+    cancel: cancelClipGeneration
+  } = useClipGeneration();
   
   const { data: events, refetch: refetchEvents } = useMatchEvents(matchId);
   
@@ -263,15 +275,45 @@ export default function Media() {
 
           {/* Clips Tab */}
           <TabsContent value="clips" className="space-y-4">
+            {/* Clip extraction progress bar */}
+            {isGeneratingClips && (
+              <Card variant="glass" className="border-primary/30 bg-primary/5">
+                <CardContent className="py-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="font-medium text-sm">{clipProgress.message}</p>
+                        <Button 
+                          variant="ghost" 
+                          size="sm" 
+                          onClick={cancelClipGeneration}
+                          className="text-destructive hover:text-destructive"
+                        >
+                          <X className="h-4 w-4" />
+                          Cancelar
+                        </Button>
+                      </div>
+                      <Progress value={clipProgress.progress} className="h-2" />
+                      {clipProgress.completedCount !== undefined && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          {clipProgress.completedCount} de {clipProgress.totalCount} clips processados
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <p className="text-sm text-muted-foreground">
-                  {clips.length} eventos • Clique para reproduzir a partir do timestamp original
+                  {clips.length} eventos • {clips.filter(c => c.clipUrl).length} clips extraídos
                 </p>
                 {matchVideo ? (
                   <Badge variant="success" className="gap-1">
                     <Video className="h-3 w-3" />
-                    Reprodução instantânea
+                    Vídeo disponível
                   </Badge>
                 ) : (
                   <Badge variant="warning" className="gap-1">
@@ -281,6 +323,34 @@ export default function Media() {
                 )}
               </div>
               <div className="flex gap-2">
+                {/* Extract video clips button */}
+                {matchVideo && clips.length > 0 && clips.some(c => !c.clipUrl) && (
+                  <Button 
+                    variant="arena" 
+                    size="sm"
+                    onClick={async () => {
+                      const eventsWithoutClips = clips
+                        .filter(c => !c.clipUrl)
+                        .map(c => ({
+                          id: c.id,
+                          minute: c.minute,
+                          second: c.second,
+                          metadata: { eventMs: c.eventMs, videoSecond: c.videoSecond }
+                        }));
+                      await generateAllClips(eventsWithoutClips, matchVideo.file_url, matchId);
+                      refetchEvents();
+                    }}
+                    disabled={isGeneratingClips}
+                  >
+                    {isGeneratingClips ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Scissors className="mr-2 h-4 w-4" />
+                    )}
+                    Extrair Clips ({clips.filter(c => !c.clipUrl).length})
+                  </Button>
+                )}
+
                 {/* Extract frames from video button */}
                 {matchVideo && clips.length > 0 && clips.some(c => !getThumbnail(c.id)) && (
                   <Button 
@@ -298,7 +368,7 @@ export default function Media() {
                         }));
                       extractAllFrames(eventsToExtract);
                     }}
-                    disabled={extractingIds.size > 0 || generatingIds.size > 0}
+                    disabled={extractingIds.size > 0 || generatingIds.size > 0 || isGeneratingClips}
                   >
                     {extractingIds.size > 0 ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -330,7 +400,7 @@ export default function Media() {
                         }));
                       generateAllThumbnails(eventsToGenerate);
                     }}
-                    disabled={generatingIds.size > 0 || extractingIds.size > 0}
+                    disabled={generatingIds.size > 0 || extractingIds.size > 0 || isGeneratingClips}
                   >
                     {generatingIds.size > 0 ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -387,19 +457,26 @@ export default function Media() {
             )}
 
             {/* Embed video warning - can't extract clips from embeds */}
-            {/* Info card about timestamp playback */}
+            {/* Info card about clips */}
             {matchVideo && clips.length > 0 && (
               <Card variant="glass" className="border-primary/30 bg-primary/5">
                 <CardContent className="py-4">
                   <div className="flex items-center gap-4">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/20">
-                      <Play className="h-5 w-5 text-primary" />
+                      <Scissors className="h-5 w-5 text-primary" />
                     </div>
                     <div className="flex-1">
-                      <p className="font-medium">Reprodução por Timestamp</p>
+                      <p className="font-medium">
+                        {clips.some(c => c.clipUrl) 
+                          ? `${clips.filter(c => c.clipUrl).length} clips extraídos` 
+                          : 'Extrair Clips Individuais'
+                        }
+                      </p>
                       <p className="text-sm text-muted-foreground">
-                        Os clips são reproduzidos diretamente do vídeo original a partir do timestamp do evento 
-                        (3s antes e 5s depois). Sem downloads ou processamento - reprodução instantânea!
+                        {clips.some(c => c.clipUrl) 
+                          ? 'Clique para reproduzir os clips extraídos diretamente. Clips com ✓ são vídeos independentes.'
+                          : 'Clique em "Extrair Clips" para gerar vídeos individuais de cada evento (~8 segundos cada). Isso permite reprodução e download separados.'
+                        }
                       </p>
                     </div>
                   </div>
@@ -421,6 +498,8 @@ export default function Media() {
                   const isPlaying = playingClipId === clip.id;
                   const isGeneratingThumbnail = isGenerating(clip.id);
                   const isExtractingFrame = isExtracting(clip.id);
+                  const isExtractingClip = isGeneratingClip(clip.id);
+                  const hasExtractedClip = !!clip.clipUrl;
                   
                   const handlePlayClip = () => {
                     if (!matchVideo && !clip.clipUrl) {
@@ -533,16 +612,22 @@ export default function Media() {
                           </Button>
                         </div>
                         <div className="absolute bottom-2 right-2 flex gap-1">
-                          {clip.clipUrl && (
+                          {isExtractingClip ? (
+                            <Badge variant="secondary" className="backdrop-blur gap-1">
+                              <Loader2 className="h-3 w-3 animate-spin" />
+                              Extraindo...
+                            </Badge>
+                          ) : hasExtractedClip ? (
                             <Badge variant="success" className="backdrop-blur gap-1">
                               <CheckCircle className="h-3 w-3" />
-                              Extraído
+                              Clip Pronto
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="backdrop-blur gap-1">
+                              <Clock className="h-3 w-3" />
+                              Via Timestamp
                             </Badge>
                           )}
-                          <Badge variant="secondary" className="backdrop-blur">
-                            <Clock className="mr-1 h-3 w-3" />
-                            ~20s
-                          </Badge>
                         </div>
                         <div className="absolute left-2 top-2">
                           <Badge variant="arena">{clip.type}</Badge>
