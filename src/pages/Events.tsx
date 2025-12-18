@@ -306,9 +306,23 @@ export default function Events() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Group events by half (based on game minute field)
-  const firstHalfEvents = filteredEvents.filter(e => (e.minute || 0) < 45);
-  const secondHalfEvents = filteredEvents.filter(e => (e.minute || 0) >= 45);
+  // Group events by half - use match_half field or metadata.half, fallback to minute-based
+  const firstHalfEvents = filteredEvents.filter(e => {
+    const matchHalf = (e as any).match_half;
+    const metadataHalf = e.metadata?.half;
+    // Prefer explicit half markers, fallback to minute-based
+    if (matchHalf) return matchHalf === 'first';
+    if (metadataHalf) return metadataHalf === 'first';
+    return (e.minute || 0) < 45;
+  });
+  const secondHalfEvents = filteredEvents.filter(e => {
+    const matchHalf = (e as any).match_half;
+    const metadataHalf = e.metadata?.half;
+    // Prefer explicit half markers, fallback to minute-based
+    if (matchHalf) return matchHalf === 'second';
+    if (metadataHalf) return metadataHalf === 'second';
+    return (e.minute || 0) >= 45;
+  });
 
   const getApprovalIcon = (status: string | null) => {
     switch (status) {

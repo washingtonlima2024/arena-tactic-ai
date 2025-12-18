@@ -183,6 +183,7 @@ export type Database = {
           event_type: string
           id: string
           is_highlight: boolean | null
+          match_half: string | null
           match_id: string
           metadata: Json | null
           minute: number | null
@@ -201,6 +202,7 @@ export type Database = {
           event_type: string
           id?: string
           is_highlight?: boolean | null
+          match_half?: string | null
           match_id: string
           metadata?: Json | null
           minute?: number | null
@@ -219,6 +221,7 @@ export type Database = {
           event_type?: string
           id?: string
           is_highlight?: boolean | null
+          match_half?: string | null
           match_id?: string
           metadata?: Json | null
           minute?: number | null

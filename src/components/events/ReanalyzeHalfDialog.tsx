@@ -287,15 +287,27 @@ export function ReanalyzeHalfDialog({
         return;
       }
 
-      const minMinute = half === 'first' ? 0 : 45;
-      const maxMinute = half === 'first' ? 44 : 90;
+      // Delete events by match_half first (preferred), fallback to minute range
+      // This handles stoppage time correctly (e.g., 45'+2 stays in first half)
+      const { error: deleteByHalfError } = await supabase
+        .from('match_events')
+        .delete()
+        .eq('match_id', matchId)
+        .eq('match_half', half);
 
-      const { error: deleteError } = await supabase
+      // Also delete events that might have been created before match_half column existed
+      const minMinute = half === 'first' ? 0 : 45;
+      const maxMinute = half === 'first' ? 48 : 95; // Include stoppage time
+
+      const { error: deleteByMinuteError } = await supabase
         .from('match_events')
         .delete()
         .eq('match_id', matchId)
         .gte('minute', minMinute)
-        .lte('minute', maxMinute);
+        .lte('minute', maxMinute)
+        .is('match_half', null); // Only delete if no match_half set
+
+      const deleteError = deleteByHalfError || deleteByMinuteError;
 
       if (deleteError) {
         console.error('Delete error:', deleteError);
@@ -346,7 +358,8 @@ export function ReanalyzeHalfDialog({
         homeTeam: homeTeamName,
         awayTeam: awayTeamName,
         gameStartMinute: half === 'first' ? 0 : 45,
-        gameEndMinute: half === 'first' ? 45 : 90,
+        gameEndMinute: half === 'first' ? 48 : 95, // Allow for stoppage time
+        halfType: half,
       });
 
       queryClient.invalidateQueries({ queryKey: ['match-events', matchId] });

@@ -103,16 +103,20 @@ export function useStartAnalysis() {
     awayTeam: string;
     gameStartMinute?: number;
     gameEndMinute?: number;
+    halfType?: 'first' | 'second';
   }) => {
     setIsLoading(true);
     
     try {
+      const halfType = params.halfType || (params.gameStartMinute && params.gameStartMinute >= 45 ? 'second' : 'first');
+      
       console.log('Starting analysis with new pipeline:', {
         matchId: params.matchId,
         homeTeam: params.homeTeam,
         awayTeam: params.awayTeam,
         gameStartMinute: params.gameStartMinute,
         gameEndMinute: params.gameEndMinute,
+        halfType,
         transcriptionLength: params.transcription?.length || 0,
       });
 
@@ -124,6 +128,7 @@ export function useStartAnalysis() {
           awayTeam: params.awayTeam,
           gameStartMinute: params.gameStartMinute || 0,
           gameEndMinute: params.gameEndMinute || 90,
+          halfType,
         },
       });
 
