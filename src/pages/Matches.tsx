@@ -80,12 +80,35 @@ export default function Matches() {
   const handleReprocess = async () => {
     if (!matchToReprocess) return;
     
+    console.log('========================================');
+    console.log('[Reprocess] INICIADO');
+    console.log('[Reprocess] Match ID:', matchToReprocess.id);
+    console.log('[Reprocess] Times:', matchToReprocess.home_team?.name, 'vs', matchToReprocess.away_team?.name);
+    
+    // Feedback imediato para o usuário
+    toast({
+      title: "Iniciando reprocessamento...",
+      description: "Carregando processador de áudio"
+    });
+    
     setIsReprocessing(true);
     const matchId = matchToReprocess.id;
     
+    // Timeout de segurança - alerta se demorar muito
+    const safetyTimeoutId = setTimeout(() => {
+      console.warn('[Reprocess] ⚠️ Processo está demorando mais de 45 segundos');
+      toast({
+        title: "Processo demorado",
+        description: "O carregamento está levando mais tempo que o esperado. Se travar, recarregue a página.",
+        variant: "destructive"
+      });
+    }, 45000);
+    
     try {
       // 1. Buscar vídeos do match
+      console.log('[Reprocess] PASSO 1: Buscando vídeos...');
       setReprocessProgress({ stage: 'Buscando vídeos...', progress: 5 });
+      
       const { data: videos, error: videoError } = await supabase
         .from('videos')
         .select('*')
@@ -95,7 +118,7 @@ export default function Matches() {
         throw new Error('Nenhum vídeo encontrado para esta partida');
       }
       
-      console.log('Vídeos encontrados:', videos);
+      console.log('[Reprocess] ✓ Vídeos encontrados:', videos.length);
       
       // 2. Pegar primeiro vídeo para transcrição
       const video = videos[0];
@@ -105,19 +128,24 @@ export default function Matches() {
         throw new Error('URL do vídeo não encontrada');
       }
       
-      // 3. Usar hook de transcrição que extrai áudio com FFmpeg primeiro
-      // Isso evita o erro de arquivo muito grande (48MB -> ~5MB de áudio)
-      console.log('Iniciando transcrição com FFmpeg + Whisper...');
+      console.log('[Reprocess] PASSO 2: Iniciando transcrição...');
+      console.log('[Reprocess] URL do vídeo:', videoUrl);
       
+      // 3. Usar hook de transcrição que extrai áudio com FFmpeg primeiro
       const transcriptionResult = await transcribeVideo(videoUrl, matchId, video.id);
+      
+      // Limpar timeout de segurança se chegamos aqui
+      clearTimeout(safetyTimeoutId);
       
       if (!transcriptionResult?.text) {
         throw new Error('Transcrição retornou vazia. Verifique se o vídeo contém áudio.');
       }
       
-      console.log('Transcrição obtida:', transcriptionResult.text.substring(0, 200) + '...');
+      console.log('[Reprocess] ✓ Transcrição obtida:', transcriptionResult.text.length, 'caracteres');
+      console.log('[Reprocess] Preview:', transcriptionResult.text.substring(0, 200) + '...');
       
       // 4. Chamar analyze-match para detectar eventos
+      console.log('[Reprocess] PASSO 3: Analisando eventos com IA...');
       setReprocessProgress({ stage: 'Analisando eventos com IA...', progress: 70 });
       
       const { data: analysisResult, error: analysisError } = await supabase.functions.invoke('analyze-match', {
@@ -133,13 +161,14 @@ export default function Matches() {
       });
       
       if (analysisError) {
-        console.error('Erro na análise:', analysisError);
+        console.error('[Reprocess] ✗ Erro na análise:', analysisError);
         throw new Error(`Erro na análise: ${analysisError.message}`);
       }
       
-      console.log('Resultado da análise:', analysisResult);
+      console.log('[Reprocess] ✓ Resultado da análise:', analysisResult);
       
       // 5. Atualizar status do match
+      console.log('[Reprocess] PASSO 4: Finalizando...');
       setReprocessProgress({ stage: 'Finalizando...', progress: 90 });
       
       await supabase
@@ -152,6 +181,9 @@ export default function Matches() {
         .eq('id', matchId);
       
       setReprocessProgress({ stage: 'Concluído!', progress: 100 });
+      
+      console.log('[Reprocess] ✓ CONCLUÍDO!');
+      console.log('========================================');
       
       toast({
         title: "Análise concluída!",
@@ -168,7 +200,10 @@ export default function Matches() {
       }, 1500);
       
     } catch (error: any) {
-      console.error('Erro no reprocessamento:', error);
+      clearTimeout(safetyTimeoutId);
+      console.error('[Reprocess] ✗ ERRO:', error);
+      console.error('[Reprocess] Stack:', error.stack);
+      
       toast({
         title: "Erro no reprocessamento",
         description: error.message || 'Erro desconhecido',

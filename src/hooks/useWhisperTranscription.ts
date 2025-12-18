@@ -38,7 +38,16 @@ export function useWhisperTranscription() {
   const ffmpegRef = useRef<FFmpeg | null>(null);
 
   const loadFFmpeg = async () => {
-    console.log('[FFmpeg] Verificando se já está carregado...');
+    console.log('[FFmpeg] ========================================');
+    console.log('[FFmpeg] Verificando compatibilidade...');
+    
+    // Verificar suporte a WebAssembly
+    if (typeof WebAssembly === 'undefined') {
+      const error = new Error('Seu navegador não suporta WebAssembly. Use Chrome, Firefox ou Edge atualizado.');
+      console.error('[FFmpeg] ✗ WebAssembly não suportado');
+      throw error;
+    }
+    console.log('[FFmpeg] ✓ WebAssembly suportado');
     
     if (ffmpegRef.current?.loaded) {
       console.log('[FFmpeg] ✓ Já carregado, reutilizando instância');
@@ -50,6 +59,10 @@ export function useWhisperTranscription() {
 
     const ffmpeg = new FFmpeg();
     ffmpegRef.current = ffmpeg;
+
+    ffmpeg.on('log', ({ message }) => {
+      console.log('[FFmpeg Log]', message);
+    });
 
     ffmpeg.on('progress', ({ progress }) => {
       const progressPercent = Math.round(progress * 100);
@@ -65,31 +78,45 @@ export function useWhisperTranscription() {
     const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
     
     try {
-      console.log('[FFmpeg] Carregando core e wasm...');
+      console.log('[FFmpeg] Carregando core JS...');
+      setTranscriptionProgress({ stage: 'loading', progress: 2, message: 'Baixando processador (1/3)...' });
       
       const coreURL = await withTimeout(
         toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
         30000,
         'carregar ffmpeg-core.js'
       );
-      console.log('[FFmpeg] ✓ Core JS carregado');
+      console.log('[FFmpeg] ✓ Core JS carregado:', coreURL.substring(0, 50) + '...');
+      
+      console.log('[FFmpeg] Carregando WASM...');
+      setTranscriptionProgress({ stage: 'loading', progress: 4, message: 'Baixando processador (2/3)...' });
       
       const wasmURL = await withTimeout(
         toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
         60000,
         'carregar ffmpeg-core.wasm'
       );
-      console.log('[FFmpeg] ✓ WASM carregado');
+      console.log('[FFmpeg] ✓ WASM carregado:', wasmURL.substring(0, 50) + '...');
       
-      await withTimeout(
-        ffmpeg.load({ coreURL, wasmURL }),
-        30000,
-        'inicializar FFmpeg'
-      );
+      console.log('[FFmpeg] Inicializando FFmpeg.load()...');
+      setTranscriptionProgress({ stage: 'loading', progress: 6, message: 'Inicializando processador (3/3)...' });
+      
+      const loadPromise = ffmpeg.load({ coreURL, wasmURL });
+      
+      // Log se a promise resolver ou rejeitar
+      loadPromise
+        .then(() => console.log('[FFmpeg] ✓ load() Promise resolvida'))
+        .catch(e => console.error('[FFmpeg] ✗ load() Promise rejeitada:', e));
+      
+      await withTimeout(loadPromise, 30000, 'inicializar FFmpeg');
       
       console.log('[FFmpeg] ✓ FFmpeg carregado com sucesso!');
+      console.log('[FFmpeg] ========================================');
+      
     } catch (error) {
       console.error('[FFmpeg] ✗ Erro ao carregar:', error);
+      console.error('[FFmpeg] Tipo do erro:', error instanceof Error ? error.constructor.name : typeof error);
+      console.error('[FFmpeg] Stack:', error instanceof Error ? error.stack : 'N/A');
       throw new Error('Erro ao carregar processador de áudio. Tente novamente ou use um arquivo SRT.');
     }
 
