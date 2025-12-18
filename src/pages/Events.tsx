@@ -83,19 +83,42 @@ const EventRow = ({
   awayTeam
 }: EventRowProps) => {
   // Get team logo based on event metadata
+  // Para gols contra, mostrar o logo do time que se beneficiou (adversário)
   const getTeamLogo = () => {
-    const teamName = event.metadata?.teamName;
     const teamType = event.metadata?.team;
+    const isOwnGoal = event.metadata?.isOwnGoal;
     
+    // Para gols contra, inverter o time (quem marcou contra si beneficia o adversário)
+    if (event.event_type === 'goal' && isOwnGoal) {
+      if (teamType === 'home' && awayTeam?.logo_url) return awayTeam.logo_url;
+      if (teamType === 'away' && homeTeam?.logo_url) return homeTeam.logo_url;
+    }
+    
+    // Caso normal
     if (teamType === 'home' && homeTeam?.logo_url) return homeTeam.logo_url;
     if (teamType === 'away' && awayTeam?.logo_url) return awayTeam.logo_url;
+    
+    const teamName = event.metadata?.teamName;
     if (teamName === homeTeam?.name && homeTeam?.logo_url) return homeTeam.logo_url;
     if (teamName === awayTeam?.name && awayTeam?.logo_url) return awayTeam.logo_url;
     return null;
   };
 
   const teamLogo = getTeamLogo();
-  const teamName = event.metadata?.teamName || (event.metadata?.team === 'home' ? homeTeam?.short_name : awayTeam?.short_name);
+  
+  // Para gols contra, mostrar o nome do time beneficiado
+  const getDisplayTeamName = () => {
+    const teamType = event.metadata?.team;
+    const isOwnGoal = event.metadata?.isOwnGoal;
+    
+    if (event.event_type === 'goal' && isOwnGoal) {
+      return teamType === 'home' ? awayTeam?.short_name : homeTeam?.short_name;
+    }
+    
+    return event.metadata?.teamName || (teamType === 'home' ? homeTeam?.short_name : awayTeam?.short_name);
+  };
+  
+  const teamName = getDisplayTeamName();
 
   return (
     <div 
