@@ -726,52 +726,102 @@ export default function Events() {
           </Card>
         )}
 
-        {/* Stats Overview */}
-        <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
-          <Card variant="glow">
-            <CardContent className="flex items-center gap-4 pt-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-green-500/10">
-                <Target className="h-6 w-6 text-green-500" />
+        {/* Match Header Card */}
+        {selectedMatch && (
+          <Card variant="glass" className="border-primary/20">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between">
+                {/* Home Team */}
+                <div className="flex items-center gap-4 flex-1">
+                  <Avatar className="h-14 w-14 border-2 border-background shadow-lg">
+                    <AvatarImage src={selectedMatch.home_team?.logo_url || ''} className="object-contain p-1" />
+                    <AvatarFallback className="text-lg font-bold bg-primary/10">
+                      {selectedMatch.home_team?.short_name?.slice(0, 2) || 'H'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <div>
+                    <p className="font-semibold">{selectedMatch.home_team?.name || 'Time Casa'}</p>
+                    <p className="text-3xl font-bold text-primary">{selectedMatch.home_score ?? 0}</p>
+                  </div>
+                </div>
+                
+                {/* Center - VS + Date + Status */}
+                <div className="text-center px-6">
+                  <p className="text-2xl font-bold text-muted-foreground">vs</p>
+                  {selectedMatch.match_date && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {new Date(selectedMatch.match_date).toLocaleDateString('pt-BR')}
+                    </p>
+                  )}
+                  <Badge variant="success" className="mt-2">
+                    {selectedMatch.status === 'completed' ? 'Finalizado' : selectedMatch.status || 'Em análise'}
+                  </Badge>
+                </div>
+                
+                {/* Away Team */}
+                <div className="flex items-center gap-4 flex-1 justify-end">
+                  <div className="text-right">
+                    <p className="font-semibold">{selectedMatch.away_team?.name || 'Time Visitante'}</p>
+                    <p className="text-3xl font-bold text-primary">{selectedMatch.away_score ?? 0}</p>
+                  </div>
+                  <Avatar className="h-14 w-14 border-2 border-background shadow-lg">
+                    <AvatarImage src={selectedMatch.away_team?.logo_url || ''} className="object-contain p-1" />
+                    <AvatarFallback className="text-lg font-bold bg-primary/10">
+                      {selectedMatch.away_team?.short_name?.slice(0, 2) || 'V'}
+                    </AvatarFallback>
+                  </Avatar>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Stats Overview - Compact */}
+        <div className="grid grid-cols-3 gap-3 md:grid-cols-6">
+          <Card variant="glow" className="py-2">
+            <CardContent className="flex items-center gap-3 py-2 px-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-green-500/10">
+                <Target className="h-4 w-4 text-green-500" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Gols</p>
-                <p className="font-display text-3xl font-bold">{eventCounts.goals}</p>
+                <p className="text-xs text-muted-foreground">Gols</p>
+                <p className="font-display text-xl font-bold">{eventCounts.goals}</p>
               </div>
             </CardContent>
           </Card>
 
-          <Card variant="glow">
-            <CardContent className="flex items-center gap-4 pt-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-yellow-500/10">
-                <Zap className="h-6 w-6 text-yellow-500" />
+          <Card variant="glow" className="py-2">
+            <CardContent className="flex items-center gap-3 py-2 px-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-yellow-500/10">
+                <Zap className="h-4 w-4 text-yellow-500" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Finalizações</p>
-                <p className="font-display text-3xl font-bold">{eventCounts.shots}</p>
+                <p className="text-xs text-muted-foreground">Finalizações</p>
+                <p className="font-display text-xl font-bold">{eventCounts.shots}</p>
               </div>
             </CardContent>
           </Card>
 
-          <Card variant="glow">
-            <CardContent className="flex items-center gap-4 pt-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500/10">
-                <AlertTriangle className="h-6 w-6 text-orange-500" />
+          <Card variant="glow" className="py-2">
+            <CardContent className="flex items-center gap-3 py-2 px-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-orange-500/10">
+                <AlertTriangle className="h-4 w-4 text-orange-500" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Faltas</p>
-                <p className="font-display text-3xl font-bold">{eventCounts.fouls}</p>
+                <p className="text-xs text-muted-foreground">Faltas</p>
+                <p className="font-display text-xl font-bold">{eventCounts.fouls}</p>
               </div>
             </CardContent>
           </Card>
 
-          <Card variant="glow">
-            <CardContent className="flex items-center gap-4 pt-6">
-              <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10">
-                <Shield className="h-6 w-6 text-primary" />
+          <Card variant="glow" className="py-2">
+            <CardContent className="flex items-center gap-3 py-2 px-3">
+              <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10">
+                <Shield className="h-4 w-4 text-primary" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Táticos</p>
-                <p className="font-display text-3xl font-bold">{eventCounts.tactical}</p>
+                <p className="text-xs text-muted-foreground">Táticos</p>
+                <p className="font-display text-xl font-bold">{eventCounts.tactical}</p>
               </div>
             </CardContent>
           </Card>
@@ -779,26 +829,26 @@ export default function Events() {
           {/* Admin: Pending approval count */}
           {isAdmin && (
             <>
-              <Card variant="glow" className="border-yellow-500/30">
-                <CardContent className="flex items-center gap-4 pt-6">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-yellow-500/10">
-                    <Clock className="h-6 w-6 text-yellow-500" />
+              <Card variant="glow" className="py-2 border-yellow-500/30">
+                <CardContent className="flex items-center gap-3 py-2 px-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-yellow-500/10">
+                    <Clock className="h-4 w-4 text-yellow-500" />
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Pendentes</p>
-                    <p className="font-display text-3xl font-bold">{eventCounts.pending}</p>
+                    <p className="text-xs text-muted-foreground">Pendentes</p>
+                    <p className="font-display text-xl font-bold">{eventCounts.pending}</p>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card variant="glow" className="border-green-500/30">
-                <CardContent className="flex items-center gap-4 pt-6">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-green-500/10">
-                    <CheckCircle className="h-6 w-6 text-green-500" />
+              <Card variant="glow" className="py-2 border-green-500/30">
+                <CardContent className="flex items-center gap-3 py-2 px-3">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-green-500/10">
+                    <CheckCircle className="h-4 w-4 text-green-500" />
                   </div>
                   <div>
-                    <p className="text-sm text-muted-foreground">Aprovados</p>
-                    <p className="font-display text-3xl font-bold">{eventCounts.approved}</p>
+                    <p className="text-xs text-muted-foreground">Aprovados</p>
+                    <p className="font-display text-xl font-bold">{eventCounts.approved}</p>
                   </div>
                 </CardContent>
               </Card>
@@ -1032,89 +1082,31 @@ export default function Events() {
               </Card>
             )}
 
-            <Card variant="glass">
-              <CardHeader>
-                <CardTitle>Por Time</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                {selectedMatch?.home_team && (
-                  <div 
-                    className="flex items-center justify-between rounded-lg p-3"
-                    style={{ backgroundColor: selectedMatch.home_team.primary_color + '15' }}
-                  >
-                    <div className="flex items-center gap-3">
-                      {selectedMatch.home_team.logo_url ? (
-                        <img 
-                          src={selectedMatch.home_team.logo_url} 
-                          alt={selectedMatch.home_team.name}
-                          className="h-8 w-8 object-contain"
-                        />
-                      ) : (
-                        <div 
-                          className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold"
-                          style={{ backgroundColor: selectedMatch.home_team.primary_color, color: '#fff' }}
-                        >
-                          {selectedMatch.home_team.short_name?.slice(0, 2)}
-                        </div>
-                      )}
-                      <span className="font-medium">{selectedMatch.home_team.short_name}</span>
-                    </div>
-                    <span className="text-lg font-bold">
-                      {selectedMatch.home_score ?? 0}
-                    </span>
-                  </div>
-                )}
-                {selectedMatch?.away_team && (
-                  <div 
-                    className="flex items-center justify-between rounded-lg p-3"
-                    style={{ backgroundColor: (selectedMatch.away_team.primary_color === '#FFFFFF' ? '#00529F' : selectedMatch.away_team.primary_color) + '15' }}
-                  >
-                    <div className="flex items-center gap-3">
-                      {selectedMatch.away_team.logo_url ? (
-                        <img 
-                          src={selectedMatch.away_team.logo_url} 
-                          alt={selectedMatch.away_team.name}
-                          className="h-8 w-8 object-contain"
-                        />
-                      ) : (
-                        <div 
-                          className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold"
-                          style={{ backgroundColor: selectedMatch.away_team.primary_color === '#FFFFFF' ? '#00529F' : selectedMatch.away_team.primary_color, color: '#fff' }}
-                        >
-                          {selectedMatch.away_team.short_name?.slice(0, 2)}
-                        </div>
-                      )}
-                      <span className="font-medium">{selectedMatch.away_team.short_name}</span>
-                    </div>
-                    <span className="text-lg font-bold">
-                      {selectedMatch.away_score ?? 0}
-                    </span>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card variant="glow">
-              <CardHeader>
-                <CardTitle>Destaques</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {events
-                  .filter(e => e.event_type === 'goal')
-                  .slice(0, 4)
-                  .map(event => (
-                    <div key={event.id} className="flex items-center gap-3">
-                      <Badge variant="success">Gol</Badge>
-                      <span className="text-sm truncate">
-                        {event.description || `${event.minute}'`}
+            {/* Videos Info Card */}
+            {matchVideos && matchVideos.length > 0 && (
+              <Card variant="glass">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Video className="h-5 w-5 text-primary" />
+                    Vídeos
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {matchVideos.map((video, index) => (
+                    <div key={video.id} className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">
+                        {video.video_type === 'first_half' ? '1º Tempo' : 
+                         video.video_type === 'second_half' ? '2º Tempo' : 
+                         `Vídeo ${index + 1}`}
                       </span>
+                      <Badge variant="outline">
+                        {video.duration_seconds ? `${Math.floor(video.duration_seconds / 60)}min` : 'N/A'}
+                      </Badge>
                     </div>
                   ))}
-                {events.filter(e => e.event_type === 'goal').length === 0 && (
-                  <p className="text-sm text-muted-foreground">Nenhum gol registrado</p>
-                )}
-              </CardContent>
-            </Card>
+                </CardContent>
+              </Card>
+            )}
           </div>
         </div>
 
