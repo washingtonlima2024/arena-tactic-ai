@@ -367,10 +367,28 @@ export function useWhisperTranscription() {
     console.log('[Transcrição] Iniciando transcrição para:', videoUrl);
     console.log('[Transcrição] Match ID:', matchId);
     console.log('[Transcrição] Video ID:', videoId);
-    if (videoSizeMB) console.log('[Transcrição] Tamanho do vídeo:', videoSizeMB, 'MB');
+    if (videoSizeMB) console.log('[Transcrição] Tamanho do vídeo (passado):', videoSizeMB, 'MB');
     
     setIsTranscribing(true);
     setUsedFallback(false);
+
+    // Se tamanho não foi passado, detectar automaticamente
+    let detectedSizeMB = videoSizeMB;
+    if (!detectedSizeMB) {
+      try {
+        console.log('[Transcrição] Detectando tamanho do vídeo...');
+        setTranscriptionProgress({ stage: 'loading', progress: 2, message: 'Verificando tamanho do vídeo...' });
+        
+        const headResponse = await fetch(videoUrl, { method: 'HEAD' });
+        const contentLength = headResponse.headers.get('content-length');
+        if (contentLength) {
+          detectedSizeMB = parseInt(contentLength) / (1024 * 1024);
+          console.log('[Transcrição] Tamanho detectado:', detectedSizeMB.toFixed(1), 'MB');
+        }
+      } catch (headError) {
+        console.warn('[Transcrição] Não foi possível detectar tamanho:', headError);
+      }
+    }
 
     try {
       // Tentar FFmpeg + Whisper primeiro
@@ -388,32 +406,35 @@ export function useWhisperTranscription() {
       } catch (ffmpegError) {
         console.warn('[Transcrição] ⚠️ FFmpeg inicial falhou:', ffmpegError);
         
-        // Para vídeos grandes, tentar novamente com mais tempo
-        if (videoSizeMB && videoSizeMB > 35) {
-          console.log('[Transcrição] Vídeo grande detectado, tentando fallback com mais tempo...');
-          setUsedFallback(true);
-          
-          try {
-            const fallbackResult = await transcribeWithLargeVideoFallback(videoUrl, matchId, videoId, videoSizeMB);
-            if (fallbackResult?.text) {
-              setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });
-              return fallbackResult;
-            }
-          } catch (fallbackError) {
-            console.error('[Transcrição] Fallback também falhou:', fallbackError);
-            throw fallbackError;
+        // Para qualquer vídeo, tentar fallback com mais tempo
+        console.log('[Transcrição] Tentando fallback com mais tempo...');
+        setUsedFallback(true);
+        
+        try {
+          const fallbackResult = await transcribeWithLargeVideoFallback(
+            videoUrl, 
+            matchId, 
+            videoId, 
+            detectedSizeMB || 50 // Assume 50MB se não detectou
+          );
+          if (fallbackResult?.text) {
+            setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });
+            return fallbackResult;
           }
+        } catch (fallbackError) {
+          console.error('[Transcrição] Fallback também falhou:', fallbackError);
+          throw fallbackError;
         }
         
         throw new Error('FFmpeg não disponível. Por favor, importe um arquivo SRT manualmente.');
       }
 
-      // Verificar se é um vídeo grande (> 35MB)
-      const isLargeVideo = videoSizeMB && videoSizeMB > 35;
+      // Verificar se é um vídeo grande (> 35MB) - usar detectedSizeMB
+      const isLargeVideo = detectedSizeMB && detectedSizeMB > 35;
       
       if (isLargeVideo) {
         console.log('[Transcrição] Vídeo grande detectado, usando processamento em partes...');
-        const result = await transcribeLargeVideo(ffmpeg, videoUrl, matchId, videoId, videoSizeMB);
+        const result = await transcribeLargeVideo(ffmpeg, videoUrl, matchId, videoId, detectedSizeMB);
         
         if (result) {
           setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });
