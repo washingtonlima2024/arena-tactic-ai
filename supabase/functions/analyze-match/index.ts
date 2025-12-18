@@ -353,12 +353,50 @@ IMPORTANTE:
       }
     }
 
-    // Update match score
+    // ═══════════════════════════════════════════════════════════════
+    // UPDATE MATCH SCORE - ACCUMULATE instead of overwrite
+    // ═══════════════════════════════════════════════════════════════
+    
+    // First, get current match scores
+    const { data: currentMatch, error: fetchError } = await supabase
+      .from('matches')
+      .select('home_score, away_score')
+      .eq('id', matchId)
+      .single();
+
+    if (fetchError) {
+      console.error('Fetch match error:', fetchError);
+    }
+
+    // Calculate new accumulated scores
+    const currentHomeScore = currentMatch?.home_score || 0;
+    const currentAwayScore = currentMatch?.away_score || 0;
+    
+    // For first half, use the calculated score directly
+    // For second half, ADD to existing score
+    let newHomeScore: number;
+    let newAwayScore: number;
+    
+    if (matchHalf === 'first') {
+      // First half: set the score directly (reset any previous)
+      newHomeScore = analysisResult.homeScore || 0;
+      newAwayScore = analysisResult.awayScore || 0;
+      console.log('1º Tempo - Placar definido:', newHomeScore, 'x', newAwayScore);
+    } else {
+      // Second half: ADD goals to first half score
+      newHomeScore = currentHomeScore + (analysisResult.homeScore || 0);
+      newAwayScore = currentAwayScore + (analysisResult.awayScore || 0);
+      console.log('2º Tempo - Placar acumulado:');
+      console.log('  1º Tempo:', currentHomeScore, 'x', currentAwayScore);
+      console.log('  2º Tempo:', analysisResult.homeScore || 0, 'x', analysisResult.awayScore || 0);
+      console.log('  Total:', newHomeScore, 'x', newAwayScore);
+    }
+
     const { error: updateError } = await supabase
       .from('matches')
       .update({
-        home_score: analysisResult.homeScore || 0,
-        away_score: analysisResult.awayScore || 0,
+        home_score: newHomeScore,
+        away_score: newAwayScore,
         status: 'completed'
       })
       .eq('id', matchId);
@@ -366,7 +404,7 @@ IMPORTANTE:
     if (updateError) {
       console.error('Update match error:', updateError);
     } else {
-      console.log('✓ Placar atualizado:', analysisResult.homeScore, 'x', analysisResult.awayScore);
+      console.log('✓ Placar final atualizado:', newHomeScore, 'x', newAwayScore);
     }
 
     console.log('=== ANÁLISE PRO COMPLETA ===');
@@ -375,10 +413,14 @@ IMPORTANTE:
       success: true,
       eventsDetected: eventsToInsert.length,
       goalsDetected: goalEvents.length,
-      homeScore: analysisResult.homeScore || 0,
-      awayScore: analysisResult.awayScore || 0,
+      homeScore: newHomeScore,
+      awayScore: newAwayScore,
+      halfHomeScore: analysisResult.homeScore || 0,
+      halfAwayScore: analysisResult.awayScore || 0,
+      half: matchHalf,
       events: eventsToInsert,
-      scoreValidated: true
+      scoreValidated: true,
+      accumulated: matchHalf === 'second'
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
