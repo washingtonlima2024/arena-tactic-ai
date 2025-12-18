@@ -1,5 +1,6 @@
 import "https://deno.land/x/xhr@0.1.0/mod.ts";
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -7,7 +8,7 @@ const corsHeaders = {
 };
 
 const MAX_WHISPER_SIZE = 24 * 1024 * 1024; // 24MB (Whisper limit is 25MB)
-const SAMPLE_SIZE = 15 * 1024 * 1024; // 15MB sample for Lovable AI
+const SAMPLE_SIZE = 12 * 1024 * 1024; // 12MB sample for Lovable AI (smaller to stay safe)
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -120,7 +121,6 @@ async function transcribeWithLovableAI(videoUrl: string, videoSizeMB: number): P
   });
   
   if (!response.ok && response.status !== 206) {
-    // Server doesn't support range requests, download smaller portion
     console.log('[LovableAI] Range não suportado, baixando início do vídeo...');
   }
   
@@ -130,17 +130,10 @@ async function transcribeWithLovableAI(videoUrl: string, videoSizeMB: number): P
   
   console.log(`[LovableAI] ✓ Amostra baixada: ${sampleSizeMB.toFixed(1)} MB`);
 
-  // Convert to base64 in chunks to avoid call stack issues
+  // Use Deno's built-in base64 encoder for proper encoding
   console.log('[LovableAI] Convertendo para base64...');
-  let base64 = '';
-  const chunkSize = 8192; // Smaller chunks to be safe
+  const base64 = base64Encode(arrayBuffer);
   
-  for (let i = 0; i < uint8Array.length; i += chunkSize) {
-    const chunk = uint8Array.slice(i, Math.min(i + chunkSize, uint8Array.length));
-    const binary = Array.from(chunk, byte => String.fromCharCode(byte)).join('');
-    base64 += btoa(binary);
-  }
-
   console.log('[LovableAI] ✓ Base64 pronto:', (base64.length / 1024 / 1024).toFixed(1), 'MB');
   console.log('[LovableAI] Enviando para Gemini via Lovable AI...');
 
