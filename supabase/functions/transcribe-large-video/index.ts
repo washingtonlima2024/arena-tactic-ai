@@ -35,8 +35,8 @@ serve(async (req) => {
       console.log('[TranscribeLarge] Usando Whisper (arquivo ≤ 24MB)...');
       return await transcribeWithWhisper(videoUrl, videoSizeMB);
     } else {
-      console.log('[TranscribeLarge] Usando Gemini via URL (arquivo > 24MB)...');
-      return await transcribeWithGeminiUrl(videoUrl, videoSizeMB);
+      console.log('[TranscribeLarge] Usando Gemini com URL pública (arquivo > 24MB)...');
+      return await transcribeWithGeminiPublicUrl(videoUrl, videoSizeMB);
     }
 
   } catch (error) {
@@ -103,122 +103,17 @@ async function transcribeWithWhisper(videoUrl: string, videoSizeMB: number): Pro
   );
 }
 
-async function transcribeWithGeminiUrl(videoUrl: string, videoSizeMB: number): Promise<Response> {
+async function transcribeWithGeminiPublicUrl(videoUrl: string, videoSizeMB: number): Promise<Response> {
   const GOOGLE_CLOUD_API_KEY = Deno.env.get('GOOGLE_CLOUD_API_KEY');
   if (!GOOGLE_CLOUD_API_KEY) {
     throw new Error('GOOGLE_CLOUD_API_KEY não configurada');
   }
 
-  console.log('[Gemini] Usando API direta do Google com URL...');
-  console.log('[Gemini] Vídeo:', videoSizeMB.toFixed(1), 'MB');
+  console.log('[Gemini] Usando URL pública diretamente (sem download)...');
+  console.log('[Gemini] URL:', videoUrl);
+  console.log('[Gemini] Tamanho:', videoSizeMB.toFixed(1), 'MB');
 
-  // Use Google's Generative Language API directly with file URI
-  // First, we need to upload the file to Google's File API
-  console.log('[Gemini] Iniciando upload para Google File API...');
-  
-  // Start resumable upload
-  const startUploadResponse = await fetch(
-    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${GOOGLE_CLOUD_API_KEY}`,
-    {
-      method: 'POST',
-      headers: {
-        'X-Goog-Upload-Protocol': 'resumable',
-        'X-Goog-Upload-Command': 'start',
-        'X-Goog-Upload-Header-Content-Type': 'video/mp4',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        file: {
-          display_name: `match-video-${Date.now()}.mp4`
-        }
-      }),
-    }
-  );
-
-  if (!startUploadResponse.ok) {
-    const errorText = await startUploadResponse.text();
-    console.error('[Gemini] Erro ao iniciar upload:', errorText);
-    throw new Error(`Erro ao iniciar upload: ${errorText}`);
-  }
-
-  const uploadUrl = startUploadResponse.headers.get('X-Goog-Upload-URL');
-  if (!uploadUrl) {
-    throw new Error('URL de upload não retornada pelo Google');
-  }
-
-  console.log('[Gemini] Upload URL obtida, baixando vídeo em streaming...');
-  
-  // Stream the video directly to Google without loading entire file in memory
-  const videoResponse = await fetch(videoUrl);
-  if (!videoResponse.ok || !videoResponse.body) {
-    throw new Error(`Erro ao acessar vídeo: ${videoResponse.status}`);
-  }
-
-  // Get total size
-  const totalSize = parseInt(videoResponse.headers.get('content-length') || '0', 10);
-  
-  // Read video in chunks and upload
-  const reader = videoResponse.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let downloadedSize = 0;
-  
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    downloadedSize += value.length;
-    
-    // Log progress every 10MB
-    if (downloadedSize % (10 * 1024 * 1024) < value.length) {
-      console.log(`[Gemini] Download: ${(downloadedSize / 1024 / 1024).toFixed(1)}MB / ${(totalSize / 1024 / 1024).toFixed(1)}MB`);
-    }
-  }
-  
-  // Combine chunks
-  const videoData = new Uint8Array(downloadedSize);
-  let offset = 0;
-  for (const chunk of chunks) {
-    videoData.set(chunk, offset);
-    offset += chunk.length;
-  }
-  
-  console.log(`[Gemini] ✓ Vídeo baixado: ${(videoData.length / 1024 / 1024).toFixed(1)} MB`);
-  console.log('[Gemini] Enviando para Google...');
-
-  // Upload the video data
-  const uploadResponse = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: {
-      'X-Goog-Upload-Command': 'upload, finalize',
-      'X-Goog-Upload-Offset': '0',
-      'Content-Type': 'video/mp4',
-    },
-    body: videoData,
-  });
-
-  if (!uploadResponse.ok) {
-    const errorText = await uploadResponse.text();
-    console.error('[Gemini] Erro no upload:', errorText);
-    throw new Error(`Erro no upload do vídeo: ${errorText}`);
-  }
-
-  const fileInfo = await uploadResponse.json();
-  const fileUri = fileInfo.file?.uri;
-  
-  if (!fileUri) {
-    console.error('[Gemini] Resposta do upload:', JSON.stringify(fileInfo));
-    throw new Error('URI do arquivo não retornada pelo Google');
-  }
-
-  console.log('[Gemini] ✓ Upload completo! URI:', fileUri);
-  
-  // Wait for file to be processed
-  console.log('[Gemini] Aguardando processamento do arquivo...');
-  await new Promise(resolve => setTimeout(resolve, 5000));
-
-  // Now use the file URI with Gemini
-  console.log('[Gemini] Enviando para Gemini 2.0 Flash...');
-  
+  // Use Gemini with video URL directly - no download needed
   const geminiResponse = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GOOGLE_CLOUD_API_KEY}`,
     {
@@ -233,7 +128,7 @@ async function transcribeWithGeminiUrl(videoUrl: string, videoSizeMB: number): P
               {
                 fileData: {
                   mimeType: 'video/mp4',
-                  fileUri: fileUri
+                  fileUri: videoUrl
                 }
               },
               {
@@ -264,7 +159,13 @@ IMPORTANTE: Retorne apenas a transcrição completa do áudio, nada mais.`
 
   if (!geminiResponse.ok) {
     const errorText = await geminiResponse.text();
-    console.error('[Gemini] Erro na geração:', geminiResponse.status, errorText);
+    console.error('[Gemini] Erro:', geminiResponse.status, errorText);
+    
+    // Check if it's a URL access error - need to use file upload instead
+    if (errorText.includes('INVALID_ARGUMENT') && errorText.includes('fileUri')) {
+      console.log('[Gemini] URL pública não suportada, tentando com Lovable AI...');
+      return await transcribeWithLovableAI(videoUrl, videoSizeMB);
+    }
     
     if (geminiResponse.status === 429) {
       throw new Error('Limite de requisições excedido. Tente novamente em alguns minutos.');
@@ -285,17 +186,135 @@ IMPORTANTE: Retorne apenas a transcrição completa do áudio, nada mais.`
   console.log('[Gemini] Caracteres:', transcriptionText.length);
   console.log('[Gemini] Preview:', transcriptionText.substring(0, 200));
 
-  // Cleanup: delete the uploaded file
-  try {
-    const fileName = fileUri.split('/').pop();
-    await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/files/${fileName}?key=${GOOGLE_CLOUD_API_KEY}`,
-      { method: 'DELETE' }
-    );
-    console.log('[Gemini] ✓ Arquivo temporário deletado');
-  } catch (e) {
-    console.log('[Gemini] Aviso: não foi possível deletar arquivo temporário');
+  return new Response(
+    JSON.stringify({ 
+      success: true, 
+      srtContent: transcriptionText,
+      text: transcriptionText,
+      videoSizeMB: videoSizeMB.toFixed(1),
+      method: 'gemini-url'
+    }),
+    { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+  );
+}
+
+// Fallback: Use Lovable AI gateway which doesn't require file upload for smaller segments
+async function transcribeWithLovableAI(videoUrl: string, videoSizeMB: number): Promise<Response> {
+  const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+  if (!LOVABLE_API_KEY) {
+    throw new Error('LOVABLE_API_KEY não configurada');
   }
+
+  console.log('[LovableAI] Usando Lovable AI gateway...');
+
+  // For very large files, we need to tell user to use SRT
+  if (videoSizeMB > 100) {
+    return new Response(
+      JSON.stringify({ 
+        success: false, 
+        error: `Vídeo muito grande (${videoSizeMB.toFixed(1)}MB). Por favor, faça upload de um arquivo SRT ou VTT.`,
+        requiresSrtUpload: true
+      }),
+      { 
+        status: 400,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+      }
+    );
+  }
+
+  // Download only first 20MB for transcription sample
+  console.log('[LovableAI] Baixando amostra do vídeo (primeiros 20MB)...');
+  
+  const response = await fetch(videoUrl, {
+    headers: {
+      'Range': 'bytes=0-20971520' // First 20MB
+    }
+  });
+  
+  const arrayBuffer = await response.arrayBuffer();
+  const uint8Array = new Uint8Array(arrayBuffer);
+  const sampleSizeMB = uint8Array.length / (1024 * 1024);
+  
+  console.log(`[LovableAI] ✓ Amostra baixada: ${sampleSizeMB.toFixed(1)} MB`);
+
+  // Convert to base64
+  let base64 = '';
+  const chunkSize = 32768;
+  for (let i = 0; i < uint8Array.length; i += chunkSize) {
+    const chunk = uint8Array.slice(i, Math.min(i + chunkSize, uint8Array.length));
+    base64 += btoa(String.fromCharCode(...chunk));
+  }
+
+  console.log('[LovableAI] ✓ Base64 pronto:', (base64.length / 1024 / 1024).toFixed(1), 'MB');
+  console.log('[LovableAI] Enviando para Gemini via Lovable AI...');
+
+  const lovableResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: 'google/gemini-2.5-flash',
+      messages: [
+        {
+          role: 'system',
+          content: `Você é um transcritor de áudio profissional especializado em transmissões esportivas de futebol em português brasileiro.
+
+TAREFA: Transcreva COMPLETAMENTE todo o áudio/narração do arquivo.
+
+INSTRUÇÕES:
+1. Transcreva TODO o conteúdo falado, sem omitir nada
+2. Mantenha a linguagem original em português brasileiro
+3. Capture nomes de jogadores, times, placar e minutos do jogo quando mencionados
+4. Inclua expressões do narrador como "GOOOL", "uuuh", etc.
+5. Não adicione timestamps ou formatação especial
+6. Retorne APENAS o texto transcrito, sem explicações ou comentários`
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'text',
+              text: `Transcreva completamente todo o áudio deste vídeo. É uma transmissão de futebol de aproximadamente ${videoSizeMB.toFixed(0)} minutos. Esta é uma amostra dos primeiros ${sampleSizeMB.toFixed(1)}MB. Retorne apenas a transcrição completa, sem comentários adicionais.`
+            },
+            {
+              type: 'image_url',
+              image_url: {
+                url: `data:video/mp4;base64,${base64}`
+              }
+            }
+          ]
+        }
+      ],
+      max_tokens: 16000,
+    }),
+  });
+
+  if (!lovableResponse.ok) {
+    const errorText = await lovableResponse.text();
+    console.error('[LovableAI] Erro:', lovableResponse.status, errorText);
+    
+    if (lovableResponse.status === 429) {
+      throw new Error('Limite de requisições excedido. Tente novamente em alguns minutos.');
+    }
+    
+    if (lovableResponse.status === 402) {
+      throw new Error('Créditos insuficientes na Lovable AI.');
+    }
+    
+    throw new Error(`Erro na Lovable AI: ${lovableResponse.status}`);
+  }
+
+  const result = await lovableResponse.json();
+  const transcriptionText = result.choices?.[0]?.message?.content || '';
+
+  if (!transcriptionText || transcriptionText.trim().length === 0) {
+    throw new Error('Transcrição retornou vazia. Verifique se o vídeo contém áudio audível.');
+  }
+
+  console.log('[LovableAI] ✓ Transcrição completa!');
+  console.log('[LovableAI] Caracteres:', transcriptionText.length);
 
   return new Response(
     JSON.stringify({ 
@@ -303,7 +322,8 @@ IMPORTANTE: Retorne apenas a transcrição completa do áudio, nada mais.`
       srtContent: transcriptionText,
       text: transcriptionText,
       videoSizeMB: videoSizeMB.toFixed(1),
-      method: 'gemini-direct'
+      method: 'lovable-ai',
+      note: 'Transcrição baseada em amostra de 20MB do vídeo'
     }),
     { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
   );
