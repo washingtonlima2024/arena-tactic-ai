@@ -25,7 +25,7 @@ import { Progress } from '@/components/ui/progress';
 import { Search, Filter, Plus, Calendar, Trophy, Loader2, Video, Trash2, RefreshCw, Mic } from 'lucide-react';
 import { useMatches, Match } from '@/hooks/useMatches';
 import { useDeleteMatch } from '@/hooks/useDeleteMatch';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { TeamBadge } from '@/components/teams/TeamBadge';
@@ -35,6 +35,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { useWhisperTranscription } from '@/hooks/useWhisperTranscription';
 
 export default function Matches() {
+  const navigate = useNavigate();
   const { data: matches = [], isLoading } = useMatches();
   const deleteMatch = useDeleteMatch();
   const [matchToDelete, setMatchToDelete] = useState<Match | null>(null);
@@ -209,9 +210,12 @@ export default function Matches() {
       resetProgress();
       
       setTimeout(() => {
+        const reprocessedId = matchToReprocess.id;
         setMatchToReprocess(null);
         setIsReprocessing(false);
         setReprocessProgress({ stage: '', progress: 0 });
+        // Navegar para a página de eventos após o sucesso
+        navigate(`/events?match=${reprocessedId}`);
       }, 1500);
       
     } catch (error: any) {
