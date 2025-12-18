@@ -31,6 +31,7 @@ import {
 import { useTeams } from '@/hooks/useTeams';
 import { useCreateMatch } from '@/hooks/useMatches';
 import { useStartAnalysis, useAnalysisJob } from '@/hooks/useAnalysisJob';
+import { useWhisperTranscription } from '@/hooks/useWhisperTranscription';
 import { AnalysisProgress } from '@/components/analysis/AnalysisProgress';
 import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
@@ -136,6 +137,7 @@ export default function VideoUpload() {
   const createMatch = useCreateMatch();
   const { startAnalysis, isLoading: isStartingAnalysis } = useStartAnalysis();
   const analysisJob = useAnalysisJob(currentJobId);
+  const { transcribeVideo, transcriptionProgress: whisperProgress, isTranscribing: isWhisperTranscribing } = useWhisperTranscription();
 
   // Detect video duration using HTML5 video element
   const detectVideoDuration = (file: File): Promise<number> => {
@@ -545,10 +547,30 @@ export default function VideoUpload() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcriptionProgress, setTranscriptionProgress] = useState('');
 
-  // Transcribe video/embed using Whisper API
-  const transcribeWithWhisper = async (segment: VideoSegment): Promise<string | null> => {
+  // Transcribe video/embed using Whisper API with FFmpeg audio extraction
+  const transcribeWithWhisper = async (segment: VideoSegment, matchId: string): Promise<string | null> => {
     try {
       console.log('Iniciando transcrição Whisper para:', segment.name);
+      
+      // For uploaded MP4 files, use FFmpeg extraction (proper flow)
+      if (!segment.isLink && segment.url) {
+        setTranscriptionProgress(`Extraindo áudio de ${segment.name}...`);
+        
+        // Generate a unique videoId for the audio file
+        const videoId = segment.id || crypto.randomUUID();
+        
+        // Use FFmpeg to extract audio, upload, and transcribe
+        const result = await transcribeVideo(segment.url, matchId, videoId);
+        
+        if (result?.text) {
+          console.log('Transcrição FFmpeg completa:', result.text.length, 'caracteres');
+          return result.text;
+        }
+        
+        console.log('FFmpeg transcription failed, trying direct URL...');
+      }
+      
+      // Fallback: For embeds or if FFmpeg fails, try direct URL
       setTranscriptionProgress(`Transcrevendo ${segment.name}...`);
       
       let requestBody: { audioUrl?: string; videoUrl?: string; embedUrl?: string } = {};
@@ -557,7 +579,7 @@ export default function VideoUpload() {
         // For embeds, send the embed URL
         requestBody = { embedUrl: segment.url };
       } else if (segment.url) {
-        // For uploaded MP4s, send the storage URL
+        // For uploaded MP4s as fallback
         requestBody = { audioUrl: segment.url };
       }
       
@@ -709,7 +731,7 @@ export default function VideoUpload() {
           description: "Extraindo áudio e enviando para Whisper API...",
         });
         
-        const transcription = await transcribeWithWhisper(firstHalfSegments[0]);
+        const transcription = await transcribeWithWhisper(firstHalfSegments[0], matchId);
         if (transcription) {
           firstHalfTranscription = transcription;
           toast({
@@ -732,7 +754,7 @@ export default function VideoUpload() {
           description: "Extraindo áudio e enviando para Whisper API...",
         });
         
-        const transcription = await transcribeWithWhisper(secondHalfSegments[0]);
+        const transcription = await transcribeWithWhisper(secondHalfSegments[0], matchId);
         if (transcription) {
           secondHalfTranscription = transcription;
           toast({
@@ -1243,8 +1265,9 @@ export default function VideoUpload() {
               onBack={() => setCurrentStep('videos')}
               onStartAnalysis={handleStartAnalysis}
               isLoading={isStartingAnalysis || createMatch.isPending}
-              isTranscribing={isTranscribing}
+              isTranscribing={isTranscribing || isWhisperTranscribing}
               transcriptionProgress={transcriptionProgress}
+              whisperProgress={whisperProgress}
             />
           )}
         </div>
