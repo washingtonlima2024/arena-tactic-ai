@@ -10,6 +10,12 @@ import { ArrowLeft, Play, Calendar, Trophy, MapPin, FileVideo, Link2 } from 'luc
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
+interface TranscriptionProgress {
+  stage: 'idle' | 'loading' | 'downloading' | 'extracting' | 'uploading' | 'transcribing' | 'complete' | 'error';
+  progress: number;
+  message: string;
+}
+
 interface AnalysisSummaryProps {
   matchData: MatchSetupData;
   segments: VideoSegment[];
@@ -18,9 +24,10 @@ interface AnalysisSummaryProps {
   isLoading: boolean;
   isTranscribing?: boolean;
   transcriptionProgress?: string;
+  whisperProgress?: TranscriptionProgress;
 }
 
-export function AnalysisSummary({ matchData, segments, onBack, onStartAnalysis, isLoading, isTranscribing, transcriptionProgress }: AnalysisSummaryProps) {
+export function AnalysisSummary({ matchData, segments, onBack, onStartAnalysis, isLoading, isTranscribing, transcriptionProgress, whisperProgress }: AnalysisSummaryProps) {
   const { data: teams } = useTeams();
   
   const homeTeam = teams?.find(t => t.id === matchData.homeTeamId);
@@ -162,10 +169,15 @@ export function AnalysisSummary({ matchData, segments, onBack, onStartAnalysis, 
           size="lg"
         >
           {isTranscribing ? (
-            <>
-              <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2" />
-              {transcriptionProgress || 'Transcrevendo áudio...'}
-            </>
+            <div className="flex items-center gap-2">
+              <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full" />
+              <span className="text-sm">
+                {whisperProgress?.message || transcriptionProgress || 'Transcrevendo áudio...'}
+              </span>
+              {whisperProgress && whisperProgress.progress > 0 && (
+                <span className="text-xs opacity-75">({Math.round(whisperProgress.progress)}%)</span>
+              )}
+            </div>
           ) : isLoading ? (
             <>
               <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2" />
