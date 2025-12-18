@@ -37,6 +37,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { useStartAnalysis } from '@/hooks/useAnalysisJob';
+import { useWhisperTranscription } from '@/hooks/useWhisperTranscription';
 
 interface UploadedFile {
   name: string;
@@ -71,12 +72,11 @@ export function ReanalyzeHalfDialog({
 }: ReanalyzeHalfDialogProps) {
   const queryClient = useQueryClient();
   const { startAnalysis, isLoading } = useStartAnalysis();
+  const { transcribeVideo, transcriptionProgress, isTranscribing } = useWhisperTranscription();
   const [transcription, setTranscription] = useState('');
   const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
-  const [isExtracting, setIsExtracting] = useState(false);
-  const [extractProgress, setExtractProgress] = useState(0);
   
   // Estado para transcrição original
   const [originalTranscription, setOriginalTranscription] = useState<string | null>(null);
@@ -179,9 +179,6 @@ export function ReanalyzeHalfDialog({
 
   const handleExtractTranscription = async () => {
     try {
-      setIsExtracting(true);
-      setExtractProgress(10);
-
       const { data: videos } = await supabase
         .from('videos')
         .select('*')
@@ -190,8 +187,9 @@ export function ReanalyzeHalfDialog({
 
       const halfVideo = videos?.find(v => {
         const start = v.start_minute || 0;
-        if (half === 'first') return start < 45;
-        return start >= 45;
+        const videoType = v.video_type;
+        if (half === 'first') return videoType === 'first_half' || start < 45;
+        return videoType === 'second_half' || start >= 45;
       });
 
       if (!halfVideo) {
@@ -199,48 +197,30 @@ export function ReanalyzeHalfDialog({
         return;
       }
 
-      setExtractProgress(30);
-      toast.info('Extraindo áudio do vídeo...');
+      toast.info('Transcrevendo áudio com Whisper...');
 
-      const { data, error } = await supabase.functions.invoke('extract-audio-srt', {
-        body: { matchId, videoUrl: halfVideo.file_url }
-      });
+      const result = await transcribeVideo(halfVideo.file_url, matchId, halfVideo.id);
 
-      setExtractProgress(80);
-
-      if (error) throw error;
-
-      if (data?.transcribedText) {
+      if (result?.srtContent) {
         setUploadedFiles(prev => {
           const filtered = prev.filter(f => 
             f.name !== '🎙️ whisper-transcription.txt' && 
             f.name !== '🎙️ whisper-timestamps.srt'
           );
           
-          const newFiles: UploadedFile[] = [
+          return [
             ...filtered,
-            { name: '🎙️ whisper-transcription.txt', content: data.transcribedText, isOriginal: false }
+            { name: '🎙️ whisper-transcription.txt', content: result.srtContent, isOriginal: false }
           ];
-
-          if (data?.srtContent) {
-            newFiles.push({ name: '🎙️ whisper-timestamps.srt', content: data.srtContent, isOriginal: false });
-          }
-          
-          return newFiles;
         });
 
-        toast.success(`Transcrição extraída: ${data.method === 'whisper' ? 'Whisper API' : 'Baseado em eventos'}`);
+        toast.success('Transcrição Whisper concluída!');
       } else {
         toast.warning('Transcrição vazia retornada');
       }
-
-      setExtractProgress(100);
     } catch (error) {
       console.error('Error extracting transcription:', error);
       toast.error('Erro ao extrair transcrição');
-    } finally {
-      setIsExtracting(false);
-      setExtractProgress(0);
     }
   };
 
@@ -475,9 +455,9 @@ export function ReanalyzeHalfDialog({
               variant="secondary"
               className="w-full"
               onClick={handleExtractTranscription}
-              disabled={isExtracting || isLoading || isDeleting}
+              disabled={isTranscribing || isLoading || isDeleting}
             >
-              {isExtracting ? (
+              {isTranscribing ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Extraindo com Whisper...
@@ -489,7 +469,12 @@ export function ReanalyzeHalfDialog({
                 </>
               )}
             </Button>
-            {isExtracting && <Progress value={extractProgress} className="h-2" />}
+            {isTranscribing && (
+              <div className="space-y-1">
+                <Progress value={transcriptionProgress.progress} className="h-2" />
+                <p className="text-xs text-muted-foreground">{transcriptionProgress.message}</p>
+              </div>
+            )}
             <p className="text-xs text-muted-foreground">
               Gera nova transcrição do áudio - será adicionada à lista de arquivos
             </p>
@@ -605,10 +590,10 @@ export function ReanalyzeHalfDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={isLoading || isDeleting || isExtracting}>
+          <Button variant="outline" onClick={onClose} disabled={isLoading || isDeleting || isTranscribing}>
             Cancelar
           </Button>
-          <Button variant="destructive" onClick={handleReanalyze} disabled={isLoading || isDeleting || isExtracting}>
+          <Button variant="destructive" onClick={handleReanalyze} disabled={isLoading || isDeleting || isTranscribing}>
             {(isLoading || isDeleting) ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
             ) : (
