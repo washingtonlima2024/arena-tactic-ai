@@ -547,53 +547,73 @@ export default function VideoUpload() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcriptionProgress, setTranscriptionProgress] = useState('');
 
-  // Transcribe video/embed using Whisper API with FFmpeg audio extraction - WITH RETRIES
+  // Transcribe video/embed using Whisper API with FFmpeg audio extraction - WITH RETRIES AND FALLBACK
   const transcribeWithWhisper = async (segment: VideoSegment, matchId: string): Promise<string | null> => {
     const MAX_RETRIES = 2;
+    
+    console.log('========================================');
+    console.log('[transcribeWithWhisper] INICIANDO');
+    console.log('Segmento:', segment.name);
+    console.log('URL:', segment.url);
+    console.log('isLink:', segment.isLink);
+    console.log('Match ID:', matchId);
+    console.log('========================================');
     
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         console.log(`[Tentativa ${attempt}/${MAX_RETRIES}] Iniciando transcrição Whisper para: ${segment.name}`);
         
-        // For uploaded MP4 files, use FFmpeg extraction (proper flow)
+        // ESTRATÉGIA 1: Para MP4 uploaded, usar FFmpeg para extrair áudio
         if (!segment.isLink && segment.url) {
           setTranscriptionProgress(`[${attempt}/${MAX_RETRIES}] Extraindo áudio de ${segment.name}...`);
+          console.log('[FFmpeg] Tentando extrair áudio do MP4...');
           
           // Generate a unique videoId for the audio file
           const videoId = segment.id || crypto.randomUUID();
           
-          // Use FFmpeg to extract audio, upload, and transcribe
-          const result = await transcribeVideo(segment.url, matchId, videoId);
-          
-          if (result?.text) {
-            console.log('Transcrição FFmpeg completa:', result.text.length, 'caracteres');
-            return result.text;
+          try {
+            // Use FFmpeg to extract audio, upload, and transcribe
+            const result = await transcribeVideo(segment.url, matchId, videoId);
+            
+            if (result?.text) {
+              console.log('[FFmpeg] ✓ Transcrição FFmpeg completa:', result.text.length, 'caracteres');
+              return result.text;
+            }
+            
+            console.log('[FFmpeg] ✗ FFmpeg retornou sem texto, tentando fallback...');
+          } catch (ffmpegError) {
+            console.error('[FFmpeg] ✗ FFmpeg falhou:', ffmpegError);
+            console.log('[FFmpeg] Tentando fallback direto para edge function...');
           }
-          
-          console.log('FFmpeg transcription failed, trying direct URL...');
         }
         
-        // Fallback: For embeds or if FFmpeg fails, try direct URL
-        setTranscriptionProgress(`[${attempt}/${MAX_RETRIES}] Transcrevendo ${segment.name}...`);
+        // ESTRATÉGIA 2: Fallback - enviar URL diretamente para edge function
+        setTranscriptionProgress(`[${attempt}/${MAX_RETRIES}] Transcrevendo ${segment.name} (fallback)...`);
+        console.log('[Fallback] Enviando URL diretamente para edge function...');
         
         let requestBody: { audioUrl?: string; videoUrl?: string; embedUrl?: string } = {};
         
         if (segment.isLink) {
-          // For embeds, send the embed URL
+          // Para embeds, enviar URL do embed
           requestBody = { embedUrl: segment.url };
+          console.log('[Fallback] Usando embedUrl:', segment.url);
         } else if (segment.url) {
-          // For uploaded MP4s as fallback
-          requestBody = { audioUrl: segment.url };
+          // Para MP4 uploaded como fallback - usar videoUrl (edge function vai baixar)
+          requestBody = { videoUrl: segment.url };
+          console.log('[Fallback] Usando videoUrl:', segment.url);
         }
         
-        if (!requestBody.audioUrl && !requestBody.embedUrl) {
-          console.log('Segmento sem URL válida para transcrição');
+        if (!requestBody.videoUrl && !requestBody.embedUrl) {
+          console.log('[Fallback] ✗ Segmento sem URL válida para transcrição');
           return null;
         }
         
+        console.log('[Fallback] Invocando edge function...');
         const { data, error } = await supabase.functions.invoke('transcribe-audio-whisper', {
           body: requestBody
         });
+        
+        console.log('[Fallback] Resposta:', { success: data?.success, hasText: !!data?.text, error: error?.message || data?.error });
         
         if (error) {
           console.error(`[Tentativa ${attempt}] Erro na transcrição Whisper:`, error);
@@ -604,7 +624,19 @@ export default function VideoUpload() {
           throw error;
         }
         
+        // Check if embed requires SRT
+        if (data?.requiresSrt) {
+          console.log('[Fallback] Embed requer SRT manual:', data.error);
+          toast({
+            title: "Embed não suportado",
+            description: "Este embed não suporta extração automática. Faça upload do MP4 ou forneça um arquivo SRT.",
+            variant: "destructive",
+          });
+          return null;
+        }
+        
         if (!data?.success) {
+          console.error('[Fallback] Transcrição falhou:', data?.error);
           if (attempt < MAX_RETRIES) {
             console.log('Tentando novamente...');
             continue;
@@ -612,7 +644,7 @@ export default function VideoUpload() {
           throw new Error(data?.error || 'Falha na transcrição');
         }
         
-        console.log('Transcrição completa:', data.text?.length || 0, 'caracteres');
+        console.log('[Fallback] ✓ Transcrição completa:', data.text?.length || 0, 'caracteres');
         return data.text || data.srtContent || '';
       } catch (error) {
         console.error(`[Tentativa ${attempt}] Erro ao transcrever:`, error);
