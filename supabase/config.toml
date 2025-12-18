@@ -29,3 +29,6 @@ verify_jwt = false
 
 [functions.transcribe-google-speech]
 verify_jwt = false
+
+[functions.transcribe-large-video]
+verify_jwt = false
