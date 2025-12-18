@@ -219,14 +219,20 @@ export function VideoPlayerModal({
                 />
               </div>
             ) : hasDirectClip ? (
-              <video 
-                ref={videoRef} 
-                src={clip.clipUrl!}
-                className="w-full h-full object-contain bg-black"
-                controls
-                autoPlay
-                muted={isMuted}
-              />
+              <div className="relative w-full h-full">
+                <video 
+                  ref={videoRef} 
+                  src={clip.clipUrl!}
+                  className="w-full h-full object-contain bg-black"
+                  controls
+                  autoPlay
+                  muted={isMuted}
+                />
+                {/* Clip indicator */}
+                <div className="absolute top-4 right-4 bg-primary/90 text-primary-foreground px-3 py-1.5 rounded-lg text-sm font-medium backdrop-blur-sm z-20">
+                  Clip Extraído
+                </div>
+              </div>
             ) : isEmbed ? (
               <iframe
                 key={iframeKey}

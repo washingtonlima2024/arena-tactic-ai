@@ -1,7 +1,10 @@
-// Simplified clip generation - uses timestamp-based playback instead of FFmpeg extraction
-// No heavy dependencies, instant playback from original video
+// Real clip extraction using FFmpeg.wasm
+// Extracts 10-second clips (5s before + 5s after event) from original video
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { supabase } from '@/integrations/supabase/client';
 
 // Timing constants in milliseconds
 export const CLIP_BUFFER_BEFORE_MS = 3000; // 3 seconds before event
@@ -11,6 +14,7 @@ export interface ClipConfig {
   eventId: string;
   eventMs: number; // Event time in milliseconds
   videoUrl: string;
+  matchId: string;
   bufferBeforeMs?: number;
   bufferAfterMs?: number;
 }
@@ -23,9 +27,12 @@ export interface ClipPlaybackInfo {
 }
 
 export interface ClipGenerationProgress {
-  stage: 'idle' | 'complete';
+  stage: 'idle' | 'loading' | 'downloading' | 'extracting' | 'uploading' | 'complete' | 'error';
   progress: number;
   message: string;
+  currentEvent?: string;
+  completedCount?: number;
+  totalCount?: number;
 }
 
 // Helper: Convert minute + second to milliseconds
@@ -33,25 +40,55 @@ export function toMs(minute: number, second: number = 0): number {
   return (minute * 60 + second) * 1000;
 }
 
-// Helper: Convert minutes to milliseconds
-export function minutesToMs(minutes: number): number {
-  return minutes * 60 * 1000;
-}
-
-// Helper: Convert seconds to milliseconds
-export function secondsToMs(seconds: number): number {
-  return seconds * 1000;
+// Helper: Convert milliseconds to FFmpeg timestamp format (HH:MM:SS.mmm)
+function msToFFmpegTimestamp(ms: number): string {
+  const totalSeconds = ms / 1000;
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toFixed(3).padStart(6, '0')}`;
 }
 
 export function useClipGeneration() {
-  const [isGenerating] = useState(false);
-  const [progress] = useState<ClipGenerationProgress>({
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [progress, setProgress] = useState<ClipGenerationProgress>({
     stage: 'idle',
     progress: 0,
     message: ''
   });
+  const [generatingEventIds, setGeneratingEventIds] = useState<Set<string>>(new Set());
+  const [isCancelled, setIsCancelled] = useState(false);
+  
+  const ffmpegRef = useRef<FFmpeg | null>(null);
+  const cancelRef = useRef(false);
 
-  // Calculate playback timestamps for a clip (no extraction needed)
+  // Load FFmpeg
+  const loadFFmpeg = async () => {
+    if (ffmpegRef.current?.loaded) return ffmpegRef.current;
+
+    setProgress({ stage: 'loading', progress: 5, message: 'Carregando processador de vídeo...' });
+
+    const ffmpeg = new FFmpeg();
+    ffmpegRef.current = ffmpeg;
+
+    ffmpeg.on('progress', ({ progress: p }) => {
+      setProgress(prev => ({
+        ...prev,
+        progress: Math.min(prev.progress + p * 10, 80),
+        message: `Extraindo clip... ${Math.round(p * 100)}%`
+      }));
+    });
+
+    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+    await ffmpeg.load({
+      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+    });
+
+    return ffmpeg;
+  };
+
+  // Calculate playback timestamps for a clip (without extraction)
   const getClipPlaybackInfo = useCallback((config: ClipConfig): ClipPlaybackInfo => {
     const bufferBefore = config.bufferBeforeMs ?? CLIP_BUFFER_BEFORE_MS;
     const bufferAfter = config.bufferAfterMs ?? CLIP_BUFFER_AFTER_MS;
@@ -69,12 +106,257 @@ export function useClipGeneration() {
     };
   }, []);
 
-  // For compatibility - these do nothing now (timestamp playback replaces extraction)
-  const generateClip = useCallback(async () => null, []);
-  const generateAllClips = useCallback(async () => {}, []);
-  const cancel = useCallback(() => {}, []);
-  const reset = useCallback(() => {}, []);
-  const isGeneratingEvent = useCallback(() => false, []);
+  // Generate a single clip
+  const generateClip = useCallback(async (
+    config: ClipConfig
+  ): Promise<string | null> => {
+    if (cancelRef.current) return null;
+    
+    setGeneratingEventIds(prev => new Set([...prev, config.eventId]));
+    
+    try {
+      // Load FFmpeg
+      const ffmpeg = await loadFFmpeg();
+      if (cancelRef.current) return null;
+
+      // Calculate timestamps
+      const bufferBefore = config.bufferBeforeMs ?? CLIP_BUFFER_BEFORE_MS;
+      const bufferAfter = config.bufferAfterMs ?? CLIP_BUFFER_AFTER_MS;
+      const eventSeconds = config.eventMs / 1000;
+      const startTimeSeconds = Math.max(0, eventSeconds - (bufferBefore / 1000));
+      const durationSeconds = (bufferBefore + bufferAfter) / 1000;
+
+      // Download video
+      setProgress(prev => ({
+        ...prev,
+        stage: 'downloading',
+        progress: 15,
+        message: 'Baixando vídeo para extração...',
+        currentEvent: config.eventId
+      }));
+
+      const videoData = await fetchFile(config.videoUrl);
+      if (cancelRef.current) return null;
+      
+      console.log('Vídeo baixado:', (videoData.byteLength / (1024 * 1024)).toFixed(2), 'MB');
+
+      // Write to FFmpeg filesystem
+      await ffmpeg.writeFile('input.mp4', videoData);
+
+      // Extract clip using stream copy (fast, no re-encoding)
+      setProgress(prev => ({
+        ...prev,
+        stage: 'extracting',
+        progress: 40,
+        message: `Extraindo clip (${Math.round(startTimeSeconds)}s - ${Math.round(startTimeSeconds + durationSeconds)}s)...`
+      }));
+
+      const startTimestamp = msToFFmpegTimestamp(startTimeSeconds * 1000);
+      
+      await ffmpeg.exec([
+        '-ss', startTimestamp,           // Seek to start (before input for faster seeking)
+        '-i', 'input.mp4',
+        '-t', durationSeconds.toString(), // Duration
+        '-c', 'copy',                     // Stream copy (no re-encoding)
+        '-avoid_negative_ts', 'make_zero',
+        'output.mp4'
+      ]);
+
+      if (cancelRef.current) {
+        await ffmpeg.deleteFile('input.mp4');
+        return null;
+      }
+
+      // Read the output
+      const clipData = await ffmpeg.readFile('output.mp4');
+      let clipBlob: Blob;
+      if (clipData instanceof Uint8Array) {
+        const buffer = new ArrayBuffer(clipData.length);
+        const view = new Uint8Array(buffer);
+        view.set(clipData);
+        clipBlob = new Blob([buffer], { type: 'video/mp4' });
+      } else {
+        clipBlob = new Blob([clipData], { type: 'video/mp4' });
+      }
+
+      console.log('Clip extraído:', (clipBlob.size / (1024 * 1024)).toFixed(2), 'MB');
+
+      // Clean up FFmpeg filesystem
+      await ffmpeg.deleteFile('input.mp4');
+      await ffmpeg.deleteFile('output.mp4');
+
+      // Upload to Supabase Storage
+      setProgress(prev => ({
+        ...prev,
+        stage: 'uploading',
+        progress: 70,
+        message: 'Enviando clip...'
+      }));
+
+      const filePath = `${config.matchId}/${config.eventId}.mp4`;
+      const { error: uploadError } = await supabase.storage
+        .from('event-clips')
+        .upload(filePath, clipBlob, {
+          contentType: 'video/mp4',
+          upsert: true
+        });
+
+      if (uploadError) {
+        throw new Error(`Erro ao fazer upload: ${uploadError.message}`);
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('event-clips')
+        .getPublicUrl(filePath);
+
+      const clipUrl = urlData.publicUrl;
+
+      // Update match_events with clip_url
+      const { error: updateError } = await supabase
+        .from('match_events')
+        .update({ clip_url: clipUrl })
+        .eq('id', config.eventId);
+
+      if (updateError) {
+        console.error('Erro ao atualizar evento:', updateError);
+      }
+
+      setProgress(prev => ({
+        ...prev,
+        stage: 'complete',
+        progress: 100,
+        message: 'Clip gerado com sucesso!'
+      }));
+
+      return clipUrl;
+
+    } catch (error) {
+      console.error('Erro na geração do clip:', error);
+      setProgress({
+        stage: 'error',
+        progress: 0,
+        message: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
+      return null;
+    } finally {
+      setGeneratingEventIds(prev => {
+        const next = new Set(prev);
+        next.delete(config.eventId);
+        return next;
+      });
+    }
+  }, []);
+
+  // Generate multiple clips with progress tracking
+  const generateAllClips = useCallback(async (
+    events: Array<{
+      id: string;
+      minute: number;
+      second?: number;
+      metadata?: { eventMs?: number; videoSecond?: number };
+    }>,
+    videoUrl: string,
+    matchId: string,
+    limit: number = 20
+  ): Promise<void> => {
+    setIsGenerating(true);
+    cancelRef.current = false;
+    setIsCancelled(false);
+
+    const eventsToProcess = events.slice(0, limit);
+    let completedCount = 0;
+
+    setProgress({
+      stage: 'loading',
+      progress: 0,
+      message: `Preparando para extrair ${eventsToProcess.length} clips...`,
+      completedCount: 0,
+      totalCount: eventsToProcess.length
+    });
+
+    try {
+      // Load FFmpeg once
+      await loadFFmpeg();
+
+      for (const event of eventsToProcess) {
+        if (cancelRef.current) {
+          setProgress(prev => ({
+            ...prev,
+            stage: 'idle',
+            message: 'Extração cancelada'
+          }));
+          break;
+        }
+
+        // Calculate event time in ms
+        let eventMs: number;
+        if (event.metadata?.eventMs !== undefined) {
+          eventMs = event.metadata.eventMs;
+        } else if (event.metadata?.videoSecond !== undefined) {
+          eventMs = event.metadata.videoSecond * 1000;
+        } else {
+          eventMs = toMs(event.minute, event.second || 0);
+        }
+
+        setProgress(prev => ({
+          ...prev,
+          progress: Math.round((completedCount / eventsToProcess.length) * 100),
+          message: `Extraindo clip ${completedCount + 1}/${eventsToProcess.length} (${event.minute}')`,
+          currentEvent: event.id,
+          completedCount,
+          totalCount: eventsToProcess.length
+        }));
+
+        await generateClip({
+          eventId: event.id,
+          eventMs,
+          videoUrl,
+          matchId
+        });
+
+        completedCount++;
+      }
+
+      setProgress({
+        stage: 'complete',
+        progress: 100,
+        message: `${completedCount} clips gerados com sucesso!`,
+        completedCount,
+        totalCount: eventsToProcess.length
+      });
+
+    } catch (error) {
+      console.error('Erro na geração em lote:', error);
+      setProgress({
+        stage: 'error',
+        progress: 0,
+        message: error instanceof Error ? error.message : 'Erro desconhecido'
+      });
+    } finally {
+      setIsGenerating(false);
+    }
+  }, [generateClip]);
+
+  // Cancel ongoing generation
+  const cancel = useCallback(() => {
+    cancelRef.current = true;
+    setIsCancelled(true);
+  }, []);
+
+  // Reset state
+  const reset = useCallback(() => {
+    setProgress({ stage: 'idle', progress: 0, message: '' });
+    setIsGenerating(false);
+    setIsCancelled(false);
+    cancelRef.current = false;
+    setGeneratingEventIds(new Set());
+  }, []);
+
+  // Check if specific event is being generated
+  const isGeneratingEvent = useCallback((eventId: string): boolean => {
+    return generatingEventIds.has(eventId);
+  }, [generatingEventIds]);
 
   return {
     isGenerating,
@@ -85,10 +367,10 @@ export function useClipGeneration() {
     cancel,
     isGeneratingEvent,
     reset,
-    isCancelled: false,
+    isCancelled,
     // Legacy compatibility
-    isLoaded: true,
-    generatingEventIds: new Set<string>(),
+    isLoaded: !!ffmpegRef.current?.loaded,
+    generatingEventIds,
     generateAllClipsOptimized: generateAllClips
   };
 }
