@@ -35,7 +35,8 @@ export function useMatchAnalysis() {
     homeTeam,
     awayTeam,
     gameStartMinute = 0,
-    gameEndMinute = 45
+    gameEndMinute = 45,
+    halfType
   }: {
     matchId: string;
     transcription: string;
@@ -43,6 +44,7 @@ export function useMatchAnalysis() {
     awayTeam: string;
     gameStartMinute?: number;
     gameEndMinute?: number;
+    halfType?: 'first' | 'second';
   }): Promise<AnalysisResult | null> => {
     if (!matchId || !transcription) {
       toast.error('Match ID e transcrição são obrigatórios');
@@ -63,7 +65,8 @@ export function useMatchAnalysis() {
           homeTeam,
           awayTeam,
           gameStartMinute,
-          gameEndMinute
+          gameEndMinute,
+          halfType: halfType || (gameStartMinute >= 45 ? 'second' : 'first')
         }
       });
 

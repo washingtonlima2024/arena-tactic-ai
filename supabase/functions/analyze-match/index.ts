@@ -27,7 +27,10 @@ serve(async (req) => {
   }
 
   try {
-    const { matchId, transcription, homeTeam, awayTeam, gameStartMinute = 0, gameEndMinute = 45 } = await req.json();
+    const { matchId, transcription, homeTeam, awayTeam, gameStartMinute = 0, gameEndMinute = 45, halfType } = await req.json();
+    
+    // Determine half type from parameters or gameStartMinute
+    const matchHalf = halfType || (gameStartMinute >= 45 ? 'second' : 'first');
 
     if (!matchId) {
       throw new Error('matchId is required');
@@ -41,6 +44,7 @@ serve(async (req) => {
     console.log('Match ID:', matchId);
     console.log('Times:', homeTeam, 'vs', awayTeam);
     console.log('Tempo de jogo:', gameStartMinute, '-', gameEndMinute);
+    console.log('Período:', matchHalf === 'first' ? '1º Tempo' : '2º Tempo');
     console.log('Transcrição:', transcription.length, 'caracteres');
 
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -163,6 +167,7 @@ Extraia todos os eventos e calcule o placar final correto.`;
         minute: eventMinute,
         second: eventSecond,
         description: event.description?.substring(0, 100) || '',
+        match_half: matchHalf,
         metadata: {
           team: event.team,
           isOwnGoal: event.isOwnGoal || false,
@@ -170,7 +175,8 @@ Extraia todos os eventos e calcule o placar final correto.`;
           source: 'ai-analysis',
           gameStartMinute,
           videoSecond,
-          eventMs
+          eventMs,
+          half: matchHalf
         },
         approval_status: 'pending',
         is_highlight: ['goal', 'red_card', 'penalty'].includes(event.event_type)
