@@ -21,18 +21,27 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Search, Filter, Plus, Calendar, Trophy, Loader2, Video, Trash2 } from 'lucide-react';
+import { Progress } from '@/components/ui/progress';
+import { Search, Filter, Plus, Calendar, Trophy, Loader2, Video, Trash2, RefreshCw, Mic } from 'lucide-react';
 import { useMatches, Match } from '@/hooks/useMatches';
 import { useDeleteMatch } from '@/hooks/useDeleteMatch';
 import { Link } from 'react-router-dom';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { TeamBadge } from '@/components/teams/TeamBadge';
+import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
+import { useQueryClient } from '@tanstack/react-query';
 
 export default function Matches() {
   const { data: matches = [], isLoading } = useMatches();
   const deleteMatch = useDeleteMatch();
   const [matchToDelete, setMatchToDelete] = useState<Match | null>(null);
+  const [matchToReprocess, setMatchToReprocess] = useState<Match | null>(null);
+  const [isReprocessing, setIsReprocessing] = useState(false);
+  const [reprocessProgress, setReprocessProgress] = useState({ stage: '', progress: 0 });
+  const { toast } = useToast();
+  const queryClient = useQueryClient();
 
   const completedMatches = matches.filter(m => m.status === 'completed').length;
   const analyzingMatches = matches.filter(m => m.status === 'analyzing').length;
@@ -42,6 +51,113 @@ export default function Matches() {
     if (matchToDelete) {
       deleteMatch.mutate(matchToDelete.id);
       setMatchToDelete(null);
+    }
+  };
+
+  const handleReprocess = async () => {
+    if (!matchToReprocess) return;
+    
+    setIsReprocessing(true);
+    const matchId = matchToReprocess.id;
+    
+    try {
+      // 1. Buscar vídeos do match
+      setReprocessProgress({ stage: 'Buscando vídeos...', progress: 10 });
+      const { data: videos, error: videoError } = await supabase
+        .from('videos')
+        .select('*')
+        .eq('match_id', matchId);
+      
+      if (videoError || !videos?.length) {
+        throw new Error('Nenhum vídeo encontrado para esta partida');
+      }
+      
+      console.log('Vídeos encontrados:', videos);
+      
+      // 2. Pegar primeiro vídeo para transcrição
+      const video = videos[0];
+      const videoUrl = video.file_url;
+      
+      if (!videoUrl) {
+        throw new Error('URL do vídeo não encontrada');
+      }
+      
+      // 3. Chamar edge function para transcrição
+      setReprocessProgress({ stage: 'Transcrevendo áudio com Whisper...', progress: 30 });
+      
+      const { data: transcriptionResult, error: transcriptionError } = await supabase.functions.invoke('transcribe-audio-whisper', {
+        body: { videoUrl }
+      });
+      
+      if (transcriptionError) {
+        console.error('Erro na transcrição:', transcriptionError);
+        throw new Error(`Erro na transcrição: ${transcriptionError.message}`);
+      }
+      
+      if (!transcriptionResult?.text) {
+        throw new Error('Transcrição retornou vazia');
+      }
+      
+      console.log('Transcrição obtida:', transcriptionResult.text.substring(0, 200) + '...');
+      
+      // 4. Chamar analyze-match para detectar eventos
+      setReprocessProgress({ stage: 'Analisando eventos com IA...', progress: 60 });
+      
+      const { data: analysisResult, error: analysisError } = await supabase.functions.invoke('analyze-match', {
+        body: {
+          matchId,
+          transcription: transcriptionResult.text,
+          homeTeam: matchToReprocess.home_team?.name || 'Time Casa',
+          awayTeam: matchToReprocess.away_team?.name || 'Time Visitante',
+          gameStartMinute: 0,
+          gameEndMinute: 90,
+          halfType: 'full'
+        }
+      });
+      
+      if (analysisError) {
+        console.error('Erro na análise:', analysisError);
+        throw new Error(`Erro na análise: ${analysisError.message}`);
+      }
+      
+      console.log('Resultado da análise:', analysisResult);
+      
+      // 5. Atualizar status do match
+      setReprocessProgress({ stage: 'Finalizando...', progress: 90 });
+      
+      await supabase
+        .from('matches')
+        .update({ 
+          status: 'completed',
+          home_score: analysisResult?.homeScore ?? 0,
+          away_score: analysisResult?.awayScore ?? 0
+        })
+        .eq('id', matchId);
+      
+      setReprocessProgress({ stage: 'Concluído!', progress: 100 });
+      
+      toast({
+        title: "Análise concluída!",
+        description: `${analysisResult?.eventsCreated || 0} eventos detectados.`
+      });
+      
+      queryClient.invalidateQueries({ queryKey: ['matches'] });
+      
+      setTimeout(() => {
+        setMatchToReprocess(null);
+        setIsReprocessing(false);
+        setReprocessProgress({ stage: '', progress: 0 });
+      }, 1500);
+      
+    } catch (error: any) {
+      console.error('Erro no reprocessamento:', error);
+      toast({
+        title: "Erro no reprocessamento",
+        description: error.message || 'Erro desconhecido',
+        variant: "destructive"
+      });
+      setIsReprocessing(false);
+      setReprocessProgress({ stage: '', progress: 0 });
     }
   };
 
@@ -212,6 +328,17 @@ export default function Matches() {
                         <Link to="/analysis">Ver Análise</Link>
                       </Button>
                     )}
+                    {(match.status === 'analyzing' || match.status === 'pending') && (
+                      <Button 
+                        variant="arena-outline" 
+                        size="sm" 
+                        className="flex-1"
+                        onClick={() => setMatchToReprocess(match)}
+                      >
+                        <RefreshCw className="mr-2 h-4 w-4" />
+                        Reprocessar
+                      </Button>
+                    )}
                     <Button 
                       variant="ghost" 
                       size="sm" 
@@ -259,6 +386,65 @@ export default function Matches() {
                   </>
                 ) : (
                   'Deletar'
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Reprocess Dialog */}
+        <AlertDialog open={!!matchToReprocess} onOpenChange={(open) => !open && !isReprocessing && setMatchToReprocess(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle className="flex items-center gap-2">
+                <Mic className="h-5 w-5 text-primary" />
+                Reprocessar Partida
+              </AlertDialogTitle>
+              <AlertDialogDescription asChild>
+                <div>
+                  <p className="mb-4">
+                    Extrair áudio e transcrever automaticamente a partida 
+                    <strong> {matchToReprocess?.home_team?.name || 'Time Casa'} vs {matchToReprocess?.away_team?.name || 'Time Visitante'}</strong>?
+                  </p>
+                  
+                  {isReprocessing && (
+                    <div className="space-y-3 mt-4 p-4 rounded-lg bg-muted/50">
+                      <div className="flex items-center gap-2">
+                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                        <span className="text-sm font-medium">{reprocessProgress.stage}</span>
+                      </div>
+                      <Progress value={reprocessProgress.progress} className="h-2" />
+                    </div>
+                  )}
+                  
+                  {!isReprocessing && (
+                    <ul className="list-disc list-inside mt-2 space-y-1 text-left text-sm text-muted-foreground">
+                      <li>Extração do áudio do vídeo</li>
+                      <li>Transcrição automática com Whisper</li>
+                      <li>Detecção de eventos com IA</li>
+                      <li>Atualização do placar final</li>
+                    </ul>
+                  )}
+                </div>
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isReprocessing}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={handleReprocess}
+                disabled={isReprocessing}
+                className="bg-primary text-primary-foreground hover:bg-primary/90"
+              >
+                {isReprocessing ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Processando...
+                  </>
+                ) : (
+                  <>
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                    Iniciar
+                  </>
                 )}
               </AlertDialogAction>
             </AlertDialogFooter>
