@@ -99,6 +99,12 @@ serve(async (req) => {
   try {
     const { audioUrl, videoUrl, embedUrl, audio } = await req.json();
 
+    console.log('=== TRANSCRIBE-AUDIO-WHISPER ===');
+    console.log('audioUrl:', audioUrl ? 'SIM' : 'NÃO');
+    console.log('videoUrl:', videoUrl ? 'SIM' : 'NÃO');
+    console.log('embedUrl:', embedUrl ? 'SIM' : 'NÃO');
+    console.log('base64:', audio ? 'SIM' : 'NÃO');
+
     const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
     if (!OPENAI_API_KEY) {
       throw new Error('OPENAI_API_KEY is not configured');
@@ -111,17 +117,26 @@ serve(async (req) => {
     // Priority: audioUrl > videoUrl > embedUrl > base64 audio
     if (audioUrl) {
       resolvedUrl = audioUrl;
-      console.log('Using direct audio URL');
+      console.log('Usando URL de áudio direta:', audioUrl);
     } else if (videoUrl) {
       resolvedUrl = videoUrl;
-      console.log('Using direct video URL');
+      console.log('Usando URL de vídeo direta:', videoUrl);
     } else if (embedUrl) {
       // Try to extract video source from embed
+      console.log('Tentando extrair vídeo do embed:', embedUrl);
       resolvedUrl = await extractVideoFromEmbed(embedUrl);
       if (!resolvedUrl) {
-        throw new Error('Não foi possível extrair o vídeo do embed. Tente fornecer uma URL de vídeo direta ou um arquivo SRT.');
+        console.log('Extração do embed falhou - retornando erro informativo');
+        return new Response(JSON.stringify({ 
+          success: false,
+          requiresSrt: true,
+          error: 'Este embed não suporta extração automática de áudio. Por favor, faça upload direto do arquivo MP4 ou forneça um arquivo SRT.' 
+        }), {
+          status: 200, // Não é erro fatal - permite que o frontend trate
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
       }
-      console.log('Extracted URL from embed:', resolvedUrl);
+      console.log('URL extraída do embed:', resolvedUrl);
     }
 
     if (resolvedUrl) {
