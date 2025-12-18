@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -32,6 +32,7 @@ import { TeamBadge } from '@/components/teams/TeamBadge';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
+import { useWhisperTranscription } from '@/hooks/useWhisperTranscription';
 
 export default function Matches() {
   const { data: matches = [], isLoading } = useMatches();
@@ -42,10 +43,32 @@ export default function Matches() {
   const [reprocessProgress, setReprocessProgress] = useState({ stage: '', progress: 0 });
   const { toast } = useToast();
   const queryClient = useQueryClient();
+  
+  // Hook para transcrição com FFmpeg (extrai áudio antes de enviar para Whisper)
+  const { transcribeVideo, transcriptionProgress, isTranscribing, resetProgress } = useWhisperTranscription();
 
   const completedMatches = matches.filter(m => m.status === 'completed').length;
   const analyzingMatches = matches.filter(m => m.status === 'analyzing').length;
   const pendingMatches = matches.filter(m => m.status === 'pending').length;
+
+  // Atualizar progresso baseado na transcrição
+  useEffect(() => {
+    if (isTranscribing && transcriptionProgress.stage !== 'idle') {
+      const stageMap: Record<string, string> = {
+        'loading': 'Carregando processador de áudio...',
+        'downloading': 'Baixando vídeo...',
+        'extracting': 'Extraindo áudio do vídeo...',
+        'uploading': 'Enviando áudio...',
+        'transcribing': 'Transcrevendo com Whisper...',
+        'complete': 'Transcrição completa!',
+        'error': 'Erro na transcrição'
+      };
+      setReprocessProgress({
+        stage: stageMap[transcriptionProgress.stage] || transcriptionProgress.message,
+        progress: transcriptionProgress.progress
+      });
+    }
+  }, [transcriptionProgress, isTranscribing]);
 
   const handleDeleteConfirm = () => {
     if (matchToDelete) {
@@ -62,7 +85,7 @@ export default function Matches() {
     
     try {
       // 1. Buscar vídeos do match
-      setReprocessProgress({ stage: 'Buscando vídeos...', progress: 10 });
+      setReprocessProgress({ stage: 'Buscando vídeos...', progress: 5 });
       const { data: videos, error: videoError } = await supabase
         .from('videos')
         .select('*')
@@ -82,26 +105,20 @@ export default function Matches() {
         throw new Error('URL do vídeo não encontrada');
       }
       
-      // 3. Chamar edge function para transcrição
-      setReprocessProgress({ stage: 'Transcrevendo áudio com Whisper...', progress: 30 });
+      // 3. Usar hook de transcrição que extrai áudio com FFmpeg primeiro
+      // Isso evita o erro de arquivo muito grande (48MB -> ~5MB de áudio)
+      console.log('Iniciando transcrição com FFmpeg + Whisper...');
       
-      const { data: transcriptionResult, error: transcriptionError } = await supabase.functions.invoke('transcribe-audio-whisper', {
-        body: { videoUrl }
-      });
-      
-      if (transcriptionError) {
-        console.error('Erro na transcrição:', transcriptionError);
-        throw new Error(`Erro na transcrição: ${transcriptionError.message}`);
-      }
+      const transcriptionResult = await transcribeVideo(videoUrl, matchId, video.id);
       
       if (!transcriptionResult?.text) {
-        throw new Error('Transcrição retornou vazia');
+        throw new Error('Transcrição retornou vazia. Verifique se o vídeo contém áudio.');
       }
       
       console.log('Transcrição obtida:', transcriptionResult.text.substring(0, 200) + '...');
       
       // 4. Chamar analyze-match para detectar eventos
-      setReprocessProgress({ stage: 'Analisando eventos com IA...', progress: 60 });
+      setReprocessProgress({ stage: 'Analisando eventos com IA...', progress: 70 });
       
       const { data: analysisResult, error: analysisError } = await supabase.functions.invoke('analyze-match', {
         body: {
@@ -142,6 +159,7 @@ export default function Matches() {
       });
       
       queryClient.invalidateQueries({ queryKey: ['matches'] });
+      resetProgress();
       
       setTimeout(() => {
         setMatchToReprocess(null);
@@ -158,6 +176,7 @@ export default function Matches() {
       });
       setIsReprocessing(false);
       setReprocessProgress({ stage: '', progress: 0 });
+      resetProgress();
     }
   };
 
