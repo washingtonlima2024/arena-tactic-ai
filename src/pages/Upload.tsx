@@ -541,6 +541,52 @@ export default function VideoUpload() {
     }));
   };
 
+  // State for transcription progress
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [transcriptionProgress, setTranscriptionProgress] = useState('');
+
+  // Transcribe video/embed using Whisper API
+  const transcribeWithWhisper = async (segment: VideoSegment): Promise<string | null> => {
+    try {
+      console.log('Iniciando transcrição Whisper para:', segment.name);
+      setTranscriptionProgress(`Transcrevendo ${segment.name}...`);
+      
+      let requestBody: { audioUrl?: string; videoUrl?: string; embedUrl?: string } = {};
+      
+      if (segment.isLink) {
+        // For embeds, send the embed URL
+        requestBody = { embedUrl: segment.url };
+      } else if (segment.url) {
+        // For uploaded MP4s, send the storage URL
+        requestBody = { audioUrl: segment.url };
+      }
+      
+      if (!requestBody.audioUrl && !requestBody.embedUrl) {
+        console.log('Segmento sem URL válida para transcrição');
+        return null;
+      }
+      
+      const { data, error } = await supabase.functions.invoke('transcribe-audio-whisper', {
+        body: requestBody
+      });
+      
+      if (error) {
+        console.error('Erro na transcrição Whisper:', error);
+        throw error;
+      }
+      
+      if (!data?.success) {
+        throw new Error(data?.error || 'Falha na transcrição');
+      }
+      
+      console.log('Transcrição completa:', data.text?.length || 0, 'caracteres');
+      return data.text || data.srtContent || '';
+    } catch (error) {
+      console.error('Erro ao transcrever:', error);
+      return null;
+    }
+  };
+
   const handleStartAnalysis = async () => {
     try {
       let matchId: string;
@@ -620,7 +666,7 @@ export default function VideoUpload() {
         }
       }
 
-      // Collect transcriptions
+      // Collect transcriptions from SRT files first
       let firstHalfTranscription = '';
       let secondHalfTranscription = '';
 
@@ -649,28 +695,73 @@ export default function VideoUpload() {
         secondHalfTranscription = secondHalfSegments[0].transcription;
       }
 
-      console.log('=== TRANSCRIÇÕES ===');
+      console.log('=== TRANSCRIÇÕES PRÉ-WHISPER ===');
       console.log('1º Tempo:', firstHalfTranscription ? `${firstHalfTranscription.length} chars` : 'Nenhuma');
       console.log('2º Tempo:', secondHalfTranscription ? `${secondHalfTranscription.length} chars` : 'Nenhuma');
 
-      // Check if we have any transcription
+      // AUTO-TRANSCRIBE: If no SRT, try Whisper on videos
+      setIsTranscribing(true);
+      
+      if (!firstHalfTranscription && firstHalfSegments.length > 0) {
+        console.log('Sem SRT para 1º tempo - tentando transcrição automática Whisper...');
+        toast({
+          title: "🎙️ Transcrevendo 1º Tempo",
+          description: "Extraindo áudio e enviando para Whisper API...",
+        });
+        
+        const transcription = await transcribeWithWhisper(firstHalfSegments[0]);
+        if (transcription) {
+          firstHalfTranscription = transcription;
+          toast({
+            title: "✓ 1º Tempo transcrito",
+            description: `${transcription.length} caracteres extraídos do áudio`,
+          });
+        } else {
+          toast({
+            title: "⚠️ Transcrição do 1º Tempo falhou",
+            description: "Tentando continuar sem transcrição...",
+            variant: "destructive",
+          });
+        }
+      }
+      
+      if (!secondHalfTranscription && secondHalfSegments.length > 0) {
+        console.log('Sem SRT para 2º tempo - tentando transcrição automática Whisper...');
+        toast({
+          title: "🎙️ Transcrevendo 2º Tempo",
+          description: "Extraindo áudio e enviando para Whisper API...",
+        });
+        
+        const transcription = await transcribeWithWhisper(secondHalfSegments[0]);
+        if (transcription) {
+          secondHalfTranscription = transcription;
+          toast({
+            title: "✓ 2º Tempo transcrito",
+            description: `${transcription.length} caracteres extraídos do áudio`,
+          });
+        } else {
+          toast({
+            title: "⚠️ Transcrição do 2º Tempo falhou",
+            description: "Tentando continuar sem transcrição...",
+            variant: "destructive",
+          });
+        }
+      }
+      
+      setIsTranscribing(false);
+      setTranscriptionProgress('');
+
+      console.log('=== TRANSCRIÇÕES PÓS-WHISPER ===');
+      console.log('1º Tempo:', firstHalfTranscription ? `${firstHalfTranscription.length} chars` : 'Nenhuma');
+      console.log('2º Tempo:', secondHalfTranscription ? `${secondHalfTranscription.length} chars` : 'Nenhuma');
+
+      // Check if we have any transcription after auto-transcription
       const hasTranscription = firstHalfTranscription || secondHalfTranscription;
       
       if (!hasTranscription) {
-        // Check if we have embeds (which require SRT)
-        const hasEmbeds = segments.some(s => s.isLink);
-        if (hasEmbeds) {
-          toast({
-            title: "Transcrição obrigatória",
-            description: "Vídeos embed (YouTube, etc.) requerem arquivo de transcrição SRT/VTT.",
-            variant: "destructive"
-          });
-          return;
-        }
-        
         toast({
           title: "Transcrição necessária",
-          description: "Por favor, adicione um arquivo de transcrição (SRT/VTT) para análise.",
+          description: "Não foi possível obter transcrição automática. Por favor, adicione um arquivo SRT/VTT.",
           variant: "destructive"
         });
         return;
@@ -725,6 +816,8 @@ export default function VideoUpload() {
       }, 1500);
 
     } catch (error: any) {
+      setIsTranscribing(false);
+      setTranscriptionProgress('');
       console.error('Erro na análise:', error);
       toast({
         title: "Erro ao analisar",
@@ -1150,6 +1243,8 @@ export default function VideoUpload() {
               onBack={() => setCurrentStep('videos')}
               onStartAnalysis={handleStartAnalysis}
               isLoading={isStartingAnalysis || createMatch.isPending}
+              isTranscribing={isTranscribing}
+              transcriptionProgress={transcriptionProgress}
             />
           )}
         </div>

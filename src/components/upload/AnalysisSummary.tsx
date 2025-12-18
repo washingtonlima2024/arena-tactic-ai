@@ -16,9 +16,11 @@ interface AnalysisSummaryProps {
   onBack: () => void;
   onStartAnalysis: () => void;
   isLoading: boolean;
+  isTranscribing?: boolean;
+  transcriptionProgress?: string;
 }
 
-export function AnalysisSummary({ matchData, segments, onBack, onStartAnalysis, isLoading }: AnalysisSummaryProps) {
+export function AnalysisSummary({ matchData, segments, onBack, onStartAnalysis, isLoading, isTranscribing, transcriptionProgress }: AnalysisSummaryProps) {
   const { data: teams } = useTeams();
   
   const homeTeam = teams?.find(t => t.id === matchData.homeTeamId);
@@ -155,12 +157,20 @@ export function AnalysisSummary({ matchData, segments, onBack, onStartAnalysis, 
         </Button>
         <Button 
           onClick={onStartAnalysis} 
-          disabled={!hasReadySegments || isLoading}
+          disabled={!hasReadySegments || isLoading || isTranscribing}
           className="flex-1"
           size="lg"
         >
-          {isLoading ? (
-            'Iniciando...'
+          {isTranscribing ? (
+            <>
+              <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2" />
+              {transcriptionProgress || 'Transcrevendo áudio...'}
+            </>
+          ) : isLoading ? (
+            <>
+              <div className="animate-spin h-4 w-4 border-2 border-white border-t-transparent rounded-full mr-2" />
+              Analisando...
+            </>
           ) : (
             <>
               <Play className="mr-2 h-5 w-5" />
