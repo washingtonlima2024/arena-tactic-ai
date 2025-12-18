@@ -11,7 +11,7 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 interface TranscriptionProgress {
-  stage: 'idle' | 'loading' | 'downloading' | 'extracting' | 'uploading' | 'transcribing' | 'complete' | 'error';
+  stage: 'idle' | 'loading' | 'downloading' | 'extracting' | 'splitting' | 'uploading' | 'transcribing' | 'complete' | 'error';
   progress: number;
   message: string;
 }
