@@ -150,21 +150,32 @@ Extraia todos os eventos e calcule o placar final correto.`;
     console.log('Placar:', analysisResult.homeScore, 'x', analysisResult.awayScore);
 
     // Insert events into database
-    const eventsToInsert = (analysisResult.events || []).map(event => ({
-      match_id: matchId,
-      event_type: event.event_type,
-      minute: Math.max(gameStartMinute, Math.min(gameEndMinute, event.minute)),
-      second: event.second || 0,
-      description: event.description?.substring(0, 100) || '',
-      metadata: {
-        team: event.team,
-        isOwnGoal: event.isOwnGoal || false,
-        teamName: event.team === 'home' ? homeTeam : awayTeam,
-        source: 'ai-analysis'
-      },
-      approval_status: 'pending',
-      is_highlight: ['goal', 'red_card', 'penalty'].includes(event.event_type)
-    }));
+    const eventsToInsert = (analysisResult.events || []).map(event => {
+      const eventMinute = Math.max(gameStartMinute, Math.min(gameEndMinute, event.minute));
+      const eventSecond = event.second || 0;
+      // Calculate video-relative timestamp (seconds from video start)
+      const videoSecond = (eventMinute - gameStartMinute) * 60 + eventSecond;
+      const eventMs = videoSecond * 1000;
+      
+      return {
+        match_id: matchId,
+        event_type: event.event_type,
+        minute: eventMinute,
+        second: eventSecond,
+        description: event.description?.substring(0, 100) || '',
+        metadata: {
+          team: event.team,
+          isOwnGoal: event.isOwnGoal || false,
+          teamName: event.team === 'home' ? homeTeam : awayTeam,
+          source: 'ai-analysis',
+          gameStartMinute,
+          videoSecond,
+          eventMs
+        },
+        approval_status: 'pending',
+        is_highlight: ['goal', 'red_card', 'penalty'].includes(event.event_type)
+      };
+    });
 
     if (eventsToInsert.length > 0) {
       const { error: insertError } = await supabase
