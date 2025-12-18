@@ -475,11 +475,20 @@ export default function Events() {
     const clipsCount = Math.min(eventsToProcess.length, limit);
     toast.info(`Iniciando extração de ${clipsCount} clips...`);
 
+    // Calculate video start minute from events if needed
+    const minEventMinute = Math.min(...eventsToProcess.map(e => e.minute || 0));
+    const videoStartMinute = matchVideo.start_minute ?? 
+      (minEventMinute > (matchVideo.duration_seconds ?? 0) / 60 ? minEventMinute - 5 : 0);
+    
     await generateAllClips(
       eventsToProcess.slice(0, limit),
       matchVideo.file_url,
       currentMatchId,
-      limit
+      {
+        limit,
+        videoStartMinute,
+        videoDurationSeconds: matchVideo.duration_seconds ?? undefined
+      }
     );
 
     // Refresh events to show updated clip_url

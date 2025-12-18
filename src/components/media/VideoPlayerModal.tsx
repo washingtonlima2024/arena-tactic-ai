@@ -72,44 +72,58 @@ export function VideoPlayerModal({
 
   // Calculate initial timestamp - handle mismatch between event times and video duration
   // When event timestamps exceed video duration, they were likely analyzed as game time
-  // not video time, so we need to calculate relative positions
+  // not video time, so we need to calculate relative positions using video start_minute
   const calculateInitialTimestamp = useCallback(() => {
     if (!clip || hasDirectClip) return 0;
     
     const videoDuration = getVideoDuration();
+    const videoStartMinute = matchVideo?.start_minute ?? 0;
     
-    // Get the raw event timestamp in seconds
-    let eventSeconds = 0;
+    // Get the raw event timestamp in seconds (these may be game-time values)
+    let gameTimeSeconds = 0;
     if (clip.eventMs !== undefined && clip.eventMs >= 0) {
-      eventSeconds = clip.eventMs / 1000;
+      gameTimeSeconds = clip.eventMs / 1000;
     } else if (clip.totalSeconds !== undefined && clip.totalSeconds >= 0) {
-      eventSeconds = clip.totalSeconds;
+      gameTimeSeconds = clip.totalSeconds;
     } else if (clip.videoSecond !== undefined && clip.videoSecond >= 0) {
-      eventSeconds = clip.videoSecond;
+      gameTimeSeconds = clip.videoSecond;
     } else {
-      eventSeconds = (clip.minute * 60) + (clip.second || 0);
+      gameTimeSeconds = (clip.minute * 60) + (clip.second || 0);
     }
     
     // If event timestamp is within video duration, use it directly
-    if (eventSeconds <= videoDuration) {
-      const targetTs = Math.max(0, eventSeconds - 3);
+    if (gameTimeSeconds <= videoDuration) {
+      const targetTs = Math.max(0, gameTimeSeconds - 3);
       return Math.min(targetTs, Math.max(0, videoDuration - 1));
     }
     
-    // Event timestamp exceeds video duration - timestamps are likely "game time" 
-    // not actual video position. We need to inform user or use a fallback.
-    // For now, log warning and start from beginning with offset
-    console.warn('Event timestamp exceeds video duration:', {
-      eventSeconds,
-      videoDuration,
-      clipId: clip.id,
-      message: 'Timestamps may represent game time, not video position'
+    // Event timestamp exceeds video duration - calculate video-relative position
+    // This happens when AI analysis returns game-time instead of video-time
+    const eventGameMinute = clip.minute;
+    
+    // Calculate video start minute from the event distribution if not set
+    let effectiveStartMinute = videoStartMinute;
+    if (effectiveStartMinute === 0 && gameTimeSeconds > videoDuration) {
+      // Estimate: assume video starts ~5 minutes before the first event we're trying to play
+      effectiveStartMinute = Math.max(0, eventGameMinute - 5);
+    }
+    
+    // Calculate relative position in video
+    const videoRelativeSeconds = (eventGameMinute - effectiveStartMinute) * 60 + (clip.second || 0);
+    
+    // Clamp to video bounds with 3s buffer before event
+    const targetTs = Math.max(0, Math.min(videoRelativeSeconds - 3, videoDuration - 1));
+    
+    console.log('Calculated video timestamp:', {
+      eventGameMinute,
+      effectiveStartMinute,
+      videoRelativeSeconds,
+      targetTs,
+      videoDuration
     });
     
-    // Fallback: start from beginning - user will need to navigate manually
-    // or the analysis needs to be redone with correct video timestamps
-    return 0;
-  }, [clip, hasDirectClip, getVideoDuration]);
+    return targetTs;
+  }, [clip, hasDirectClip, getVideoDuration, matchVideo?.start_minute]);
 
   // Initialize timestamp when modal opens or clip changes
   useEffect(() => {
