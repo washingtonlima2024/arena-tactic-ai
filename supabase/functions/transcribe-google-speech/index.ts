@@ -35,7 +35,19 @@ serve(async (req) => {
 
     if (fileSizeBytes > MAX_FILE_SIZE) {
       console.log('[Transcribe Fallback] Arquivo muito grande para Whisper API');
-      throw new Error(`Arquivo muito grande (${fileSizeMB}MB). Máximo: 24MB. Por favor, importe um arquivo SRT manualmente.`);
+      // Return 200 with success:false for expected validation errors
+      // so the client can properly read the error message
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: `Arquivo muito grande (${fileSizeMB}MB). Máximo: 24MB. Por favor, importe um arquivo SRT manualmente.`,
+          method: 'whisper-fallback'
+        }),
+        { 
+          status: 200, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
     }
 
     // Download the file in chunks to avoid memory spike
