@@ -75,7 +75,7 @@ export function useThumbnailGeneration(matchId?: string) {
     loadThumbnails();
   }, [loadThumbnails]);
 
-  // Extract frame from video using canvas
+  // Extract frame from video using canvas and upload to Storage
   const extractFrameFromVideo = async (params: ExtractFrameParams): Promise<ThumbnailData | null> => {
     const { eventId, eventType, videoUrl, timestamp, matchId: eventMatchId } = params;
 
@@ -88,6 +88,22 @@ export function useThumbnailGeneration(matchId?: string) {
         const video = document.createElement('video');
         video.crossOrigin = 'anonymous';
         video.preload = 'metadata';
+        video.muted = true;
+        
+        let timeoutId: number;
+        let resolved = false;
+        
+        const cleanup = () => {
+          clearTimeout(timeoutId);
+          video.remove();
+        };
+        
+        const handleError = (error: string) => {
+          if (resolved) return;
+          resolved = true;
+          cleanup();
+          reject(new Error(error));
+        };
         
         video.onloadedmetadata = () => {
           // Ensure timestamp is within video duration
@@ -95,7 +111,10 @@ export function useThumbnailGeneration(matchId?: string) {
           video.currentTime = Math.max(0, targetTime);
         };
 
-        video.onseeked = () => {
+        video.onseeked = async () => {
+          if (resolved) return;
+          resolved = true;
+          
           try {
             const canvas = document.createElement('canvas');
             canvas.width = video.videoWidth || 1280;
@@ -108,9 +127,37 @@ export function useThumbnailGeneration(matchId?: string) {
             
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            // Convert to blob for upload
+            const blob = await new Promise<Blob | null>((res) => {
+              canvas.toBlob((b) => res(b), 'image/jpeg', 0.85);
+            });
             
-            // Save to database
+            if (!blob) {
+              throw new Error('Failed to create image blob');
+            }
+            
+            // Upload to Supabase Storage
+            const fileName = `${eventMatchId}/${eventId}-frame.jpg`;
+            const { data: uploadData, error: uploadError } = await supabase.storage
+              .from('thumbnails')
+              .upload(fileName, blob, {
+                contentType: 'image/jpeg',
+                upsert: true
+              });
+            
+            if (uploadError) {
+              console.error('Storage upload error:', uploadError);
+              throw new Error('Erro ao salvar frame no storage');
+            }
+            
+            // Get public URL
+            const { data: urlData } = supabase.storage
+              .from('thumbnails')
+              .getPublicUrl(fileName);
+            
+            const imageUrl = urlData.publicUrl;
+            
+            // Generate title
             const eventLabels: Record<string, string> = {
               goal: 'GOL',
               shot: 'FINALIZAÇÃO',
@@ -127,23 +174,24 @@ export function useThumbnailGeneration(matchId?: string) {
             const minute = Math.floor(timestamp / 60);
             const title = `${eventLabel} - ${minute}'`;
             
-            // Save to Supabase
-            supabase
+            // Save to database
+            const { error: dbError } = await supabase
               .from('thumbnails')
               .upsert({
                 event_id: eventId,
                 match_id: eventMatchId,
-                image_url: dataUrl,
+                image_url: imageUrl,
                 event_type: eventType,
                 title
-              }, { onConflict: 'event_id' })
-              .then(({ error }) => {
-                if (error) console.error('Error saving thumbnail:', error);
-              });
+              }, { onConflict: 'event_id' });
+            
+            if (dbError) {
+              console.error('Error saving thumbnail to DB:', dbError);
+            }
             
             const thumbnailData: ThumbnailData = {
               eventId,
-              imageUrl: dataUrl,
+              imageUrl,
               eventType,
               title
             };
@@ -153,28 +201,27 @@ export function useThumbnailGeneration(matchId?: string) {
               [eventId]: thumbnailData
             }));
             
-            video.remove();
+            cleanup();
             canvas.remove();
             
             toast.success(`Frame extraído: ${eventLabel}`);
             resolve(thumbnailData);
           } catch (err) {
+            cleanup();
             reject(err);
           }
         };
 
         video.onerror = () => {
-          video.remove();
-          reject(new Error('Failed to load video'));
+          handleError('Falha ao carregar vídeo (CORS ou URL inválida)');
         };
 
         // Set timeout for loading
-        setTimeout(() => {
-          if (!video.readyState) {
-            video.remove();
-            reject(new Error('Video load timeout'));
+        timeoutId = window.setTimeout(() => {
+          if (!resolved) {
+            handleError('Timeout ao carregar vídeo');
           }
-        }, 10000);
+        }, 15000);
 
         video.src = videoUrl;
         video.load();

@@ -366,10 +366,10 @@ export default function Media() {
                   </Button>
                 )}
 
-                {/* Extract frames from video button */}
+                {/* Extract frames from video button - generates thumbnails from actual video frames */}
                 {matchVideo && clips.length > 0 && clips.some(c => !getThumbnail(c.id)) && (
                   <Button 
-                    variant="outline" 
+                    variant="arena" 
                     size="sm"
                     onClick={() => {
                       const eventsToExtract = clips
@@ -388,9 +388,9 @@ export default function Media() {
                     {extractingIds.size > 0 ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
-                      <Film className="mr-2 h-4 w-4" />
+                      <Image className="mr-2 h-4 w-4" />
                     )}
-                    Extrair Frames
+                    Extrair Capas ({clips.filter(c => !getThumbnail(c.id)).length})
                   </Button>
                 )}
                 
