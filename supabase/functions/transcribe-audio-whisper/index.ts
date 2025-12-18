@@ -24,13 +24,80 @@ function segmentsToSrt(segments: Array<{ start: number; end: number; text: strin
   }).join('\n');
 }
 
+// Try to extract video source URL from embed page
+async function extractVideoFromEmbed(embedUrl: string): Promise<string | null> {
+  console.log('Attempting to extract video from embed:', embedUrl);
+  
+  // Try common URL patterns for direct video access
+  const patterns = [
+    // Replace /embed/ with /video/
+    embedUrl.replace('/embed/', '/video/'),
+    // Replace /embed/ with /download/
+    embedUrl.replace('/embed/', '/download/'),
+    // Add .mp4 extension
+    embedUrl.replace('/embed/', '/video/') + '.mp4',
+    // API endpoint pattern
+    embedUrl.replace('/embed/', '/api/video/'),
+  ];
+
+  for (const url of patterns) {
+    try {
+      console.log('Trying URL pattern:', url);
+      const response = await fetch(url, { method: 'HEAD' });
+      const contentType = response.headers.get('content-type') || '';
+      
+      if (response.ok && (contentType.includes('video') || contentType.includes('audio'))) {
+        console.log('Found media at:', url);
+        return url;
+      }
+    } catch (e) {
+      console.log('Pattern failed:', url);
+    }
+  }
+
+  // Try to fetch embed page and extract source
+  try {
+    console.log('Fetching embed page to extract source...');
+    const response = await fetch(embedUrl);
+    const html = await response.text();
+    
+    // Look for video source in HTML
+    const patterns = [
+      /src=["']([^"']+\.mp4[^"']*)/i,
+      /source\s+src=["']([^"']+)/i,
+      /"url":\s*["']([^"']+\.mp4[^"']*)/i,
+      /"file":\s*["']([^"']+)/i,
+      /videoUrl["']?\s*[:=]\s*["']([^"']+)/i,
+      /hlsUrl["']?\s*[:=]\s*["']([^"']+)/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = html.match(pattern);
+      if (match && match[1]) {
+        let videoUrl = match[1];
+        // Handle relative URLs
+        if (videoUrl.startsWith('/')) {
+          const baseUrl = new URL(embedUrl);
+          videoUrl = `${baseUrl.origin}${videoUrl}`;
+        }
+        console.log('Extracted video URL from embed:', videoUrl);
+        return videoUrl;
+      }
+    }
+  } catch (e) {
+    console.log('Failed to parse embed page:', e);
+  }
+
+  return null;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response(null, { headers: corsHeaders });
   }
 
   try {
-    const { audioUrl, audio } = await req.json();
+    const { audioUrl, videoUrl, embedUrl, audio } = await req.json();
 
     const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
     if (!OPENAI_API_KEY) {
@@ -39,14 +106,35 @@ serve(async (req) => {
 
     let audioBlob: Blob;
     let fileName = 'audio.mp3';
+    let resolvedUrl: string | null = null;
 
+    // Priority: audioUrl > videoUrl > embedUrl > base64 audio
     if (audioUrl) {
-      // Download audio from URL
-      console.log('Downloading audio from URL:', audioUrl);
-      const response = await fetch(audioUrl);
+      resolvedUrl = audioUrl;
+      console.log('Using direct audio URL');
+    } else if (videoUrl) {
+      resolvedUrl = videoUrl;
+      console.log('Using direct video URL');
+    } else if (embedUrl) {
+      // Try to extract video source from embed
+      resolvedUrl = await extractVideoFromEmbed(embedUrl);
+      if (!resolvedUrl) {
+        throw new Error('Não foi possível extrair o vídeo do embed. Tente fornecer uma URL de vídeo direta ou um arquivo SRT.');
+      }
+      console.log('Extracted URL from embed:', resolvedUrl);
+    }
+
+    if (resolvedUrl) {
+      // Download media from URL
+      console.log('Downloading media from URL:', resolvedUrl);
+      const response = await fetch(resolvedUrl, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        }
+      });
       
       if (!response.ok) {
-        throw new Error(`Failed to download audio: ${response.statusText}`);
+        throw new Error(`Failed to download media: ${response.status} ${response.statusText}`);
       }
       
       const arrayBuffer = await response.arrayBuffer();
@@ -54,10 +142,10 @@ serve(async (req) => {
       audioBlob = new Blob([arrayBuffer], { type: contentType });
       
       // Extract filename from URL
-      const urlParts = audioUrl.split('/');
-      fileName = urlParts[urlParts.length - 1] || 'audio.mp3';
+      const urlParts = resolvedUrl.split('/');
+      fileName = urlParts[urlParts.length - 1]?.split('?')[0] || 'audio.mp3';
       
-      console.log('Audio downloaded:', (audioBlob.size / (1024 * 1024)).toFixed(2), 'MB');
+      console.log('Media downloaded:', (audioBlob.size / (1024 * 1024)).toFixed(2), 'MB');
     } else if (audio) {
       // Base64 encoded audio
       console.log('Using base64 audio data');
@@ -68,16 +156,16 @@ serve(async (req) => {
       }
       audioBlob = new Blob([bytes], { type: 'audio/mpeg' });
     } else {
-      throw new Error('Either audioUrl or audio (base64) is required');
+      throw new Error('Forneça audioUrl, videoUrl, embedUrl ou audio (base64)');
     }
 
     // Check file size (Whisper has 25MB limit)
     const MAX_SIZE_MB = 25;
     const fileSizeMB = audioBlob.size / (1024 * 1024);
-    console.log('Audio size:', fileSizeMB.toFixed(2), 'MB');
+    console.log('Media size:', fileSizeMB.toFixed(2), 'MB');
     
     if (fileSizeMB > MAX_SIZE_MB) {
-      throw new Error(`Audio file too large (${fileSizeMB.toFixed(1)}MB). Maximum is ${MAX_SIZE_MB}MB.`);
+      throw new Error(`Arquivo muito grande (${fileSizeMB.toFixed(1)}MB). Máximo permitido: ${MAX_SIZE_MB}MB. Use um arquivo de áudio extraído ou SRT.`);
     }
 
     // Create form data for Whisper API
