@@ -26,7 +26,9 @@ import {
   Plus,
   Clock,
   FolderOpen,
-  ArrowLeft
+  ArrowLeft,
+  ListPlus,
+  FilePlus
 } from 'lucide-react';
 import { useTeams } from '@/hooks/useTeams';
 import { useCreateMatch } from '@/hooks/useMatches';
@@ -67,7 +69,7 @@ const suggestVideoType = (filename: string): VideoType => {
   return 'full';
 };
 
-type WizardStep = 'match' | 'videos' | 'summary';
+type WizardStep = 'choice' | 'existing' | 'match' | 'videos' | 'summary';
 
 export default function VideoUpload() {
   const navigate = useNavigate();
@@ -92,8 +94,24 @@ export default function VideoUpload() {
     enabled: !!existingMatchId
   });
   
-  // Wizard state - skip to 'videos' if reimporting existing match
-  const [currentStep, setCurrentStep] = useState<WizardStep>(existingMatchId ? 'videos' : 'match');
+  // Wizard state - skip to 'videos' if reimporting existing match, else start with 'choice'
+  const [currentStep, setCurrentStep] = useState<WizardStep>(existingMatchId ? 'videos' : 'choice');
+  
+  // Selected match for adding videos
+  const [selectedExistingMatch, setSelectedExistingMatch] = useState<string | null>(null);
+  
+  // Fetch all matches for existing match selection
+  const { data: allMatches = [], isLoading: isLoadingMatches } = useQuery({
+    queryKey: ['all-matches-for-selection'],
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from('matches')
+        .select('*, home_team:teams!matches_home_team_id_fkey(*), away_team:teams!matches_away_team_id_fkey(*)')
+        .order('created_at', { ascending: false });
+      if (error) throw error;
+      return data || [];
+    }
+  });
   
   // Match setup data
   const [matchData, setMatchData] = useState<MatchSetupData>({
@@ -1068,7 +1086,7 @@ export default function VideoUpload() {
                     matchTime: '',
                     venue: '',
                   });
-                  setCurrentStep('match');
+                  setCurrentStep('choice');
                 }}>
                   Nova Análise
                 </Button>
@@ -1080,11 +1098,21 @@ export default function VideoUpload() {
     );
   }
 
-  const steps = [
-    { id: 'match' as const, label: 'Partida', icon: '🏟️' },
-    { id: 'videos' as const, label: 'Vídeos', icon: '🎬' },
-    { id: 'summary' as const, label: 'Análise', icon: '🚀' },
-  ];
+  const steps = currentStep === 'choice' || currentStep === 'existing' 
+    ? [] // No step indicator on choice/existing screens
+    : [
+        { id: 'match' as const, label: 'Partida', icon: '🏟️' },
+        { id: 'videos' as const, label: 'Vídeos', icon: '🎬' },
+        { id: 'summary' as const, label: 'Análise', icon: '🚀' },
+      ];
+  
+  // Determine which step is active for the indicator
+  const isStepActive = (stepId: WizardStep) => {
+    if (stepId === 'match') return currentStep === 'match';
+    if (stepId === 'videos') return currentStep === 'videos' || currentStep === 'existing';
+    if (stepId === 'summary') return currentStep === 'summary';
+    return false;
+  };
 
   const readySegments = segments.filter(s => s.status === 'complete' || s.status === 'ready');
 
@@ -1104,10 +1132,7 @@ export default function VideoUpload() {
               className="h-12 md:h-16 mx-auto"
             />
             <p className="text-muted-foreground text-sm mt-1">
-              {existingMatch 
-                ? `Reimportando: ${existingMatch.home_team?.short_name || 'Casa'} vs ${existingMatch.away_team?.short_name || 'Visitante'}`
-                : 'Nova Partida para Análise'
-              }
+              Upload de Vídeos
             </p>
           </div>
 
@@ -1127,55 +1152,230 @@ export default function VideoUpload() {
           </div>
         </div>
 
-        {/* Step Indicator */}
-        <div className="flex justify-center">
-          <div className="flex items-center gap-2 p-1 rounded-lg bg-muted/30 border border-border/50">
-            {steps.map((step, index) => (
-              <div key={step.id} className="flex items-center">
-                <button
-                  onClick={() => {
-                    // If reimporting, skip match step
-                    if (step.id === 'match' && !existingMatchId) setCurrentStep('match');
-                    if (step.id === 'videos' && (existingMatchId || (matchData.homeTeamId && matchData.awayTeamId))) setCurrentStep('videos');
-                    if (step.id === 'summary' && readySegments.length > 0) setCurrentStep('summary');
-                  }}
-                  className={cn(
-                    "flex items-center gap-2 px-4 py-2 rounded-md transition-all",
-                    currentStep === step.id 
-                      ? "bg-primary text-primary-foreground" 
-                      : "text-muted-foreground hover:text-foreground"
+        {/* Step Indicator - only show when not on choice/existing screens */}
+        {steps.length > 0 && (
+          <div className="flex justify-center">
+            <div className="flex items-center gap-2 p-1 rounded-lg bg-muted/30 border border-border/50">
+              {steps.map((step, index) => (
+                <div key={step.id} className="flex items-center">
+                  <button
+                    onClick={() => {
+                      // If reimporting, skip match step
+                      if (step.id === 'match' && !existingMatchId && !selectedExistingMatch) setCurrentStep('match');
+                      if (step.id === 'videos' && (existingMatchId || selectedExistingMatch || (matchData.homeTeamId && matchData.awayTeamId))) setCurrentStep('videos');
+                      if (step.id === 'summary' && readySegments.length > 0) setCurrentStep('summary');
+                    }}
+                    className={cn(
+                      "flex items-center gap-2 px-4 py-2 rounded-md transition-all",
+                      isStepActive(step.id) 
+                        ? "bg-primary text-primary-foreground" 
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <span>{step.icon}</span>
+                    <span className="hidden sm:inline">{step.label}</span>
+                  </button>
+                  {index < steps.length - 1 && (
+                    <div className="w-8 h-px bg-border mx-1" />
                   )}
-                >
-                  <span>{step.icon}</span>
-                  <span className="hidden sm:inline">{step.label}</span>
-                </button>
-                {index < steps.length - 1 && (
-                  <div className="w-8 h-px bg-border mx-1" />
-                )}
-              </div>
-            ))}
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Step Content */}
         <div className="pb-8">
+          {/* Step 0: Choice - New or Existing */}
+          {currentStep === 'choice' && (
+            <div className="max-w-3xl mx-auto space-y-6">
+              <Card className="border-border/50 bg-card/50 backdrop-blur">
+                <CardContent className="pt-6">
+                  <div className="text-center mb-8">
+                    <h2 className="text-xl font-semibold mb-2">Como deseja prosseguir?</h2>
+                    <p className="text-muted-foreground">
+                      Crie uma nova partida ou adicione vídeos a uma partida existente
+                    </p>
+                  </div>
+                  
+                  <div className="grid md:grid-cols-2 gap-4">
+                    {/* New Match Option */}
+                    <button
+                      onClick={() => setCurrentStep('match')}
+                      className="group relative p-6 rounded-lg border-2 border-border/50 bg-background/50 hover:border-primary/50 hover:bg-primary/5 transition-all text-left"
+                    >
+                      <div className="flex flex-col items-center text-center gap-4">
+                        <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+                          <FilePlus className="h-8 w-8 text-primary" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-lg mb-1">Nova Partida</h3>
+                          <p className="text-sm text-muted-foreground">
+                            Criar uma nova partida e fazer upload dos vídeos
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                    
+                    {/* Existing Match Option */}
+                    <button
+                      onClick={() => setCurrentStep('existing')}
+                      className="group relative p-6 rounded-lg border-2 border-border/50 bg-background/50 hover:border-primary/50 hover:bg-primary/5 transition-all text-left"
+                    >
+                      <div className="flex flex-col items-center text-center gap-4">
+                        <div className="h-16 w-16 rounded-full bg-primary/10 flex items-center justify-center group-hover:bg-primary/20 transition-colors">
+                          <ListPlus className="h-8 w-8 text-primary" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-lg mb-1">Adicionar a Partida Existente</h3>
+                          <p className="text-sm text-muted-foreground">
+                            Adicionar mais vídeos (ex: 2º tempo) a uma partida já analisada
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          )}
+          
+          {/* Step 0b: Existing Match Selection */}
+          {currentStep === 'existing' && (
+            <div className="max-w-3xl mx-auto space-y-6">
+              <Button variant="ghost" onClick={() => setCurrentStep('choice')} className="gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                Voltar
+              </Button>
+              
+              <Card className="border-border/50 bg-card/50 backdrop-blur">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <ListPlus className="h-5 w-5 text-primary" />
+                    Selecionar Partida
+                  </CardTitle>
+                  <CardDescription>
+                    Escolha a partida para adicionar novos vídeos
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {isLoadingMatches ? (
+                    <div className="flex items-center justify-center py-8">
+                      <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-primary" />
+                    </div>
+                  ) : allMatches.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                      <p>Nenhuma partida encontrada.</p>
+                      <Button 
+                        variant="arena" 
+                        className="mt-4"
+                        onClick={() => setCurrentStep('match')}
+                      >
+                        Criar Nova Partida
+                      </Button>
+                    </div>
+                  ) : (
+                    allMatches.map((match) => (
+                      <button
+                        key={match.id}
+                        onClick={() => {
+                          setSelectedExistingMatch(match.id);
+                          navigate(`/upload?match=${match.id}`);
+                        }}
+                        className="w-full flex items-center justify-between p-4 rounded-lg border border-border/50 bg-background/50 hover:border-primary/50 hover:bg-primary/5 transition-all"
+                      >
+                        <div className="flex items-center gap-3">
+                          {/* Home Team */}
+                          <div className="flex items-center gap-2">
+                            {match.home_team?.logo_url ? (
+                              <img 
+                                src={match.home_team.logo_url} 
+                                alt={match.home_team.name}
+                                className="h-8 w-8 object-contain rounded"
+                              />
+                            ) : (
+                              <div 
+                                className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold text-white"
+                                style={{ backgroundColor: match.home_team?.primary_color || '#10b981' }}
+                              >
+                                {match.home_team?.short_name?.[0] || 'H'}
+                              </div>
+                            )}
+                            <span className="font-medium">{match.home_team?.short_name || match.home_team?.name || 'Casa'}</span>
+                            <span className="font-bold">{match.home_score ?? 0}</span>
+                          </div>
+                          
+                          <span className="text-muted-foreground">x</span>
+                          
+                          {/* Away Team */}
+                          <div className="flex items-center gap-2">
+                            <span className="font-bold">{match.away_score ?? 0}</span>
+                            <span className="font-medium">{match.away_team?.short_name || match.away_team?.name || 'Visitante'}</span>
+                            {match.away_team?.logo_url ? (
+                              <img 
+                                src={match.away_team.logo_url} 
+                                alt={match.away_team.name}
+                                className="h-8 w-8 object-contain rounded"
+                              />
+                            ) : (
+                              <div 
+                                className="h-8 w-8 rounded-full flex items-center justify-center text-xs font-bold text-white"
+                                style={{ backgroundColor: match.away_team?.primary_color || '#ef4444' }}
+                              >
+                                {match.away_team?.short_name?.[0] || 'A'}
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                        
+                        <Badge 
+                          variant={match.status === 'completed' ? 'default' : 'secondary'}
+                          className={match.status === 'completed' ? 'bg-primary/20 text-primary border-primary/30' : ''}
+                        >
+                          {match.status === 'completed' ? 'Analisada' : match.status === 'pending' ? 'Pendente' : match.status}
+                        </Badge>
+                      </button>
+                    ))
+                  )}
+                </CardContent>
+              </Card>
+            </div>
+          )}
+
           {/* Step 1: Match Setup */}
           {currentStep === 'match' && (
-            <MatchSetupCard
-              data={matchData}
-              onChange={setMatchData}
-              onContinue={() => setCurrentStep('videos')}
-            />
+            <div className="max-w-4xl mx-auto space-y-6">
+              <Button variant="ghost" onClick={() => setCurrentStep('choice')} className="gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                Voltar
+              </Button>
+              
+              <MatchSetupCard
+                data={matchData}
+                onChange={setMatchData}
+                onContinue={() => setCurrentStep('videos')}
+              />
+            </div>
           )}
 
           {/* Step 2: Videos */}
           {currentStep === 'videos' && (
             <div className="max-w-4xl mx-auto space-y-6">
               {/* Back Button - only show if not reimporting */}
-              {!existingMatchId && (
+              {!existingMatchId && !selectedExistingMatch && (
                 <Button variant="ghost" onClick={() => setCurrentStep('match')} className="gap-2">
                   <ArrowLeft className="h-4 w-4" />
-                  Voltar para Partida
+                  Voltar
+                </Button>
+              )}
+              {(existingMatchId || selectedExistingMatch) && (
+                <Button variant="ghost" onClick={() => {
+                  setSelectedExistingMatch(null);
+                  navigate('/upload');
+                  setCurrentStep('choice');
+                }} className="gap-2">
+                  <ArrowLeft className="h-4 w-4" />
+                  Voltar
                 </Button>
               )}
               
