@@ -337,7 +337,22 @@ export default function Media() {
                           second: c.second,
                           metadata: { eventMs: c.eventMs, videoSecond: c.videoSecond }
                         }));
-                      await generateAllClips(eventsWithoutClips, matchVideo.file_url, matchId);
+                      
+                      // Calculate video start minute from events if timestamps exceed video duration
+                      const minEventMinute = Math.min(...eventsWithoutClips.map(e => e.minute || 0));
+                      const videoDuration = matchVideo.duration_seconds ?? 0;
+                      const videoStartMinute = matchVideo.start_minute ?? 
+                        (minEventMinute > videoDuration / 60 ? minEventMinute - 5 : 0);
+                      
+                      await generateAllClips(
+                        eventsWithoutClips, 
+                        matchVideo.file_url, 
+                        matchId,
+                        {
+                          videoStartMinute,
+                          videoDurationSeconds: matchVideo.duration_seconds ?? undefined
+                        }
+                      );
                       refetchEvents();
                     }}
                     disabled={isGeneratingClips}

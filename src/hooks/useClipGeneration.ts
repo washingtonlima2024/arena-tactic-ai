@@ -249,6 +249,7 @@ export function useClipGeneration() {
   }, []);
 
   // Generate multiple clips with progress tracking
+  // Now accepts videoStartMinute to calculate correct video-relative timestamps
   const generateAllClips = useCallback(async (
     events: Array<{
       id: string;
@@ -258,8 +259,16 @@ export function useClipGeneration() {
     }>,
     videoUrl: string,
     matchId: string,
-    limit: number = 20
+    options?: {
+      limit?: number;
+      videoStartMinute?: number; // Game minute where video starts
+      videoDurationSeconds?: number; // Actual video duration
+    }
   ): Promise<void> => {
+    const limit = options?.limit ?? 20;
+    const videoStartMinute = options?.videoStartMinute ?? 0;
+    const videoDurationSeconds = options?.videoDurationSeconds;
+    
     setIsGenerating(true);
     cancelRef.current = false;
     setIsCancelled(false);
@@ -289,20 +298,52 @@ export function useClipGeneration() {
           break;
         }
 
-        // Calculate event time in ms
+        // Calculate event time in ms - relative to video, not game time
         let eventMs: number;
-        if (event.metadata?.eventMs !== undefined) {
-          eventMs = event.metadata.eventMs;
+        
+        // If event minute is greater than video duration, we need to calculate offset
+        const gameTimeSeconds = (event.minute * 60) + (event.second || 0);
+        const videoRelativeSeconds = (event.minute - videoStartMinute) * 60 + (event.second || 0);
+        
+        // Check if we need to use game-time offset calculation
+        if (videoDurationSeconds && gameTimeSeconds > videoDurationSeconds) {
+          // Event timestamp exceeds video duration - calculate relative to video start
+          eventMs = Math.max(0, videoRelativeSeconds) * 1000;
+          console.log(`Recalculating timestamp for event ${event.id}: game time ${event.minute}' -> video time ${videoRelativeSeconds}s`);
+        } else if (event.metadata?.eventMs !== undefined) {
+          // Check if eventMs is reasonable for video duration
+          if (videoDurationSeconds && event.metadata.eventMs / 1000 > videoDurationSeconds) {
+            // eventMs is game time, recalculate
+            eventMs = Math.max(0, videoRelativeSeconds) * 1000;
+          } else {
+            eventMs = event.metadata.eventMs;
+          }
         } else if (event.metadata?.videoSecond !== undefined) {
-          eventMs = event.metadata.videoSecond * 1000;
+          // Check if videoSecond is reasonable for video duration
+          if (videoDurationSeconds && event.metadata.videoSecond > videoDurationSeconds) {
+            // videoSecond is game time, recalculate
+            eventMs = Math.max(0, videoRelativeSeconds) * 1000;
+          } else {
+            eventMs = event.metadata.videoSecond * 1000;
+          }
         } else {
-          eventMs = toMs(event.minute, event.second || 0);
+          // Use game-time calculation if video start offset is provided
+          if (videoStartMinute > 0) {
+            eventMs = Math.max(0, videoRelativeSeconds) * 1000;
+          } else {
+            eventMs = toMs(event.minute, event.second || 0);
+          }
+        }
+        
+        // Clamp to video duration if available
+        if (videoDurationSeconds) {
+          eventMs = Math.min(eventMs, (videoDurationSeconds - 1) * 1000);
         }
 
         setProgress(prev => ({
           ...prev,
           progress: Math.round((completedCount / eventsToProcess.length) * 100),
-          message: `Extraindo clip ${completedCount + 1}/${eventsToProcess.length} (${event.minute}')`,
+          message: `Extraindo clip ${completedCount + 1}/${eventsToProcess.length} (${event.minute}' -> ${Math.round(eventMs/1000)}s no vídeo)`,
           currentEvent: event.id,
           completedCount,
           totalCount: eventsToProcess.length
