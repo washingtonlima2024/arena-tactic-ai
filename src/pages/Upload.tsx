@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { useNavigate, Link, useSearchParams } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
@@ -110,6 +110,14 @@ export default function VideoUpload() {
 
   // Video segments
   const [segments, setSegments] = useState<VideoSegment[]>([]);
+  const segmentsRef = useRef<VideoSegment[]>([]);
+  
+  // Sync ref with state to avoid stale closure in handleStartAnalysis
+  useEffect(() => {
+    segmentsRef.current = segments;
+    console.log('[Sync] segmentsRef atualizado:', segments.length, 'segmentos');
+  }, [segments]);
+  
   const [isDragging, setIsDragging] = useState(false);
   const [uploadMode, setUploadMode] = useState<'file' | 'link'>('file');
   
@@ -660,6 +668,30 @@ export default function VideoUpload() {
 
   const handleStartAnalysis = async () => {
     try {
+      // CORREÇÃO: Usar ref para obter valor atual dos segmentos (evita stale closure)
+      const currentSegments = segmentsRef.current;
+      
+      console.log('========================================');
+      console.log('handleStartAnalysis - INÍCIO');
+      console.log('segments do estado:', segments.length);
+      console.log('segmentsRef.current:', currentSegments.length);
+      
+      // Validação: verificar se há segmentos disponíveis
+      if (currentSegments.length === 0) {
+        console.error('ERRO CRÍTICO: Nenhum segmento disponível!');
+        toast({
+          title: "Nenhum vídeo encontrado",
+          description: "Por favor, faça upload de vídeos ou recarregue a página.",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      // Debug: mostrar estado dos segmentos
+      currentSegments.forEach(s => {
+        console.log(`  - ${s.name}: status=${s.status}, url=${s.url ? 'SIM' : 'NÃO'}, videoType=${s.videoType}`);
+      });
+      
       let matchId: string;
       let homeTeamName: string = '';
       let awayTeamName: string = '';
@@ -721,8 +753,8 @@ export default function VideoUpload() {
         matchId = match.id;
       }
 
-      // Register all video segments
-      for (const segment of segments) {
+      // Register all video segments - USANDO currentSegments
+      for (const segment of currentSegments) {
         if (segment.status === 'complete' || segment.status === 'ready') {
           await supabase.from('videos').insert({
             match_id: matchId,
@@ -749,27 +781,27 @@ export default function VideoUpload() {
         secondHalfTranscription = await readSrtFile(secondHalfSrt);
       }
 
-      // Debug: mostrar todos os segmentos disponíveis
+      // Debug: mostrar todos os segmentos disponíveis - USANDO currentSegments
       console.log('=== SEGMENTOS DISPONÍVEIS PARA TRANSCRIÇÃO ===');
-      segments.forEach(s => {
+      currentSegments.forEach(s => {
         console.log(`- ${s.name}: half=${s.half}, videoType=${s.videoType}, status=${s.status}, url=${s.url ? 'SIM' : 'NÃO'}, isLink=${s.isLink}`);
       });
 
-      // CORREÇÃO: Incluir vídeos 'full' no filtro de segmentos
+      // CORREÇÃO: Incluir vídeos 'full' no filtro de segmentos - USANDO currentSegments
       // Vídeos 'full' são tratados como primeiro tempo para transcrição única
-      const firstHalfSegments = segments.filter(s => 
+      const firstHalfSegments = currentSegments.filter(s => 
         (s.half === 'first' || s.videoType === 'first_half' || s.videoType === 'full') && 
         (s.status === 'complete' || s.status === 'ready')
       );
       
-      // Segundo tempo: só incluir se NÃO tiver vídeo 'full' (evita duplicação)
-      const hasFullVideo = segments.some(s => 
+      // Segundo tempo: só incluir se NÃO tiver vídeo 'full' (evita duplicação) - USANDO currentSegments
+      const hasFullVideo = currentSegments.some(s => 
         s.videoType === 'full' && (s.status === 'complete' || s.status === 'ready')
       );
       
       const secondHalfSegments = hasFullVideo 
         ? [] // Se tem vídeo full, não precisa transcrever segundo tempo separado
-        : segments.filter(s => 
+        : currentSegments.filter(s => 
             (s.half === 'second' || s.videoType === 'second_half') && 
             (s.status === 'complete' || s.status === 'ready')
           );
