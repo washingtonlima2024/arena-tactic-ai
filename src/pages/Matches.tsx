@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -32,7 +32,6 @@ import { TeamBadge } from '@/components/teams/TeamBadge';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
-import { useWhisperTranscription } from '@/hooks/useWhisperTranscription';
 
 export default function Matches() {
   const navigate = useNavigate();
@@ -44,32 +43,11 @@ export default function Matches() {
   const [reprocessProgress, setReprocessProgress] = useState({ stage: '', progress: 0 });
   const { toast } = useToast();
   const queryClient = useQueryClient();
-  
-  // Hook para transcrição com FFmpeg (extrai áudio antes de enviar para Whisper)
-  const { transcribeVideo, transcriptionProgress, isTranscribing, usedFallback, resetProgress } = useWhisperTranscription();
 
   const completedMatches = matches.filter(m => m.status === 'completed').length;
   const analyzingMatches = matches.filter(m => m.status === 'analyzing').length;
   const pendingMatches = matches.filter(m => m.status === 'pending').length;
 
-  // Atualizar progresso baseado na transcrição
-  useEffect(() => {
-    if (isTranscribing && transcriptionProgress.stage !== 'idle') {
-      const stageMap: Record<string, string> = {
-        'loading': 'Carregando processador de áudio...',
-        'downloading': 'Baixando vídeo...',
-        'extracting': 'Extraindo áudio do vídeo...',
-        'uploading': 'Enviando áudio...',
-        'transcribing': 'Transcrevendo com Whisper...',
-        'complete': 'Transcrição completa!',
-        'error': 'Erro na transcrição'
-      };
-      setReprocessProgress({
-        stage: stageMap[transcriptionProgress.stage] || transcriptionProgress.message,
-        progress: transcriptionProgress.progress
-      });
-    }
-  }, [transcriptionProgress, isTranscribing]);
 
   const handleDeleteConfirm = () => {
     if (matchToDelete) {
@@ -129,35 +107,33 @@ export default function Matches() {
         throw new Error('URL do vídeo não encontrada');
       }
       
-      console.log('[Reprocess] PASSO 2: Iniciando transcrição...');
+      console.log('[Reprocess] PASSO 2: Iniciando transcrição server-side...');
       console.log('[Reprocess] URL do vídeo:', videoUrl);
+      setReprocessProgress({ stage: 'Transcrevendo vídeo (servidor)...', progress: 20 });
       
-      // 3. Usar hook de transcrição que extrai áudio com FFmpeg primeiro
-      let transcriptionResult;
-      try {
-        transcriptionResult = await transcribeVideo(videoUrl, matchId, video.id);
-      } catch (transcriptionError: any) {
-        // Re-throw with original error message
-        throw new Error(transcriptionError.message || 'Erro na transcrição');
-      }
+      // 3. Usar edge function server-side diretamente (sem FFmpeg no browser)
+      const { data: transcriptionResult, error: transcriptionError } = await supabase.functions.invoke('transcribe-large-video', {
+        body: { videoUrl }
+      });
       
       // Limpar timeout de segurança se chegamos aqui
       clearTimeout(safetyTimeoutId);
+      
+      if (transcriptionError) {
+        console.error('[Reprocess] ✗ Erro na transcrição:', transcriptionError);
+        throw new Error(transcriptionError.message || 'Erro na transcrição do vídeo');
+      }
       
       if (!transcriptionResult?.text) {
         throw new Error('Transcrição retornou vazia. Verifique se o vídeo contém áudio.');
       }
       
       console.log('[Reprocess] ✓ Transcrição obtida:', transcriptionResult.text.length, 'caracteres');
-      console.log('[Reprocess] Método usado:', usedFallback ? 'Google Speech (fallback)' : 'FFmpeg + Whisper');
       console.log('[Reprocess] Preview:', transcriptionResult.text.substring(0, 200) + '...');
       
-      // Informar qual método foi usado
       toast({
-        title: usedFallback ? "Google Speech API" : "Whisper API",
-        description: usedFallback 
-          ? "Transcrição realizada com Google Speech (fallback)" 
-          : "Transcrição realizada com FFmpeg + Whisper"
+        title: "Transcrição concluída",
+        description: "Transcrição realizada no servidor com sucesso"
       });
       
       // 4. Chamar analyze-match para detectar eventos
@@ -213,7 +189,6 @@ export default function Matches() {
       queryClient.invalidateQueries({ queryKey: ['match-details', reprocessedMatchId] });
       queryClient.invalidateQueries({ queryKey: ['match-analysis', reprocessedMatchId] });
       queryClient.invalidateQueries({ queryKey: ['completed-matches'] });
-      resetProgress();
       
       setTimeout(() => {
         const reprocessedId = matchToReprocess.id;
@@ -241,7 +216,6 @@ export default function Matches() {
       });
       setIsReprocessing(false);
       setReprocessProgress({ stage: '', progress: 0 });
-      resetProgress();
     }
   };
 
