@@ -55,6 +55,7 @@ import { useClipGeneration } from '@/hooks/useClipGeneration';
 import { TranscriptionAnalysisDialog } from '@/components/events/TranscriptionAnalysisDialog';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { getEventTeam, getEventTimeMs as getEventTimeMsHelper, formatEventTime } from '@/lib/eventHelpers';
 
 // EventRow component for rendering individual events
 interface EventRowProps {
@@ -82,43 +83,15 @@ const EventRow = ({
   homeTeam,
   awayTeam
 }: EventRowProps) => {
-  // Get team logo based on event metadata
-  // Para gols contra, mostrar o logo do time que se beneficiou (adversário)
-  const getTeamLogo = () => {
-    const teamType = event.metadata?.team;
-    const isOwnGoal = event.metadata?.isOwnGoal;
-    
-    // Para gols contra, inverter o time (quem marcou contra si beneficia o adversário)
-    if (event.event_type === 'goal' && isOwnGoal) {
-      if (teamType === 'home' && awayTeam?.logo_url) return awayTeam.logo_url;
-      if (teamType === 'away' && homeTeam?.logo_url) return homeTeam.logo_url;
-    }
-    
-    // Caso normal
-    if (teamType === 'home' && homeTeam?.logo_url) return homeTeam.logo_url;
-    if (teamType === 'away' && awayTeam?.logo_url) return awayTeam.logo_url;
-    
-    const teamName = event.metadata?.teamName;
-    if (teamName === homeTeam?.name && homeTeam?.logo_url) return homeTeam.logo_url;
-    if (teamName === awayTeam?.name && awayTeam?.logo_url) return awayTeam.logo_url;
-    return null;
-  };
-
-  const teamLogo = getTeamLogo();
+  // Use centralized helper for team identification
+  const { team: eventTeam, teamType } = getEventTeam(
+    { metadata: event.metadata, event_type: event.event_type },
+    homeTeam,
+    awayTeam
+  );
   
-  // Para gols contra, mostrar o nome do time beneficiado
-  const getDisplayTeamName = () => {
-    const teamType = event.metadata?.team;
-    const isOwnGoal = event.metadata?.isOwnGoal;
-    
-    if (event.event_type === 'goal' && isOwnGoal) {
-      return teamType === 'home' ? awayTeam?.short_name : homeTeam?.short_name;
-    }
-    
-    return event.metadata?.teamName || (teamType === 'home' ? homeTeam?.short_name : awayTeam?.short_name);
-  };
-  
-  const teamName = getDisplayTeamName();
+  const teamLogo = eventTeam?.logo_url || null;
+  const teamName = eventTeam?.short_name || eventTeam?.name || null;
 
   return (
     <div 

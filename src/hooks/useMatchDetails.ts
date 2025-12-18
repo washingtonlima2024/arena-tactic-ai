@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { supabase } from '@/integrations/supabase/client';
+import { getEventHalf } from '@/lib/eventHelpers';
 
 export interface MatchWithDetails {
   id: string;
@@ -46,6 +47,8 @@ export interface MatchEvent {
   approval_status: string | null;
   approved_by: string | null;
   approved_at: string | null;
+  match_half?: string | null;
+  computed_half?: 'first' | 'second'; // Inferred from minute when match_half is 'full'
 }
 
 export interface TacticalAnalysis {
@@ -123,6 +126,17 @@ export function useMatchEvents(matchId: string | null) {
 
       if (error) throw error;
 
+      // Normalize match_half for 'full' type videos (infer from minute)
+      const normalizedEvents = (data as MatchEvent[]).map(event => ({
+        ...event,
+        // Add computed_half to help with filtering if match_half is 'full'
+        computed_half: getEventHalf({ 
+          minute: event.minute, 
+          metadata: event.metadata, 
+          match_half: (event as any).match_half 
+        })
+      }));
+
       // Filter events to only those within video time range if videos exist
       if (videos && videos.length > 0) {
         const videoRanges = videos.map(v => ({
@@ -131,7 +145,7 @@ export function useMatchEvents(matchId: string | null) {
         }));
 
         // Keep events that fall within any video segment
-        return (data as MatchEvent[]).filter(event => {
+        return normalizedEvents.filter(event => {
           if (event.minute === null) return true; // Keep events without minute
           return videoRanges.some(range => 
             event.minute! >= range.start && event.minute! <= range.end
@@ -139,7 +153,7 @@ export function useMatchEvents(matchId: string | null) {
         });
       }
 
-      return data as MatchEvent[];
+      return normalizedEvents;
     },
     enabled: !!matchId,
   });
