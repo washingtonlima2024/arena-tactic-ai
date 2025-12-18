@@ -3,6 +3,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { 
   Select, 
   SelectContent, 
@@ -10,6 +11,12 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { 
   Filter, 
   Download, 
@@ -29,7 +36,9 @@ import {
   AlertCircle,
   Sparkles,
   RefreshCw,
-  FileText
+  FileText,
+  Film,
+  StopCircle
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -42,6 +51,7 @@ import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
 import { useMatchAnalysis } from '@/hooks/useMatchAnalysis';
+import { useClipGeneration } from '@/hooks/useClipGeneration';
 import { TranscriptionAnalysisDialog } from '@/components/events/TranscriptionAnalysisDialog';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -140,7 +150,14 @@ const EventRow = ({
           Editado
         </Badge>
       )}
-      {/* Video indicator */}
+      {/* Clip badge */}
+      {event.clip_url && (
+        <Badge variant="secondary" className="shrink-0 text-xs gap-1 bg-primary/20 text-primary border-primary/30">
+          <Film className="h-3 w-3" />
+          Clip
+        </Badge>
+      )}
+      {/* Video indicator - only show if no clip */}
       {matchVideo && !event.clip_url && (
         <Badge variant="outline" className="shrink-0 text-xs gap-1 hidden sm:flex">
           <Play className="h-3 w-3" />
@@ -166,6 +183,13 @@ export default function Events() {
   const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
   const { analyzeWithTranscription, isAnalyzing: isRefining } = useMatchAnalysis();
+  const { 
+    isGenerating, 
+    progress: clipProgress, 
+    generateAllClips, 
+    cancel: cancelClipGeneration,
+    reset: resetClipProgress 
+  } = useClipGeneration();
   
   // Centralized match selection
   const { currentMatchId, selectedMatch, matches, isLoading: matchesLoading, setSelectedMatch } = useMatchSelection();
@@ -364,7 +388,58 @@ export default function Events() {
     return thumb ? { imageUrl: thumb.image_url } : undefined;
   };
 
-  // Note: Clip extraction removed - using timestamp-based playback instead
+  // Handle clip generation
+  const handleGenerateClips = async (mode: 'highlights' | 'all' | 'selected', limit: number = 20) => {
+    if (!currentMatchId || !matchVideo) {
+      toast.error('Nenhum vídeo disponível para esta partida');
+      return;
+    }
+
+    // Check if video is direct MP4 (not embed)
+    if (matchVideo.file_url.includes('embed') || matchVideo.file_url.includes('xtream.tech')) {
+      toast.error('Extração de clips só funciona com vídeos MP4 diretos, não com embeds');
+      return;
+    }
+
+    let eventsToProcess: typeof events;
+    
+    if (mode === 'highlights') {
+      // Priority: goals, red cards, penalties, yellow cards
+      const priorityTypes = ['goal', 'red_card', 'penalty', 'yellow_card'];
+      eventsToProcess = events
+        .filter(e => priorityTypes.includes(e.event_type) && !e.clip_url)
+        .sort((a, b) => {
+          const priorityA = priorityTypes.indexOf(a.event_type);
+          const priorityB = priorityTypes.indexOf(b.event_type);
+          return priorityA - priorityB;
+        });
+    } else {
+      eventsToProcess = events.filter(e => !e.clip_url);
+    }
+
+    if (eventsToProcess.length === 0) {
+      toast.info('Todos os eventos já possuem clips extraídos');
+      return;
+    }
+
+    const clipsCount = Math.min(eventsToProcess.length, limit);
+    toast.info(`Iniciando extração de ${clipsCount} clips...`);
+
+    await generateAllClips(
+      eventsToProcess.slice(0, limit),
+      matchVideo.file_url,
+      currentMatchId,
+      limit
+    );
+
+    // Refresh events to show updated clip_url
+    refetchEvents();
+    toast.success('Extração de clips concluída!');
+  };
+
+  // Count events with clips
+  const eventsWithClips = events.filter(e => e.clip_url).length;
+  const eventsWithoutClips = events.filter(e => !e.clip_url).length;
 
   if (matchesLoading) {
     return (
@@ -439,6 +514,45 @@ export default function Events() {
                   <Plus className="mr-2 h-4 w-4" />
                   Novo Evento
                 </Button>
+                
+                {/* Clip Generation Dropdown */}
+                {matchVideo && !matchVideo.file_url.includes('embed') && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button 
+                        variant="secondary" 
+                        disabled={isGenerating || eventsWithoutClips === 0}
+                      >
+                        {isGenerating ? (
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        ) : (
+                          <Scissors className="mr-2 h-4 w-4" />
+                        )}
+                        Gerar Clips
+                        {eventsWithClips > 0 && (
+                          <Badge variant="outline" className="ml-2 text-xs">
+                            {eventsWithClips}/{events.length}
+                          </Badge>
+                        )}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end">
+                      <DropdownMenuItem onClick={() => handleGenerateClips('highlights', 10)}>
+                        <Target className="mr-2 h-4 w-4" />
+                        Gerar Highlights (gols, cartões)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleGenerateClips('all', 20)}>
+                        <Film className="mr-2 h-4 w-4" />
+                        Gerar Todos (máx 20)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleGenerateClips('all', 50)}>
+                        <Video className="mr-2 h-4 w-4" />
+                        Gerar Todos (máx 50)
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+
                 <TranscriptionAnalysisDialog
                   matchId={currentMatchId}
                   homeTeamName={selectedMatch?.home_team?.name || 'Casa'}
@@ -481,6 +595,38 @@ export default function Events() {
             </Button>
           </div>
         </div>
+
+        {/* Clip Generation Progress */}
+        {isGenerating && (
+          <Card variant="glass" className="border-primary/30">
+            <CardContent className="py-4">
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium">{clipProgress.message}</span>
+                    <div className="flex items-center gap-2">
+                      {clipProgress.completedCount !== undefined && (
+                        <Badge variant="outline">
+                          {clipProgress.completedCount}/{clipProgress.totalCount} clips
+                        </Badge>
+                      )}
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={cancelClipGeneration}
+                        className="h-7"
+                      >
+                        <StopCircle className="h-4 w-4 mr-1" />
+                        Cancelar
+                      </Button>
+                    </div>
+                  </div>
+                  <Progress value={clipProgress.progress} className="h-2" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Stats Overview */}
         <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
