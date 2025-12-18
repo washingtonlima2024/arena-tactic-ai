@@ -125,11 +125,121 @@ export function useThumbnailGeneration(matchId?: string) {
               throw new Error('Failed to get canvas context');
             }
             
+            // Draw video frame
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            // === OVERLAY: Event Badge and Minute ===
+            const eventLabels: Record<string, string> = {
+              goal: 'GOL',
+              shot: 'FINALIZAÇÃO',
+              shot_on_target: 'CHUTE',
+              save: 'DEFESA',
+              foul: 'FALTA',
+              yellow_card: 'AMARELO',
+              red_card: 'VERMELHO',
+              corner: 'ESCANTEIO',
+              penalty: 'PÊNALTI',
+              offside: 'IMPEDIMENTO',
+              substitution: 'SUBST',
+              high_press: 'PRESSÃO',
+              transition: 'TRANSIÇÃO',
+              ball_recovery: 'RECUPERAÇÃO',
+            };
+            const eventLabel = eventLabels[eventType] || eventType.toUpperCase().replace(/_/g, ' ');
+            const minute = Math.floor(timestamp / 60);
+            
+            // Badge colors based on event type
+            const badgeColors: Record<string, { bg: string; text: string }> = {
+              goal: { bg: '#10b981', text: '#ffffff' }, // Green
+              shot: { bg: '#f59e0b', text: '#ffffff' }, // Amber
+              shot_on_target: { bg: '#f59e0b', text: '#ffffff' },
+              save: { bg: '#3b82f6', text: '#ffffff' }, // Blue
+              foul: { bg: '#ef4444', text: '#ffffff' }, // Red
+              yellow_card: { bg: '#eab308', text: '#000000' }, // Yellow
+              red_card: { bg: '#dc2626', text: '#ffffff' }, // Red
+              corner: { bg: '#8b5cf6', text: '#ffffff' }, // Purple
+              penalty: { bg: '#ec4899', text: '#ffffff' }, // Pink
+              offside: { bg: '#6366f1', text: '#ffffff' }, // Indigo
+            };
+            const colors = badgeColors[eventType] || { bg: '#10b981', text: '#ffffff' };
+            
+            const scale = canvas.width / 1280; // Scale based on video width
+            const padding = 20 * scale;
+            const badgeHeight = 50 * scale;
+            const fontSize = 28 * scale;
+            const minuteFontSize = 36 * scale;
+            
+            // Draw semi-transparent gradient at bottom
+            const gradient = ctx.createLinearGradient(0, canvas.height - 120 * scale, 0, canvas.height);
+            gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+            gradient.addColorStop(1, 'rgba(0, 0, 0, 0.7)');
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, canvas.height - 120 * scale, canvas.width, 120 * scale);
+            
+            // Draw event type badge (bottom left)
+            ctx.font = `bold ${fontSize}px sans-serif`;
+            const badgeText = eventLabel;
+            const textMetrics = ctx.measureText(badgeText);
+            const badgeWidth = textMetrics.width + 30 * scale;
+            
+            const badgeX = padding;
+            const badgeY = canvas.height - padding - badgeHeight;
+            
+            // Badge background with rounded corners
+            ctx.fillStyle = colors.bg;
+            ctx.beginPath();
+            const radius = 8 * scale;
+            ctx.moveTo(badgeX + radius, badgeY);
+            ctx.lineTo(badgeX + badgeWidth - radius, badgeY);
+            ctx.quadraticCurveTo(badgeX + badgeWidth, badgeY, badgeX + badgeWidth, badgeY + radius);
+            ctx.lineTo(badgeX + badgeWidth, badgeY + badgeHeight - radius);
+            ctx.quadraticCurveTo(badgeX + badgeWidth, badgeY + badgeHeight, badgeX + badgeWidth - radius, badgeY + badgeHeight);
+            ctx.lineTo(badgeX + radius, badgeY + badgeHeight);
+            ctx.quadraticCurveTo(badgeX, badgeY + badgeHeight, badgeX, badgeY + badgeHeight - radius);
+            ctx.lineTo(badgeX, badgeY + radius);
+            ctx.quadraticCurveTo(badgeX, badgeY, badgeX + radius, badgeY);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Badge text
+            ctx.fillStyle = colors.text;
+            ctx.textBaseline = 'middle';
+            ctx.fillText(badgeText, badgeX + 15 * scale, badgeY + badgeHeight / 2);
+            
+            // Draw minute badge (bottom right)
+            const minuteText = `${minute}'`;
+            ctx.font = `bold ${minuteFontSize}px sans-serif`;
+            const minuteMetrics = ctx.measureText(minuteText);
+            const minuteBadgeWidth = minuteMetrics.width + 30 * scale;
+            const minuteBadgeX = canvas.width - padding - minuteBadgeWidth;
+            
+            // Minute badge background (dark with green accent)
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+            ctx.beginPath();
+            ctx.moveTo(minuteBadgeX + radius, badgeY);
+            ctx.lineTo(minuteBadgeX + minuteBadgeWidth - radius, badgeY);
+            ctx.quadraticCurveTo(minuteBadgeX + minuteBadgeWidth, badgeY, minuteBadgeX + minuteBadgeWidth, badgeY + radius);
+            ctx.lineTo(minuteBadgeX + minuteBadgeWidth, badgeY + badgeHeight - radius);
+            ctx.quadraticCurveTo(minuteBadgeX + minuteBadgeWidth, badgeY + badgeHeight, minuteBadgeX + minuteBadgeWidth - radius, badgeY + badgeHeight);
+            ctx.lineTo(minuteBadgeX + radius, badgeY + badgeHeight);
+            ctx.quadraticCurveTo(minuteBadgeX, badgeY + badgeHeight, minuteBadgeX, badgeY + badgeHeight - radius);
+            ctx.lineTo(minuteBadgeX, badgeY + radius);
+            ctx.quadraticCurveTo(minuteBadgeX, badgeY, minuteBadgeX + radius, badgeY);
+            ctx.closePath();
+            ctx.fill();
+            
+            // Green accent line on left of minute badge
+            ctx.fillStyle = '#10b981';
+            ctx.fillRect(minuteBadgeX, badgeY + 5 * scale, 4 * scale, badgeHeight - 10 * scale);
+            
+            // Minute text
+            ctx.fillStyle = '#ffffff';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(minuteText, minuteBadgeX + 15 * scale, badgeY + badgeHeight / 2);
             
             // Convert to blob for upload
             const blob = await new Promise<Blob | null>((res) => {
-              canvas.toBlob((b) => res(b), 'image/jpeg', 0.85);
+              canvas.toBlob((b) => res(b), 'image/jpeg', 0.90);
             });
             
             if (!blob) {
@@ -157,21 +267,7 @@ export function useThumbnailGeneration(matchId?: string) {
             
             const imageUrl = urlData.publicUrl;
             
-            // Generate title
-            const eventLabels: Record<string, string> = {
-              goal: 'GOL',
-              shot: 'FINALIZAÇÃO',
-              shot_on_target: 'CHUTE NO GOL',
-              save: 'DEFESA',
-              foul: 'FALTA',
-              yellow_card: 'CARTÃO AMARELO',
-              red_card: 'CARTÃO VERMELHO',
-              corner: 'ESCANTEIO',
-              penalty: 'PÊNALTI',
-              offside: 'IMPEDIMENTO',
-            };
-            const eventLabel = eventLabels[eventType] || eventType.toUpperCase();
-            const minute = Math.floor(timestamp / 60);
+            // Generate title (reuse eventLabel and minute from overlay)
             const title = `${eventLabel} - ${minute}'`;
             
             // Save to database
