@@ -38,6 +38,7 @@ import {
 import { useMatchAnalysis, useMatchEvents, ExtendedTacticalAnalysis } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
+import { useEventBasedAnalysis } from '@/hooks/useEventBasedAnalysis';
 import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
@@ -91,6 +92,14 @@ export default function Analysis() {
     enabled: !!currentMatchId
   });
 
+  // Generate analysis from real events
+  const eventAnalysis = useEventBasedAnalysis(
+    events,
+    selectedMatch?.home_team,
+    selectedMatch?.away_team
+  );
+
+  // Use event-based analysis as primary, fallback to stored tactical analysis
   const tacticalAnalysis = analysis?.tacticalAnalysis as ExtendedTacticalAnalysis | null;
 
   // Get important events (goals, shots, key moments, tactical events)
@@ -98,14 +107,6 @@ export default function Analysis() {
     ['goal', 'shot', 'shot_on_target', 'penalty', 'corner', 'foul', 'free_kick', 'cross', 
      'save', 'offside', 'yellow_card', 'red_card', 'high_press', 'transition', 'ball_recovery'].includes(e.event_type)
   ).slice(0, 10);
-
-  // Calculate stats from events
-  const eventCounts = {
-    goals: events.filter(e => e.event_type === 'goal').length,
-    shots: events.filter(e => e.event_type.includes('shot')).length,
-    fouls: events.filter(e => e.event_type === 'foul' || e.event_type.includes('card')).length,
-    tactical: events.filter(e => ['high_press', 'transition', 'ball_recovery', 'substitution'].includes(e.event_type)).length,
-  };
 
   const handlePlayVideo = (eventId: string) => {
     if (matchVideo) {
@@ -197,13 +198,19 @@ export default function Analysis() {
             <div className="flex items-center gap-3">
               <h1 className="font-display text-3xl font-bold">Análise Tática</h1>
               {selectedMatch && (
-                <Badge variant="arena">
-                  {selectedMatch.home_team?.short_name || 'Casa'} vs {selectedMatch.away_team?.short_name || 'Visitante'}
-                </Badge>
+                <>
+                  <Badge variant="arena">
+                    {selectedMatch.home_team?.short_name || 'Casa'} vs {selectedMatch.away_team?.short_name || 'Visitante'}
+                  </Badge>
+                  <Badge variant="outline" className="text-lg font-bold px-3 py-1">
+                    {eventAnalysis.homeScore} x {eventAnalysis.awayScore}
+                  </Badge>
+                </>
               )}
             </div>
             <p className="text-muted-foreground">
               {selectedMatch?.competition || 'Amistoso'} • {selectedMatch?.match_date ? new Date(selectedMatch.match_date).toLocaleDateString('pt-BR') : 'Data não definida'}
+              {events.length > 0 && ` • ${events.length} eventos detectados`}
             </p>
           </div>
           <div className="flex gap-2">
@@ -446,10 +453,11 @@ export default function Analysis() {
               <CardContent>
                 <div className="space-y-4">
                   {[
-                    { label: 'Posse de Bola', home: tacticalAnalysis?.possession?.home || 50, away: tacticalAnalysis?.possession?.away || 50, suffix: '%' },
-                    { label: 'Gols', home: selectedMatch?.home_score || eventCounts.goals, away: selectedMatch?.away_score || 0 },
-                    { label: 'Eventos Táticos', home: eventCounts.tactical, away: 0 },
-                    { label: 'Faltas/Cartões', home: eventCounts.fouls, away: 0 },
+                    { label: 'Posse de Bola', home: eventAnalysis.possession.home, away: eventAnalysis.possession.away, suffix: '%' },
+                    { label: 'Gols', home: eventAnalysis.homeScore, away: eventAnalysis.awayScore },
+                    { label: 'Finalizações', home: eventAnalysis.homeStats.shots, away: eventAnalysis.awayStats.shots },
+                    { label: 'Defesas', home: eventAnalysis.homeStats.saves, away: eventAnalysis.awayStats.saves },
+                    { label: 'Faltas/Cartões', home: eventAnalysis.homeStats.fouls + eventAnalysis.homeStats.cards, away: eventAnalysis.awayStats.fouls + eventAnalysis.awayStats.cards },
                   ].map((stat, index) => (
                     <div key={index} className="grid grid-cols-[1fr,2fr,1fr] items-center gap-4">
                       <div className="text-right">
@@ -477,8 +485,8 @@ export default function Analysis() {
               </CardContent>
             </Card>
 
-            {/* Match Summary Section */}
-            {(tacticalAnalysis?.matchSummary || tacticalAnalysis?.tacticalOverview) && (
+            {/* Match Summary Section - Generated from events */}
+            {(eventAnalysis.matchSummary || eventAnalysis.tacticalOverview || events.length > 0) && (
               <Card variant="glow">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
@@ -488,40 +496,40 @@ export default function Analysis() {
                 </CardHeader>
                 <CardContent className="space-y-6">
                   {/* Complete Analysis */}
-                  {tacticalAnalysis?.matchSummary && (
+                  {eventAnalysis.matchSummary && (
                     <div className="space-y-2">
                       <h4 className="font-semibold text-sm text-muted-foreground flex items-center gap-2">
                         <BarChart3 className="h-4 w-4" />
                         Análise Completa
                       </h4>
                       <p className="text-sm leading-relaxed bg-muted/30 p-4 rounded-lg">
-                        {tacticalAnalysis.matchSummary}
+                        {eventAnalysis.matchSummary}
                       </p>
                     </div>
                   )}
                   
                   {/* Tactical Analysis */}
-                  {tacticalAnalysis?.tacticalOverview && (
+                  {eventAnalysis.tacticalOverview && (
                     <div className="space-y-2">
                       <h4 className="font-semibold text-sm text-muted-foreground flex items-center gap-2">
                         <Target className="h-4 w-4" />
                         Análise Tática
                       </h4>
                       <p className="text-sm leading-relaxed bg-muted/30 p-4 rounded-lg">
-                        {tacticalAnalysis.tacticalOverview}
+                        {eventAnalysis.tacticalOverview}
                       </p>
                     </div>
                   )}
                   
                   {/* Standout Players */}
-                  {tacticalAnalysis?.standoutPlayers && tacticalAnalysis.standoutPlayers.length > 0 && (
+                  {eventAnalysis.standoutPlayers && eventAnalysis.standoutPlayers.length > 0 && (
                     <div className="space-y-2">
                       <h4 className="font-semibold text-sm text-muted-foreground flex items-center gap-2">
                         <Star className="h-4 w-4" />
                         Jogadores em Destaque
                       </h4>
                       <div className="flex flex-wrap gap-2">
-                        {tacticalAnalysis.standoutPlayers.map((player, i) => (
+                        {eventAnalysis.standoutPlayers.map((player, i) => (
                           <Badge key={i} variant="arena" className="gap-1">
                             <User className="h-3 w-3" />
                             {player}
@@ -585,17 +593,17 @@ export default function Analysis() {
             <Tabs defaultValue="insights" className="space-y-6">
               <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="insights">
-                  Insights {tacticalAnalysis?.keyMoments?.length ? `(${tacticalAnalysis.keyMoments.length})` : ''}
+                  Insights ({eventAnalysis.keyMoments.length})
                 </TabsTrigger>
-                <TabsTrigger value="patterns">Padrões Táticos</TabsTrigger>
+                <TabsTrigger value="patterns">Padrões Táticos ({eventAnalysis.patterns.length})</TabsTrigger>
                 <TabsTrigger value="events">Eventos ({events.length})</TabsTrigger>
               </TabsList>
 
               <TabsContent value="insights" className="space-y-4">
-                {tacticalAnalysis?.keyMoments && tacticalAnalysis.keyMoments.length > 0 ? (
+                {eventAnalysis.keyMoments.length > 0 ? (
                   <ScrollArea className="h-[500px] pr-4">
                     <div className="space-y-3">
-                      {tacticalAnalysis.keyMoments.map((moment, index) => {
+                      {eventAnalysis.keyMoments.map((moment, index) => {
                         const typeLabels: Record<string, string> = {
                           goal: 'Gol',
                           assist: 'Assistência',
@@ -658,9 +666,9 @@ export default function Analysis() {
                       })}
                     </div>
                   </ScrollArea>
-                ) : tacticalAnalysis?.insights && tacticalAnalysis.insights.length > 0 ? (
+                ) : eventAnalysis.insights.length > 0 ? (
                   <div className="grid gap-4 md:grid-cols-2">
-                    {tacticalAnalysis.insights.map((insight, index) => (
+                    {eventAnalysis.insights.map((insight, index) => (
                       <Card key={index} variant="glow">
                         <CardContent className="pt-6">
                           <div className="flex items-start gap-3">
@@ -676,16 +684,16 @@ export default function Analysis() {
                 ) : (
                   <Card variant="glass">
                     <CardContent className="py-8 text-center text-muted-foreground">
-                      Nenhum insight disponível
+                      Nenhum insight disponível - analise uma partida para ver os resultados
                     </CardContent>
                   </Card>
                 )}
               </TabsContent>
 
               <TabsContent value="patterns" className="space-y-4">
-                {tacticalAnalysis?.patterns && tacticalAnalysis.patterns.length > 0 ? (
+                {eventAnalysis.patterns.length > 0 ? (
                   <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {tacticalAnalysis.patterns.map((pattern, index) => (
+                    {eventAnalysis.patterns.map((pattern, index) => (
                       <Card key={index} variant="glow">
                         <CardContent className="pt-6">
                           <div className="mb-4 flex items-center gap-3">
@@ -713,7 +721,7 @@ export default function Analysis() {
                 ) : (
                   <Card variant="glass">
                     <CardContent className="py-8 text-center text-muted-foreground">
-                      Nenhum padrão tático identificado
+                      Nenhum padrão tático identificado - mais eventos são necessários
                     </CardContent>
                   </Card>
                 )}
