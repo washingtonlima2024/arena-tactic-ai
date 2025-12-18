@@ -73,7 +73,7 @@ export default function Media() {
 
   const queryClient = useQueryClient();
   
-  const { thumbnails, generateThumbnail, generateAllThumbnails, isGenerating, getThumbnail, generatingIds } = useThumbnailGeneration(matchId);
+  const { thumbnails, generateThumbnail, generateAllThumbnails, extractFrameFromVideo, extractAllFrames, isGenerating, isExtracting, getThumbnail, generatingIds, extractingIds } = useThumbnailGeneration(matchId);
   
   const { data: events, refetch: refetchEvents } = useMatchEvents(matchId);
   
@@ -202,15 +202,40 @@ export default function Media() {
           <Card variant="glass">
             <CardContent className="py-4">
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="text-center">
-                    <p className="font-semibold">{selectedMatch.home_team?.name}</p>
-                    <p className="text-2xl font-bold">{selectedMatch.home_score || 0}</p>
+                <div className="flex items-center gap-6">
+                  {/* Home Team */}
+                  <div className="flex items-center gap-3">
+                    {selectedMatch.home_team?.logo_url && (
+                      <img 
+                        src={selectedMatch.home_team.logo_url} 
+                        alt={selectedMatch.home_team.name}
+                        className="h-10 w-10 object-contain"
+                      />
+                    )}
+                    <div className="text-center">
+                      <p className="font-semibold">{selectedMatch.home_team?.short_name || selectedMatch.home_team?.name}</p>
+                    </div>
                   </div>
-                  <span className="text-muted-foreground">vs</span>
-                  <div className="text-center">
-                    <p className="font-semibold">{selectedMatch.away_team?.name}</p>
-                    <p className="text-2xl font-bold">{selectedMatch.away_score || 0}</p>
+                  
+                  {/* Score */}
+                  <div className="flex items-center gap-2">
+                    <span className="text-2xl font-bold">{selectedMatch.home_score || 0}</span>
+                    <span className="text-muted-foreground text-lg">x</span>
+                    <span className="text-2xl font-bold">{selectedMatch.away_score || 0}</span>
+                  </div>
+                  
+                  {/* Away Team */}
+                  <div className="flex items-center gap-3">
+                    <div className="text-center">
+                      <p className="font-semibold">{selectedMatch.away_team?.short_name || selectedMatch.away_team?.name}</p>
+                    </div>
+                    {selectedMatch.away_team?.logo_url && (
+                      <img 
+                        src={selectedMatch.away_team.logo_url} 
+                        alt={selectedMatch.away_team.name}
+                        className="h-10 w-10 object-contain"
+                      />
+                    )}
                   </div>
                 </div>
                 <Badge variant="success">Análise Completa</Badge>
@@ -256,6 +281,35 @@ export default function Media() {
                 )}
               </div>
               <div className="flex gap-2">
+                {/* Extract frames from video button */}
+                {matchVideo && clips.length > 0 && clips.some(c => !getThumbnail(c.id)) && (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => {
+                      const eventsToExtract = clips
+                        .filter(c => !getThumbnail(c.id))
+                        .map(c => ({
+                          eventId: c.id,
+                          eventType: c.type,
+                          videoUrl: matchVideo.file_url,
+                          timestamp: c.totalSeconds,
+                          matchId: matchId
+                        }));
+                      extractAllFrames(eventsToExtract);
+                    }}
+                    disabled={extractingIds.size > 0 || generatingIds.size > 0}
+                  >
+                    {extractingIds.size > 0 ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Film className="mr-2 h-4 w-4" />
+                    )}
+                    Extrair Frames
+                  </Button>
+                )}
+                
+                {/* Generate AI thumbnails button */}
                 {clips.length > 0 && clips.some(c => !getThumbnail(c.id)) && (
                   <Button 
                     variant="outline" 
@@ -276,14 +330,14 @@ export default function Media() {
                         }));
                       generateAllThumbnails(eventsToGenerate);
                     }}
-                    disabled={generatingIds.size > 0}
+                    disabled={generatingIds.size > 0 || extractingIds.size > 0}
                   >
                     {generatingIds.size > 0 ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
-                      <Image className="mr-2 h-4 w-4" />
+                      <Sparkles className="mr-2 h-4 w-4" />
                     )}
-                    Gerar Capas
+                    Gerar Capas IA
                   </Button>
                 )}
               </div>
@@ -366,6 +420,7 @@ export default function Media() {
                   const thumbnail = getThumbnail(clip.id);
                   const isPlaying = playingClipId === clip.id;
                   const isGeneratingThumbnail = isGenerating(clip.id);
+                  const isExtractingFrame = isExtracting(clip.id);
                   
                   const handlePlayClip = () => {
                     if (!matchVideo && !clip.clipUrl) {
@@ -386,6 +441,24 @@ export default function Media() {
                       }
                       setPlayingClipId(clip.id);
                     }
+                  };
+
+                  const handleExtractFrame = () => {
+                    if (!matchVideo) {
+                      toast({
+                        title: "Vídeo não disponível",
+                        description: "Faça upload do vídeo para extrair frames",
+                        variant: "destructive"
+                      });
+                      return;
+                    }
+                    extractFrameFromVideo({
+                      eventId: clip.id,
+                      eventType: clip.type,
+                      videoUrl: matchVideo.file_url,
+                      timestamp: clip.totalSeconds,
+                      matchId: matchId
+                    });
                   };
 
                   const handleGenerateThumbnail = () => {
@@ -411,18 +484,38 @@ export default function Media() {
                             alt={clip.title}
                             className="w-full h-full object-cover"
                           />
-                        ) : isGeneratingThumbnail ? (
+                        ) : isGeneratingThumbnail || isExtractingFrame ? (
                           <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
                             <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
-                            <p className="text-xs text-muted-foreground">Gerando capa...</p>
+                            <p className="text-xs text-muted-foreground">
+                              {isExtractingFrame ? 'Extraindo frame...' : 'Gerando capa...'}
+                            </p>
                           </div>
                         ) : (
-                          <div 
-                            className="absolute inset-0 bg-gradient-to-br from-primary/20 to-primary/5 cursor-pointer hover:from-primary/30 hover:to-primary/10 transition-colors flex flex-col items-center justify-center"
-                            onClick={handleGenerateThumbnail}
-                          >
-                            <Sparkles className="h-8 w-8 text-primary/60 mb-2" />
-                            <p className="text-xs text-muted-foreground">Clique para gerar capa</p>
+                          <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-primary/5 flex flex-col items-center justify-center gap-2">
+                            <div className="flex gap-2">
+                              {matchVideo && (
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={handleExtractFrame}
+                                  className="gap-1"
+                                >
+                                  <Film className="h-3 w-3" />
+                                  Frame
+                                </Button>
+                              )}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleGenerateThumbnail}
+                                className="gap-1"
+                              >
+                                <Sparkles className="h-3 w-3" />
+                                IA
+                              </Button>
+                            </div>
+                            <p className="text-xs text-muted-foreground">Gerar capa</p>
                           </div>
                         )}
                         <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-t from-background/80 to-transparent pointer-events-none">

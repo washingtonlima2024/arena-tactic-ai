@@ -21,9 +21,18 @@ interface GenerateThumbnailParams {
   description?: string;
 }
 
+interface ExtractFrameParams {
+  eventId: string;
+  eventType: string;
+  videoUrl: string;
+  timestamp: number; // in seconds
+  matchId: string;
+}
+
 export function useThumbnailGeneration(matchId?: string) {
   const [thumbnails, setThumbnails] = useState<Record<string, ThumbnailData>>({});
   const [generatingIds, setGeneratingIds] = useState<Set<string>>(new Set());
+  const [extractingIds, setExtractingIds] = useState<Set<string>>(new Set());
   const [isLoading, setIsLoading] = useState(false);
 
   // Load existing thumbnails from database
@@ -65,6 +74,123 @@ export function useThumbnailGeneration(matchId?: string) {
   useEffect(() => {
     loadThumbnails();
   }, [loadThumbnails]);
+
+  // Extract frame from video using canvas
+  const extractFrameFromVideo = async (params: ExtractFrameParams): Promise<ThumbnailData | null> => {
+    const { eventId, eventType, videoUrl, timestamp, matchId: eventMatchId } = params;
+
+    if (extractingIds.has(eventId)) return null;
+
+    setExtractingIds(prev => new Set(prev).add(eventId));
+
+    try {
+      return new Promise((resolve, reject) => {
+        const video = document.createElement('video');
+        video.crossOrigin = 'anonymous';
+        video.preload = 'metadata';
+        
+        video.onloadedmetadata = () => {
+          // Ensure timestamp is within video duration
+          const targetTime = Math.min(timestamp, video.duration - 0.1);
+          video.currentTime = Math.max(0, targetTime);
+        };
+
+        video.onseeked = () => {
+          try {
+            const canvas = document.createElement('canvas');
+            canvas.width = video.videoWidth || 1280;
+            canvas.height = video.videoHeight || 720;
+            
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+              throw new Error('Failed to get canvas context');
+            }
+            
+            ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+            
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85);
+            
+            // Save to database
+            const eventLabels: Record<string, string> = {
+              goal: 'GOL',
+              shot: 'FINALIZAÇÃO',
+              shot_on_target: 'CHUTE NO GOL',
+              save: 'DEFESA',
+              foul: 'FALTA',
+              yellow_card: 'CARTÃO AMARELO',
+              red_card: 'CARTÃO VERMELHO',
+              corner: 'ESCANTEIO',
+              penalty: 'PÊNALTI',
+              offside: 'IMPEDIMENTO',
+            };
+            const eventLabel = eventLabels[eventType] || eventType.toUpperCase();
+            const minute = Math.floor(timestamp / 60);
+            const title = `${eventLabel} - ${minute}'`;
+            
+            // Save to Supabase
+            supabase
+              .from('thumbnails')
+              .upsert({
+                event_id: eventId,
+                match_id: eventMatchId,
+                image_url: dataUrl,
+                event_type: eventType,
+                title
+              }, { onConflict: 'event_id' })
+              .then(({ error }) => {
+                if (error) console.error('Error saving thumbnail:', error);
+              });
+            
+            const thumbnailData: ThumbnailData = {
+              eventId,
+              imageUrl: dataUrl,
+              eventType,
+              title
+            };
+            
+            setThumbnails(prev => ({
+              ...prev,
+              [eventId]: thumbnailData
+            }));
+            
+            video.remove();
+            canvas.remove();
+            
+            toast.success(`Frame extraído: ${eventLabel}`);
+            resolve(thumbnailData);
+          } catch (err) {
+            reject(err);
+          }
+        };
+
+        video.onerror = () => {
+          video.remove();
+          reject(new Error('Failed to load video'));
+        };
+
+        // Set timeout for loading
+        setTimeout(() => {
+          if (!video.readyState) {
+            video.remove();
+            reject(new Error('Video load timeout'));
+          }
+        }, 10000);
+
+        video.src = videoUrl;
+        video.load();
+      });
+    } catch (error) {
+      console.error('Error extracting frame:', error);
+      toast.error('Erro ao extrair frame do vídeo');
+      return null;
+    } finally {
+      setExtractingIds(prev => {
+        const next = new Set(prev);
+        next.delete(eventId);
+        return next;
+      });
+    }
+  };
 
   const generateThumbnail = async (params: GenerateThumbnailParams) => {
     const { eventId, eventType, minute, homeTeam, awayTeam, homeScore, awayScore, matchId: eventMatchId, description } = params;
@@ -152,7 +278,21 @@ Style: Professional sports broadcast graphics, dramatic lighting, soccer field b
     toast.success('Todas as thumbnails foram geradas!');
   };
 
+  const extractAllFrames = async (events: ExtractFrameParams[]) => {
+    toast.info(`Extraindo ${events.length} frames do vídeo...`);
+    
+    for (const event of events) {
+      if (!thumbnails[event.eventId]) {
+        await extractFrameFromVideo(event);
+        await new Promise(resolve => setTimeout(resolve, 500));
+      }
+    }
+    
+    toast.success('Todos os frames foram extraídos!');
+  };
+
   const isGenerating = (eventId: string) => generatingIds.has(eventId);
+  const isExtracting = (eventId: string) => extractingIds.has(eventId);
   const hasThumbnail = (eventId: string) => !!thumbnails[eventId];
   const getThumbnail = (eventId: string) => thumbnails[eventId];
 
@@ -160,10 +300,14 @@ Style: Professional sports broadcast graphics, dramatic lighting, soccer field b
     thumbnails,
     generateThumbnail,
     generateAllThumbnails,
+    extractFrameFromVideo,
+    extractAllFrames,
     isGenerating,
+    isExtracting,
     hasThumbnail,
     getThumbnail,
     generatingIds,
+    extractingIds,
     isLoading,
     reload: loadThumbnails
   };
