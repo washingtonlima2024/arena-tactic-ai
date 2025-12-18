@@ -463,12 +463,14 @@ export function useWhisperTranscription() {
 
     } catch (error) {
       console.error('[Transcrição] ✗ ERRO:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
       setTranscriptionProgress({
         stage: 'error',
         progress: 0,
-        message: error instanceof Error ? error.message : 'Erro desconhecido'
+        message: errorMessage
       });
-      return null;
+      // Re-throw to allow caller to handle with proper message
+      throw new Error(errorMessage);
     } finally {
       setIsTranscribing(false);
     }

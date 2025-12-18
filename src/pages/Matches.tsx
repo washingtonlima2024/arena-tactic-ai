@@ -133,7 +133,13 @@ export default function Matches() {
       console.log('[Reprocess] URL do vídeo:', videoUrl);
       
       // 3. Usar hook de transcrição que extrai áudio com FFmpeg primeiro
-      const transcriptionResult = await transcribeVideo(videoUrl, matchId, video.id);
+      let transcriptionResult;
+      try {
+        transcriptionResult = await transcribeVideo(videoUrl, matchId, video.id);
+      } catch (transcriptionError: any) {
+        // Re-throw with original error message
+        throw new Error(transcriptionError.message || 'Erro na transcrição');
+      }
       
       // Limpar timeout de segurança se chegamos aqui
       clearTimeout(safetyTimeoutId);
