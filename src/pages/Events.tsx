@@ -232,16 +232,28 @@ export default function Events() {
     enabled: !!currentMatchId
   });
   
-  // Find correct video segment for a given event based on game minute
+  // Find correct video segment for a given event based on match_half (preferred) or game minute (fallback)
   const getVideoForEvent = (event: any) => {
     if (!matchVideos || matchVideos.length === 0) return null;
+    
+    // PREFERIR match_half ou metadata.half para selecionar o vídeo
+    const eventHalf = event.match_half || event.metadata?.half;
+    
+    if (eventHalf) {
+      // Mapear half do evento para video_type
+      const videoType = eventHalf === 'first' ? 'first_half' : 'second_half';
+      const video = matchVideos.find(v => v.video_type === videoType);
+      if (video) return video;
+    }
+    
+    // FALLBACK: usar minuto se não tiver half definido
     const eventMinute = event.minute || 0;
-    // Find video that contains this minute
     const video = matchVideos.find(v => {
       const start = v.start_minute || 0;
       const end = v.end_minute || 90;
       return eventMinute >= start && eventMinute < end;
     });
+    
     return video || matchVideos[0];
   };
   
