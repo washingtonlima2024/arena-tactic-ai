@@ -345,6 +345,12 @@ export default function Events() {
   const firstHalfEvents = filteredEvents.filter(e => {
     const matchHalf = (e as any).match_half;
     const metadataHalf = e.metadata?.half;
+    
+    // Para vídeos 'full', usar minuto para decidir o tempo
+    if (matchHalf === 'full' || metadataHalf === 'full') {
+      return (e.minute || 0) < 45;
+    }
+    
     // Prefer explicit half markers, fallback to minute-based
     if (matchHalf) return matchHalf === 'first';
     if (metadataHalf) return metadataHalf === 'first';
@@ -353,6 +359,12 @@ export default function Events() {
   const secondHalfEvents = filteredEvents.filter(e => {
     const matchHalf = (e as any).match_half;
     const metadataHalf = e.metadata?.half;
+    
+    // Para vídeos 'full', usar minuto para decidir o tempo
+    if (matchHalf === 'full' || metadataHalf === 'full') {
+      return (e.minute || 0) >= 45;
+    }
+    
     // Prefer explicit half markers, fallback to minute-based
     if (matchHalf) return matchHalf === 'second';
     if (metadataHalf) return metadataHalf === 'second';
