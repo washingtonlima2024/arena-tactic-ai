@@ -40,11 +40,18 @@ export function useWhisperTranscription() {
       }));
     });
 
-    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-    await ffmpeg.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-    });
+    // UMD version works without SharedArrayBuffer/COOP/COEP headers
+    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+    
+    try {
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      });
+    } catch (error) {
+      console.error('FFmpeg load error:', error);
+      throw new Error('Erro ao carregar processador de áudio. Tente novamente ou use um arquivo SRT.');
+    }
 
     return ffmpeg;
   };
