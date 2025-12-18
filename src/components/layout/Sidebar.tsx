@@ -13,7 +13,7 @@ import {
   ShieldCheck,
   Ruler
 } from 'lucide-react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useSidebarContext } from '@/contexts/SidebarContext';
@@ -50,29 +50,22 @@ export function Sidebar() {
         collapsed ? "w-20" : "w-64"
       )}
     >
-      {/* Logo */}
+      {/* Logo - Com link para home */}
       <div className="flex h-20 items-center justify-between border-b border-border px-4">
-        {!collapsed && (
-          <div className="flex items-center gap-2">
-            <img 
-              src={arenaIcon} 
-              alt="Arena Play" 
-              className="h-10 w-10 object-contain"
-            />
+        <Link to="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+          <img 
+            src={arenaIcon} 
+            alt="Arena Play" 
+            className="h-10 w-10 object-contain"
+          />
+          {!collapsed && (
             <img 
               src={arenaWordmark} 
               alt="Arena Play" 
               className="h-8 object-contain"
             />
-          </div>
-        )}
-        {collapsed && (
-          <img 
-            src={arenaIcon} 
-            alt="Arena Play" 
-            className="mx-auto h-10 w-10 object-contain"
-          />
-        )}
+          )}
+        </Link>
       </div>
 
       {/* Navigation */}
