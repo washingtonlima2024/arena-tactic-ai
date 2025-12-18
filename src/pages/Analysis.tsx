@@ -203,7 +203,7 @@ export default function Analysis() {
                     {selectedMatch.home_team?.short_name || 'Casa'} vs {selectedMatch.away_team?.short_name || 'Visitante'}
                   </Badge>
                   <Badge variant="outline" className="text-lg font-bold px-3 py-1">
-                    {eventAnalysis.homeScore} x {eventAnalysis.awayScore}
+                    {selectedMatch.home_score ?? 0} x {selectedMatch.away_score ?? 0}
                   </Badge>
                 </>
               )}
@@ -454,7 +454,7 @@ export default function Analysis() {
                 <div className="space-y-4">
                   {[
                     { label: 'Posse de Bola', home: eventAnalysis.possession.home, away: eventAnalysis.possession.away, suffix: '%' },
-                    { label: 'Gols', home: eventAnalysis.homeScore, away: eventAnalysis.awayScore },
+                    { label: 'Gols', home: selectedMatch?.home_score ?? 0, away: selectedMatch?.away_score ?? 0 },
                     { label: 'Finalizações', home: eventAnalysis.homeStats.shots, away: eventAnalysis.awayStats.shots },
                     { label: 'Defesas', home: eventAnalysis.homeStats.saves, away: eventAnalysis.awayStats.saves },
                     { label: 'Faltas/Cartões', home: eventAnalysis.homeStats.fouls + eventAnalysis.homeStats.cards, away: eventAnalysis.awayStats.fouls + eventAnalysis.awayStats.cards },
