@@ -71,51 +71,60 @@ export function VideoPlayerModal({
   }, [matchVideo]);
 
   // Calculate initial timestamp - handle mismatch between event times and video duration
-  // When event timestamps exceed video duration, they were likely analyzed as game time
-  // not video time, so we need to calculate relative positions using video start_minute
+  // Priority: videoSecond (calculated from offset) > eventMs > totalSeconds > minute+second
   const calculateInitialTimestamp = useCallback(() => {
     if (!clip || hasDirectClip) return 0;
     
     const videoDuration = getVideoDuration();
     const videoStartMinute = matchVideo?.start_minute ?? 0;
     
-    // Get the raw event timestamp in seconds (these may be game-time values)
-    let gameTimeSeconds = 0;
-    if (clip.eventMs !== undefined && clip.eventMs >= 0) {
-      gameTimeSeconds = clip.eventMs / 1000;
-    } else if (clip.totalSeconds !== undefined && clip.totalSeconds >= 0) {
-      gameTimeSeconds = clip.totalSeconds;
-    } else if (clip.videoSecond !== undefined && clip.videoSecond >= 0) {
-      gameTimeSeconds = clip.videoSecond;
-    } else {
-      gameTimeSeconds = (clip.minute * 60) + (clip.second || 0);
-    }
-    
-    // If event timestamp is within video duration, use it directly
-    if (gameTimeSeconds <= videoDuration) {
-      const targetTs = Math.max(0, gameTimeSeconds - 3);
+    // PRIORITY 1: Use videoSecond if it's valid and within video duration
+    // This is the pre-calculated video-relative timestamp
+    if (clip.videoSecond !== undefined && clip.videoSecond >= 0 && clip.videoSecond <= videoDuration) {
+      const targetTs = Math.max(0, clip.videoSecond - 3);
+      console.log('Using videoSecond:', { videoSecond: clip.videoSecond, targetTs });
       return Math.min(targetTs, Math.max(0, videoDuration - 1));
     }
     
-    // Event timestamp exceeds video duration - calculate video-relative position
-    // This happens when AI analysis returns game-time instead of video-time
-    const eventGameMinute = clip.minute;
-    
-    // Calculate video start minute from the event distribution if not set
-    let effectiveStartMinute = videoStartMinute;
-    if (effectiveStartMinute === 0 && gameTimeSeconds > videoDuration) {
-      // Estimate: assume video starts ~5 minutes before the first event we're trying to play
-      effectiveStartMinute = Math.max(0, eventGameMinute - 5);
+    // PRIORITY 2: Use eventMs if valid and within video duration
+    if (clip.eventMs !== undefined && clip.eventMs >= 0) {
+      const eventSeconds = clip.eventMs / 1000;
+      if (eventSeconds <= videoDuration) {
+        const targetTs = Math.max(0, eventSeconds - 3);
+        console.log('Using eventMs:', { eventMs: clip.eventMs, eventSeconds, targetTs });
+        return Math.min(targetTs, Math.max(0, videoDuration - 1));
+      }
     }
     
-    // Calculate relative position in video
-    const videoRelativeSeconds = (eventGameMinute - effectiveStartMinute) * 60 + (clip.second || 0);
+    // PRIORITY 3: Use totalSeconds if valid and within video duration
+    if (clip.totalSeconds !== undefined && clip.totalSeconds >= 0 && clip.totalSeconds <= videoDuration) {
+      const targetTs = Math.max(0, clip.totalSeconds - 3);
+      console.log('Using totalSeconds:', { totalSeconds: clip.totalSeconds, targetTs });
+      return Math.min(targetTs, Math.max(0, videoDuration - 1));
+    }
     
-    // Clamp to video bounds with 3s buffer before event
+    // PRIORITY 4: Calculate from game minute with offset
+    const gameTimeSeconds = (clip.minute * 60) + (clip.second || 0);
+    
+    // If game time is within video duration, use it directly
+    if (gameTimeSeconds <= videoDuration) {
+      const targetTs = Math.max(0, gameTimeSeconds - 3);
+      console.log('Using game time directly:', { gameTimeSeconds, targetTs });
+      return Math.min(targetTs, Math.max(0, videoDuration - 1));
+    }
+    
+    // Calculate video-relative position using offset
+    let effectiveStartMinute = videoStartMinute;
+    if (effectiveStartMinute === 0 && gameTimeSeconds > videoDuration) {
+      // Estimate: assume video starts ~5 minutes before the event
+      effectiveStartMinute = Math.max(0, clip.minute - 5);
+    }
+    
+    const videoRelativeSeconds = (clip.minute - effectiveStartMinute) * 60 + (clip.second || 0);
     const targetTs = Math.max(0, Math.min(videoRelativeSeconds - 3, videoDuration - 1));
     
-    console.log('Calculated video timestamp:', {
-      eventGameMinute,
+    console.log('Calculated from offset:', {
+      gameMinute: clip.minute,
       effectiveStartMinute,
       videoRelativeSeconds,
       targetTs,
