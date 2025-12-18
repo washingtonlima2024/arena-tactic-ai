@@ -228,44 +228,14 @@ export function VideoPlayerModal({
                 muted={isMuted}
               />
             ) : isEmbed ? (
-              <div className="relative w-full h-full">
-                <iframe
-                  key={iframeKey}
-                  src={matchVideo.file_url}
-                  className="absolute inset-0 w-full h-full"
-                  frameBorder="0"
-                  allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
-                  title="Match Video"
-                />
-                
-                {/* Prominent navigation instruction banner */}
-                <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-amber-500/90 backdrop-blur-md px-6 py-3 rounded-xl border border-amber-400/50 z-30 shadow-lg animate-pulse">
-                  <div className="flex items-center gap-3 text-black">
-                    <Clock className="h-5 w-5" />
-                    <div className="text-center">
-                      <p className="font-bold text-lg">
-                        Navegue até {formatTime(clip.videoSecond ?? (clip.minute * 60 + (clip.second || 0)))}
-                      </p>
-                      <p className="text-sm opacity-80">
-                        Minuto {clip.minute}' do jogo
-                      </p>
-                    </div>
-                  </div>
-                </div>
-                
-                {/* Fixed timestamp indicator */}
-                <div className="absolute bottom-4 left-4 bg-primary/90 text-primary-foreground px-4 py-2 rounded-lg font-bold backdrop-blur-sm z-20 shadow-lg">
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4" />
-                    <span>Ir para: {formatTime(clip.videoSecond ?? (clip.minute * 60 + (clip.second || 0)))}</span>
-                  </div>
-                </div>
-                
-                {/* Info about embed limitation */}
-                <div className="absolute bottom-4 right-4 bg-black/70 text-white/80 px-3 py-1.5 rounded-lg text-xs backdrop-blur-sm z-20">
-                  Player externo não suporta navegação automática
-                </div>
-              </div>
+              <iframe
+                key={iframeKey}
+                src={matchVideo.file_url}
+                className="w-full h-full"
+                frameBorder="0"
+                allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
+                title="Match Video"
+              />
             ) : matchVideo ? (
               <div className="relative w-full h-full">
                 <video 
