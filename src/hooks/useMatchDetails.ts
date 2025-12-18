@@ -241,48 +241,57 @@ export function useAllCompletedMatches() {
         .from('match_events')
         .select('match_id, event_type, metadata');
       
-      // Calculate scores from goals if database scores are 0
+      // Calculate scores from goals ONLY if database scores are both 0 and there are goals
       const matchesWithCalculatedScores = matches?.map(match => {
-        const matchEvents = allEvents?.filter(e => e.match_id === match.id) || [];
-        const goalEvents = matchEvents.filter(e => e.event_type === 'goal');
+        // Se já tem score no banco, usar diretamente (não recalcular)
+        const dbHomeScore = match.home_score ?? 0;
+        const dbAwayScore = match.away_score ?? 0;
         
-        // If database has 0-0 but there are goal events, calculate from events
-        if ((match.home_score === 0 && match.away_score === 0) && goalEvents.length > 0) {
-          let homeGoals = 0;
-          let awayGoals = 0;
+        // Só recalcular se AMBOS forem 0 E houver eventos de gol
+        if (dbHomeScore === 0 && dbAwayScore === 0) {
+          const matchEvents = allEvents?.filter(e => e.match_id === match.id) || [];
+          const goalEvents = matchEvents.filter(e => e.event_type === 'goal');
           
-          goalEvents.forEach(goal => {
-            const metadata = goal.metadata as Record<string, any> | null;
-            const team = metadata?.team || metadata?.scoring_team;
-            const isOwnGoal = metadata?.isOwnGoal === true;
+          if (goalEvents.length > 0) {
+            let homeGoals = 0;
+            let awayGoals = 0;
             
-            // Para gols contra, inverter o beneficiário
-            if (isOwnGoal) {
-              // Gol contra: beneficia o time ADVERSÁRIO
-              if (team === 'home') {
-                awayGoals++; // Gol contra do home = ponto para away
-              } else if (team === 'away') {
-                homeGoals++; // Gol contra do away = ponto para home
+            goalEvents.forEach(goal => {
+              const metadata = goal.metadata as Record<string, any> | null;
+              const team = metadata?.team || metadata?.scoring_team;
+              const isOwnGoal = metadata?.isOwnGoal === true;
+              
+              // Para gols contra, inverter o beneficiário
+              if (isOwnGoal) {
+                if (team === 'home') {
+                  awayGoals++;
+                } else if (team === 'away') {
+                  homeGoals++;
+                }
+              } else {
+                if (team === 'home' || team === match.home_team?.name) {
+                  homeGoals++;
+                } else if (team === 'away' || team === match.away_team?.name) {
+                  awayGoals++;
+                }
               }
-            } else {
-              // Gol normal
-              if (team === 'home' || team === match.home_team?.name) {
-                homeGoals++;
-              } else if (team === 'away' || team === match.away_team?.name) {
-                awayGoals++;
-              }
-            }
-          });
-          
-          return {
-            ...match,
-            home_score: homeGoals,
-            away_score: awayGoals,
-            _calculated: true
-          };
+            });
+            
+            return {
+              ...match,
+              home_score: homeGoals,
+              away_score: awayGoals,
+              _calculated: true
+            };
+          }
         }
         
-        return match;
+        // Usar scores do banco de dados diretamente
+        return {
+          ...match,
+          home_score: dbHomeScore,
+          away_score: dbAwayScore
+        };
       }) || [];
 
       return matchesWithCalculatedScores as MatchWithDetails[];
