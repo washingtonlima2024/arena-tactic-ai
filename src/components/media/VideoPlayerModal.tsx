@@ -116,15 +116,8 @@ export function VideoPlayerModal({
 
   const isEmbed = matchVideo ? (matchVideo.file_url.includes('xtream.tech') || matchVideo.file_url.includes('embed')) : false;
   
-  // Build embed URL with current timestamp
-  const buildEmbedUrl = (timestamp: number) => {
-    if (!matchVideo || hasDirectClip) return '';
-    const baseUrl = matchVideo.file_url;
-    const separator = baseUrl.includes('?') ? '&' : '?';
-    return `${baseUrl}${separator}start=${Math.round(timestamp)}&t=${Math.round(timestamp)}`;
-  };
-
-  const embedUrl = buildEmbedUrl(currentTimestamp);
+  // Note: Most embed players don't support timestamp URL params
+  // So we show manual navigation instructions instead
 
   // Navigation handlers - clamp to video duration
   const handleSeek = (delta: number) => {
@@ -161,9 +154,8 @@ export function VideoPlayerModal({
     eventMinute: clip.minute,
     eventSecond: clip.second,
     videoSecond: clip.videoSecond,
-    currentTimestamp,
-    isEmbed,
-    embedUrl
+    targetTimestamp: clip.videoSecond ?? (clip.minute * 60 + (clip.second || 0)),
+    isEmbed
   });
 
   return (
@@ -239,74 +231,39 @@ export function VideoPlayerModal({
               <div className="relative w-full h-full">
                 <iframe
                   key={iframeKey}
-                  src={embedUrl}
+                  src={matchVideo.file_url}
                   className="absolute inset-0 w-full h-full"
                   frameBorder="0"
                   allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
                   title="Match Video"
                 />
                 
-                {/* Navigation controls for embeds */}
-                <div className="absolute bottom-20 left-1/2 -translate-x-1/2 flex items-center gap-2 bg-black/80 backdrop-blur-md px-4 py-2 rounded-full border border-white/20 z-20">
-                  <Button 
-                    variant="ghost" 
-                    size="sm"
-                    className="text-white/80 hover:text-white hover:bg-white/10 gap-1"
-                    onClick={() => handleSeek(-30)}
-                  >
-                    <SkipBack className="h-4 w-4" />
-                    30s
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="sm"
-                    className="text-white/80 hover:text-white hover:bg-white/10 gap-1"
-                    onClick={() => handleSeek(-10)}
-                  >
-                    <SkipBack className="h-4 w-4" />
-                    10s
-                  </Button>
-                  
-                  <div className="px-3 py-1 bg-primary/20 rounded-lg text-white font-mono text-sm">
-                    {formatTime(currentTimestamp)}
+                {/* Prominent navigation instruction banner */}
+                <div className="absolute top-16 left-1/2 -translate-x-1/2 bg-amber-500/90 backdrop-blur-md px-6 py-3 rounded-xl border border-amber-400/50 z-30 shadow-lg animate-pulse">
+                  <div className="flex items-center gap-3 text-black">
+                    <Clock className="h-5 w-5" />
+                    <div className="text-center">
+                      <p className="font-bold text-lg">
+                        Navegue até {formatTime(clip.videoSecond ?? (clip.minute * 60 + (clip.second || 0)))}
+                      </p>
+                      <p className="text-sm opacity-80">
+                        Minuto {clip.minute}' do jogo
+                      </p>
+                    </div>
                   </div>
-                  
-                  <Button 
-                    variant="ghost" 
-                    size="sm"
-                    className="text-white/80 hover:text-white hover:bg-white/10 gap-1"
-                    onClick={() => handleSeek(10)}
-                  >
-                    10s
-                    <SkipForward className="h-4 w-4" />
-                  </Button>
-                  <Button 
-                    variant="ghost" 
-                    size="sm"
-                    className="text-white/80 hover:text-white hover:bg-white/10 gap-1"
-                    onClick={() => handleSeek(30)}
-                  >
-                    30s
-                    <SkipForward className="h-4 w-4" />
-                  </Button>
-                  
-                  <div className="w-px h-6 bg-white/20" />
-                  
-                  <Button 
-                    variant="ghost" 
-                    size="sm"
-                    className="text-primary hover:text-primary hover:bg-primary/10 gap-1"
-                    onClick={handleResetToEvent}
-                    title="Voltar ao início do evento"
-                  >
-                    <RotateCcw className="h-4 w-4" />
-                    Evento
-                  </Button>
                 </div>
                 
-                {/* Timestamp indicator */}
-                <div className="absolute bottom-4 left-4 bg-black/70 text-white px-3 py-1.5 rounded-lg text-sm font-medium backdrop-blur-sm z-10 pointer-events-none">
-                  Minuto do jogo: {clip.minute}'
+                {/* Fixed timestamp indicator */}
+                <div className="absolute bottom-4 left-4 bg-primary/90 text-primary-foreground px-4 py-2 rounded-lg font-bold backdrop-blur-sm z-20 shadow-lg">
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4" />
+                    <span>Ir para: {formatTime(clip.videoSecond ?? (clip.minute * 60 + (clip.second || 0)))}</span>
+                  </div>
+                </div>
+                
+                {/* Info about embed limitation */}
+                <div className="absolute bottom-4 right-4 bg-black/70 text-white/80 px-3 py-1.5 rounded-lg text-xs backdrop-blur-sm z-20">
+                  Player externo não suporta navegação automática
                 </div>
               </div>
             ) : matchVideo ? (
