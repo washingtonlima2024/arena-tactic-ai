@@ -24,8 +24,11 @@ export function ProjectSelector() {
 
   const handleSelectMatch = (matchId: string) => {
     setSelectedMatch(matchId);
-    // If not on a match page, navigate to events
-    if (!isOnMatchPage) {
+    // Always update URL with new match ID on match pages
+    if (isOnMatchPage) {
+      // Force navigation to update the URL properly
+      navigate(`${location.pathname}?match=${matchId}`, { replace: true });
+    } else {
       navigate(`/events?match=${matchId}`);
     }
   };
