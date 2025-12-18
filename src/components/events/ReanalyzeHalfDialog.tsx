@@ -241,11 +241,18 @@ export function ReanalyzeHalfDialog({
         return;
       }
 
-      toast.info('Transcrevendo áudio com Whisper...');
+      // Mostrar aviso se vídeo é grande
+      if (isVideoTooLarge && videoSizeMB) {
+        toast.info(`Vídeo grande (${videoSizeMB}MB) - será dividido em partes para transcrição...`);
+      } else {
+        toast.info('Transcrevendo áudio com Whisper...');
+      }
 
-      const result = await transcribeVideo(halfVideo.file_url, matchId, halfVideo.id);
+      // Passar o tamanho do vídeo para habilitar processamento em partes
+      const result = await transcribeVideo(halfVideo.file_url, matchId, halfVideo.id, videoSizeMB || undefined);
 
-      if (result?.srtContent) {
+      if (result?.text || result?.srtContent) {
+        const transcriptionContent = result.text || result.srtContent;
         setUploadedFiles(prev => {
           const filtered = prev.filter(f => 
             f.name !== '🎙️ whisper-transcription.txt' && 
@@ -254,17 +261,18 @@ export function ReanalyzeHalfDialog({
           
           return [
             ...filtered,
-            { name: '🎙️ whisper-transcription.txt', content: result.srtContent, isOriginal: false }
+            { name: '🎙️ whisper-transcription.txt', content: transcriptionContent, isOriginal: false }
           ];
         });
 
-        toast.success('Transcrição Whisper concluída!');
+        toast.success(`Transcrição Whisper concluída! (${(transcriptionContent.length / 1024).toFixed(1)}KB)`);
       } else {
         toast.warning('Transcrição vazia retornada');
       }
     } catch (error) {
       console.error('Error extracting transcription:', error);
-      toast.error('Erro ao extrair transcrição');
+      const errorMsg = error instanceof Error ? error.message : 'Erro desconhecido';
+      toast.error(`Erro ao extrair transcrição: ${errorMsg}`);
     }
   };
 
@@ -496,75 +504,81 @@ export function ReanalyzeHalfDialog({
             </div>
           )}
 
-          {/* Seção de Extração Automática - condicional baseado no tamanho */}
-          {isVideoTooLarge ? (
-            <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-4 space-y-2">
-              <div className="flex items-center gap-2">
-                <AlertTriangle className="h-5 w-5 text-amber-500" />
-                <span className="font-medium text-amber-600 dark:text-amber-400">
-                  Vídeo Grande ({videoSizeMB}MB)
-                </span>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                Transcrição automática não disponível para vídeos maiores que 35MB.
-              </p>
-              <div className="text-sm space-y-1">
-                {originalTranscription ? (
-                  <p className="text-green-600 dark:text-green-400 flex items-center gap-1">
-                    ✓ Use a transcrição original disponível acima
-                  </p>
-                ) : (
-                  <p className="text-muted-foreground">
-                    → Importe um arquivo SRT/VTT manualmente abaixo
-                  </p>
-                )}
-              </div>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <Wand2 className="h-4 w-4" />
-                Extração Automática
-                {videoSizeMB !== null && (
-                  <Badge variant="outline" className="text-xs font-normal">
-                    {videoSizeMB}MB
-                  </Badge>
-                )}
-              </Label>
-              <Button
-                variant="secondary"
-                className="w-full"
-                onClick={handleExtractTranscription}
-                disabled={isTranscribing || isLoading || isDeleting || isCheckingVideoSize}
-              >
-                {isTranscribing ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Extraindo com Whisper...
-                  </>
-                ) : isCheckingVideoSize ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Verificando vídeo...
-                  </>
-                ) : (
-                  <>
-                    <Mic className="mr-2 h-4 w-4" />
-                    Extrair Nova Transcrição (Whisper)
-                  </>
-                )}
-              </Button>
-              {isTranscribing && (
-                <div className="space-y-1">
-                  <Progress value={transcriptionProgress.progress} className="h-2" />
-                  <p className="text-xs text-muted-foreground">{transcriptionProgress.message}</p>
-                </div>
+          {/* Seção de Extração Automática - sempre disponível */}
+          <div className="space-y-2">
+            <Label className="flex items-center gap-2">
+              <Wand2 className="h-4 w-4" />
+              Extração Automática
+              {videoSizeMB !== null && (
+                <Badge 
+                  variant={isVideoTooLarge ? "secondary" : "outline"} 
+                  className={`text-xs font-normal ${isVideoTooLarge ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400' : ''}`}
+                >
+                  {videoSizeMB}MB {isVideoTooLarge && '• Dividido em partes'}
+                </Badge>
               )}
-              <p className="text-xs text-muted-foreground">
-                Gera nova transcrição do áudio - será adicionada à lista de arquivos
-              </p>
-            </div>
-          )}
+            </Label>
+            
+            {isVideoTooLarge && (
+              <div className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs text-amber-600 dark:text-amber-400">
+                Vídeo grande detectado - será dividido em partes de ~10 min para transcrição
+              </div>
+            )}
+            
+            <Button
+              variant="secondary"
+              className="w-full"
+              onClick={handleExtractTranscription}
+              disabled={isTranscribing || isLoading || isDeleting || isCheckingVideoSize}
+            >
+              {isTranscribing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {transcriptionProgress.currentPart && transcriptionProgress.totalParts 
+                    ? `Parte ${transcriptionProgress.currentPart}/${transcriptionProgress.totalParts}...`
+                    : 'Processando...'}
+                </>
+              ) : isCheckingVideoSize ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Verificando vídeo...
+                </>
+              ) : (
+                <>
+                  <Mic className="mr-2 h-4 w-4" />
+                  Extrair Nova Transcrição (Whisper)
+                </>
+              )}
+            </Button>
+            {isTranscribing && (
+              <div className="space-y-1">
+                <div className="flex items-center justify-between text-xs text-muted-foreground">
+                  <span>{transcriptionProgress.message}</span>
+                  <span className="font-mono">{transcriptionProgress.progress}%</span>
+                </div>
+                <Progress value={transcriptionProgress.progress} className="h-2" />
+                {transcriptionProgress.currentPart && transcriptionProgress.totalParts && (
+                  <div className="flex gap-1">
+                    {Array.from({ length: transcriptionProgress.totalParts }).map((_, i) => (
+                      <div
+                        key={i}
+                        className={`h-1.5 flex-1 rounded-full transition-colors ${
+                          i < transcriptionProgress.currentPart! 
+                            ? 'bg-green-500' 
+                            : i === transcriptionProgress.currentPart! - 1 
+                              ? 'bg-primary animate-pulse' 
+                              : 'bg-muted'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground">
+              Gera nova transcrição do áudio - será adicionada à lista de arquivos
+            </p>
+          </div>
 
           <div className="space-y-2">
             <Label className="flex items-center justify-between">

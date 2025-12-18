@@ -7,6 +7,8 @@ interface TranscriptionProgress {
   stage: 'idle' | 'loading' | 'downloading' | 'extracting' | 'splitting' | 'uploading' | 'transcribing' | 'complete' | 'error';
   progress: number;
   message: string;
+  currentPart?: number;
+  totalParts?: number;
 }
 
 interface TranscriptionResult {
@@ -25,8 +27,11 @@ const withTimeout = <T>(promise: Promise<T>, ms: number, operation: string): Pro
   ]);
 };
 
-// Tamanho máximo por chunk (18MB para ter margem)
+// Tamanho máximo por chunk de áudio (18MB para ter margem)
 const MAX_CHUNK_SIZE = 18 * 1024 * 1024;
+
+// Duração máxima por parte do vídeo (10 minutos = 600 segundos)
+const MAX_PART_DURATION = 600;
 
 export function useWhisperTranscription() {
   const [transcriptionProgress, setTranscriptionProgress] = useState<TranscriptionProgress>({
@@ -68,11 +73,6 @@ export function useWhisperTranscription() {
     ffmpeg.on('progress', ({ progress }) => {
       const progressPercent = Math.round(progress * 100);
       console.log(`[FFmpeg] Progresso: ${progressPercent}%`);
-      setTranscriptionProgress(prev => ({
-        ...prev,
-        progress: Math.min(15 + progress * 25, 40),
-        message: `Extraindo áudio... ${progressPercent}%`
-      }));
     });
 
     // UMD version works without SharedArrayBuffer/COOP/COEP headers
@@ -87,7 +87,7 @@ export function useWhisperTranscription() {
         30000,
         'carregar ffmpeg-core.js'
       );
-      console.log('[FFmpeg] ✓ Core JS carregado:', coreURL.substring(0, 50) + '...');
+      console.log('[FFmpeg] ✓ Core JS carregado');
       
       console.log('[FFmpeg] Carregando WASM...');
       setTranscriptionProgress({ stage: 'loading', progress: 4, message: 'Baixando processador (2/3)...' });
@@ -97,14 +97,13 @@ export function useWhisperTranscription() {
         60000,
         'carregar ffmpeg-core.wasm'
       );
-      console.log('[FFmpeg] ✓ WASM carregado:', wasmURL.substring(0, 50) + '...');
+      console.log('[FFmpeg] ✓ WASM carregado');
       
       console.log('[FFmpeg] Inicializando FFmpeg.load()...');
       setTranscriptionProgress({ stage: 'loading', progress: 6, message: 'Inicializando processador (3/3)...' });
       
       const loadPromise = ffmpeg.load({ coreURL, wasmURL });
       
-      // Log se a promise resolver ou rejeitar
       loadPromise
         .then(() => console.log('[FFmpeg] ✓ load() Promise resolvida'))
         .catch(e => console.error('[FFmpeg] ✗ load() Promise rejeitada:', e));
@@ -116,66 +115,205 @@ export function useWhisperTranscription() {
       
     } catch (error) {
       console.error('[FFmpeg] ✗ Erro ao carregar:', error);
-      console.error('[FFmpeg] Tipo do erro:', error instanceof Error ? error.constructor.name : typeof error);
-      console.error('[FFmpeg] Stack:', error instanceof Error ? error.stack : 'N/A');
       throw new Error('Erro ao carregar processador de áudio. Tente novamente ou use um arquivo SRT.');
     }
 
     return ffmpeg;
   };
 
-  // Função para dividir áudio em chunks por duração
-  const splitAudioIntoChunks = async (
-    ffmpeg: FFmpeg,
-    totalDuration: number,
-    audioSizeMB: number
-  ): Promise<string[]> => {
-    // Calcular quantos chunks precisamos baseado no tamanho
-    const numChunks = Math.ceil((audioSizeMB * 1024 * 1024) / MAX_CHUNK_SIZE);
-    const chunkDuration = Math.ceil(totalDuration / numChunks);
-    
-    console.log(`[Split] Dividindo áudio em ${numChunks} partes de ~${chunkDuration}s cada`);
-    
-    const chunkFiles: string[] = [];
-    
-    for (let i = 0; i < numChunks; i++) {
-      const startTime = i * chunkDuration;
-      const outputFile = `chunk_${i}.mp3`;
-      
-      setTranscriptionProgress({ 
-        stage: 'splitting', 
-        progress: 35 + (i / numChunks) * 10, 
-        message: `Dividindo áudio... parte ${i + 1}/${numChunks}` 
-      });
-      
-      await ffmpeg.exec([
-        '-i', 'full_audio.mp3',
-        '-ss', startTime.toString(),
-        '-t', chunkDuration.toString(),
-        '-acodec', 'copy',
-        outputFile
-      ]);
-      
-      chunkFiles.push(outputFile);
-      console.log(`[Split] ✓ Chunk ${i + 1}/${numChunks} criado`);
-    }
-    
-    return chunkFiles;
+  // Estimar duração do vídeo baseado no tamanho (fallback quando não temos metadata)
+  const estimateVideoDuration = (videoSizeMB: number): number => {
+    // Estimativa: ~5MB por minuto para vídeo comprimido
+    // Vídeos de futebol geralmente têm 3-8MB/min dependendo da qualidade
+    const estimatedMinutes = videoSizeMB / 5;
+    const estimatedSeconds = estimatedMinutes * 60;
+    console.log(`[Duration] Duração estimada: ${estimatedMinutes.toFixed(1)} min para ${videoSizeMB.toFixed(0)}MB`);
+    return estimatedSeconds;
   };
 
-  // Obter duração do áudio
-  const getAudioDuration = async (ffmpeg: FFmpeg, filename: string): Promise<number> => {
-    // Tentar ler metadata - se falhar, estimar baseado no tamanho
-    try {
-      // MP3 mono 16kHz ~16KB/s = 1MB ~62 segundos
-      const audioData = await ffmpeg.readFile(filename);
-      const sizeMB = (audioData as Uint8Array).length / (1024 * 1024);
-      const estimatedDuration = sizeMB * 62; // ~62 segundos por MB para MP3 mono 16kHz
-      console.log(`[Duration] Duração estimada: ${estimatedDuration.toFixed(0)}s para ${sizeMB.toFixed(2)}MB`);
-      return estimatedDuration;
-    } catch {
-      return 300; // Fallback: 5 minutos
+  // Função para transcrever vídeos grandes dividindo em partes
+  const transcribeLargeVideo = async (
+    ffmpeg: FFmpeg,
+    videoUrl: string,
+    matchId: string,
+    videoId: string,
+    videoSizeMB: number
+  ): Promise<TranscriptionResult | null> => {
+    console.log('[LargeVideo] ========================================');
+    console.log('[LargeVideo] Processando vídeo grande:', videoSizeMB.toFixed(0), 'MB');
+
+    // Estimar duração total
+    const totalDuration = estimateVideoDuration(videoSizeMB);
+    const numParts = Math.ceil(totalDuration / MAX_PART_DURATION);
+    
+    console.log(`[LargeVideo] Dividindo em ${numParts} partes de ~${MAX_PART_DURATION/60} min cada`);
+
+    const transcriptions: string[] = [];
+    let mainAudioUrl = '';
+
+    // Baixar o vídeo uma vez
+    setTranscriptionProgress({ 
+      stage: 'downloading', 
+      progress: 5, 
+      message: 'Baixando vídeo...',
+      currentPart: 0,
+      totalParts: numParts
+    });
+
+    const videoData = await withTimeout(
+      fetchFile(videoUrl),
+      300000, // 5 minutos para download de vídeos grandes
+      'download do vídeo'
+    );
+    console.log('[LargeVideo] ✓ Vídeo baixado:', (videoData.byteLength / (1024 * 1024)).toFixed(0), 'MB');
+
+    await ffmpeg.writeFile('input.mp4', videoData);
+
+    // Processar cada parte
+    for (let i = 0; i < numParts; i++) {
+      const partNum = i + 1;
+      const startSeconds = i * MAX_PART_DURATION;
+      const startMinutes = Math.floor(startSeconds / 60);
+      const endMinutes = Math.floor(Math.min(startSeconds + MAX_PART_DURATION, totalDuration) / 60);
+
+      console.log(`[LargeVideo] Processando parte ${partNum}/${numParts} (${startMinutes}'-${endMinutes}')`);
+
+      // Extrair áudio desta parte
+      setTranscriptionProgress({ 
+        stage: 'extracting', 
+        progress: 10 + (i / numParts) * 30, 
+        message: `Extraindo áudio parte ${partNum}/${numParts} (${startMinutes}'-${endMinutes}')...`,
+        currentPart: partNum,
+        totalParts: numParts
+      });
+
+      const partAudioFile = `part_${i}.mp3`;
+      
+      try {
+        await withTimeout(
+          ffmpeg.exec([
+            '-i', 'input.mp4',
+            '-ss', startSeconds.toString(),
+            '-t', MAX_PART_DURATION.toString(),
+            '-vn',                    // No video
+            '-acodec', 'libmp3lame',  // MP3 codec
+            '-q:a', '4',              // Quality
+            '-ar', '16000',           // 16kHz sample rate
+            '-ac', '1',               // Mono
+            partAudioFile
+          ]),
+          120000, // 2 minutos por parte
+          `extração de áudio parte ${partNum}`
+        );
+      } catch (extractError) {
+        console.warn(`[LargeVideo] Parte ${partNum} pode ter falhado na extração, continuando...`);
+        continue;
+      }
+
+      // Verificar se o arquivo foi criado
+      let audioData: Uint8Array;
+      try {
+        const readData = await ffmpeg.readFile(partAudioFile);
+        audioData = readData instanceof Uint8Array ? readData : new Uint8Array(readData as unknown as ArrayBuffer);
+        
+        if (audioData.length < 1000) {
+          console.warn(`[LargeVideo] Parte ${partNum} muito pequena (${audioData.length} bytes), pulando...`);
+          continue;
+        }
+      } catch (readError) {
+        console.warn(`[LargeVideo] Erro ao ler parte ${partNum}, pulando...`);
+        continue;
+      }
+
+      const audioSizeMB = audioData.length / (1024 * 1024);
+      console.log(`[LargeVideo] ✓ Áudio parte ${partNum}: ${audioSizeMB.toFixed(2)}MB`);
+
+      // Upload da parte - criar buffer slice para evitar erro de tipo
+      const audioBuffer = new Uint8Array(audioData).buffer.slice(0);
+      setTranscriptionProgress({
+        stage: 'uploading', 
+        progress: 40 + (i / numParts) * 20, 
+        message: `Enviando parte ${partNum}/${numParts}...`,
+        currentPart: partNum,
+        totalParts: numParts
+      });
+
+      const audioBlob = new Blob([audioBuffer], { type: 'audio/mpeg' });
+      const partPath = `${matchId}/${videoId}_part_${i}.mp3`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from('generated-audio')
+        .upload(partPath, audioBlob, {
+          contentType: 'audio/mpeg',
+          upsert: true
+        });
+
+      if (uploadError) {
+        console.error(`[LargeVideo] Erro no upload parte ${partNum}:`, uploadError);
+        continue;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('generated-audio')
+        .getPublicUrl(partPath);
+
+      if (i === 0) mainAudioUrl = urlData.publicUrl;
+
+      // Transcrever a parte
+      setTranscriptionProgress({ 
+        stage: 'transcribing', 
+        progress: 60 + (i / numParts) * 35, 
+        message: `Transcrevendo parte ${partNum}/${numParts} (${startMinutes}'-${endMinutes}')...`,
+        currentPart: partNum,
+        totalParts: numParts
+      });
+
+      try {
+        const { data, error } = await withTimeout(
+          supabase.functions.invoke('transcribe-audio-whisper', {
+            body: { audioUrl: urlData.publicUrl }
+          }),
+          180000, // 3 minutos por transcrição
+          `transcrição parte ${partNum}`
+        );
+
+        if (error) {
+          console.error(`[LargeVideo] Erro na transcrição parte ${partNum}:`, error);
+        } else if (data?.text) {
+          // Adicionar marcador de tempo à transcrição
+          const timeMarker = `[${startMinutes}'-${endMinutes}']`;
+          transcriptions.push(`${timeMarker}\n${data.text}`);
+          console.log(`[LargeVideo] ✓ Parte ${partNum} transcrita: ${data.text.length} caracteres`);
+        }
+      } catch (transcribeError) {
+        console.error(`[LargeVideo] Timeout/erro na transcrição parte ${partNum}:`, transcribeError);
+      }
+
+      // Limpar arquivo da parte
+      try {
+        await ffmpeg.deleteFile(partAudioFile);
+      } catch { }
     }
+
+    // Limpar arquivo de entrada
+    try {
+      await ffmpeg.deleteFile('input.mp4');
+    } catch { }
+
+    // Combinar todas as transcrições
+    const fullText = transcriptions.join('\n\n');
+    
+    if (!fullText || fullText.trim().length === 0) {
+      throw new Error('Nenhuma parte foi transcrita com sucesso. Verifique se o vídeo contém áudio.');
+    }
+
+    console.log(`[LargeVideo] ✓ Transcrição completa: ${numParts} partes, ${fullText.length} caracteres`);
+    
+    return {
+      srtContent: fullText,
+      text: fullText,
+      audioUrl: mainAudioUrl
+    };
   };
 
   // Fallback: usar Google Speech-to-Text via edge function
@@ -199,11 +337,9 @@ export function useWhisperTranscription() {
 
     if (error) {
       console.error('[Google Fallback] Erro:', error);
-      // Tentar extrair mensagem de erro do contexto ou data
       const errorContext = (error as any).context;
       let errorMessage = error.message;
       
-      // Se temos data com erro, usar essa mensagem
       if (data?.error) {
         errorMessage = data.error;
       } else if (errorContext?.error) {
@@ -229,27 +365,28 @@ export function useWhisperTranscription() {
   const transcribeVideo = async (
     videoUrl: string,
     matchId: string,
-    videoId: string
+    videoId: string,
+    videoSizeMB?: number
   ): Promise<TranscriptionResult | null> => {
     console.log('[Transcrição] ========================================');
     console.log('[Transcrição] Iniciando transcrição para:', videoUrl);
     console.log('[Transcrição] Match ID:', matchId);
     console.log('[Transcrição] Video ID:', videoId);
+    if (videoSizeMB) console.log('[Transcrição] Tamanho do vídeo:', videoSizeMB, 'MB');
     
     setIsTranscribing(true);
     setUsedFallback(false);
 
     try {
-      // Tentar FFmpeg + Whisper primeiro com timeout curto
-      console.log('[Transcrição] PASSO 1: Tentando FFmpeg + Whisper...');
+      // Tentar FFmpeg + Whisper primeiro
+      console.log('[Transcrição] PASSO 1: Carregando FFmpeg...');
       
       let ffmpeg: FFmpeg;
       try {
-        // Timeout de 20 segundos para carregar FFmpeg
         ffmpeg = await Promise.race([
           loadFFmpeg(),
           new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('FFmpeg timeout')), 20000)
+            setTimeout(() => reject(new Error('FFmpeg timeout')), 25000)
           )
         ]);
         console.log('[Transcrição] ✓ FFmpeg pronto');
@@ -267,7 +404,21 @@ export function useWhisperTranscription() {
         throw new Error('Fallback Google Speech também falhou');
       }
 
-      // Step 2: Download video
+      // Verificar se é um vídeo grande (> 35MB)
+      const isLargeVideo = videoSizeMB && videoSizeMB > 35;
+      
+      if (isLargeVideo) {
+        console.log('[Transcrição] Vídeo grande detectado, usando processamento em partes...');
+        const result = await transcribeLargeVideo(ffmpeg, videoUrl, matchId, videoId, videoSizeMB);
+        
+        if (result) {
+          setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });
+          return result;
+        }
+        throw new Error('Falha na transcrição do vídeo grande');
+      }
+
+      // Fluxo normal para vídeos pequenos
       console.log('[Transcrição] PASSO 2: Baixando vídeo...');
       setTranscriptionProgress({ stage: 'downloading', progress: 10, message: 'Baixando vídeo para extração de áudio...' });
       
@@ -277,76 +428,78 @@ export function useWhisperTranscription() {
         'download do vídeo'
       );
       
-      const videoSizeMB = (videoData.byteLength / (1024 * 1024)).toFixed(2);
-      console.log('[Transcrição] ✓ Vídeo baixado:', videoSizeMB, 'MB');
+      const actualVideoSizeMB = videoData.byteLength / (1024 * 1024);
+      console.log('[Transcrição] ✓ Vídeo baixado:', actualVideoSizeMB.toFixed(2), 'MB');
 
-      // Write to FFmpeg filesystem
-      console.log('[Transcrição] Escrevendo arquivo no sistema FFmpeg...');
       await ffmpeg.writeFile('input.mp4', videoData);
-      console.log('[Transcrição] ✓ Arquivo escrito');
 
-      // Step 3: Extract audio (MP3, mono, 16kHz - optimized for speech)
+      // Extract audio
       console.log('[Transcrição] PASSO 3: Extraindo áudio...');
       setTranscriptionProgress({ stage: 'extracting', progress: 15, message: 'Extraindo áudio do vídeo...' });
       
       await withTimeout(
         ffmpeg.exec([
           '-i', 'input.mp4',
-          '-vn',                    // No video
-          '-acodec', 'libmp3lame',  // MP3 codec
-          '-q:a', '4',              // Quality (0-9, lower is better)
-          '-ar', '16000',           // 16kHz sample rate (good for speech)
-          '-ac', '1',               // Mono (smaller file)
+          '-vn',
+          '-acodec', 'libmp3lame',
+          '-q:a', '4',
+          '-ar', '16000',
+          '-ac', '1',
           'full_audio.mp3'
         ]),
-        300000, // 5 minutos para extração
+        300000,
         'extração de áudio'
       );
       
       console.log('[Transcrição] ✓ Áudio extraído');
 
-      // Clean up video file to free memory
       await ffmpeg.deleteFile('input.mp4');
 
-      // Read the output and check size
       const audioData = await ffmpeg.readFile('full_audio.mp3');
-      let audioBytes: Uint8Array;
-      if (audioData instanceof Uint8Array) {
-        audioBytes = audioData;
-      } else {
-        audioBytes = new Uint8Array(audioData as unknown as ArrayBuffer);
-      }
+      const audioBytes = audioData instanceof Uint8Array ? audioData : new Uint8Array(audioData as unknown as ArrayBuffer);
       const audioSizeMB = audioBytes.length / (1024 * 1024);
       console.log('[Transcrição] ✓ Áudio pronto:', audioSizeMB.toFixed(2), 'MB');
 
       let allTranscriptions: string[] = [];
       let mainAudioUrl = '';
 
-      // Check if we need to split
+      // Check if we need to split audio
       if (audioBytes.length > MAX_CHUNK_SIZE) {
         console.log('[Transcrição] Áudio muito grande, dividindo em partes...');
         
-        const duration = await getAudioDuration(ffmpeg, 'full_audio.mp3');
-        const chunkFiles = await splitAudioIntoChunks(ffmpeg, duration, audioSizeMB);
+        // Estimar duração baseado no tamanho
+        const duration = audioSizeMB * 62; // ~62 segundos por MB para MP3 mono 16kHz
+        const numChunks = Math.ceil((audioSizeMB * 1024 * 1024) / MAX_CHUNK_SIZE);
+        const chunkDuration = Math.ceil(duration / numChunks);
         
-        // Transcribe each chunk
-        for (let i = 0; i < chunkFiles.length; i++) {
-          const chunkFile = chunkFiles[i];
+        console.log(`[Split] Dividindo em ${numChunks} partes de ~${chunkDuration}s cada`);
+        
+        for (let i = 0; i < numChunks; i++) {
+          const startTime = i * chunkDuration;
+          const outputFile = `chunk_${i}.mp3`;
+          
           setTranscriptionProgress({ 
-            stage: 'transcribing', 
-            progress: 50 + (i / chunkFiles.length) * 45, 
-            message: `Transcrevendo parte ${i + 1}/${chunkFiles.length}...` 
+            stage: 'splitting', 
+            progress: 35 + (i / numChunks) * 10, 
+            message: `Dividindo áudio... parte ${i + 1}/${numChunks}`,
+            currentPart: i + 1,
+            totalParts: numChunks
           });
           
-          // Read and upload chunk
-          const chunkData = await ffmpeg.readFile(chunkFile);
-          let chunkBytes: Uint8Array;
-          if (chunkData instanceof Uint8Array) {
-            chunkBytes = chunkData;
-          } else {
-            chunkBytes = new Uint8Array(chunkData as unknown as ArrayBuffer);
-          }
-          const chunkBlob = new Blob([new Uint8Array(chunkBytes).buffer.slice(0)], { type: 'audio/mpeg' });
+          await ffmpeg.exec([
+            '-i', 'full_audio.mp3',
+            '-ss', startTime.toString(),
+            '-t', chunkDuration.toString(),
+            '-acodec', 'copy',
+            outputFile
+          ]);
+          
+          console.log(`[Split] ✓ Chunk ${i + 1}/${numChunks} criado`);
+          
+        const chunkData = await ffmpeg.readFile(outputFile);
+          const chunkBytes = chunkData instanceof Uint8Array ? chunkData : new Uint8Array(chunkData as unknown as ArrayBuffer);
+          const chunkBuffer = new Uint8Array(chunkBytes).buffer.slice(0);
+          const chunkBlob = new Blob([chunkBuffer], { type: 'audio/mpeg' });
           
           const chunkPath = `${matchId}/${videoId}_chunk_${i}.mp3`;
           await supabase.storage
@@ -362,8 +515,15 @@ export function useWhisperTranscription() {
           
           if (i === 0) mainAudioUrl = urlData.publicUrl;
           
-          // Transcribe chunk
-          console.log(`[Transcrição] Transcrevendo chunk ${i + 1}/${chunkFiles.length}...`);
+          setTranscriptionProgress({ 
+            stage: 'transcribing', 
+            progress: 50 + (i / numChunks) * 45, 
+            message: `Transcrevendo parte ${i + 1}/${numChunks}...`,
+            currentPart: i + 1,
+            totalParts: numChunks
+          });
+          
+          console.log(`[Transcrição] Transcrevendo chunk ${i + 1}/${numChunks}...`);
           const { data, error } = await withTimeout(
             supabase.functions.invoke('transcribe-audio-whisper', {
               body: { audioUrl: urlData.publicUrl }
@@ -374,26 +534,23 @@ export function useWhisperTranscription() {
           
           if (error) {
             console.error(`Erro no chunk ${i + 1}:`, error);
-            // Continue com outros chunks mesmo se um falhar
           } else if (data?.text) {
             allTranscriptions.push(data.text);
             console.log(`[Transcrição] ✓ Chunk ${i + 1} transcrito: ${data.text.length} caracteres`);
           }
           
-          // Cleanup chunk
-          await ffmpeg.deleteFile(chunkFile);
+          await ffmpeg.deleteFile(outputFile);
         }
         
-        // Cleanup full audio
         await ffmpeg.deleteFile('full_audio.mp3');
         
       } else {
         // Single file transcription
         console.log('[Transcrição] Áudio dentro do limite, transcrevendo arquivo único...');
         
-        const audioBlob = new Blob([new Uint8Array(audioBytes).buffer.slice(0)], { type: 'audio/mpeg' });
+        const audioBuffer = new Uint8Array(audioBytes).buffer.slice(0);
+        const audioBlob = new Blob([audioBuffer], { type: 'audio/mpeg' });
 
-        // Step 4: Upload audio to storage
         console.log('[Transcrição] PASSO 4: Fazendo upload do áudio...');
         setTranscriptionProgress({ stage: 'uploading', progress: 45, message: 'Enviando áudio para transcrição...' });
         
@@ -415,9 +572,7 @@ export function useWhisperTranscription() {
           .getPublicUrl(filePath);
 
         mainAudioUrl = urlData.publicUrl;
-        console.log('[Transcrição] URL do áudio:', mainAudioUrl);
 
-        // Step 5: Transcribe with Whisper via edge function
         console.log('[Transcrição] PASSO 5: Enviando para Whisper API...');
         setTranscriptionProgress({ stage: 'transcribing', progress: 55, message: 'Transcrevendo com Whisper API...' });
 
@@ -425,7 +580,7 @@ export function useWhisperTranscription() {
           supabase.functions.invoke('transcribe-audio-whisper', {
             body: { audioUrl: mainAudioUrl }
           }),
-          300000, // 5 minutos para transcrição
+          300000,
           'transcrição Whisper'
         );
 
@@ -439,11 +594,9 @@ export function useWhisperTranscription() {
 
         allTranscriptions.push(data.text);
         
-        // Cleanup
         await ffmpeg.deleteFile('full_audio.mp3');
       }
 
-      // Combine all transcriptions
       const fullText = allTranscriptions.join('\n\n');
       
       if (!fullText || fullText.trim().length === 0) {
@@ -456,7 +609,7 @@ export function useWhisperTranscription() {
       setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });
 
       return {
-        srtContent: '', // SRT não é gerado com chunks
+        srtContent: '',
         text: fullText,
         audioUrl: mainAudioUrl
       };
@@ -469,7 +622,6 @@ export function useWhisperTranscription() {
         progress: 0,
         message: errorMessage
       });
-      // Re-throw to allow caller to handle with proper message
       throw new Error(errorMessage);
     } finally {
       setIsTranscribing(false);
