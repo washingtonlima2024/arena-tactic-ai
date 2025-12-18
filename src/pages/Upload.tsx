@@ -717,16 +717,37 @@ export default function VideoUpload() {
         secondHalfTranscription = await readSrtFile(secondHalfSrt);
       }
 
-      // Also check segment transcriptions
-      const firstHalfSegments = segments.filter(s => 
-        (s.half === 'first' || s.videoType === 'first_half') && 
-        (s.status === 'complete' || s.status === 'ready')
-      );
-      const secondHalfSegments = segments.filter(s => 
-        (s.half === 'second' || s.videoType === 'second_half') && 
-        (s.status === 'complete' || s.status === 'ready')
-      );
+      // Debug: mostrar todos os segmentos disponíveis
+      console.log('=== SEGMENTOS DISPONÍVEIS PARA TRANSCRIÇÃO ===');
+      segments.forEach(s => {
+        console.log(`- ${s.name}: half=${s.half}, videoType=${s.videoType}, status=${s.status}, url=${s.url ? 'SIM' : 'NÃO'}, isLink=${s.isLink}`);
+      });
 
+      // CORREÇÃO: Incluir vídeos 'full' no filtro de segmentos
+      // Vídeos 'full' são tratados como primeiro tempo para transcrição única
+      const firstHalfSegments = segments.filter(s => 
+        (s.half === 'first' || s.videoType === 'first_half' || s.videoType === 'full') && 
+        (s.status === 'complete' || s.status === 'ready')
+      );
+      
+      // Segundo tempo: só incluir se NÃO tiver vídeo 'full' (evita duplicação)
+      const hasFullVideo = segments.some(s => 
+        s.videoType === 'full' && (s.status === 'complete' || s.status === 'ready')
+      );
+      
+      const secondHalfSegments = hasFullVideo 
+        ? [] // Se tem vídeo full, não precisa transcrever segundo tempo separado
+        : segments.filter(s => 
+            (s.half === 'second' || s.videoType === 'second_half') && 
+            (s.status === 'complete' || s.status === 'ready')
+          );
+
+      console.log('=== SEGMENTOS FILTRADOS ===');
+      console.log('1º Tempo / Full:', firstHalfSegments.length, 'segmentos');
+      console.log('2º Tempo:', secondHalfSegments.length, 'segmentos');
+      console.log('Tem vídeo full:', hasFullVideo);
+
+      // Check segment transcriptions first (from SRT uploads)
       if (!firstHalfTranscription && firstHalfSegments[0]?.transcription) {
         firstHalfTranscription = firstHalfSegments[0].transcription;
       }
@@ -735,43 +756,55 @@ export default function VideoUpload() {
       }
 
       console.log('=== TRANSCRIÇÕES PRÉ-WHISPER ===');
-      console.log('1º Tempo:', firstHalfTranscription ? `${firstHalfTranscription.length} chars` : 'Nenhuma');
+      console.log('1º Tempo / Full:', firstHalfTranscription ? `${firstHalfTranscription.length} chars` : 'Nenhuma');
       console.log('2º Tempo:', secondHalfTranscription ? `${secondHalfTranscription.length} chars` : 'Nenhuma');
 
-      // AUTO-TRANSCRIBE: If no SRT, try Whisper on videos
+      // AUTO-TRANSCRIBE: Se não tem SRT, extrair áudio e transcrever automaticamente
       setIsTranscribing(true);
       
+      // Transcrever primeiro tempo OU vídeo full
       if (!firstHalfTranscription && firstHalfSegments.length > 0) {
-        console.log('Sem SRT para 1º tempo - tentando transcrição automática Whisper...');
+        const segment = firstHalfSegments[0];
+        const isFullMatch = segment.videoType === 'full';
+        
+        console.log(`Sem SRT para ${isFullMatch ? 'partida completa' : '1º tempo'} - tentando transcrição automática Whisper...`);
+        console.log('Segmento selecionado:', segment.name, 'URL:', segment.url, 'isLink:', segment.isLink);
+        
         toast({
-          title: "🎙️ Transcrevendo 1º Tempo",
+          title: isFullMatch ? "🎙️ Transcrevendo Partida Completa" : "🎙️ Transcrevendo 1º Tempo",
           description: "Extraindo áudio e enviando para Whisper API...",
         });
         
-        const transcription = await transcribeWithWhisper(firstHalfSegments[0], matchId);
+        const transcription = await transcribeWithWhisper(segment, matchId);
         if (transcription) {
           firstHalfTranscription = transcription;
           toast({
-            title: "✓ 1º Tempo transcrito",
+            title: isFullMatch ? "✓ Partida transcrita" : "✓ 1º Tempo transcrito",
             description: `${transcription.length} caracteres extraídos do áudio`,
           });
         } else {
+          console.error('Transcrição Whisper falhou para:', segment.name);
           toast({
-            title: "⚠️ Transcrição do 1º Tempo falhou",
-            description: "Tentando continuar sem transcrição...",
+            title: isFullMatch ? "⚠️ Transcrição da partida falhou" : "⚠️ Transcrição do 1º Tempo falhou",
+            description: "Verifique se o vídeo é um arquivo MP4 válido.",
             variant: "destructive",
           });
         }
       }
       
-      if (!secondHalfTranscription && secondHalfSegments.length > 0) {
+      // Transcrever segundo tempo (apenas se não tiver vídeo full)
+      if (!secondHalfTranscription && secondHalfSegments.length > 0 && !hasFullVideo) {
+        const segment = secondHalfSegments[0];
+        
         console.log('Sem SRT para 2º tempo - tentando transcrição automática Whisper...');
+        console.log('Segmento selecionado:', segment.name, 'URL:', segment.url, 'isLink:', segment.isLink);
+        
         toast({
           title: "🎙️ Transcrevendo 2º Tempo",
           description: "Extraindo áudio e enviando para Whisper API...",
         });
         
-        const transcription = await transcribeWithWhisper(secondHalfSegments[0], matchId);
+        const transcription = await transcribeWithWhisper(segment, matchId);
         if (transcription) {
           secondHalfTranscription = transcription;
           toast({
@@ -779,9 +812,10 @@ export default function VideoUpload() {
             description: `${transcription.length} caracteres extraídos do áudio`,
           });
         } else {
+          console.error('Transcrição Whisper falhou para:', segment.name);
           toast({
             title: "⚠️ Transcrição do 2º Tempo falhou",
-            description: "Tentando continuar sem transcrição...",
+            description: "Verifique se o vídeo é um arquivo MP4 válido.",
             variant: "destructive",
           });
         }
@@ -815,9 +849,14 @@ export default function VideoUpload() {
 
       let totalEventsDetected = 0;
 
-      // Analyze first half if has transcription
-      if (firstHalfTranscription) {
-        console.log('Iniciando análise do 1º Tempo...');
+      // Verificar se é vídeo full (partida completa)
+      const isFullMatchAnalysis = segments.some(s => 
+        s.videoType === 'full' && (s.status === 'complete' || s.status === 'ready')
+      );
+
+      if (isFullMatchAnalysis && firstHalfTranscription) {
+        // ANÁLISE DE PARTIDA COMPLETA (0-90 min)
+        console.log('Iniciando análise da PARTIDA COMPLETA (0-90 min)...');
         
         try {
           const result = await startAnalysis({
@@ -826,50 +865,81 @@ export default function VideoUpload() {
             homeTeam: homeTeamName,
             awayTeam: awayTeamName,
             gameStartMinute: 0,
-            gameEndMinute: 45,
+            gameEndMinute: 90, // Partida completa
           });
           
           totalEventsDetected += result.eventsDetected || 0;
           toast({
-            title: "1º Tempo analisado",
-            description: `${result.eventsDetected} eventos detectados`,
+            title: "Partida analisada",
+            description: `${result.eventsDetected} eventos detectados na partida completa`,
           });
         } catch (error) {
-          console.error('Erro na análise do 1º tempo:', error);
+          console.error('Erro na análise da partida completa:', error);
           toast({
-            title: "⚠️ Erro no 1º Tempo",
-            description: "Análise parcial - continuando com 2º tempo...",
+            title: "⚠️ Erro na análise",
+            description: "Não foi possível analisar a partida",
             variant: "destructive",
           });
         }
-      }
-
-      // Analyze second half if has transcription
-      if (secondHalfTranscription) {
-        console.log('Iniciando análise do 2º Tempo...');
+      } else {
+        // ANÁLISE POR TEMPOS SEPARADOS
         
-        try {
-          const result = await startAnalysis({
-            matchId,
-            transcription: secondHalfTranscription,
-            homeTeam: homeTeamName,
-            awayTeam: awayTeamName,
-            gameStartMinute: 45,
-            gameEndMinute: 90,
-          });
+        // Analyze first half if has transcription
+        if (firstHalfTranscription) {
+          console.log('Iniciando análise do 1º Tempo...');
           
-          totalEventsDetected += result.eventsDetected || 0;
-          toast({
-            title: "2º Tempo analisado",
-            description: `${result.eventsDetected} eventos detectados`,
-          });
-        } catch (error) {
-          console.error('Erro na análise do 2º tempo:', error);
-          toast({
-            title: "⚠️ Erro no 2º Tempo",
-            description: "Análise parcial concluída",
-            variant: "destructive",
-          });
+          try {
+            const result = await startAnalysis({
+              matchId,
+              transcription: firstHalfTranscription,
+              homeTeam: homeTeamName,
+              awayTeam: awayTeamName,
+              gameStartMinute: 0,
+              gameEndMinute: 45,
+            });
+            
+            totalEventsDetected += result.eventsDetected || 0;
+            toast({
+              title: "1º Tempo analisado",
+              description: `${result.eventsDetected} eventos detectados`,
+            });
+          } catch (error) {
+            console.error('Erro na análise do 1º tempo:', error);
+            toast({
+              title: "⚠️ Erro no 1º Tempo",
+              description: "Análise parcial - continuando com 2º tempo...",
+              variant: "destructive",
+            });
+          }
+        }
+
+        // Analyze second half if has transcription
+        if (secondHalfTranscription) {
+          console.log('Iniciando análise do 2º Tempo...');
+          
+          try {
+            const result = await startAnalysis({
+              matchId,
+              transcription: secondHalfTranscription,
+              homeTeam: homeTeamName,
+              awayTeam: awayTeamName,
+              gameStartMinute: 45,
+              gameEndMinute: 90,
+            });
+            
+            totalEventsDetected += result.eventsDetected || 0;
+            toast({
+              title: "2º Tempo analisado",
+              description: `${result.eventsDetected} eventos detectados`,
+            });
+          } catch (error) {
+            console.error('Erro na análise do 2º tempo:', error);
+            toast({
+              title: "⚠️ Erro no 2º Tempo",
+              description: "Análise parcial concluída",
+              variant: "destructive",
+            });
+          }
         }
       }
 
