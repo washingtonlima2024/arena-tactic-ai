@@ -400,13 +400,26 @@ export default function Events() {
     // Check if event is within video range (when we have duration info)
     const videoDuration = eventVideo?.duration_seconds;
     const eventVideoSecond = event.metadata?.videoSecond;
+    const videoStartMinute = eventVideo?.start_minute ?? 0;
+    const videoEndMinute = eventVideo?.end_minute ?? 90;
     
-    // If event timestamp exceeds video duration, show warning and play from start
+    // If event timestamp exceeds video duration, calculate proportional position
     if (videoDuration && eventVideoSecond && eventVideoSecond > videoDuration) {
-      console.warn(`Evento (${eventVideoSecond}s) excede duração do vídeo (${videoDuration}s). Iniciando do início.`);
-      toast.info(`Timestamp do evento (${Math.round(eventVideoSecond)}s) excede o vídeo (${Math.round(videoDuration)}s). Iniciando do início.`);
-      // Override videoSecond to start from beginning
-      event = { ...event, metadata: { ...event.metadata, videoSecond: 0 } };
+      // Calculate proportional position based on event minute within video coverage
+      const eventMinute = event.minute ?? 0;
+      const videoCoverageMinutes = videoEndMinute - videoStartMinute;
+      
+      if (videoCoverageMinutes > 0 && eventMinute >= videoStartMinute && eventMinute <= videoEndMinute) {
+        // Event is within video coverage - calculate proportional position
+        const positionInCoverage = (eventMinute - videoStartMinute) / videoCoverageMinutes;
+        const calculatedVideoSecond = Math.floor(positionInCoverage * videoDuration);
+        console.log(`Calculando posição proporcional: minuto ${eventMinute} → ${calculatedVideoSecond}s do vídeo`);
+        event = { ...event, metadata: { ...event.metadata, videoSecond: calculatedVideoSecond } };
+      } else {
+        // Event outside video coverage - start from beginning
+        console.warn(`Evento (minuto ${eventMinute}) fora da cobertura do vídeo (${videoStartMinute}-${videoEndMinute})`);
+        event = { ...event, metadata: { ...event.metadata, videoSecond: 0 } };
+      }
     }
     
     console.log('Opening video for event:', {
