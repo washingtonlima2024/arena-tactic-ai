@@ -27,6 +27,7 @@ interface ResetMatchDialogProps {
   videos: Array<{
     id: string;
     file_url: string;
+    video_type: string | null;
     start_minute: number | null;
     end_minute: number | null;
     duration_seconds: number | null;
@@ -181,13 +182,21 @@ export function ResetMatchDialog({
           continue;
         }
         
+        // Determinar halfType baseado no video_type ou start_minute
+        const halfType = video.video_type === 'second_half' 
+          ? 'second' 
+          : video.video_type === 'first_half' 
+            ? 'first' 
+            : (video.start_minute ?? 0) >= 45 ? 'second' : 'first';
+
         await startAnalysis({
           matchId,
           transcription: srtData.content,
           homeTeam: homeTeamName,
           awayTeam: awayTeamName,
           gameStartMinute: video.start_minute ?? 0,
-          gameEndMinute: video.end_minute ?? 45,
+          gameEndMinute: video.end_minute ?? (halfType === 'first' ? 48 : 95),
+          halfType,
         });
       }
 
@@ -222,6 +231,8 @@ export function ResetMatchDialog({
   };
 
   const getVideoLabel = (video: typeof videos[0], index: number) => {
+    if (video.video_type === 'first_half') return '1º Tempo';
+    if (video.video_type === 'second_half') return '2º Tempo';
     if (video.start_minute === 0 && video.end_minute === 45) return '1º Tempo';
     if (video.start_minute === 45) return '2º Tempo';
     return `Vídeo ${index + 1}`;
