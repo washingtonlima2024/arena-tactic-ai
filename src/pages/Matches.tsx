@@ -219,9 +219,14 @@ export default function Matches() {
       console.error('[Reprocess] ✗ ERRO:', error);
       console.error('[Reprocess] Stack:', error.stack);
       
+      const errorMessage = error.message || 'Erro desconhecido';
+      const isFileTooLarge = errorMessage.includes('muito grande') || errorMessage.includes('Máximo:');
+      
       toast({
-        title: "Erro no reprocessamento",
-        description: error.message || 'Erro desconhecido',
+        title: isFileTooLarge ? "Vídeo muito grande" : "Erro no reprocessamento",
+        description: isFileTooLarge 
+          ? "O vídeo excede 24MB. Use a página de Upload para importar um arquivo SRT manualmente."
+          : errorMessage,
         variant: "destructive"
       });
       setIsReprocessing(false);
