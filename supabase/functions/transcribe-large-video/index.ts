@@ -110,47 +110,79 @@ serve(async (req) => {
       });
     }
 
-    // 3. Para vídeos grandes, baixar e processar em partes
+    // 3. Para vídeos grandes, enviar direto para Whisper em partes menores
+    // O Whisper aceita até 25MB, então dividimos em partes de ~20MB
     console.log('[TranscribeLarge] Vídeo grande - processando em partes...');
     
-    // Estimar duração baseado no tamanho (5MB por minuto aproximadamente)
-    const estimatedMinutes = videoSizeMB / 5;
-    const partDurationMinutes = 10; // 10 minutos por parte
-    const numParts = Math.ceil(estimatedMinutes / partDurationMinutes);
-    
-    console.log(`[TranscribeLarge] Estimativa: ${estimatedMinutes.toFixed(0)} min, ${numParts} partes`);
-
     // Baixar vídeo completo
     console.log('[TranscribeLarge] Baixando vídeo...');
     const videoResponse = await fetch(videoUrl);
     const videoBuffer = await videoResponse.arrayBuffer();
     console.log('[TranscribeLarge] ✓ Vídeo baixado:', (videoBuffer.byteLength / (1024 * 1024)).toFixed(1), 'MB');
 
-    // Dividir o buffer em partes proporcionais
+    // Calcular número de partes baseado no tamanho (max 20MB por parte)
+    const MAX_PART_SIZE = 20 * 1024 * 1024; // 20MB
+    const numParts = Math.ceil(videoBuffer.byteLength / MAX_PART_SIZE);
     const partSize = Math.ceil(videoBuffer.byteLength / numParts);
+    
+    console.log(`[TranscribeLarge] Dividindo em ${numParts} partes de ~${(partSize / (1024 * 1024)).toFixed(1)}MB`);
+
     const transcriptions: string[] = [];
 
     for (let i = 0; i < numParts; i++) {
       const startByte = i * partSize;
       const endByte = Math.min((i + 1) * partSize, videoBuffer.byteLength);
       const partBuffer = videoBuffer.slice(startByte, endByte);
+      const partSizeMB = partBuffer.byteLength / (1024 * 1024);
       
-      const startMin = Math.floor((i * partDurationMinutes));
-      const endMin = Math.floor(Math.min((i + 1) * partDurationMinutes, estimatedMinutes));
-      
-      console.log(`[TranscribeLarge] Parte ${i + 1}/${numParts} (${startMin}'-${endMin}'): ${(partBuffer.byteLength / (1024 * 1024)).toFixed(1)}MB`);
+      console.log(`[TranscribeLarge] Parte ${i + 1}/${numParts}: ${partSizeMB.toFixed(1)}MB`);
 
-      // Criar blob da parte e enviar para Whisper
-      const partBlob = new Blob([partBuffer], { type: 'video/mp4' });
-      
       // Verificar se a parte não é muito grande para Whisper
-      if (partBlob.size > 25 * 1024 * 1024) {
-        console.log(`[TranscribeLarge] Parte ${i + 1} muito grande, pulando...`);
+      if (partSizeMB > 25) {
+        console.log(`[TranscribeLarge] Parte ${i + 1} muito grande (${partSizeMB.toFixed(1)}MB), subdividindo...`);
+        // Subdividir esta parte
+        const subParts = Math.ceil(partBuffer.byteLength / MAX_PART_SIZE);
+        const subPartSize = Math.ceil(partBuffer.byteLength / subParts);
+        
+        for (let j = 0; j < subParts; j++) {
+          const subStart = j * subPartSize;
+          const subEnd = Math.min((j + 1) * subPartSize, partBuffer.byteLength);
+          const subBuffer = partBuffer.slice(subStart, subEnd);
+          
+          try {
+            const formData = new FormData();
+            const subBlob = new Blob([subBuffer], { type: 'video/mp4' });
+            formData.append('file', subBlob, `part_${i}_${j}.mp4`);
+            formData.append('model', 'whisper-1');
+            formData.append('language', 'pt');
+            formData.append('response_format', 'text');
+
+            const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+              body: formData,
+            });
+
+            if (whisperResponse.ok) {
+              const text = await whisperResponse.text();
+              if (text && text.trim()) {
+                transcriptions.push(text);
+                console.log(`[TranscribeLarge] ✓ Subparte ${i+1}.${j+1} transcrita: ${text.length} chars`);
+              }
+            } else {
+              const error = await whisperResponse.text();
+              console.error(`[TranscribeLarge] Subparte ${i+1}.${j+1} falhou:`, error);
+            }
+          } catch (subError) {
+            console.error(`[TranscribeLarge] Erro na subparte ${i+1}.${j+1}:`, subError);
+          }
+        }
         continue;
       }
 
       try {
         const formData = new FormData();
+        const partBlob = new Blob([partBuffer], { type: 'video/mp4' });
         formData.append('file', partBlob, `part_${i}.mp4`);
         formData.append('model', 'whisper-1');
         formData.append('language', 'pt');
@@ -165,7 +197,7 @@ serve(async (req) => {
         if (whisperResponse.ok) {
           const text = await whisperResponse.text();
           if (text && text.trim()) {
-            transcriptions.push(`[${startMin}'-${endMin}']\n${text}`);
+            transcriptions.push(text);
             console.log(`[TranscribeLarge] ✓ Parte ${i + 1} transcrita: ${text.length} chars`);
           }
         } else {
