@@ -1037,7 +1037,7 @@ export default function Events() {
                       <span className="font-medium">{selectedMatch.home_team.short_name}</span>
                     </div>
                     <span className="text-lg font-bold">
-                      {events.filter(e => e.metadata?.team === 'home' || e.metadata?.teamName === selectedMatch.home_team?.name).length}
+                      {selectedMatch.home_score ?? 0}
                     </span>
                   </div>
                 )}
@@ -1064,7 +1064,7 @@ export default function Events() {
                       <span className="font-medium">{selectedMatch.away_team.short_name}</span>
                     </div>
                     <span className="text-lg font-bold">
-                      {events.filter(e => e.metadata?.team === 'away' || e.metadata?.teamName === selectedMatch.away_team?.name).length}
+                      {selectedMatch.away_score ?? 0}
                     </span>
                   </div>
                 )}
