@@ -45,7 +45,7 @@ export default function Matches() {
   const queryClient = useQueryClient();
   
   // Hook para transcrição com FFmpeg (extrai áudio antes de enviar para Whisper)
-  const { transcribeVideo, transcriptionProgress, isTranscribing, resetProgress } = useWhisperTranscription();
+  const { transcribeVideo, transcriptionProgress, isTranscribing, usedFallback, resetProgress } = useWhisperTranscription();
 
   const completedMatches = matches.filter(m => m.status === 'completed').length;
   const analyzingMatches = matches.filter(m => m.status === 'analyzing').length;
@@ -142,7 +142,16 @@ export default function Matches() {
       }
       
       console.log('[Reprocess] ✓ Transcrição obtida:', transcriptionResult.text.length, 'caracteres');
+      console.log('[Reprocess] Método usado:', usedFallback ? 'Google Speech (fallback)' : 'FFmpeg + Whisper');
       console.log('[Reprocess] Preview:', transcriptionResult.text.substring(0, 200) + '...');
+      
+      // Informar qual método foi usado
+      toast({
+        title: usedFallback ? "Google Speech API" : "Whisper API",
+        description: usedFallback 
+          ? "Transcrição realizada com Google Speech (fallback)" 
+          : "Transcrição realizada com FFmpeg + Whisper"
+      });
       
       // 4. Chamar analyze-match para detectar eventos
       console.log('[Reprocess] PASSO 3: Analisando eventos com IA...');
