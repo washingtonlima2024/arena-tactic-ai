@@ -316,45 +316,42 @@ export function useWhisperTranscription() {
     };
   };
 
-  // Fallback para vídeos grandes quando FFmpeg falha - carrega FFmpeg e usa transcribeLargeVideo
-  const transcribeWithLargeVideoFallback = async (
+  // Fallback: usar edge function server-side para vídeos grandes
+  const transcribeWithServerFallback = async (
     videoUrl: string,
     matchId: string,
-    videoId: string,
-    videoSizeMB: number
+    videoId: string
   ): Promise<TranscriptionResult | null> => {
-    console.log('[LargeVideo Fallback] ========================================');
-    console.log('[LargeVideo Fallback] Tentando novamente com FFmpeg para vídeo grande...');
+    console.log('[Server Fallback] ========================================');
+    console.log('[Server Fallback] Usando transcrição server-side...');
     
     setTranscriptionProgress({ 
-      stage: 'loading', 
-      progress: 5, 
-      message: 'Preparando para processar vídeo grande...' 
+      stage: 'transcribing', 
+      progress: 30, 
+      message: 'Transcrevendo no servidor (processamento em partes)...' 
     });
 
-    // Tentar carregar FFmpeg novamente com mais tempo
-    const ffmpeg = new FFmpeg();
-    ffmpegRef.current = ffmpeg;
-    
-    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-    
-    try {
-      const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
-      const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
-      
-      await withTimeout(
-        ffmpeg.load({ coreURL, wasmURL }),
-        60000, // 60 segundos para carregar
-        'inicializar FFmpeg'
-      );
-      
-      console.log('[LargeVideo Fallback] ✓ FFmpeg carregado, processando vídeo grande...');
-      
-      return await transcribeLargeVideo(ffmpeg, videoUrl, matchId, videoId, videoSizeMB);
-    } catch (loadError) {
-      console.error('[LargeVideo Fallback] Erro ao carregar FFmpeg:', loadError);
-      throw new Error('Não foi possível processar o vídeo. FFmpeg não disponível no navegador.');
+    const { data, error } = await supabase.functions.invoke('transcribe-large-video', {
+      body: { videoUrl, matchId, videoId }
+    });
+
+    if (error) {
+      console.error('[Server Fallback] Erro:', error);
+      throw new Error(error.message || 'Erro na transcrição server-side');
     }
+
+    if (!data?.success) {
+      throw new Error(data?.error || 'Erro desconhecido na transcrição');
+    }
+
+    console.log('[Server Fallback] ✓ Transcrição completa:', data.text?.length, 'caracteres');
+    console.log('[Server Fallback] Método:', data.method, '- Partes:', data.parts);
+    
+    return {
+      srtContent: '',
+      text: data.text,
+      audioUrl: ''
+    };
   };
 
   const transcribeVideo = async (
@@ -406,27 +403,22 @@ export function useWhisperTranscription() {
       } catch (ffmpegError) {
         console.warn('[Transcrição] ⚠️ FFmpeg inicial falhou:', ffmpegError);
         
-        // Para qualquer vídeo, tentar fallback com mais tempo
-        console.log('[Transcrição] Tentando fallback com mais tempo...');
+        // Usar fallback server-side
+        console.log('[Transcrição] Tentando transcrição server-side...');
         setUsedFallback(true);
         
         try {
-          const fallbackResult = await transcribeWithLargeVideoFallback(
-            videoUrl, 
-            matchId, 
-            videoId, 
-            detectedSizeMB || 50 // Assume 50MB se não detectou
-          );
+          const fallbackResult = await transcribeWithServerFallback(videoUrl, matchId, videoId);
           if (fallbackResult?.text) {
             setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });
             return fallbackResult;
           }
         } catch (fallbackError) {
-          console.error('[Transcrição] Fallback também falhou:', fallbackError);
+          console.error('[Transcrição] Fallback server-side também falhou:', fallbackError);
           throw fallbackError;
         }
         
-        throw new Error('FFmpeg não disponível. Por favor, importe um arquivo SRT manualmente.');
+        throw new Error('Transcrição não disponível. Por favor, importe um arquivo SRT manualmente.');
       }
 
       // Verificar se é um vídeo grande (> 35MB) - usar detectedSizeMB
