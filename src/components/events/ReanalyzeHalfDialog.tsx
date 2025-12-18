@@ -19,7 +19,7 @@ import {
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
 import { 
-  Loader2, 
+  Loader2,
   RefreshCw, 
   AlertTriangle, 
   FileText,
@@ -33,6 +33,7 @@ import {
   ChevronDown,
   Database
 } from 'lucide-react';
+import { SoccerBallLoader } from '@/components/ui/SoccerBallLoader';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
@@ -551,18 +552,19 @@ export function ReanalyzeHalfDialog({
               )}
             </Button>
             {isTranscribing && (
-              <div className="space-y-1">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{transcriptionProgress.message}</span>
-                  <span className="font-mono">{transcriptionProgress.progress}%</span>
-                </div>
-                <Progress value={transcriptionProgress.progress} className="h-2" />
+              <div className="space-y-3 mt-4">
+                <SoccerBallLoader
+                  message={transcriptionProgress.message || 'Processando...'}
+                  progress={transcriptionProgress.progress}
+                  showProgress={true}
+                  className="min-h-[160px]"
+                />
                 {transcriptionProgress.currentPart && transcriptionProgress.totalParts && (
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 px-4">
                     {Array.from({ length: transcriptionProgress.totalParts }).map((_, i) => (
                       <div
                         key={i}
-                        className={`h-1.5 flex-1 rounded-full transition-colors ${
+                        className={`h-2 flex-1 rounded-full transition-colors ${
                           i < transcriptionProgress.currentPart! 
                             ? 'bg-green-500' 
                             : i === transcriptionProgress.currentPart! - 1 

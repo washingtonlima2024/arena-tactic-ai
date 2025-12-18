@@ -316,50 +316,45 @@ export function useWhisperTranscription() {
     };
   };
 
-  // Fallback: usar Google Speech-to-Text via edge function
-  const transcribeWithGoogleFallback = async (
+  // Fallback para vídeos grandes quando FFmpeg falha - carrega FFmpeg e usa transcribeLargeVideo
+  const transcribeWithLargeVideoFallback = async (
     videoUrl: string,
     matchId: string,
-    videoId: string
+    videoId: string,
+    videoSizeMB: number
   ): Promise<TranscriptionResult | null> => {
-    console.log('[Google Fallback] ========================================');
-    console.log('[Google Fallback] Usando Google Speech-to-Text API...');
+    console.log('[LargeVideo Fallback] ========================================');
+    console.log('[LargeVideo Fallback] Tentando novamente com FFmpeg para vídeo grande...');
     
     setTranscriptionProgress({ 
-      stage: 'transcribing', 
-      progress: 30, 
-      message: 'Transcrevendo com Google Speech API (fallback)...' 
+      stage: 'loading', 
+      progress: 5, 
+      message: 'Preparando para processar vídeo grande...' 
     });
 
-    const { data, error } = await supabase.functions.invoke('transcribe-google-speech', {
-      body: { videoUrl, matchId, videoId }
-    });
-
-    if (error) {
-      console.error('[Google Fallback] Erro:', error);
-      const errorContext = (error as any).context;
-      let errorMessage = error.message;
-      
-      if (data?.error) {
-        errorMessage = data.error;
-      } else if (errorContext?.error) {
-        errorMessage = errorContext.error;
-      }
-      
-      throw new Error(errorMessage);
-    }
-
-    if (!data?.success) {
-      throw new Error(data?.error || 'Erro desconhecido no Google Speech');
-    }
-
-    console.log('[Google Fallback] ✓ Transcrição completa:', data.text?.length, 'caracteres');
+    // Tentar carregar FFmpeg novamente com mais tempo
+    const ffmpeg = new FFmpeg();
+    ffmpegRef.current = ffmpeg;
     
-    return {
-      srtContent: data.srt || '',
-      text: data.text,
-      audioUrl: ''
-    };
+    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+    
+    try {
+      const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
+      const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
+      
+      await withTimeout(
+        ffmpeg.load({ coreURL, wasmURL }),
+        60000, // 60 segundos para carregar
+        'inicializar FFmpeg'
+      );
+      
+      console.log('[LargeVideo Fallback] ✓ FFmpeg carregado, processando vídeo grande...');
+      
+      return await transcribeLargeVideo(ffmpeg, videoUrl, matchId, videoId, videoSizeMB);
+    } catch (loadError) {
+      console.error('[LargeVideo Fallback] Erro ao carregar FFmpeg:', loadError);
+      throw new Error('Não foi possível processar o vídeo. FFmpeg não disponível no navegador.');
+    }
   };
 
   const transcribeVideo = async (
@@ -391,17 +386,26 @@ export function useWhisperTranscription() {
         ]);
         console.log('[Transcrição] ✓ FFmpeg pronto');
       } catch (ffmpegError) {
-        console.warn('[Transcrição] ⚠️ FFmpeg falhou, usando fallback Google Speech...');
-        console.warn('[Transcrição] Erro FFmpeg:', ffmpegError);
+        console.warn('[Transcrição] ⚠️ FFmpeg inicial falhou:', ffmpegError);
         
-        setUsedFallback(true);
-        const fallbackResult = await transcribeWithGoogleFallback(videoUrl, matchId, videoId);
-        
-        if (fallbackResult?.text) {
-          setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa (Google Speech)!' });
-          return fallbackResult;
+        // Para vídeos grandes, tentar novamente com mais tempo
+        if (videoSizeMB && videoSizeMB > 35) {
+          console.log('[Transcrição] Vídeo grande detectado, tentando fallback com mais tempo...');
+          setUsedFallback(true);
+          
+          try {
+            const fallbackResult = await transcribeWithLargeVideoFallback(videoUrl, matchId, videoId, videoSizeMB);
+            if (fallbackResult?.text) {
+              setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });
+              return fallbackResult;
+            }
+          } catch (fallbackError) {
+            console.error('[Transcrição] Fallback também falhou:', fallbackError);
+            throw fallbackError;
+          }
         }
-        throw new Error('Fallback Google Speech também falhou');
+        
+        throw new Error('FFmpeg não disponível. Por favor, importe um arquivo SRT manualmente.');
       }
 
       // Verificar se é um vídeo grande (> 35MB)
