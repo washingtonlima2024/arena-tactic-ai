@@ -40,7 +40,7 @@ serve(async (req) => {
       throw new Error('transcription is required and must be at least 50 characters');
     }
 
-    console.log('=== ANÁLISE DE PARTIDA ===');
+    console.log('=== ANÁLISE DE PARTIDA (Pro + Few-Shot) ===');
     console.log('Match ID:', matchId);
     console.log('Times:', homeTeam, 'vs', awayTeam);
     console.log('Tempo de jogo:', gameStartMinute, '-', gameEndMinute);
@@ -57,31 +57,95 @@ serve(async (req) => {
       throw new Error('LOVABLE_API_KEY not configured');
     }
 
-    const systemPrompt = `Você é um analista de futebol especializado em identificar eventos em narrações.
-Analise a transcrição e extraia TODOS os eventos mencionados pelo narrador.
+    // IMPROVED: System prompt with Few-Shot Learning examples
+    const systemPrompt = `Você é um ANALISTA ESPECIALIZADO em futebol brasileiro que assiste milhares de jogos.
+Seu trabalho é analisar transcrições de narrações e extrair TODOS os eventos com MÁXIMA PRECISÃO.
 
-REGRAS:
-1. Identifique TODOS os gols mencionados na narração
-2. Para gols contra (own goals), marque isOwnGoal: true
-3. Extraia o minuto aproximado do jogo baseado no contexto
-4. Os minutos devem estar entre ${gameStartMinute} e ${gameEndMinute}
-5. Use descrições curtas em português (máximo 60 caracteres)
-6. Identifique qual time fez cada evento: "home" para ${homeTeam} ou "away" para ${awayTeam}
+═══════════════════════════════════════════════════════════════
+EXEMPLOS DE EXTRAÇÃO (FEW-SHOT LEARNING) - SIGA ESTE PADRÃO:
+═══════════════════════════════════════════════════════════════
+
+EXEMPLO 1 - GOL:
+Narração: "GOOOOOL! Neymar recebe na área, dribla o marcador e chuta no canto! Brasil abre o placar!"
+→ Evento: { minute: (estimado), event_type: "goal", team: "home", description: "Gol de Neymar! Drible e chute no canto!", isOwnGoal: false }
+
+EXEMPLO 2 - GOL CONTRA:
+Narração: "Que azar! O zagueiro tenta cortar e manda contra o próprio gol! Gol contra do Sport!"
+→ Evento: { minute: (estimado), event_type: "goal", team: "home", description: "GOL CONTRA! Zagueiro corta errado!", isOwnGoal: true }
+NOTA: isOwnGoal=true quando o jogador marca em seu próprio gol
+
+EXEMPLO 3 - CARTÃO AMARELO:
+Narração: "Cartão amarelo para o zagueiro que derrubou o atacante na entrada da área"
+→ Evento: { minute: (estimado), event_type: "yellow_card", team: "away", description: "Amarelo por falta no atacante" }
+
+EXEMPLO 4 - DEFESA:
+Narração: "Que defesa espetacular! O goleiro voou no canto e salvou o que seria o gol!"
+→ Evento: { minute: (estimado), event_type: "save", team: "away", description: "Defesa espetacular do goleiro!" }
+
+EXEMPLO 5 - CHANCE:
+Narração: "Quase gol! A bola passa raspando a trave, por pouco não foi!"
+→ Evento: { minute: (estimado), event_type: "chance", team: "home", description: "Bola raspando a trave!" }
+
+EXEMPLO 6 - FALTA:
+Narração: "Falta dura do lateral! O árbitro marca falta perigosa"
+→ Evento: { minute: (estimado), event_type: "foul", team: "away", description: "Falta dura do lateral" }
+
+═══════════════════════════════════════════════════════════════
+REGRAS CRÍTICAS:
+═══════════════════════════════════════════════════════════════
+
+1. EXTRAIA ABSOLUTAMENTE TODOS OS EVENTOS - não perca NENHUM gol, cartão ou lance importante
+2. GOLS CONTRA: Se narrador menciona "gol contra", "próprio gol", "contra si mesmo" → isOwnGoal: true
+3. TIME CORRETO: Analise QUEM atacava e QUEM defendia no contexto da narração
+4. MINUTOS: Estime baseado na progressão (início ~2'-10', meio ~15'-30', fim ~35'-45'+)
+5. DESCRIÇÕES: Máximo 60 caracteres, capture a EMOÇÃO do narrador
+6. PLACAR: Conte TODOS os gols corretamente ao final
 
 TIPOS DE EVENTOS (use exatamente):
-- goal, shot, save, foul, yellow_card, red_card, corner, offside, substitution, chance, penalty`;
+goal, shot, save, foul, yellow_card, red_card, corner, offside, substitution, chance, penalty
 
-    const userPrompt = `Times: ${homeTeam} (casa) vs ${awayTeam} (visitante)
-Período: ${gameStartMinute}' - ${gameEndMinute}'
+TIMES DA PARTIDA:
+- HOME (casa): ${homeTeam}
+- AWAY (visitante): ${awayTeam}
+- Período: ${matchHalf === 'first' ? '1º Tempo' : '2º Tempo'} (${gameStartMinute}' - ${gameEndMinute}')`;
 
-TRANSCRIÇÃO:
+    // IMPROVED: User prompt with Chain-of-Thought instructions
+    const userPrompt = `═══════════════════════════════════════════════════════════════
+PARTIDA: ${homeTeam} (casa) vs ${awayTeam} (visitante)
+PERÍODO: ${matchHalf === 'first' ? '1º Tempo' : '2º Tempo'} (minutos ${gameStartMinute}' a ${gameEndMinute}')
+═══════════════════════════════════════════════════════════════
+
+INSTRUÇÕES DE ANÁLISE (CHAIN-OF-THOUGHT):
+
+PASSO 1: Leia a transcrição COMPLETA abaixo com atenção
+PASSO 2: Identifique CADA momento importante (gols, defesas, faltas, cartões, chances)
+PASSO 3: Para cada momento, determine:
+   - Minuto aproximado (${gameStartMinute}' a ${gameEndMinute}')
+   - Tipo de evento (goal, shot, save, foul, etc)
+   - Qual time realizou a ação (home=${homeTeam} ou away=${awayTeam})
+   - Se é gol contra (isOwnGoal: true/false)
+PASSO 4: Gere descrições que capturam a EMOÇÃO do narrador (máx 60 chars)
+PASSO 5: Conte TODOS os gols para calcular o placar final correto
+
+═══════════════════════════════════════════════════════════════
+TRANSCRIÇÃO COMPLETA DA NARRAÇÃO:
+═══════════════════════════════════════════════════════════════
+
 ${transcription}
 
-Extraia todos os eventos e calcule o placar final.`;
+═══════════════════════════════════════════════════════════════
+IMPORTANTE: 
+- NÃO PERCA NENHUM GOL! 
+- Conte todos os gols para determinar o placar final correto
+- Gols de ${homeTeam} aumentam homeScore
+- Gols de ${awayTeam} aumentam awayScore
+- Gols contra de ${homeTeam} aumentam awayScore (isOwnGoal=true, team="home")
+- Gols contra de ${awayTeam} aumentam homeScore (isOwnGoal=true, team="away")
+═══════════════════════════════════════════════════════════════`;
 
-    console.log('Chamando IA com tool calling...');
+    console.log('Chamando Gemini 2.5 Pro com tool calling...');
 
-    // Use tool calling for structured output
+    // IMPROVED: Use gemini-2.5-pro for better accuracy
     const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
       method: 'POST',
       headers: {
@@ -89,7 +153,7 @@ Extraia todos os eventos e calcule o placar final.`;
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'google/gemini-2.5-flash',
+        model: 'google/gemini-2.5-pro', // UPGRADED from flash to pro
         messages: [
           { role: 'system', content: systemPrompt },
           { role: 'user', content: userPrompt }
@@ -117,7 +181,7 @@ Extraia todos os eventos e calcule o placar final.`;
                         },
                         description: { type: "string", description: "Descrição curta em português (max 60 chars)" },
                         team: { type: "string", enum: ["home", "away"], description: "Time que fez o evento" },
-                        isOwnGoal: { type: "boolean", description: "Se é gol contra" }
+                        isOwnGoal: { type: "boolean", description: "Se é gol contra (true se jogador marca em seu próprio gol)" }
                       },
                       required: ["minute", "event_type", "description", "team"],
                       additionalProperties: false
@@ -150,7 +214,7 @@ Extraia todos os eventos e calcule o placar final.`;
     }
 
     const aiData = await aiResponse.json();
-    console.log('AI response received');
+    console.log('AI response received from Gemini Pro');
 
     // Extract structured data from tool call
     let analysisResult: AnalysisResult;
@@ -192,8 +256,61 @@ Extraia todos os eventos e calcule o placar final.`;
       }
     }
 
-    console.log('Eventos detectados:', analysisResult.events?.length || 0);
-    console.log('Placar:', analysisResult.homeScore, 'x', analysisResult.awayScore);
+    console.log('Eventos detectados (antes da validação):', analysisResult.events?.length || 0);
+    console.log('Placar reportado pela IA:', analysisResult.homeScore, 'x', analysisResult.awayScore);
+
+    // ═══════════════════════════════════════════════════════════════
+    // SCORE VALIDATION: Ensure score matches goal count
+    // ═══════════════════════════════════════════════════════════════
+    const goalEvents = (analysisResult.events || []).filter(e => e.event_type === 'goal');
+    
+    // Calculate correct score from goal events
+    let calculatedHomeScore = 0;
+    let calculatedAwayScore = 0;
+    
+    for (const goal of goalEvents) {
+      if (goal.isOwnGoal) {
+        // Own goal: adds to opponent's score
+        if (goal.team === 'home') {
+          calculatedAwayScore++;
+        } else {
+          calculatedHomeScore++;
+        }
+      } else {
+        // Regular goal: adds to own team's score
+        if (goal.team === 'home') {
+          calculatedHomeScore++;
+        } else {
+          calculatedAwayScore++;
+        }
+      }
+    }
+
+    console.log('Gols detectados:', goalEvents.length);
+    console.log('Placar calculado dos gols:', calculatedHomeScore, 'x', calculatedAwayScore);
+
+    // Validate and correct if inconsistent
+    if (calculatedHomeScore !== analysisResult.homeScore || calculatedAwayScore !== analysisResult.awayScore) {
+      console.warn('⚠️ PLACAR INCONSISTENTE! Corrigindo...');
+      console.warn(`  IA reportou: ${analysisResult.homeScore} x ${analysisResult.awayScore}`);
+      console.warn(`  Calculado:   ${calculatedHomeScore} x ${calculatedAwayScore}`);
+      
+      // Use calculated score (based on actual goal events)
+      analysisResult.homeScore = calculatedHomeScore;
+      analysisResult.awayScore = calculatedAwayScore;
+      
+      console.log('✓ Placar corrigido para:', calculatedHomeScore, 'x', calculatedAwayScore);
+    } else {
+      console.log('✓ Placar consistente com gols detectados');
+    }
+
+    // Log goal details for debugging
+    if (goalEvents.length > 0) {
+      console.log('Detalhes dos gols:');
+      goalEvents.forEach((g, i) => {
+        console.log(`  ${i+1}. ${g.minute}' - ${g.team} ${g.isOwnGoal ? '(CONTRA)' : ''} - ${g.description}`);
+      });
+    }
 
     // Insert events into database
     const eventsToInsert = (analysisResult.events || []).map(event => {
@@ -213,7 +330,7 @@ Extraia todos os eventos e calcule o placar final.`;
           team: event.team,
           isOwnGoal: event.isOwnGoal || false,
           teamName: event.team === 'home' ? homeTeam : awayTeam,
-          source: 'ai-analysis',
+          source: 'ai-analysis-pro',
           gameStartMinute,
           videoSecond,
           eventMs,
@@ -252,14 +369,16 @@ Extraia todos os eventos e calcule o placar final.`;
       console.log('✓ Placar atualizado:', analysisResult.homeScore, 'x', analysisResult.awayScore);
     }
 
-    console.log('=== ANÁLISE COMPLETA ===');
+    console.log('=== ANÁLISE PRO COMPLETA ===');
 
     return new Response(JSON.stringify({
       success: true,
       eventsDetected: eventsToInsert.length,
+      goalsDetected: goalEvents.length,
       homeScore: analysisResult.homeScore || 0,
       awayScore: analysisResult.awayScore || 0,
-      events: eventsToInsert
+      events: eventsToInsert,
+      scoreValidated: true
     }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
