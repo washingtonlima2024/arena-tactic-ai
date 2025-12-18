@@ -397,33 +397,40 @@ export function useWhisperTranscription() {
       console.log('[Transcrição] PASSO 1: Carregando FFmpeg...');
       
       let ffmpeg: FFmpeg;
-      try {
-        ffmpeg = await Promise.race([
-          loadFFmpeg(),
-          new Promise<never>((_, reject) => 
-            setTimeout(() => reject(new Error('FFmpeg timeout')), 25000)
-          )
-        ]);
-        console.log('[Transcrição] ✓ FFmpeg pronto');
-      } catch (ffmpegError) {
-        console.warn('[Transcrição] ⚠️ FFmpeg inicial falhou:', ffmpegError);
-        
-        // Usar fallback server-side
-        console.log('[Transcrição] Tentando transcrição server-side...');
-        setUsedFallback(true);
-        
+      let retryCount = 0;
+      const maxRetries = 3;
+      
+      while (retryCount < maxRetries) {
         try {
-          const fallbackResult = await transcribeWithServerFallback(videoUrl, matchId, videoId);
-          if (fallbackResult?.text) {
-            setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });
-            return fallbackResult;
+          ffmpeg = await Promise.race([
+            loadFFmpeg(),
+            new Promise<never>((_, reject) => 
+              setTimeout(() => reject(new Error('FFmpeg timeout')), 60000) // 60 segundos
+            )
+          ]);
+          console.log('[Transcrição] ✓ FFmpeg pronto');
+          break;
+        } catch (ffmpegError) {
+          retryCount++;
+          console.warn(`[Transcrição] ⚠️ FFmpeg tentativa ${retryCount}/${maxRetries} falhou:`, ffmpegError);
+          
+          if (retryCount < maxRetries) {
+            console.log('[Transcrição] Aguardando 2s antes de tentar novamente...');
+            setTranscriptionProgress({ 
+              stage: 'loading', 
+              progress: retryCount * 2, 
+              message: `Carregando processador... tentativa ${retryCount + 1}/${maxRetries}` 
+            });
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            ffmpegRef.current = null; // Reset para nova tentativa
+          } else {
+            // Todas as tentativas falharam - pedir SRT
+            throw new Error(
+              'Não foi possível carregar o processador de áudio após várias tentativas. ' +
+              'Por favor, faça upload de um arquivo SRT ou VTT com a transcrição.'
+            );
           }
-        } catch (fallbackError) {
-          console.error('[Transcrição] Fallback server-side também falhou:', fallbackError);
-          throw fallbackError;
         }
-        
-        throw new Error('Transcrição não disponível. Por favor, importe um arquivo SRT manualmente.');
       }
 
       // Verificar se é um vídeo grande (> 35MB) - usar detectedSizeMB
