@@ -4,7 +4,7 @@ import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { supabase } from '@/integrations/supabase/client';
 
 interface TranscriptionProgress {
-  stage: 'idle' | 'loading' | 'downloading' | 'extracting' | 'uploading' | 'transcribing' | 'complete' | 'error';
+  stage: 'idle' | 'loading' | 'downloading' | 'extracting' | 'splitting' | 'uploading' | 'transcribing' | 'complete' | 'error';
   progress: number;
   message: string;
 }
@@ -24,6 +24,9 @@ const withTimeout = <T>(promise: Promise<T>, ms: number, operation: string): Pro
     )
   ]);
 };
+
+// Tamanho máximo por chunk (18MB para ter margem)
+const MAX_CHUNK_SIZE = 18 * 1024 * 1024;
 
 export function useWhisperTranscription() {
   const [transcriptionProgress, setTranscriptionProgress] = useState<TranscriptionProgress>({
@@ -93,6 +96,60 @@ export function useWhisperTranscription() {
     return ffmpeg;
   };
 
+  // Função para dividir áudio em chunks por duração
+  const splitAudioIntoChunks = async (
+    ffmpeg: FFmpeg,
+    totalDuration: number,
+    audioSizeMB: number
+  ): Promise<string[]> => {
+    // Calcular quantos chunks precisamos baseado no tamanho
+    const numChunks = Math.ceil((audioSizeMB * 1024 * 1024) / MAX_CHUNK_SIZE);
+    const chunkDuration = Math.ceil(totalDuration / numChunks);
+    
+    console.log(`[Split] Dividindo áudio em ${numChunks} partes de ~${chunkDuration}s cada`);
+    
+    const chunkFiles: string[] = [];
+    
+    for (let i = 0; i < numChunks; i++) {
+      const startTime = i * chunkDuration;
+      const outputFile = `chunk_${i}.mp3`;
+      
+      setTranscriptionProgress({ 
+        stage: 'splitting', 
+        progress: 35 + (i / numChunks) * 10, 
+        message: `Dividindo áudio... parte ${i + 1}/${numChunks}` 
+      });
+      
+      await ffmpeg.exec([
+        '-i', 'full_audio.mp3',
+        '-ss', startTime.toString(),
+        '-t', chunkDuration.toString(),
+        '-acodec', 'copy',
+        outputFile
+      ]);
+      
+      chunkFiles.push(outputFile);
+      console.log(`[Split] ✓ Chunk ${i + 1}/${numChunks} criado`);
+    }
+    
+    return chunkFiles;
+  };
+
+  // Obter duração do áudio
+  const getAudioDuration = async (ffmpeg: FFmpeg, filename: string): Promise<number> => {
+    // Tentar ler metadata - se falhar, estimar baseado no tamanho
+    try {
+      // MP3 mono 16kHz ~16KB/s = 1MB ~62 segundos
+      const audioData = await ffmpeg.readFile(filename);
+      const sizeMB = (audioData as Uint8Array).length / (1024 * 1024);
+      const estimatedDuration = sizeMB * 62; // ~62 segundos por MB para MP3 mono 16kHz
+      console.log(`[Duration] Duração estimada: ${estimatedDuration.toFixed(0)}s para ${sizeMB.toFixed(2)}MB`);
+      return estimatedDuration;
+    } catch {
+      return 300; // Fallback: 5 minutos
+    }
+  };
+
   const transcribeVideo = async (
     videoUrl: string,
     matchId: string,
@@ -117,7 +174,7 @@ export function useWhisperTranscription() {
       
       const videoData = await withTimeout(
         fetchFile(videoUrl),
-        120000, // 2 minutos para download
+        180000, // 3 minutos para download
         'download do vídeo'
       );
       
@@ -141,87 +198,168 @@ export function useWhisperTranscription() {
           '-q:a', '4',              // Quality (0-9, lower is better)
           '-ar', '16000',           // 16kHz sample rate (good for speech)
           '-ac', '1',               // Mono (smaller file)
-          'output.mp3'
+          'full_audio.mp3'
         ]),
-        180000, // 3 minutos para extração
+        300000, // 5 minutos para extração
         'extração de áudio'
       );
       
       console.log('[Transcrição] ✓ Áudio extraído');
 
-      // Read the output
-      const audioData = await ffmpeg.readFile('output.mp3');
-      let audioBlob: Blob;
-      if (audioData instanceof Uint8Array) {
-        const buffer = new ArrayBuffer(audioData.length);
-        const view = new Uint8Array(buffer);
-        view.set(audioData);
-        audioBlob = new Blob([buffer], { type: 'audio/mpeg' });
-      } else {
-        audioBlob = new Blob([audioData], { type: 'audio/mpeg' });
-      }
-
-      const audioSizeMB = (audioBlob.size / (1024 * 1024)).toFixed(2);
-      console.log('[Transcrição] ✓ Áudio pronto:', audioSizeMB, 'MB');
-
-      // Clean up FFmpeg filesystem
+      // Clean up video file to free memory
       await ffmpeg.deleteFile('input.mp4');
-      await ffmpeg.deleteFile('output.mp3');
-      console.log('[Transcrição] ✓ Arquivos temporários limpos');
 
-      // Step 4: Upload audio to storage
-      console.log('[Transcrição] PASSO 4: Fazendo upload do áudio...');
-      setTranscriptionProgress({ stage: 'uploading', progress: 45, message: 'Enviando áudio para transcrição...' });
+      // Read the output and check size
+      const audioData = await ffmpeg.readFile('full_audio.mp3');
+      let audioBytes: Uint8Array;
+      if (audioData instanceof Uint8Array) {
+        audioBytes = audioData;
+      } else {
+        audioBytes = new Uint8Array(audioData as unknown as ArrayBuffer);
+      }
+      const audioSizeMB = audioBytes.length / (1024 * 1024);
+      console.log('[Transcrição] ✓ Áudio pronto:', audioSizeMB.toFixed(2), 'MB');
+
+      let allTranscriptions: string[] = [];
+      let mainAudioUrl = '';
+
+      // Check if we need to split
+      if (audioBytes.length > MAX_CHUNK_SIZE) {
+        console.log('[Transcrição] Áudio muito grande, dividindo em partes...');
+        
+        const duration = await getAudioDuration(ffmpeg, 'full_audio.mp3');
+        const chunkFiles = await splitAudioIntoChunks(ffmpeg, duration, audioSizeMB);
+        
+        // Transcribe each chunk
+        for (let i = 0; i < chunkFiles.length; i++) {
+          const chunkFile = chunkFiles[i];
+          setTranscriptionProgress({ 
+            stage: 'transcribing', 
+            progress: 50 + (i / chunkFiles.length) * 45, 
+            message: `Transcrevendo parte ${i + 1}/${chunkFiles.length}...` 
+          });
+          
+          // Read and upload chunk
+          const chunkData = await ffmpeg.readFile(chunkFile);
+          let chunkBytes: Uint8Array;
+          if (chunkData instanceof Uint8Array) {
+            chunkBytes = chunkData;
+          } else {
+            chunkBytes = new Uint8Array(chunkData as unknown as ArrayBuffer);
+          }
+          const chunkBlob = new Blob([new Uint8Array(chunkBytes).buffer.slice(0)], { type: 'audio/mpeg' });
+          
+          const chunkPath = `${matchId}/${videoId}_chunk_${i}.mp3`;
+          await supabase.storage
+            .from('generated-audio')
+            .upload(chunkPath, chunkBlob, {
+              contentType: 'audio/mpeg',
+              upsert: true
+            });
+          
+          const { data: urlData } = supabase.storage
+            .from('generated-audio')
+            .getPublicUrl(chunkPath);
+          
+          if (i === 0) mainAudioUrl = urlData.publicUrl;
+          
+          // Transcribe chunk
+          console.log(`[Transcrição] Transcrevendo chunk ${i + 1}/${chunkFiles.length}...`);
+          const { data, error } = await withTimeout(
+            supabase.functions.invoke('transcribe-audio-whisper', {
+              body: { audioUrl: urlData.publicUrl }
+            }),
+            300000,
+            `transcrição chunk ${i + 1}`
+          );
+          
+          if (error) {
+            console.error(`Erro no chunk ${i + 1}:`, error);
+            // Continue com outros chunks mesmo se um falhar
+          } else if (data?.text) {
+            allTranscriptions.push(data.text);
+            console.log(`[Transcrição] ✓ Chunk ${i + 1} transcrito: ${data.text.length} caracteres`);
+          }
+          
+          // Cleanup chunk
+          await ffmpeg.deleteFile(chunkFile);
+        }
+        
+        // Cleanup full audio
+        await ffmpeg.deleteFile('full_audio.mp3');
+        
+      } else {
+        // Single file transcription
+        console.log('[Transcrição] Áudio dentro do limite, transcrevendo arquivo único...');
+        
+        const audioBlob = new Blob([new Uint8Array(audioBytes).buffer.slice(0)], { type: 'audio/mpeg' });
+
+        // Step 4: Upload audio to storage
+        console.log('[Transcrição] PASSO 4: Fazendo upload do áudio...');
+        setTranscriptionProgress({ stage: 'uploading', progress: 45, message: 'Enviando áudio para transcrição...' });
+        
+        const filePath = `${matchId}/${videoId}_whisper.mp3`;
+        const { error: uploadError } = await supabase.storage
+          .from('generated-audio')
+          .upload(filePath, audioBlob, {
+            contentType: 'audio/mpeg',
+            upsert: true
+          });
+
+        if (uploadError) {
+          throw new Error(`Erro ao fazer upload do áudio: ${uploadError.message}`);
+        }
+        console.log('[Transcrição] ✓ Áudio uploaded');
+
+        const { data: urlData } = supabase.storage
+          .from('generated-audio')
+          .getPublicUrl(filePath);
+
+        mainAudioUrl = urlData.publicUrl;
+        console.log('[Transcrição] URL do áudio:', mainAudioUrl);
+
+        // Step 5: Transcribe with Whisper via edge function
+        console.log('[Transcrição] PASSO 5: Enviando para Whisper API...');
+        setTranscriptionProgress({ stage: 'transcribing', progress: 55, message: 'Transcrevendo com Whisper API...' });
+
+        const { data, error } = await withTimeout(
+          supabase.functions.invoke('transcribe-audio-whisper', {
+            body: { audioUrl: mainAudioUrl }
+          }),
+          300000, // 5 minutos para transcrição
+          'transcrição Whisper'
+        );
+
+        if (error) {
+          throw new Error(`Erro na transcrição: ${error.message}`);
+        }
+
+        if (!data?.success) {
+          throw new Error(data?.error || 'Erro desconhecido na transcrição');
+        }
+
+        allTranscriptions.push(data.text);
+        
+        // Cleanup
+        await ffmpeg.deleteFile('full_audio.mp3');
+      }
+
+      // Combine all transcriptions
+      const fullText = allTranscriptions.join('\n\n');
       
-      const filePath = `${matchId}/${videoId}_whisper.mp3`;
-      const { error: uploadError } = await supabase.storage
-        .from('generated-audio')
-        .upload(filePath, audioBlob, {
-          contentType: 'audio/mpeg',
-          upsert: true
-        });
-
-      if (uploadError) {
-        throw new Error(`Erro ao fazer upload do áudio: ${uploadError.message}`);
-      }
-      console.log('[Transcrição] ✓ Áudio uploaded');
-
-      const { data: urlData } = supabase.storage
-        .from('generated-audio')
-        .getPublicUrl(filePath);
-
-      const audioUrl = urlData.publicUrl;
-      console.log('[Transcrição] URL do áudio:', audioUrl);
-
-      // Step 5: Transcribe with Whisper via edge function
-      console.log('[Transcrição] PASSO 5: Enviando para Whisper API...');
-      setTranscriptionProgress({ stage: 'transcribing', progress: 55, message: 'Transcrevendo com Whisper API (isso pode levar alguns minutos)...' });
-
-      const { data, error } = await withTimeout(
-        supabase.functions.invoke('transcribe-audio-whisper', {
-          body: { audioUrl }
-        }),
-        300000, // 5 minutos para transcrição
-        'transcrição Whisper'
-      );
-
-      if (error) {
-        throw new Error(`Erro na transcrição: ${error.message}`);
-      }
-
-      if (!data?.success) {
-        throw new Error(data?.error || 'Erro desconhecido na transcrição');
+      if (!fullText || fullText.trim().length === 0) {
+        throw new Error('Transcrição retornou vazia. Verifique se o vídeo contém áudio audível.');
       }
 
       console.log('[Transcrição] ✓ Transcrição completa!');
-      console.log('[Transcrição] Texto:', data.text?.length || 0, 'caracteres');
+      console.log('[Transcrição] Texto total:', fullText.length, 'caracteres');
       
       setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });
 
       return {
-        srtContent: data.srtContent,
-        text: data.text,
-        audioUrl
+        srtContent: '', // SRT não é gerado com chunks
+        text: fullText,
+        audioUrl: mainAudioUrl
       };
 
     } catch (error) {
