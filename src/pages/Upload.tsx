@@ -547,66 +547,83 @@ export default function VideoUpload() {
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcriptionProgress, setTranscriptionProgress] = useState('');
 
-  // Transcribe video/embed using Whisper API with FFmpeg audio extraction
+  // Transcribe video/embed using Whisper API with FFmpeg audio extraction - WITH RETRIES
   const transcribeWithWhisper = async (segment: VideoSegment, matchId: string): Promise<string | null> => {
-    try {
-      console.log('Iniciando transcrição Whisper para:', segment.name);
-      
-      // For uploaded MP4 files, use FFmpeg extraction (proper flow)
-      if (!segment.isLink && segment.url) {
-        setTranscriptionProgress(`Extraindo áudio de ${segment.name}...`);
+    const MAX_RETRIES = 2;
+    
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        console.log(`[Tentativa ${attempt}/${MAX_RETRIES}] Iniciando transcrição Whisper para: ${segment.name}`);
         
-        // Generate a unique videoId for the audio file
-        const videoId = segment.id || crypto.randomUUID();
-        
-        // Use FFmpeg to extract audio, upload, and transcribe
-        const result = await transcribeVideo(segment.url, matchId, videoId);
-        
-        if (result?.text) {
-          console.log('Transcrição FFmpeg completa:', result.text.length, 'caracteres');
-          return result.text;
+        // For uploaded MP4 files, use FFmpeg extraction (proper flow)
+        if (!segment.isLink && segment.url) {
+          setTranscriptionProgress(`[${attempt}/${MAX_RETRIES}] Extraindo áudio de ${segment.name}...`);
+          
+          // Generate a unique videoId for the audio file
+          const videoId = segment.id || crypto.randomUUID();
+          
+          // Use FFmpeg to extract audio, upload, and transcribe
+          const result = await transcribeVideo(segment.url, matchId, videoId);
+          
+          if (result?.text) {
+            console.log('Transcrição FFmpeg completa:', result.text.length, 'caracteres');
+            return result.text;
+          }
+          
+          console.log('FFmpeg transcription failed, trying direct URL...');
         }
         
-        console.log('FFmpeg transcription failed, trying direct URL...');
+        // Fallback: For embeds or if FFmpeg fails, try direct URL
+        setTranscriptionProgress(`[${attempt}/${MAX_RETRIES}] Transcrevendo ${segment.name}...`);
+        
+        let requestBody: { audioUrl?: string; videoUrl?: string; embedUrl?: string } = {};
+        
+        if (segment.isLink) {
+          // For embeds, send the embed URL
+          requestBody = { embedUrl: segment.url };
+        } else if (segment.url) {
+          // For uploaded MP4s as fallback
+          requestBody = { audioUrl: segment.url };
+        }
+        
+        if (!requestBody.audioUrl && !requestBody.embedUrl) {
+          console.log('Segmento sem URL válida para transcrição');
+          return null;
+        }
+        
+        const { data, error } = await supabase.functions.invoke('transcribe-audio-whisper', {
+          body: requestBody
+        });
+        
+        if (error) {
+          console.error(`[Tentativa ${attempt}] Erro na transcrição Whisper:`, error);
+          if (attempt < MAX_RETRIES) {
+            console.log('Tentando novamente...');
+            continue;
+          }
+          throw error;
+        }
+        
+        if (!data?.success) {
+          if (attempt < MAX_RETRIES) {
+            console.log('Tentando novamente...');
+            continue;
+          }
+          throw new Error(data?.error || 'Falha na transcrição');
+        }
+        
+        console.log('Transcrição completa:', data.text?.length || 0, 'caracteres');
+        return data.text || data.srtContent || '';
+      } catch (error) {
+        console.error(`[Tentativa ${attempt}] Erro ao transcrever:`, error);
+        if (attempt === MAX_RETRIES) {
+          console.log('Todas as tentativas de transcrição falharam');
+          return null;
+        }
       }
-      
-      // Fallback: For embeds or if FFmpeg fails, try direct URL
-      setTranscriptionProgress(`Transcrevendo ${segment.name}...`);
-      
-      let requestBody: { audioUrl?: string; videoUrl?: string; embedUrl?: string } = {};
-      
-      if (segment.isLink) {
-        // For embeds, send the embed URL
-        requestBody = { embedUrl: segment.url };
-      } else if (segment.url) {
-        // For uploaded MP4s as fallback
-        requestBody = { audioUrl: segment.url };
-      }
-      
-      if (!requestBody.audioUrl && !requestBody.embedUrl) {
-        console.log('Segmento sem URL válida para transcrição');
-        return null;
-      }
-      
-      const { data, error } = await supabase.functions.invoke('transcribe-audio-whisper', {
-        body: requestBody
-      });
-      
-      if (error) {
-        console.error('Erro na transcrição Whisper:', error);
-        throw error;
-      }
-      
-      if (!data?.success) {
-        throw new Error(data?.error || 'Falha na transcrição');
-      }
-      
-      console.log('Transcrição completa:', data.text?.length || 0, 'caracteres');
-      return data.text || data.srtContent || '';
-    } catch (error) {
-      console.error('Erro ao transcrever:', error);
-      return null;
     }
+    
+    return null;
   };
 
   const handleStartAnalysis = async () => {
@@ -780,57 +797,88 @@ export default function VideoUpload() {
       // Check if we have any transcription after auto-transcription
       const hasTranscription = firstHalfTranscription || secondHalfTranscription;
       
+      // WARNING: Continue even without transcription - analysis will be limited
       if (!hasTranscription) {
+        console.log('⚠️ Sem transcrição disponível - partida será criada mas sem análise de eventos');
         toast({
-          title: "Transcrição necessária",
-          description: "Não foi possível obter transcrição automática. Por favor, adicione um arquivo SRT/VTT.",
-          variant: "destructive"
+          title: "⚠️ Sem transcrição disponível",
+          description: "A partida foi criada. Para detectar eventos, reimporte com arquivo de vídeo MP4 ou adicione SRT.",
+          variant: "default"
         });
+        
+        // Redirect to match anyway - user can add videos/transcription later
+        setTimeout(() => {
+          navigate(`/events?match=${matchId}`);
+        }, 1500);
         return;
       }
+
+      let totalEventsDetected = 0;
 
       // Analyze first half if has transcription
       if (firstHalfTranscription) {
         console.log('Iniciando análise do 1º Tempo...');
         
-        const result = await startAnalysis({
-          matchId,
-          transcription: firstHalfTranscription,
-          homeTeam: homeTeamName,
-          awayTeam: awayTeamName,
-          gameStartMinute: 0,
-          gameEndMinute: 45,
-        });
-        
-        toast({
-          title: "1º Tempo analisado",
-          description: `${result.eventsDetected} eventos detectados`,
-        });
+        try {
+          const result = await startAnalysis({
+            matchId,
+            transcription: firstHalfTranscription,
+            homeTeam: homeTeamName,
+            awayTeam: awayTeamName,
+            gameStartMinute: 0,
+            gameEndMinute: 45,
+          });
+          
+          totalEventsDetected += result.eventsDetected || 0;
+          toast({
+            title: "1º Tempo analisado",
+            description: `${result.eventsDetected} eventos detectados`,
+          });
+        } catch (error) {
+          console.error('Erro na análise do 1º tempo:', error);
+          toast({
+            title: "⚠️ Erro no 1º Tempo",
+            description: "Análise parcial - continuando com 2º tempo...",
+            variant: "destructive",
+          });
+        }
       }
 
       // Analyze second half if has transcription
       if (secondHalfTranscription) {
         console.log('Iniciando análise do 2º Tempo...');
         
-        const result = await startAnalysis({
-          matchId,
-          transcription: secondHalfTranscription,
-          homeTeam: homeTeamName,
-          awayTeam: awayTeamName,
-          gameStartMinute: 45,
-          gameEndMinute: 90,
-        });
-        
-        toast({
-          title: "2º Tempo analisado",
-          description: `${result.eventsDetected} eventos detectados`,
-        });
+        try {
+          const result = await startAnalysis({
+            matchId,
+            transcription: secondHalfTranscription,
+            homeTeam: homeTeamName,
+            awayTeam: awayTeamName,
+            gameStartMinute: 45,
+            gameEndMinute: 90,
+          });
+          
+          totalEventsDetected += result.eventsDetected || 0;
+          toast({
+            title: "2º Tempo analisado",
+            description: `${result.eventsDetected} eventos detectados`,
+          });
+        } catch (error) {
+          console.error('Erro na análise do 2º tempo:', error);
+          toast({
+            title: "⚠️ Erro no 2º Tempo",
+            description: "Análise parcial concluída",
+            variant: "destructive",
+          });
+        }
       }
 
       // Success - redirect to events
       toast({
-        title: "Análise completa!",
-        description: "Redirecionando para os eventos...",
+        title: totalEventsDetected > 0 ? "Análise completa!" : "Partida criada",
+        description: totalEventsDetected > 0 
+          ? `${totalEventsDetected} eventos detectados. Redirecionando...`
+          : "Redirecionando para os eventos...",
       });
 
       setTimeout(() => {
