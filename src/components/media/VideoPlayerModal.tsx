@@ -58,17 +58,31 @@ export function VideoPlayerModal({
 
   const hasDirectClip = !!clip?.clipUrl;
 
-  // Check if we have video metadata for timestamp calculation
-  const hasVideoMetadata = matchVideo && (
-    matchVideo.duration_seconds || 
-    (matchVideo.end_minute && matchVideo.end_minute > 0)
-  );
-
   // Get video duration for validation
   const getVideoDuration = useCallback(() => {
     if (!matchVideo) return 90 * 60; // Default 90 minutes
     return matchVideo.duration_seconds ?? ((matchVideo.end_minute ?? 90) - (matchVideo.start_minute ?? 0)) * 60;
   }, [matchVideo]);
+
+  // Check if event timestamp is outside video range - should use clip if available
+  const isTimestampOutOfRange = useCallback(() => {
+    if (!clip || hasDirectClip) return false;
+    const videoDuration = getVideoDuration();
+    const videoStart = matchVideo?.start_minute ?? 0;
+    const videoEndMinute = videoStart + (videoDuration / 60);
+    
+    // If event minute is outside video coverage, timestamp is out of range
+    if (clip.minute < videoStart || clip.minute > videoEndMinute) {
+      return true;
+    }
+    
+    // If we have videoSecond and it exceeds duration
+    if (clip.videoSecond !== undefined && clip.videoSecond > videoDuration) {
+      return true;
+    }
+    
+    return false;
+  }, [clip, hasDirectClip, getVideoDuration, matchVideo?.start_minute]);
 
   // Calculate initial timestamp - handle mismatch between event times and video duration
   // Priority: videoSecond (calculated from offset) > eventMs > totalSeconds > minute+second
