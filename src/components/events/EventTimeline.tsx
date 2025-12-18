@@ -5,6 +5,7 @@ import { cn } from '@/lib/utils';
 import { TeamBadge } from '@/components/teams/TeamBadge';
 import { Star, Pencil, Play } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
+import { getEventTeam, getEventTimeMs, formatEventTime } from '@/lib/eventHelpers';
 
 interface EventTimelineProps {
   events: MatchEvent[];
@@ -73,50 +74,29 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
   const { isAdmin } = useAuth();
 
   const getTeam = (event: MatchEvent) => {
-    // Try to get team from metadata first
-    const metadata = event.metadata as { team?: string; teamName?: string } | null;
-    
-    if (metadata?.team === 'home' && homeTeam) return homeTeam;
-    if (metadata?.team === 'away' && awayTeam) return awayTeam;
-    if (metadata?.teamName === homeTeam?.name && homeTeam) return homeTeam;
-    if (metadata?.teamName === awayTeam?.name && awayTeam) return awayTeam;
-    
-    // Fallback to teamId matching
-    if (event.teamId === homeTeam?.id) return homeTeam;
-    if (event.teamId === awayTeam?.id) return awayTeam;
-    
-    return null;
+    const { team } = getEventTeam(
+      { metadata: event.metadata as any, event_type: event.type },
+      homeTeam ? { id: homeTeam.id, name: homeTeam.name, short_name: 'short_name' in homeTeam ? homeTeam.short_name : ('shortName' in homeTeam ? homeTeam.shortName : null), logo_url: 'logo_url' in homeTeam ? homeTeam.logo_url : ('logo' in homeTeam ? homeTeam.logo : null), primary_color: 'primary_color' in homeTeam ? homeTeam.primary_color : ('primaryColor' in homeTeam ? homeTeam.primaryColor : null) } : null,
+      awayTeam ? { id: awayTeam.id, name: awayTeam.name, short_name: 'short_name' in awayTeam ? awayTeam.short_name : ('shortName' in awayTeam ? awayTeam.shortName : null), logo_url: 'logo_url' in awayTeam ? awayTeam.logo_url : ('logo' in awayTeam ? awayTeam.logo : null), primary_color: 'primary_color' in awayTeam ? awayTeam.primary_color : ('primaryColor' in awayTeam ? awayTeam.primaryColor : null) } : null
+    );
+    return team;
   };
 
   const isHighlightEvent = (eventType: string) => {
     return highlightEventTypes.includes(eventType);
   };
 
-  // Get event time from metadata.eventMs (milliseconds) as primary source
-  const getEventTimeMs = (event: MatchEvent): number => {
-    const metadata = event.metadata as { eventMs?: number; videoSecond?: number } | null;
-    
-    // Priority: eventMs (ms) > videoSecond (s) > minute+second
-    if (metadata?.eventMs !== undefined) {
-      return metadata.eventMs;
-    }
-    if (metadata?.videoSecond !== undefined) {
-      return metadata.videoSecond * 1000;
-    }
-    return ((event.minute || 0) * 60 + (event.second || 0)) * 1000;
-  };
-
-  // Format time from milliseconds to MM:SS display
-  const formatEventTime = (event: MatchEvent) => {
-    const totalMs = getEventTimeMs(event);
-    const totalSeconds = Math.floor(totalMs / 1000);
-    const displayMinutes = Math.floor(totalSeconds / 60);
-    const displaySeconds = totalSeconds % 60;
+  // Format time from event for display
+  const formatEventTimeDisplay = (event: MatchEvent) => {
+    const totalMs = getEventTimeMs({ 
+      minute: event.minute, 
+      second: event.second, 
+      metadata: event.metadata as any 
+    });
     return {
-      minutes: displayMinutes.toString().padStart(2, '0'),
-      seconds: displaySeconds.toString().padStart(2, '0'),
+      formatted: formatEventTime(totalMs),
       totalMs,
-      totalSeconds
+      totalSeconds: Math.floor(totalMs / 1000)
     };
   };
 
@@ -125,7 +105,7 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
       {events.map((event, index) => {
         const team = getTeam(event);
         const isHighlight = isHighlightEvent(event.type);
-        const timeDisplay = formatEventTime(event);
+        const timeDisplay = formatEventTimeDisplay(event);
 
         return (
           <div 
@@ -151,12 +131,11 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
               </Button>
             )}
 
-            {/* Time */}
             <div className="flex w-14 flex-col items-center">
               <span className={cn(
                 "text-base font-bold font-mono",
                 isHighlight ? "text-yellow-500" : "text-primary"
-              )}>{timeDisplay.minutes}:{timeDisplay.seconds}</span>
+              )}>{timeDisplay.formatted}</span>
             </div>
 
             {/* Line */}
@@ -186,9 +165,9 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
                   </Badge>
                   {team && (
                     <div className="flex items-center gap-1.5">
-                      <TeamBadge team={team} size="xs" />
+                      <TeamBadge team={team as any} size="xs" />
                       <span className="text-xs font-medium text-muted-foreground">
-                        {'short_name' in team ? team.short_name : 'shortName' in team ? team.shortName : team.name}
+                        {team.short_name || team.name}
                       </span>
                     </div>
                   )}

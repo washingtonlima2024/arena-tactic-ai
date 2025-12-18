@@ -73,19 +73,5 @@ export function useCreateMatch() {
   });
 }
 
-export function useMatchEvents(matchId: string) {
-  return useQuery({
-    queryKey: ['match-events', matchId],
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from('match_events')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('minute', { ascending: true });
-
-      if (error) throw error;
-      return data;
-    },
-    enabled: !!matchId,
-  });
-}
+// useMatchEvents foi movido para useMatchDetails.ts para evitar duplicação
+// Use: import { useMatchEvents } from '@/hooks/useMatchDetails';
