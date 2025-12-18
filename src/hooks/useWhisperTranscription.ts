@@ -328,7 +328,7 @@ export function useWhisperTranscription() {
     setTranscriptionProgress({ 
       stage: 'transcribing', 
       progress: 30, 
-      message: 'Transcrevendo no servidor (processamento em partes)...' 
+      message: 'Transcrevendo no servidor...' 
     });
 
     const { data, error } = await supabase.functions.invoke('transcribe-large-video', {
@@ -340,16 +340,21 @@ export function useWhisperTranscription() {
       throw new Error(error.message || 'Erro na transcrição server-side');
     }
 
+    // Handle video too large response
+    if (data?.requiresSrtUpload) {
+      console.log('[Server Fallback] Vídeo muito grande, requer upload de SRT');
+      throw new Error(data.error || `Vídeo muito grande (${data.videoSizeMB}MB). Faça upload de um arquivo SRT.`);
+    }
+
     if (!data?.success) {
       throw new Error(data?.error || 'Erro desconhecido na transcrição');
     }
 
-    console.log('[Server Fallback] ✓ Transcrição completa:', data.text?.length, 'caracteres');
-    console.log('[Server Fallback] Método:', data.method, '- Partes:', data.parts);
+    console.log('[Server Fallback] ✓ Transcrição completa:', data.text?.length || data.srtContent?.length, 'caracteres');
     
     return {
-      srtContent: '',
-      text: data.text,
+      srtContent: data.srtContent || '',
+      text: data.text || data.srtContent || '',
       audioUrl: ''
     };
   };
