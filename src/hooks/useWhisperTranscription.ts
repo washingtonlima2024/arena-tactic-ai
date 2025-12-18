@@ -199,7 +199,18 @@ export function useWhisperTranscription() {
 
     if (error) {
       console.error('[Google Fallback] Erro:', error);
-      throw new Error(`Erro no Google Speech: ${error.message}`);
+      // Tentar extrair mensagem de erro do contexto ou data
+      const errorContext = (error as any).context;
+      let errorMessage = error.message;
+      
+      // Se temos data com erro, usar essa mensagem
+      if (data?.error) {
+        errorMessage = data.error;
+      } else if (errorContext?.error) {
+        errorMessage = errorContext.error;
+      }
+      
+      throw new Error(errorMessage);
     }
 
     if (!data?.success) {
