@@ -47,15 +47,31 @@ serve(async (req) => {
     console.log('Período:', matchHalf === 'first' ? '1º Tempo' : '2º Tempo');
     console.log('Transcrição:', transcription.length, 'caracteres');
 
-    const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
-    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
-    const supabase = createClient(supabaseUrl, supabaseKey);
-
+    // ═══════════════════════════════════════════════════════════════
+    // CREDENTIAL VERIFICATION
+    // ═══════════════════════════════════════════════════════════════
+    const supabaseUrl = Deno.env.get('SUPABASE_URL');
+    const supabaseKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY');
     const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+
+    console.log('[DEBUG] ========================================');
+    console.log('[DEBUG] VERIFICAÇÃO DE CREDENCIAIS');
+    console.log('[DEBUG] SUPABASE_URL existe:', !!supabaseUrl);
+    console.log('[DEBUG] SUPABASE_URL valor:', supabaseUrl?.substring(0, 30) + '...');
+    console.log('[DEBUG] SERVICE_ROLE_KEY existe:', !!supabaseKey);
+    console.log('[DEBUG] SERVICE_ROLE_KEY tamanho:', supabaseKey?.length || 0);
+    console.log('[DEBUG] LOVABLE_API_KEY existe:', !!LOVABLE_API_KEY);
+    console.log('[DEBUG] ========================================');
+
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('Credenciais Supabase não configuradas! URL=' + !!supabaseUrl + ' KEY=' + !!supabaseKey);
+    }
     
     if (!LOVABLE_API_KEY) {
       throw new Error('LOVABLE_API_KEY not configured');
     }
+
+    const supabase = createClient(supabaseUrl, supabaseKey);
 
     // IMPROVED: System prompt with Few-Shot Learning examples
     const systemPrompt = `Você é um ANALISTA ESPECIALIZADO em futebol brasileiro que assiste milhares de jogos.
@@ -342,15 +358,52 @@ IMPORTANTE:
     });
 
     if (eventsToInsert.length > 0) {
-      const { error: insertError } = await supabase
+      console.log('[DEBUG] ========================================');
+      console.log('[DEBUG] INSERINDO EVENTOS NO BANCO');
+      console.log('[DEBUG] Quantidade a inserir:', eventsToInsert.length);
+      console.log('[DEBUG] Match ID:', matchId);
+      console.log('[DEBUG] Primeiro evento:', JSON.stringify(eventsToInsert[0]));
+      
+      const { data: insertedData, error: insertError } = await supabase
         .from('match_events')
-        .insert(eventsToInsert);
+        .insert(eventsToInsert)
+        .select();
+
+      console.log('[DEBUG] INSERT response - data:', JSON.stringify(insertedData));
+      console.log('[DEBUG] INSERT response - error:', JSON.stringify(insertError));
+      console.log('[DEBUG] INSERT retornou dados?:', insertedData !== null);
+      console.log('[DEBUG] INSERT quantidade retornada:', insertedData?.length || 0);
 
       if (insertError) {
-        console.error('Insert events error:', insertError);
+        console.error('[ERRO] Insert events error:', JSON.stringify(insertError));
+        console.error('[ERRO] Error code:', insertError.code);
+        console.error('[ERRO] Error message:', insertError.message);
+        console.error('[ERRO] Error details:', insertError.details);
       } else {
-        console.log('✓ Eventos inseridos:', eventsToInsert.length);
+        console.log('✓ Eventos inseridos com sucesso:', insertedData?.length || 0);
       }
+
+      // VERIFICAÇÃO: Query para confirmar que dados foram realmente salvos
+      console.log('[DEBUG] ========================================');
+      console.log('[DEBUG] VERIFICANDO PERSISTÊNCIA DOS EVENTOS');
+      const { data: verifyData, error: verifyError } = await supabase
+        .from('match_events')
+        .select('id, event_type, minute, description')
+        .eq('match_id', matchId);
+
+      console.log('[DEBUG] VERIFY query - error:', JSON.stringify(verifyError));
+      console.log('[DEBUG] VERIFY eventos no banco:', verifyData?.length || 0);
+      
+      if (verifyData && verifyData.length > 0) {
+        console.log('[DEBUG] VERIFY primeiro evento:', JSON.stringify(verifyData[0]));
+        console.log('[DEBUG] ✓ CONFIRMADO: Eventos persistidos no banco!');
+      } else {
+        console.error('[ERRO] ✗ FALHA: Nenhum evento encontrado no banco após insert!');
+        console.error('[ERRO] Isso indica que o INSERT não persistiu os dados');
+      }
+      console.log('[DEBUG] ========================================');
+    } else {
+      console.log('[DEBUG] Nenhum evento para inserir');
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -392,20 +445,65 @@ IMPORTANTE:
       console.log('  Total:', newHomeScore, 'x', newAwayScore);
     }
 
-    const { error: updateError } = await supabase
+    console.log('[DEBUG] ========================================');
+    console.log('[DEBUG] ATUALIZANDO PLACAR DO MATCH');
+    console.log('[DEBUG] Match ID:', matchId);
+    console.log('[DEBUG] Novo placar:', newHomeScore, 'x', newAwayScore);
+    console.log('[DEBUG] Novo status: completed');
+
+    const { data: updateData, error: updateError } = await supabase
       .from('matches')
       .update({
         home_score: newHomeScore,
         away_score: newAwayScore,
         status: 'completed'
       })
-      .eq('id', matchId);
+      .eq('id', matchId)
+      .select();
+
+    console.log('[DEBUG] UPDATE response - data:', JSON.stringify(updateData));
+    console.log('[DEBUG] UPDATE response - error:', JSON.stringify(updateError));
+    console.log('[DEBUG] UPDATE retornou dados?:', updateData !== null);
+    console.log('[DEBUG] UPDATE quantidade retornada:', updateData?.length || 0);
 
     if (updateError) {
-      console.error('Update match error:', updateError);
+      console.error('[ERRO] Update match error:', JSON.stringify(updateError));
+      console.error('[ERRO] Error code:', updateError.code);
+      console.error('[ERRO] Error message:', updateError.message);
     } else {
-      console.log('✓ Placar final atualizado:', newHomeScore, 'x', newAwayScore);
+      console.log('✓ Placar atualizado com sucesso');
     }
+
+    // VERIFICAÇÃO: Query para confirmar que o match foi realmente atualizado
+    console.log('[DEBUG] ========================================');
+    console.log('[DEBUG] VERIFICANDO PERSISTÊNCIA DO MATCH');
+    const { data: verifyMatch, error: verifyMatchError } = await supabase
+      .from('matches')
+      .select('id, home_score, away_score, status')
+      .eq('id', matchId)
+      .single();
+
+    console.log('[DEBUG] VERIFY match - error:', JSON.stringify(verifyMatchError));
+    console.log('[DEBUG] VERIFY match data:', JSON.stringify(verifyMatch));
+    
+    if (verifyMatch) {
+      const matchOk = verifyMatch.home_score === newHomeScore && 
+                      verifyMatch.away_score === newAwayScore && 
+                      verifyMatch.status === 'completed';
+      if (matchOk) {
+        console.log('[DEBUG] ✓ CONFIRMADO: Match atualizado corretamente!');
+        console.log('[DEBUG]   home_score:', verifyMatch.home_score);
+        console.log('[DEBUG]   away_score:', verifyMatch.away_score);
+        console.log('[DEBUG]   status:', verifyMatch.status);
+      } else {
+        console.error('[ERRO] ✗ FALHA: Match não foi atualizado corretamente!');
+        console.error('[ERRO]   Esperado: home_score=' + newHomeScore + ', away_score=' + newAwayScore + ', status=completed');
+        console.error('[ERRO]   Atual: home_score=' + verifyMatch.home_score + ', away_score=' + verifyMatch.away_score + ', status=' + verifyMatch.status);
+      }
+    } else {
+      console.error('[ERRO] ✗ FALHA: Match não encontrado após update!');
+    }
+    console.log('[DEBUG] ========================================');
 
     console.log('=== ANÁLISE PRO COMPLETA ===');
 
