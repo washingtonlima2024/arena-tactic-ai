@@ -6,7 +6,7 @@ const corsHeaders = {
 };
 
 const MAX_WHISPER_SIZE = 24 * 1024 * 1024; // 24MB (Whisper limit is 25MB)
-const MAX_GEMINI_SIZE = 200 * 1024 * 1024; // 200MB for Gemini
+const MAX_GEMINI_SIZE = 35 * 1024 * 1024; // 35MB - limite conservador para evitar CPU timeout
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -29,13 +29,13 @@ serve(async (req) => {
     
     console.log('[Transcribe] Tamanho:', fileSizeMB, 'MB');
 
-    // Check absolute maximum
+    // Check absolute maximum - lowered to avoid CPU timeout on edge functions
     if (fileSizeBytes > MAX_GEMINI_SIZE) {
-      console.log('[Transcribe] Arquivo muito grande mesmo para Gemini');
+      console.log('[Transcribe] Arquivo muito grande para transcrição automática:', fileSizeMB, 'MB');
       return new Response(
         JSON.stringify({
           success: false,
-          error: `Arquivo muito grande (${fileSizeMB}MB). Máximo: 200MB. Por favor, importe um arquivo SRT manualmente.`,
+          error: `Arquivo muito grande para transcrição automática (${fileSizeMB}MB). Máximo: 35MB. Por favor, importe um arquivo SRT manualmente ou use um vídeo menor.`,
           method: 'error'
         }),
         { 
