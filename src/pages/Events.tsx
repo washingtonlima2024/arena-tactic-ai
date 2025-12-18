@@ -401,9 +401,12 @@ export default function Events() {
     const videoDuration = eventVideo?.duration_seconds;
     const eventVideoSecond = event.metadata?.videoSecond;
     
+    // If event timestamp exceeds video duration, show warning and play from start
     if (videoDuration && eventVideoSecond && eventVideoSecond > videoDuration) {
-      toast.error(`Evento fora do range do vídeo (${Math.round(videoDuration)}s). O vídeo não contém este momento.`);
-      return;
+      console.warn(`Evento (${eventVideoSecond}s) excede duração do vídeo (${videoDuration}s). Iniciando do início.`);
+      toast.info(`Timestamp do evento (${Math.round(eventVideoSecond)}s) excede o vídeo (${Math.round(videoDuration)}s). Iniciando do início.`);
+      // Override videoSecond to start from beginning
+      event = { ...event, metadata: { ...event.metadata, videoSecond: 0 } };
     }
     
     console.log('Opening video for event:', {
