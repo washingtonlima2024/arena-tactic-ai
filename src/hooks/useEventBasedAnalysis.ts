@@ -106,13 +106,26 @@ export function useEventBasedAnalysis(
       
       switch (event.event_type) {
         case 'goal':
-          if (stats) stats.goals++;
-          keyMoments.push({
-            timestamp,
-            type: 'goal',
-            description: event.description || `Gol aos ${minute}'`,
-            player
-          });
+          const isOwnGoal = (event.metadata as { isOwnGoal?: boolean })?.isOwnGoal === true;
+          if (isOwnGoal) {
+            // Gol contra: credita ao time ADVERSÁRIO
+            const opposingStats = team === 'home' ? awayStats : team === 'away' ? homeStats : null;
+            if (opposingStats) opposingStats.goals++;
+            keyMoments.push({
+              timestamp,
+              type: 'ownGoal',
+              description: event.description || `Gol contra aos ${minute}'`,
+              player
+            });
+          } else {
+            if (stats) stats.goals++;
+            keyMoments.push({
+              timestamp,
+              type: 'goal',
+              description: event.description || `Gol aos ${minute}'`,
+              player
+            });
+          }
           break;
         case 'shot':
         case 'shot_on_target':
@@ -193,8 +206,10 @@ export function useEventBasedAnalysis(
     // Estimate possession based on events distribution
     const homeEvents = events.filter(e => getEventTeam(e) === 'home').length;
     const awayEvents = events.filter(e => getEventTeam(e) === 'away').length;
-    const totalEvents = homeEvents + awayEvents || 1;
-    const homePossession = Math.round((homeEvents / totalEvents) * 100);
+    const totalEvents = homeEvents + awayEvents;
+    
+    // Com menos de 10 eventos, posse não é confiável - usar 50/50
+    const homePossession = totalEvents < 10 ? 50 : Math.round((homeEvents / totalEvents) * 100);
     const awayPossession = 100 - homePossession;
     
     // Generate insights based on events
@@ -272,8 +287,9 @@ export function useEventBasedAnalysis(
     }
     
     matchSummary += `A partida teve ${events.length} evento(s) registrado(s)`;
-    if (keyMoments.filter(k => k.type === 'goal').length > 0) {
-      matchSummary += `, incluindo ${keyMoments.filter(k => k.type === 'goal').length} gol(s)`;
+    const goalCount = keyMoments.filter(k => k.type === 'goal' || k.type === 'ownGoal').length;
+    if (goalCount > 0) {
+      matchSummary += `, incluindo ${goalCount} gol(s)`;
     }
     matchSummary += `. `;
     
@@ -281,14 +297,18 @@ export function useEventBasedAnalysis(
       matchSummary += `Foram ${homeStats.shots + awayStats.shots} finalização(ões) ao gol. `;
     }
     
-    // Generate tactical overview
+    // Generate tactical overview - só mencionar posse se houver eventos suficientes
     let tacticalOverview = '';
-    if (homePossession > 55) {
-      tacticalOverview = `${homeName} dominou a posse de bola estimada em ${homePossession}%. `;
-    } else if (awayPossession > 55) {
-      tacticalOverview = `${awayName} controlou o jogo com ${awayPossession}% de posse estimada. `;
+    if (totalEvents >= 10) {
+      if (homePossession > 55) {
+        tacticalOverview = `${homeName} dominou a posse de bola estimada em ${homePossession}%. `;
+      } else if (awayPossession > 55) {
+        tacticalOverview = `${awayName} controlou o jogo com ${awayPossession}% de posse estimada. `;
+      } else {
+        tacticalOverview = `Partida equilibrada com posse dividida entre as equipes. `;
+      }
     } else {
-      tacticalOverview = `Partida equilibrada com posse dividida entre as equipes. `;
+      tacticalOverview = `Análise baseada em ${events.length} evento(s) detectado(s). `;
     }
     
     if (patterns.length > 0) {
