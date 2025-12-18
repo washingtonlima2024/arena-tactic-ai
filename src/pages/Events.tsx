@@ -69,6 +69,7 @@ interface EventRowProps {
   handleEditClick: (e: React.MouseEvent, event: any) => void;
   homeTeam?: any;
   awayTeam?: any;
+  thumbnailUrl?: string | null;
 }
 
 const EventRow = ({ 
@@ -81,7 +82,8 @@ const EventRow = ({
   handleEventClick, 
   handleEditClick,
   homeTeam,
-  awayTeam
+  awayTeam,
+  thumbnailUrl
 }: EventRowProps) => {
   // Use centralized helper for team identification
   const { team: eventTeam, teamType } = getEventTeam(
@@ -104,12 +106,23 @@ const EventRow = ({
       }`}
       onClick={() => handleEventClick(event)}
     >
-      {/* Play icon for video */}
-      {(matchVideo || event.clip_url) && (
-        <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/20 text-primary group-hover:bg-primary/30 transition-colors shrink-0">
-          <Play className="h-4 w-4" />
+      {/* Thumbnail do evento */}
+      {thumbnailUrl ? (
+        <div className="relative w-16 h-10 rounded overflow-hidden shrink-0 group-hover:ring-2 ring-primary/50 transition-all">
+          <img 
+            src={thumbnailUrl} 
+            alt={`${event.event_type} ${event.minute}'`}
+            className="w-full h-full object-cover"
+          />
+          <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <Play className="h-4 w-4 text-white" />
+          </div>
         </div>
-      )}
+      ) : (matchVideo || event.clip_url) ? (
+        <div className="flex h-10 w-16 items-center justify-center rounded bg-muted/50 text-muted-foreground group-hover:bg-primary/20 group-hover:text-primary transition-colors shrink-0">
+          <Play className="h-5 w-5" />
+        </div>
+      ) : null}
 
       {/* Team logo */}
       {teamLogo ? (
@@ -370,42 +383,68 @@ export default function Events() {
       return;
     }
     
-    // Check if event is within video range (when we have duration info)
+    // Calculate the correct video timestamp
     const videoDuration = eventVideo?.duration_seconds;
     const eventVideoSecond = event.metadata?.videoSecond;
     const videoStartMinute = eventVideo?.start_minute ?? 0;
-    const videoEndMinute = eventVideo?.end_minute ?? 90;
+    const eventMinute = event.minute ?? 0;
     
-    // If event timestamp exceeds video duration, calculate proportional position
-    if (videoDuration && eventVideoSecond && eventVideoSecond > videoDuration) {
-      // Calculate proportional position based on event minute within video coverage
-      const eventMinute = event.minute ?? 0;
-      const videoCoverageMinutes = videoEndMinute - videoStartMinute;
+    // Calculate actual video coverage based on duration
+    // end_minute from DB might be wrong, use duration_seconds for accuracy
+    const videoDurationMinutes = videoDuration ? videoDuration / 60 : 44; // default 44 min for half
+    const actualVideoEndMinute = videoStartMinute + videoDurationMinutes;
+    
+    // Prepare event with calculated videoSecond for the modal
+    let processedEvent = { ...event };
+    
+    // Calculate video-relative position if:
+    // 1. We have video duration
+    // 2. AND either there's no videoSecond, or it exceeds video duration
+    if (videoDuration) {
+      const needsCalculation = !eventVideoSecond || eventVideoSecond > videoDuration;
       
-      if (videoCoverageMinutes > 0 && eventMinute >= videoStartMinute && eventMinute <= videoEndMinute) {
-        // Event is within video coverage - calculate proportional position
-        const positionInCoverage = (eventMinute - videoStartMinute) / videoCoverageMinutes;
-        const calculatedVideoSecond = Math.floor(positionInCoverage * videoDuration);
-        console.log(`Calculando posição proporcional: minuto ${eventMinute} → ${calculatedVideoSecond}s do vídeo`);
-        event = { ...event, metadata: { ...event.metadata, videoSecond: calculatedVideoSecond } };
-      } else {
-        // Event outside video coverage - start from beginning
-        console.warn(`Evento (minuto ${eventMinute}) fora da cobertura do vídeo (${videoStartMinute}-${videoEndMinute})`);
-        event = { ...event, metadata: { ...event.metadata, videoSecond: 0 } };
+      if (needsCalculation) {
+        // Calculate based on game minute offset from video start
+        if (eventMinute >= videoStartMinute && eventMinute <= actualVideoEndMinute) {
+          // Event is within video coverage - calculate offset in seconds
+          const offsetSeconds = (eventMinute - videoStartMinute) * 60;
+          const calculatedVideoSecond = Math.min(offsetSeconds, videoDuration - 1);
+          console.log(`Calculando offset: minuto ${eventMinute} - start ${videoStartMinute} = ${calculatedVideoSecond}s do vídeo`);
+          processedEvent = { 
+            ...processedEvent, 
+            metadata: { ...processedEvent.metadata, videoSecond: calculatedVideoSecond } 
+          };
+        } else if (eventMinute < videoStartMinute) {
+          // Event before video coverage - start from beginning
+          console.warn(`Evento (minuto ${eventMinute}) antes da cobertura do vídeo (${videoStartMinute})`);
+          processedEvent = { 
+            ...processedEvent, 
+            metadata: { ...processedEvent.metadata, videoSecond: 0 } 
+          };
+        } else {
+          // Event after video coverage - go to end
+          console.warn(`Evento (minuto ${eventMinute}) após da cobertura do vídeo (${actualVideoEndMinute})`);
+          processedEvent = { 
+            ...processedEvent, 
+            metadata: { ...processedEvent.metadata, videoSecond: Math.max(0, videoDuration - 5) } 
+          };
+        }
       }
     }
     
     console.log('Opening video for event:', {
-      eventMinute: event.minute,
-      videoSecond: event.metadata?.videoSecond,
+      eventMinute: processedEvent.minute,
+      calculatedVideoSecond: processedEvent.metadata?.videoSecond,
+      originalVideoSecond: eventVideoSecond,
       video: eventVideo?.file_url,
-      videoStart: eventVideo?.start_minute,
-      videoEnd: eventVideo?.end_minute
+      videoStart: videoStartMinute,
+      videoEnd: actualVideoEndMinute,
+      videoDuration
     });
     
     if (eventVideo || event.clip_url) {
       setShowVignette(false); // Skip vignette, go directly to video
-      setPlayingEvent({ ...event, _video: eventVideo });
+      setPlayingEvent({ ...processedEvent, _video: eventVideo });
     }
   };
 
@@ -849,6 +888,7 @@ export default function Events() {
                             handleEditClick={handleEditClick}
                             homeTeam={selectedMatch?.home_team}
                             awayTeam={selectedMatch?.away_team}
+                            thumbnailUrl={getEventThumbnail(event.id)?.imageUrl}
                           />
                         ))}
                       </div>
@@ -898,6 +938,7 @@ export default function Events() {
                             handleEditClick={handleEditClick}
                             homeTeam={selectedMatch?.home_team}
                             awayTeam={selectedMatch?.away_team}
+                            thumbnailUrl={getEventThumbnail(event.id)?.imageUrl}
                           />
                         ))}
                       </div>
