@@ -383,7 +383,7 @@ export default function Matches() {
                   <div className="flex gap-2 mt-4">
                     {match.status === 'completed' && (
                       <Button variant="arena-outline" size="sm" className="flex-1" asChild>
-                        <Link to="/analysis">Ver Análise</Link>
+                        <Link to={`/analysis?match=${match.id}`}>Ver Análise</Link>
                       </Button>
                     )}
                     {(match.status === 'analyzing' || match.status === 'pending') && (
