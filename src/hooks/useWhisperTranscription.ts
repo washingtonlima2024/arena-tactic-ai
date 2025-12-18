@@ -35,6 +35,7 @@ export function useWhisperTranscription() {
     message: ''
   });
   const [isTranscribing, setIsTranscribing] = useState(false);
+  const [usedFallback, setUsedFallback] = useState(false);
   const ffmpegRef = useRef<FFmpeg | null>(null);
 
   const loadFFmpeg = async () => {
@@ -177,6 +178,43 @@ export function useWhisperTranscription() {
     }
   };
 
+  // Fallback: usar Google Speech-to-Text via edge function
+  const transcribeWithGoogleFallback = async (
+    videoUrl: string,
+    matchId: string,
+    videoId: string
+  ): Promise<TranscriptionResult | null> => {
+    console.log('[Google Fallback] ========================================');
+    console.log('[Google Fallback] Usando Google Speech-to-Text API...');
+    
+    setTranscriptionProgress({ 
+      stage: 'transcribing', 
+      progress: 30, 
+      message: 'Transcrevendo com Google Speech API (fallback)...' 
+    });
+
+    const { data, error } = await supabase.functions.invoke('transcribe-google-speech', {
+      body: { videoUrl, matchId, videoId }
+    });
+
+    if (error) {
+      console.error('[Google Fallback] Erro:', error);
+      throw new Error(`Erro no Google Speech: ${error.message}`);
+    }
+
+    if (!data?.success) {
+      throw new Error(data?.error || 'Erro desconhecido no Google Speech');
+    }
+
+    console.log('[Google Fallback] ✓ Transcrição completa:', data.text?.length, 'caracteres');
+    
+    return {
+      srtContent: data.srt || '',
+      text: data.text,
+      audioUrl: ''
+    };
+  };
+
   const transcribeVideo = async (
     videoUrl: string,
     matchId: string,
@@ -188,12 +226,35 @@ export function useWhisperTranscription() {
     console.log('[Transcrição] Video ID:', videoId);
     
     setIsTranscribing(true);
+    setUsedFallback(false);
 
     try {
-      // Step 1: Load FFmpeg
-      console.log('[Transcrição] PASSO 1: Carregando FFmpeg...');
-      const ffmpeg = await loadFFmpeg();
-      console.log('[Transcrição] ✓ FFmpeg pronto');
+      // Tentar FFmpeg + Whisper primeiro com timeout curto
+      console.log('[Transcrição] PASSO 1: Tentando FFmpeg + Whisper...');
+      
+      let ffmpeg: FFmpeg;
+      try {
+        // Timeout de 20 segundos para carregar FFmpeg
+        ffmpeg = await Promise.race([
+          loadFFmpeg(),
+          new Promise<never>((_, reject) => 
+            setTimeout(() => reject(new Error('FFmpeg timeout')), 20000)
+          )
+        ]);
+        console.log('[Transcrição] ✓ FFmpeg pronto');
+      } catch (ffmpegError) {
+        console.warn('[Transcrição] ⚠️ FFmpeg falhou, usando fallback Google Speech...');
+        console.warn('[Transcrição] Erro FFmpeg:', ffmpegError);
+        
+        setUsedFallback(true);
+        const fallbackResult = await transcribeWithGoogleFallback(videoUrl, matchId, videoId);
+        
+        if (fallbackResult?.text) {
+          setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa (Google Speech)!' });
+          return fallbackResult;
+        }
+        throw new Error('Fallback Google Speech também falhou');
+      }
 
       // Step 2: Download video
       console.log('[Transcrição] PASSO 2: Baixando vídeo...');
@@ -411,6 +472,7 @@ export function useWhisperTranscription() {
     transcribeVideo,
     transcriptionProgress,
     isTranscribing,
+    usedFallback,
     resetProgress
   };
 }
