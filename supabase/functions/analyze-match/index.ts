@@ -505,6 +505,43 @@ IMPORTANTE:
     }
     console.log('[DEBUG] ========================================');
 
+    // ═══════════════════════════════════════════════════════════════
+    // SAVE ANALYSIS JOB WITH TRANSCRIPTION FOR FUTURE REPROCESSING
+    // ═══════════════════════════════════════════════════════════════
+    console.log('[DEBUG] Salvando analysis_job com transcrição...');
+    
+    const analysisResult2 = {
+      fullTranscription: transcription,
+      eventsDetected: eventsToInsert.length,
+      goalsDetected: goalEvents.length,
+      homeScore: newHomeScore,
+      awayScore: newAwayScore,
+      half: matchHalf,
+      homeTeam,
+      awayTeam,
+      analyzedAt: new Date().toISOString()
+    };
+
+    // Insert analysis_job record
+    const { error: jobError } = await supabase
+      .from('analysis_jobs')
+      .insert({
+        match_id: matchId,
+        status: 'completed',
+        progress: 100,
+        current_step: 'Análise completa',
+        started_at: new Date().toISOString(),
+        completed_at: new Date().toISOString(),
+        result: analysisResult2
+      });
+
+    if (jobError) {
+      console.error('[DEBUG] Erro ao salvar analysis_job:', jobError);
+      // Não falhar a análise por causa disso, apenas log
+    } else {
+      console.log('[DEBUG] ✓ analysis_job salvo com transcrição para reprocessamento futuro');
+    }
+
     console.log('=== ANÁLISE PRO COMPLETA ===');
 
     return new Response(JSON.stringify({
