@@ -176,7 +176,21 @@ export const useLiveBroadcast = () => {
       let audioStream: MediaStream;
       
       if (cameraStream) {
-        audioStream = cameraStream;
+        // Extract audio tracks from camera stream
+        const audioTracks = cameraStream.getAudioTracks();
+        if (audioTracks.length === 0) {
+          // If camera stream has no audio, get audio separately
+          const audioOnly = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
+          audioStream = audioOnly;
+        } else {
+          audioStream = new MediaStream(audioTracks);
+        }
       } else {
         audioStream = await navigator.mediaDevices.getUserMedia({
           audio: {
@@ -190,9 +204,29 @@ export const useLiveBroadcast = () => {
       // Create temp match for auto-saving transcripts
       await createTempMatch();
 
-      const mediaRecorder = new MediaRecorder(audioStream, {
-        mimeType: "audio/webm;codecs=opus",
-      });
+      // Find a supported mimeType
+      const mimeTypes = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/mp4",
+        ""
+      ];
+      
+      let selectedMimeType = "";
+      for (const mimeType of mimeTypes) {
+        if (mimeType === "" || MediaRecorder.isTypeSupported(mimeType)) {
+          selectedMimeType = mimeType;
+          break;
+        }
+      }
+
+      const recorderOptions: MediaRecorderOptions = {};
+      if (selectedMimeType) {
+        recorderOptions.mimeType = selectedMimeType;
+      }
+
+      const mediaRecorder = new MediaRecorder(audioStream, recorderOptions);
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
