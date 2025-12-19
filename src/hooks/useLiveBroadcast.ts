@@ -59,6 +59,8 @@ export const useLiveBroadcast = () => {
   const [transcriptChunks, setTranscriptChunks] = useState<TranscriptChunk[]>([]);
   const [isSavingTranscript, setIsSavingTranscript] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+  const [lastProcessedAt, setLastProcessedAt] = useState<Date | null>(null);
   
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
@@ -244,10 +246,15 @@ export const useLiveBroadcast = () => {
       setTranscriptChunks([]);
       audioChunksRef.current = [];
 
-      // Start transcription interval (every 30 seconds)
+      // Start transcription interval (every 10 seconds for faster feedback)
       transcriptionIntervalRef.current = setInterval(() => {
         processAudioChunk();
-      }, 30000);
+      }, 10000);
+      
+      // Process first chunk after 5 seconds
+      setTimeout(() => {
+        processAudioChunk();
+      }, 5000);
 
       toast({
         title: "Transmissão iniciada",
@@ -264,18 +271,30 @@ export const useLiveBroadcast = () => {
   }, [cameraStream, toast, createTempMatch]);
 
   const processAudioChunk = useCallback(async () => {
-    if (audioChunksRef.current.length === 0) return;
+    if (audioChunksRef.current.length === 0) {
+      console.log("No audio chunks to process");
+      return;
+    }
+    
+    if (isProcessingAudio) {
+      console.log("Already processing audio, skipping...");
+      return;
+    }
 
+    setIsProcessingAudio(true);
     const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
     audioChunksRef.current = [];
     const currentMinute = Math.floor(recordingTime / 60);
     const currentSecond = recordingTime % 60;
+
+    console.log(`Processing audio chunk at ${currentMinute}:${currentSecond}, size: ${audioBlob.size} bytes`);
 
     try {
       const reader = new FileReader();
       reader.readAsDataURL(audioBlob);
       reader.onloadend = async () => {
         const base64Audio = (reader.result as string).split(",")[1];
+        console.log("Sending audio to transcription service...");
 
         const { data: transcriptData, error: transcriptError } = await supabase.functions.invoke(
           "transcribe-audio",
@@ -284,10 +303,14 @@ export const useLiveBroadcast = () => {
 
         if (transcriptError) {
           console.error("Transcription error:", transcriptError);
+          setIsProcessingAudio(false);
           return;
         }
 
-        if (transcriptData?.text) {
+        console.log("Transcription result:", transcriptData);
+        setLastProcessedAt(new Date());
+
+        if (transcriptData?.text && transcriptData.text.trim()) {
           const newChunk: TranscriptChunk = {
             id: crypto.randomUUID(),
             text: transcriptData.text,
@@ -301,6 +324,8 @@ export const useLiveBroadcast = () => {
             const updated = prev + " " + transcriptData.text;
             return updated.trim();
           });
+
+          console.log("Extracting events from transcript...");
 
           // Extract events from transcript
           const { data: eventsData, error: eventsError } = await supabase.functions.invoke(
@@ -316,25 +341,33 @@ export const useLiveBroadcast = () => {
             }
           );
 
-          if (!eventsError && eventsData?.events) {
+          console.log("Events extraction result:", eventsData);
+
+          if (!eventsError && eventsData?.events && eventsData.events.length > 0) {
             const newEvents: LiveEvent[] = eventsData.events.map((e: any) => ({
               id: crypto.randomUUID(),
               type: e.type,
-              minute: e.minute,
+              minute: e.minute || currentMinute,
               second: e.second || 0,
               description: e.description,
-              confidence: e.confidence,
+              confidence: e.confidence || 0.8,
               status: "pending" as const,
             }));
 
+            console.log(`Detected ${newEvents.length} new events`);
             setDetectedEvents((prev) => [...prev, ...newEvents]);
           }
+        } else {
+          console.log("No text in transcription result");
         }
+        
+        setIsProcessingAudio(false);
       };
     } catch (error) {
       console.error("Error processing audio chunk:", error);
+      setIsProcessingAudio(false);
     }
-  }, [matchInfo, currentScore, recordingTime]);
+  }, [matchInfo, currentScore, recordingTime, isProcessingAudio]);
 
   const stopRecording = useCallback(() => {
     if (mediaRecorderRef.current) {
@@ -510,6 +543,8 @@ export const useLiveBroadcast = () => {
     transcriptChunks,
     isSavingTranscript,
     lastSavedAt,
+    isProcessingAudio,
+    lastProcessedAt,
     startRecording,
     stopRecording,
     pauseRecording,
@@ -520,5 +555,6 @@ export const useLiveBroadcast = () => {
     removeEvent,
     updateScore,
     finishMatch,
+    processAudioChunk,
   };
 };
