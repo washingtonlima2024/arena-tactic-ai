@@ -72,7 +72,10 @@ const Live = () => {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => navigate(`/viewer?url=${encodeURIComponent(streamUrl)}`)}
+              onClick={() => {
+                const viewerUrl = `${window.location.origin}/viewer?url=${encodeURIComponent(streamUrl)}`;
+                window.open(viewerUrl, 'ArenaPlayViewer', 'width=1280,height=720,menubar=no,toolbar=no,location=no,status=no');
+              }}
               className="border-primary/50 text-primary hover:bg-primary/10"
             >
               <ExternalLink className="h-4 w-4 mr-2" />
