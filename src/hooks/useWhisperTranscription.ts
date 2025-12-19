@@ -270,8 +270,8 @@ export function useWhisperTranscription() {
 
       try {
         const { data, error } = await withTimeout(
-          supabase.functions.invoke('transcribe-audio-whisper', {
-            body: { audioUrl: urlData.publicUrl }
+          supabase.functions.invoke('transcribe-large-video', {
+            body: { videoUrl: urlData.publicUrl }
           }),
           180000, // 3 minutos por transcrição
           `transcrição parte ${partNum}`
@@ -554,8 +554,8 @@ export function useWhisperTranscription() {
           
           console.log(`[Transcrição] Transcrevendo chunk ${i + 1}/${numChunks}...`);
           const { data, error } = await withTimeout(
-            supabase.functions.invoke('transcribe-audio-whisper', {
-              body: { audioUrl: urlData.publicUrl }
+            supabase.functions.invoke('transcribe-large-video', {
+              body: { videoUrl: urlData.publicUrl }
             }),
             300000,
             `transcrição chunk ${i + 1}`
@@ -606,8 +606,8 @@ export function useWhisperTranscription() {
         setTranscriptionProgress({ stage: 'transcribing', progress: 55, message: 'Transcrevendo com Whisper API...' });
 
         const { data, error } = await withTimeout(
-          supabase.functions.invoke('transcribe-audio-whisper', {
-            body: { audioUrl: mainAudioUrl }
+          supabase.functions.invoke('transcribe-large-video', {
+            body: { videoUrl: mainAudioUrl }
           }),
           300000,
           'transcrição Whisper'

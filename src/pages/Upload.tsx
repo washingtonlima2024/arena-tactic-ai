@@ -634,9 +634,9 @@ export default function VideoUpload() {
           return null;
         }
         
-        console.log('[Fallback] Invocando edge function...');
-        const { data, error } = await supabase.functions.invoke('transcribe-audio-whisper', {
-          body: requestBody
+        console.log('[Fallback] Invocando edge function transcribe-large-video...');
+        const { data, error } = await supabase.functions.invoke('transcribe-large-video', {
+          body: { videoUrl: requestBody.videoUrl || requestBody.embedUrl }
         });
         
         console.log('[Fallback] Resposta:', { success: data?.success, hasText: !!data?.text, error: error?.message || data?.error });
