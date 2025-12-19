@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
+import Hls from "hls.js";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Link2, Play, ExternalLink } from "lucide-react";
+import { Link2, Play, ExternalLink, Loader2 } from "lucide-react";
 
 interface LiveStreamInputProps {
   streamUrl: string;
@@ -15,6 +16,77 @@ export const LiveStreamInput = ({
   isRecording,
 }: LiveStreamInputProps) => {
   const [previewUrl, setPreviewUrl] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
+
+  // Cleanup HLS instance on unmount or URL change
+  useEffect(() => {
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, []);
+
+  // Initialize video when previewUrl changes
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !previewUrl) return;
+
+    // Cleanup previous HLS instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    setIsLoading(true);
+
+    if (isHlsStream(previewUrl)) {
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+        });
+        
+        hlsRef.current = hls;
+        hls.loadSource(previewUrl);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          setIsLoading(false);
+          video.play().catch(console.error);
+        });
+
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            console.error("HLS error:", data);
+            setIsLoading(false);
+          }
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Native HLS support (Safari)
+        video.src = previewUrl;
+        video.addEventListener('loadedmetadata', () => {
+          setIsLoading(false);
+          video.play().catch(console.error);
+        }, { once: true });
+      }
+    } else if (isDirectVideo(previewUrl)) {
+      video.src = previewUrl;
+      video.addEventListener('loadedmetadata', () => {
+        setIsLoading(false);
+        video.play().catch(console.error);
+      }, { once: true });
+      video.addEventListener('error', () => {
+        setIsLoading(false);
+      }, { once: true });
+    } else {
+      // For YouTube/Twitch, loading handled by iframe
+      setIsLoading(false);
+    }
+  }, [previewUrl]);
 
   const handlePreview = () => {
     setPreviewUrl(streamUrl);
@@ -59,32 +131,24 @@ export const LiveStreamInput = ({
       );
     }
 
-    // Direct video files (MP4, WebM, etc.)
-    if (isDirectVideo(previewUrl)) {
+    // Direct video files or HLS streams - use video element with HLS.js
+    if (isDirectVideo(previewUrl) || isHlsStream(previewUrl)) {
       return (
-        <video
-          src={previewUrl}
-          className="w-full h-full object-contain"
-          controls
-          autoPlay
-          muted
-          playsInline
-          crossOrigin="anonymous"
-        />
-      );
-    }
-
-    // HLS streams - use video element with native support or fallback
-    if (isHlsStream(previewUrl)) {
-      return (
-        <video
-          src={previewUrl}
-          className="w-full h-full object-contain"
-          controls
-          autoPlay
-          muted
-          playsInline
-        />
+        <div className="relative w-full h-full">
+          {isLoading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/50 z-10">
+              <Loader2 className="h-8 w-8 text-primary animate-spin" />
+            </div>
+          )}
+          <video
+            ref={videoRef}
+            className="w-full h-full object-contain"
+            controls
+            muted
+            playsInline
+            crossOrigin="anonymous"
+          />
+        </div>
       );
     }
 

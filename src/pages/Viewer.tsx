@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
+import Hls from "hls.js";
 import { Button } from "@/components/ui/button";
 import { 
   Maximize, 
@@ -10,13 +11,16 @@ import {
   Play,
   Pause,
   Settings,
-  Radio
+  Radio,
+  Loader2
 } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
@@ -27,6 +31,7 @@ const Viewer = () => {
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const hlsRef = useRef<Hls | null>(null);
   
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(false);
@@ -35,6 +40,9 @@ const Viewer = () => {
   const [showControls, setShowControls] = useState(true);
   const [currentTime, setCurrentTime] = useState("00:00");
   const [playbackRate, setPlaybackRate] = useState(1);
+  const [isLoading, setIsLoading] = useState(true);
+  const [qualityLevels, setQualityLevels] = useState<{ height: number; bitrate: number; index: number }[]>([]);
+  const [currentQuality, setCurrentQuality] = useState<number>(-1); // -1 = auto
 
   // Auto-hide controls after 3 seconds of inactivity
   useEffect(() => {
@@ -64,6 +72,78 @@ const Viewer = () => {
       }
     };
   }, [isPlaying]);
+
+  // Initialize HLS.js or native playback
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !streamUrl) return;
+
+    const isHls = streamUrl.toLowerCase().includes('.m3u8');
+
+    // Cleanup previous HLS instance
+    if (hlsRef.current) {
+      hlsRef.current.destroy();
+      hlsRef.current = null;
+    }
+
+    if (isHls) {
+      if (Hls.isSupported()) {
+        const hls = new Hls({
+          enableWorker: true,
+          lowLatencyMode: true,
+          backBufferLength: 90,
+        });
+        
+        hlsRef.current = hls;
+        hls.loadSource(streamUrl);
+        hls.attachMedia(video);
+
+        hls.on(Hls.Events.MANIFEST_PARSED, (_, data) => {
+          setIsLoading(false);
+          // Get quality levels
+          const levels = data.levels.map((level, index) => ({
+            height: level.height,
+            bitrate: level.bitrate,
+            index,
+          }));
+          setQualityLevels(levels);
+          video.play().catch(console.error);
+        });
+
+        hls.on(Hls.Events.ERROR, (_, data) => {
+          if (data.fatal) {
+            console.error("HLS fatal error:", data);
+            setIsLoading(false);
+          }
+        });
+
+        hls.on(Hls.Events.LEVEL_SWITCHED, (_, data) => {
+          setCurrentQuality(data.level);
+        });
+      } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+        // Native HLS support (Safari)
+        video.src = streamUrl;
+        video.addEventListener('loadedmetadata', () => {
+          setIsLoading(false);
+          video.play().catch(console.error);
+        });
+      }
+    } else {
+      // Direct video file
+      video.src = streamUrl;
+      video.addEventListener('loadedmetadata', () => {
+        setIsLoading(false);
+        video.play().catch(console.error);
+      });
+    }
+
+    return () => {
+      if (hlsRef.current) {
+        hlsRef.current.destroy();
+        hlsRef.current = null;
+      }
+    };
+  }, [streamUrl]);
 
   // Handle fullscreen changes
   useEffect(() => {
@@ -139,7 +219,17 @@ const Viewer = () => {
     setPlaybackRate(rate);
   };
 
-  // Check if URL is HLS stream
+  const handleQualityChange = (levelIndex: number) => {
+    if (!hlsRef.current) return;
+    
+    hlsRef.current.currentLevel = levelIndex;
+    setCurrentQuality(levelIndex);
+  };
+
+  const formatBitrate = (bitrate: number) => {
+    return `${Math.round(bitrate / 1000)}kbps`;
+  };
+
   const isHlsStream = streamUrl.toLowerCase().includes('.m3u8');
 
   return (
@@ -151,12 +241,17 @@ const Viewer = () => {
       {/* Video Element */}
       <video
         ref={videoRef}
-        src={streamUrl}
         className="w-full h-full object-contain"
-        autoPlay
         playsInline
         muted={isMuted}
       />
+
+      {/* Loading Spinner */}
+      {isLoading && (
+        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+          <Loader2 className="h-12 w-12 text-primary animate-spin" />
+        </div>
+      )}
 
       {/* Live Indicator */}
       <div 
@@ -282,7 +377,32 @@ const Viewer = () => {
                   <Settings className="h-5 w-5" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="bg-black/90 border-white/20">
+              <DropdownMenuContent align="end" className="bg-black/90 border-white/20 min-w-[180px]">
+                {/* Quality Selection */}
+                {qualityLevels.length > 0 && (
+                  <>
+                    <DropdownMenuLabel className="text-white/70">Qualidade</DropdownMenuLabel>
+                    <DropdownMenuItem 
+                      className={`text-white hover:bg-white/20 ${currentQuality === -1 ? "bg-white/10" : ""}`}
+                      onClick={() => handleQualityChange(-1)}
+                    >
+                      Auto
+                    </DropdownMenuItem>
+                    {qualityLevels.sort((a, b) => b.height - a.height).map((level) => (
+                      <DropdownMenuItem 
+                        key={level.index}
+                        className={`text-white hover:bg-white/20 ${currentQuality === level.index ? "bg-white/10" : ""}`}
+                        onClick={() => handleQualityChange(level.index)}
+                      >
+                        {level.height}p ({formatBitrate(level.bitrate)})
+                      </DropdownMenuItem>
+                    ))}
+                    <DropdownMenuSeparator className="bg-white/20" />
+                  </>
+                )}
+                
+                {/* Playback Speed */}
+                <DropdownMenuLabel className="text-white/70">Velocidade</DropdownMenuLabel>
                 <DropdownMenuItem 
                   className={`text-white hover:bg-white/20 ${playbackRate === 0.5 ? "bg-white/10" : ""}`}
                   onClick={() => handlePlaybackRateChange(0.5)}
