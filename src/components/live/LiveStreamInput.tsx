@@ -2,14 +2,13 @@ import { useState, useRef, useEffect } from "react";
 import Hls from "hls.js";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Link2, Play, ExternalLink, Loader2, ChevronDown, AlertTriangle } from "lucide-react";
+import { Link2, Play, ExternalLink, Loader2, ChevronDown } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const TEST_STREAMS = [
   { label: "HLS Local (live.m3u8)", url: "http://localhost:8000/streams/live.m3u8" },
@@ -17,12 +16,6 @@ const TEST_STREAMS = [
   { label: "MJPEG Local", url: "http://localhost:8000/stream/mjpeg" },
   { label: "Big Buck Bunny (MP4)", url: "https://live-hls-abr-cdn.livepush.io/vod/bigbuckbunnyclip.mp4" },
 ];
-
-// Check if running in Lovable preview (not localhost)
-const isLovablePreview = (): boolean => {
-  const hostname = window.location.hostname;
-  return hostname.includes('lovable.app') || hostname.includes('lovableproject.com');
-};
 
 interface LiveStreamInputProps {
   streamUrl: string;
@@ -37,7 +30,6 @@ export const LiveStreamInput = ({
 }: LiveStreamInputProps) => {
   const [previewUrl, setPreviewUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [localStreamError, setLocalStreamError] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
 
@@ -63,23 +55,20 @@ export const LiveStreamInput = ({
     }
 
     setIsLoading(true);
-    setLocalStreamError(false);
 
     const isLocal = isLocalStream(previewUrl);
-
-    // Check if trying to use local stream in Lovable preview
-    if (isLocal && isLovablePreview()) {
-      setIsLoading(false);
-      setLocalStreamError(true);
-      return;
-    }
 
     if (isHlsStream(previewUrl)) {
       if (Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
           lowLatencyMode: true,
-          backBufferLength: 90,
+          xhrSetup: (xhr, url) => {
+            // Para streams locais, não forçar credenciais CORS
+            if (isLocalStream(url)) {
+              xhr.withCredentials = false;
+            }
+          }
         });
         
         hlsRef.current = hls;
@@ -182,59 +171,27 @@ export const LiveStreamInput = ({
       );
     }
 
-    // Show error for local streams in Lovable preview
-    if (localStreamError) {
-      return (
-        <div className="w-full h-full flex flex-col items-center justify-center p-6">
-          <Alert className="max-w-md bg-yellow-500/10 border-yellow-500/50">
-            <AlertTriangle className="h-5 w-5 text-yellow-500" />
-            <AlertTitle className="text-yellow-500">Stream Local Bloqueado</AlertTitle>
-            <AlertDescription className="text-muted-foreground">
-              <p className="mb-2">
-                Streams locais (localhost) não funcionam no preview do Lovable devido a políticas de segurança do navegador.
-              </p>
-              <p className="font-medium">Para testar, rode localmente:</p>
-              <code className="block mt-1 px-2 py-1 bg-muted rounded text-xs">
-                npm run dev
-              </code>
-            </AlertDescription>
-          </Alert>
-        </div>
-      );
-    }
-
     // MJPEG streams - use img tag
     if (isMjpegStream(previewUrl)) {
-      const isLocal = isLocalStream(previewUrl);
-      
       return (
         <div className="relative w-full h-full">
           <img
             src={previewUrl}
             alt="MJPEG Stream"
             className="w-full h-full object-contain"
-            {...(!isLocal && { crossOrigin: "anonymous" })}
             onError={(e) => {
               console.error('MJPEG stream failed to load:', previewUrl);
               const target = e.target as HTMLImageElement;
               target.style.display = 'none';
               target.parentElement?.insertAdjacentHTML(
                 'beforeend',
-                `<div class="w-full h-full flex flex-col items-center justify-center text-red-400"><p class="text-center">Erro ao carregar stream MJPEG${isLocal ? ' local' : ''}.<br/>Verifique se o servidor está rodando.</p></div>`
+                '<div class="w-full h-full flex flex-col items-center justify-center text-red-400"><p class="text-center">Erro ao carregar stream MJPEG.<br/>Verifique se o servidor está rodando e CORS está habilitado.</p></div>'
               );
             }}
             onLoad={() => console.log('MJPEG stream loaded successfully')}
           />
-          {/* Badges */}
-          <div className="absolute top-2 left-2 flex gap-2">
-            <div className="px-2 py-1 rounded bg-orange-500/80 text-white text-xs font-medium">
-              MJPEG
-            </div>
-            {isLocal && (
-              <div className="px-2 py-1 rounded bg-green-500/80 text-white text-xs font-medium">
-                LOCAL
-              </div>
-            )}
+          <div className="absolute top-2 left-2 px-2 py-1 rounded bg-orange-500/80 text-white text-xs font-medium">
+            MJPEG
           </div>
         </div>
       );
@@ -256,9 +213,9 @@ export const LiveStreamInput = ({
             ref={videoRef}
             className="w-full h-full object-contain"
             controls
-            autoPlay
             muted
             playsInline
+            {...(!isLocal && { crossOrigin: "anonymous" })}
           />
           {/* Badges */}
           <div className="absolute top-2 left-2 flex gap-2">
