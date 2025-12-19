@@ -160,6 +160,16 @@ export const LiveStreamInput = ({
             src={previewUrl}
             alt="MJPEG Stream"
             className="w-full h-full object-contain"
+            onError={(e) => {
+              console.error('MJPEG stream failed to load:', previewUrl);
+              const target = e.target as HTMLImageElement;
+              target.style.display = 'none';
+              target.parentElement?.insertAdjacentHTML(
+                'beforeend',
+                '<div class="w-full h-full flex flex-col items-center justify-center text-red-400"><p class="text-center">Erro ao carregar stream MJPEG.<br/>Verifique se o servidor está rodando e CORS está habilitado.</p></div>'
+              );
+            }}
+            onLoad={() => console.log('MJPEG stream loaded successfully')}
           />
           <div className="absolute top-2 left-2 px-2 py-1 rounded bg-orange-500/80 text-white text-xs font-medium">
             MJPEG
