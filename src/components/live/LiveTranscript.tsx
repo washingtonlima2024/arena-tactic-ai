@@ -1,6 +1,7 @@
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Clock, Save, CheckCircle } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { FileText, Clock, Save, CheckCircle, Loader2, Mic } from "lucide-react";
 import { TranscriptChunk } from "@/hooks/useLiveBroadcast";
 
 interface LiveTranscriptProps {
@@ -9,6 +10,9 @@ interface LiveTranscriptProps {
   isSaving: boolean;
   lastSavedAt: Date | null;
   isRecording: boolean;
+  isProcessingAudio?: boolean;
+  lastProcessedAt?: Date | null;
+  onProcessNow?: () => void;
 }
 
 export const LiveTranscript = ({
@@ -17,6 +21,9 @@ export const LiveTranscript = ({
   isSaving,
   lastSavedAt,
   isRecording,
+  isProcessingAudio = false,
+  lastProcessedAt,
+  onProcessNow,
 }: LiveTranscriptProps) => {
   const wordCount = transcriptBuffer.trim().split(/\s+/).filter(Boolean).length;
 
@@ -28,6 +35,12 @@ export const LiveTranscript = ({
           Transcrição Ao Vivo
         </h3>
         <div className="flex items-center gap-2">
+          {isProcessingAudio && (
+            <Badge variant="outline" className="text-blue-500 border-blue-500/50">
+              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              Transcrevendo...
+            </Badge>
+          )}
           {isSaving ? (
             <Badge variant="outline" className="text-yellow-500 border-yellow-500/50">
               <Save className="h-3 w-3 mr-1 animate-pulse" />
@@ -50,7 +63,20 @@ export const LiveTranscript = ({
           {transcriptChunks.length === 0 ? (
             <div className="text-center text-muted-foreground py-8">
               {isRecording ? (
-                <p>Aguardando transcrição...</p>
+                <div className="space-y-2">
+                  {isProcessingAudio ? (
+                    <>
+                      <Loader2 className="h-8 w-8 mx-auto animate-spin text-primary" />
+                      <p>Processando áudio...</p>
+                    </>
+                  ) : (
+                    <>
+                      <Mic className="h-8 w-8 mx-auto text-red-500 animate-pulse" />
+                      <p>Gravando áudio...</p>
+                      <p className="text-xs">Transcrição automática a cada 10s</p>
+                    </>
+                  )}
+                </div>
               ) : (
                 <p>Inicie a gravação para ver a transcrição</p>
               )}
@@ -69,17 +95,34 @@ export const LiveTranscript = ({
         </div>
       </ScrollArea>
 
-      {/* Auto-save indicator */}
+      {/* Status indicator */}
       {isRecording && (
-        <div className="mt-3 pt-3 border-t border-border">
-          <p className="text-xs text-muted-foreground text-center">
-            Auto-salvamento a cada 60 segundos
-            {lastSavedAt && (
-              <span className="ml-2">
-                • Último: {lastSavedAt.toLocaleTimeString()}
-              </span>
+        <div className="mt-3 pt-3 border-t border-border space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs text-muted-foreground">
+              Transcrição a cada 10s
+              {lastProcessedAt && (
+                <span className="ml-2">
+                  • Último: {lastProcessedAt.toLocaleTimeString()}
+                </span>
+              )}
+            </p>
+            {onProcessNow && (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={onProcessNow}
+                disabled={isProcessingAudio}
+                className="h-6 text-xs"
+              >
+                {isProcessingAudio ? (
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                ) : (
+                  "Processar Agora"
+                )}
+              </Button>
             )}
-          </p>
+          </div>
         </div>
       )}
     </div>

@@ -33,6 +33,8 @@ const Live = () => {
     transcriptChunks,
     isSavingTranscript,
     lastSavedAt,
+    isProcessingAudio,
+    lastProcessedAt,
     startRecording,
     stopRecording,
     pauseRecording,
@@ -43,6 +45,7 @@ const Live = () => {
     removeEvent,
     updateScore,
     finishMatch,
+    processAudioChunk,
   } = useLiveBroadcast();
 
   const hasVideoSource = streamUrl || cameraStream;
@@ -172,6 +175,9 @@ const Live = () => {
               isSaving={isSavingTranscript}
               lastSavedAt={lastSavedAt}
               isRecording={isRecording}
+              isProcessingAudio={isProcessingAudio}
+              lastProcessedAt={lastProcessedAt}
+              onProcessNow={processAudioChunk}
             />
 
             {/* Events List */}
