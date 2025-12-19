@@ -147,6 +147,8 @@ const Live = () => {
               awayScore={currentScore.away}
               onScoreChange={updateScore}
               disabled={!isRecording}
+              isRecording={isRecording}
+              recordingTime={recordingTime}
             />
 
             {/* Live Transcript */}
