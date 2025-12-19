@@ -22,6 +22,29 @@ export const LiveMatchForm = ({
     onMatchInfoChange({ ...matchInfo, [field]: value });
   };
 
+  // Handle team selection - store both ID and name
+  const handleHomeTeamChange = (teamId: string) => {
+    const team = teams?.find(t => t.id === teamId);
+    if (team) {
+      onMatchInfoChange({ 
+        ...matchInfo, 
+        homeTeam: team.name,
+        homeTeamId: team.id 
+      });
+    }
+  };
+
+  const handleAwayTeamChange = (teamId: string) => {
+    const team = teams?.find(t => t.id === teamId);
+    if (team) {
+      onMatchInfoChange({ 
+        ...matchInfo, 
+        awayTeam: team.name,
+        awayTeamId: team.id 
+      });
+    }
+  };
+
   return (
     <div className="glass-card p-6 rounded-xl space-y-4">
       <h3 className="font-semibold flex items-center gap-2 text-foreground">
@@ -35,16 +58,18 @@ export const LiveMatchForm = ({
           <Label>Time Casa</Label>
           {teams && teams.length > 0 ? (
             <Select
-              value={matchInfo.homeTeam}
-              onValueChange={(v) => updateField("homeTeam", v)}
+              value={matchInfo.homeTeamId || ""}
+              onValueChange={handleHomeTeamChange}
               disabled={disabled}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Selecione o time" />
+                <SelectValue placeholder="Selecione o time">
+                  {matchInfo.homeTeam || "Selecione o time"}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {teams.map((team) => (
-                  <SelectItem key={team.id} value={team.name}>
+                  <SelectItem key={team.id} value={team.id}>
                     {team.name}
                   </SelectItem>
                 ))}
@@ -65,16 +90,18 @@ export const LiveMatchForm = ({
           <Label>Time Fora</Label>
           {teams && teams.length > 0 ? (
             <Select
-              value={matchInfo.awayTeam}
-              onValueChange={(v) => updateField("awayTeam", v)}
+              value={matchInfo.awayTeamId || ""}
+              onValueChange={handleAwayTeamChange}
               disabled={disabled}
             >
               <SelectTrigger>
-                <SelectValue placeholder="Selecione o time" />
+                <SelectValue placeholder="Selecione o time">
+                  {matchInfo.awayTeam || "Selecione o time"}
+                </SelectValue>
               </SelectTrigger>
               <SelectContent>
                 {teams.map((team) => (
-                  <SelectItem key={team.id} value={team.name}>
+                  <SelectItem key={team.id} value={team.id}>
                     {team.name}
                   </SelectItem>
                 ))}

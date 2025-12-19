@@ -6,6 +6,8 @@ import { useNavigate } from "react-router-dom";
 export interface MatchInfo {
   homeTeam: string;
   awayTeam: string;
+  homeTeamId?: string;
+  awayTeamId?: string;
   competition: string;
   matchDate: string;
 }
@@ -18,6 +20,7 @@ export interface LiveEvent {
   description: string;
   confidence?: number;
   status: "pending" | "approved" | "rejected";
+  recordingTimestamp?: number; // Recording time in seconds when event occurred
 }
 
 export interface Score {
@@ -40,6 +43,8 @@ export const useLiveBroadcast = () => {
   const [matchInfo, setMatchInfo] = useState<MatchInfo>({
     homeTeam: "",
     awayTeam: "",
+    homeTeamId: undefined,
+    awayTeamId: undefined,
     competition: "",
     matchDate: new Date().toISOString().slice(0, 16),
   });
@@ -62,12 +67,26 @@ export const useLiveBroadcast = () => {
   const [isProcessingAudio, setIsProcessingAudio] = useState(false);
   const [lastProcessedAt, setLastProcessedAt] = useState<Date | null>(null);
   
+  // NEW: Video recording states
+  const [isRecordingVideo, setIsRecordingVideo] = useState(false);
+  const [videoUploadProgress, setVideoUploadProgress] = useState(0);
+  const [isUploadingVideo, setIsUploadingVideo] = useState(false);
+  
+  // Audio refs (existing)
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const audioChunksRef = useRef<Blob[]>([]);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const transcriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const autoSaveIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const tempMatchIdRef = useRef<string | null>(null);
+
+  // NEW: Video recording refs
+  const videoRecorderRef = useRef<MediaRecorder | null>(null);
+  const videoChunksRef = useRef<Blob[]>([]);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoElementRef = useRef<HTMLVideoElement | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
 
   // Save transcript to database
   const saveTranscriptToDatabase = useCallback(async (matchId?: string) => {
@@ -153,6 +172,8 @@ export const useLiveBroadcast = () => {
       const { data: match, error } = await supabase
         .from("matches")
         .insert({
+          home_team_id: matchInfo.homeTeamId || null,
+          away_team_id: matchInfo.awayTeamId || null,
           home_score: 0,
           away_score: 0,
           competition: matchInfo.competition || "Transmissão ao vivo",
@@ -173,7 +194,187 @@ export const useLiveBroadcast = () => {
     return null;
   }, [matchInfo]);
 
-  const startRecording = useCallback(async () => {
+  // NEW: Start video recording from video element
+  const startVideoRecording = useCallback((videoElement: HTMLVideoElement) => {
+    try {
+      // Create canvas for capturing video frames
+      const canvas = document.createElement('canvas');
+      canvas.width = videoElement.videoWidth || 1280;
+      canvas.height = videoElement.videoHeight || 720;
+      const ctx = canvas.getContext('2d');
+      canvasRef.current = canvas;
+      videoElementRef.current = videoElement;
+
+      console.log(`Starting video recording: ${canvas.width}x${canvas.height}`);
+
+      // Animation loop to draw video frames to canvas
+      const drawFrame = () => {
+        if (ctx && videoElementRef.current && isRecording && !isPaused) {
+          ctx.drawImage(videoElementRef.current, 0, 0, canvas.width, canvas.height);
+        }
+        animationFrameRef.current = requestAnimationFrame(drawFrame);
+      };
+      drawFrame();
+
+      // Capture canvas stream
+      const canvasStream = canvas.captureStream(30); // 30 fps
+
+      // Combine video with audio if available
+      let combinedStream: MediaStream;
+      if (audioStreamRef.current) {
+        const audioTracks = audioStreamRef.current.getAudioTracks();
+        combinedStream = new MediaStream([
+          ...canvasStream.getVideoTracks(),
+          ...audioTracks
+        ]);
+      } else {
+        combinedStream = canvasStream;
+      }
+
+      // Find supported video mimeType
+      const mimeTypes = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+        'video/mp4',
+        ''
+      ];
+
+      let selectedMimeType = '';
+      for (const mimeType of mimeTypes) {
+        if (mimeType === '' || MediaRecorder.isTypeSupported(mimeType)) {
+          selectedMimeType = mimeType;
+          break;
+        }
+      }
+
+      const recorderOptions: MediaRecorderOptions = {};
+      if (selectedMimeType) {
+        recorderOptions.mimeType = selectedMimeType;
+      }
+
+      const videoRecorder = new MediaRecorder(combinedStream, recorderOptions);
+
+      videoRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          videoChunksRef.current.push(event.data);
+          console.log(`Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB`);
+        }
+      };
+
+      videoRecorder.onerror = (event) => {
+        console.error('Video recorder error:', event);
+      };
+
+      videoRecorderRef.current = videoRecorder;
+      videoRecorder.start(5000); // Chunk every 5 seconds
+      setIsRecordingVideo(true);
+
+      console.log('Video recording started with mimeType:', selectedMimeType || 'default');
+
+    } catch (error) {
+      console.error('Error starting video recording:', error);
+      toast({
+        title: "Erro na gravação de vídeo",
+        description: "Não foi possível iniciar a gravação do vídeo",
+        variant: "destructive",
+      });
+    }
+  }, [isRecording, isPaused, toast]);
+
+  // NEW: Save recorded video to storage
+  const saveRecordedVideo = useCallback(async (matchId: string): Promise<string | null> => {
+    if (videoChunksRef.current.length === 0) {
+      console.log('No video chunks to save');
+      return null;
+    }
+
+    setIsUploadingVideo(true);
+    setVideoUploadProgress(0);
+
+    try {
+      const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
+      const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+      const videoBlob = new Blob(videoChunksRef.current, { type: mimeType });
+      
+      console.log(`Saving video: ${(videoBlob.size / (1024 * 1024)).toFixed(2)} MB`);
+
+      const filePath = `live-${matchId}-${Date.now()}.${extension}`;
+
+      setVideoUploadProgress(20);
+
+      // Upload to Supabase Storage
+      const { error: uploadError } = await supabase.storage
+        .from('match-videos')
+        .upload(filePath, videoBlob, {
+          contentType: mimeType,
+          upsert: true
+        });
+
+      if (uploadError) {
+        console.error('Error uploading video:', uploadError);
+        throw uploadError;
+      }
+
+      setVideoUploadProgress(70);
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('match-videos')
+        .getPublicUrl(filePath);
+
+      const videoUrl = urlData.publicUrl;
+
+      // Register in videos table
+      const { error: insertError } = await supabase.from('videos').insert({
+        match_id: matchId,
+        file_url: videoUrl,
+        file_name: `Transmissão ao vivo`,
+        video_type: 'full',
+        start_minute: 0,
+        end_minute: Math.ceil(recordingTime / 60),
+        duration_seconds: recordingTime,
+        status: 'complete'
+      });
+
+      if (insertError) {
+        console.error('Error inserting video record:', insertError);
+      }
+
+      setVideoUploadProgress(100);
+      console.log('Video saved successfully:', videoUrl);
+
+      return videoUrl;
+
+    } catch (error) {
+      console.error('Error saving video:', error);
+      toast({
+        title: "Erro ao salvar vídeo",
+        description: "O vídeo não pôde ser enviado",
+        variant: "destructive",
+      });
+      return null;
+    } finally {
+      setIsUploadingVideo(false);
+    }
+  }, [recordingTime, toast]);
+
+  // NEW: Stop video recording
+  const stopVideoRecording = useCallback(() => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+
+    if (videoRecorderRef.current && videoRecorderRef.current.state !== 'inactive') {
+      videoRecorderRef.current.stop();
+    }
+
+    setIsRecordingVideo(false);
+    console.log('Video recording stopped');
+  }, []);
+
+  const startRecording = useCallback(async (videoElement?: HTMLVideoElement | null) => {
     try {
       let audioStream: MediaStream;
       
@@ -202,6 +403,9 @@ export const useLiveBroadcast = () => {
           },
         });
       }
+
+      // Store audio stream for video recording
+      audioStreamRef.current = audioStream;
 
       // Create temp match for auto-saving transcripts
       await createTempMatch();
@@ -245,6 +449,19 @@ export const useLiveBroadcast = () => {
       setTranscriptBuffer("");
       setTranscriptChunks([]);
       audioChunksRef.current = [];
+      videoChunksRef.current = [];
+
+      // NEW: Start video recording if video element is available
+      if (videoElement) {
+        // Wait for video to be ready
+        if (videoElement.readyState >= 2) {
+          startVideoRecording(videoElement);
+        } else {
+          videoElement.addEventListener('loadeddata', () => {
+            startVideoRecording(videoElement);
+          }, { once: true });
+        }
+      }
 
       // Start transcription interval (every 10 seconds for faster feedback)
       transcriptionIntervalRef.current = setInterval(() => {
@@ -258,7 +475,9 @@ export const useLiveBroadcast = () => {
 
       toast({
         title: "Transmissão iniciada",
-        description: "Gravando áudio e salvando transcrição automaticamente...",
+        description: videoElement 
+          ? "Gravando áudio e vídeo..." 
+          : "Gravando áudio e salvando transcrição automaticamente...",
       });
     } catch (error) {
       console.error("Error starting recording:", error);
@@ -268,7 +487,7 @@ export const useLiveBroadcast = () => {
         variant: "destructive",
       });
     }
-  }, [cameraStream, toast, createTempMatch]);
+  }, [cameraStream, toast, createTempMatch, startVideoRecording]);
 
   const processAudioChunk = useCallback(async () => {
     if (audioChunksRef.current.length === 0) {
@@ -344,6 +563,7 @@ export const useLiveBroadcast = () => {
           console.log("Events extraction result:", eventsData);
 
           if (!eventsError && eventsData?.events && eventsData.events.length > 0) {
+            const currentRecordingTime = recordingTime;
             const newEvents: LiveEvent[] = eventsData.events.map((e: any) => ({
               id: crypto.randomUUID(),
               type: e.type,
@@ -352,6 +572,7 @@ export const useLiveBroadcast = () => {
               description: e.description,
               confidence: e.confidence || 0.8,
               status: "pending" as const,
+              recordingTimestamp: currentRecordingTime, // NEW: Store recording time for clip extraction
             }));
 
             console.log(`Detected ${newEvents.length} new events`);
@@ -380,6 +601,9 @@ export const useLiveBroadcast = () => {
       clearInterval(autoSaveIntervalRef.current);
     }
     
+    // NEW: Stop video recording
+    stopVideoRecording();
+    
     // Save transcript one final time
     if (transcriptBuffer.trim()) {
       saveTranscriptToDatabase();
@@ -387,11 +611,17 @@ export const useLiveBroadcast = () => {
     
     setIsRecording(false);
     setIsPaused(false);
-  }, [transcriptBuffer, saveTranscriptToDatabase]);
+  }, [transcriptBuffer, saveTranscriptToDatabase, stopVideoRecording]);
 
   const pauseRecording = useCallback(() => {
     if (mediaRecorderRef.current && isRecording) {
       mediaRecorderRef.current.pause();
+      
+      // Pause video recording
+      if (videoRecorderRef.current && videoRecorderRef.current.state === 'recording') {
+        videoRecorderRef.current.pause();
+      }
+      
       setIsPaused(true);
       
       // Save transcript when pausing
@@ -404,6 +634,12 @@ export const useLiveBroadcast = () => {
   const resumeRecording = useCallback(() => {
     if (mediaRecorderRef.current && isPaused) {
       mediaRecorderRef.current.resume();
+      
+      // Resume video recording
+      if (videoRecorderRef.current && videoRecorderRef.current.state === 'paused') {
+        videoRecorderRef.current.resume();
+      }
+      
       setIsPaused(false);
     }
   }, [isPaused]);
@@ -419,6 +655,7 @@ export const useLiveBroadcast = () => {
       second,
       description: `${type} aos ${minute}'${second}"`,
       status: "approved",
+      recordingTimestamp: recordingTime, // NEW: Store recording time
     };
 
     setApprovedEvents((prev) => [...prev, newEvent]);
@@ -480,10 +717,20 @@ export const useLiveBroadcast = () => {
       const matchId = tempMatchIdRef.current;
       
       if (matchId) {
-        // Update the temp match with final data
+        // NEW: Save recorded video first
+        toast({ 
+          title: "Salvando vídeo...", 
+          description: "Aguarde o upload da gravação" 
+        });
+        
+        const videoUrl = await saveRecordedVideo(matchId);
+
+        // Update the temp match with final data (including team IDs)
         await supabase
           .from("matches")
           .update({
+            home_team_id: matchInfo.homeTeamId || null,
+            away_team_id: matchInfo.awayTeamId || null,
             home_score: currentScore.home,
             away_score: currentScore.away,
             competition: matchInfo.competition,
@@ -494,7 +741,7 @@ export const useLiveBroadcast = () => {
         // Save final transcript
         await saveTranscriptToDatabase(matchId);
 
-        // Save approved events
+        // Save approved events with metadata for clip extraction
         if (approvedEvents.length > 0) {
           const eventsToInsert = approvedEvents.map((e) => ({
             match_id: matchId,
@@ -503,16 +750,25 @@ export const useLiveBroadcast = () => {
             second: e.second,
             description: e.description,
             approval_status: "approved",
+            is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(e.type),
+            match_half: e.minute < 45 ? 'first' : 'second',
+            metadata: {
+              eventMs: (e.recordingTimestamp || (e.minute * 60 + e.second)) * 1000,
+              videoSecond: e.recordingTimestamp || (e.minute * 60 + e.second),
+              source: 'live'
+            }
           }));
 
           await supabase.from("match_events").insert(eventsToInsert);
         }
-      }
 
-      toast({
-        title: "Partida finalizada",
-        description: `Transcrição salva (${transcriptBuffer.split(" ").length} palavras)`,
-      });
+        toast({
+          title: "Partida finalizada",
+          description: videoUrl 
+            ? `Vídeo e ${approvedEvents.length} eventos salvos. Clips podem ser extraídos na página de Mídia.`
+            : `Transcrição salva (${transcriptBuffer.split(" ").length} palavras)`,
+        });
+      }
 
       tempMatchIdRef.current = null;
       navigate("/matches");
@@ -524,7 +780,7 @@ export const useLiveBroadcast = () => {
         variant: "destructive",
       });
     }
-  }, [stopRecording, currentScore, matchInfo, approvedEvents, transcriptBuffer, saveTranscriptToDatabase, toast, navigate]);
+  }, [stopRecording, currentScore, matchInfo, approvedEvents, transcriptBuffer, saveTranscriptToDatabase, saveRecordedVideo, toast, navigate]);
 
   return {
     matchInfo,
@@ -545,6 +801,10 @@ export const useLiveBroadcast = () => {
     lastSavedAt,
     isProcessingAudio,
     lastProcessedAt,
+    // NEW: Video recording exports
+    isRecordingVideo,
+    videoUploadProgress,
+    isUploadingVideo,
     startRecording,
     stopRecording,
     pauseRecording,

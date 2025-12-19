@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useState, useRef, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Link2, Camera, Radio, Settings, ExternalLink } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
+import { Link2, Camera, Radio, Settings, ExternalLink, Loader2, Video } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LiveStreamInput } from "@/components/live/LiveStreamInput";
 import { LiveCameraInput } from "@/components/live/LiveCameraInput";
@@ -16,6 +17,10 @@ import { useLiveBroadcast } from "@/hooks/useLiveBroadcast";
 const Live = () => {
   const navigate = useNavigate();
   const [inputMode, setInputMode] = useState<"stream" | "camera">("stream");
+  
+  // Ref for video element (for recording)
+  const videoElementRef = useRef<HTMLVideoElement | null>(null);
+  
   const {
     matchInfo,
     setMatchInfo,
@@ -35,6 +40,10 @@ const Live = () => {
     lastSavedAt,
     isProcessingAudio,
     lastProcessedAt,
+    // NEW: Video recording states
+    isRecordingVideo,
+    videoUploadProgress,
+    isUploadingVideo,
     startRecording,
     stopRecording,
     pauseRecording,
@@ -49,6 +58,17 @@ const Live = () => {
   } = useLiveBroadcast();
 
   const hasVideoSource = streamUrl || cameraStream;
+
+  // Callback to receive video element from LiveStreamInput
+  const handleVideoElementReady = useCallback((videoElement: HTMLVideoElement | null) => {
+    videoElementRef.current = videoElement;
+    console.log('Video element ready:', videoElement ? 'available' : 'null');
+  }, []);
+
+  // Modified start recording to pass video element
+  const handleStartRecording = useCallback(() => {
+    startRecording(videoElementRef.current);
+  }, [startRecording]);
 
   return (
     <AppLayout>
@@ -69,6 +89,12 @@ const Live = () => {
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
               </span>
               <span className="text-red-500 font-semibold">AO VIVO</span>
+              {isRecordingVideo && (
+                <span className="flex items-center gap-1 text-xs text-muted-foreground ml-2">
+                  <Video className="h-3 w-3" />
+                  Gravando vídeo
+                </span>
+              )}
             </div>
           )}
           {streamUrl && (
@@ -118,6 +144,7 @@ const Live = () => {
                     streamUrl={streamUrl} 
                     onStreamUrlChange={setStreamUrl}
                     isRecording={isRecording}
+                    onVideoElementReady={handleVideoElementReady}
                   />
                 </TabsContent>
 
@@ -145,7 +172,7 @@ const Live = () => {
               recordingTime={recordingTime}
               hasVideoSource={!!hasVideoSource}
               hasMatchInfo={!!(matchInfo.homeTeam && matchInfo.awayTeam)}
-              onStart={startRecording}
+              onStart={handleStartRecording}
               onStop={stopRecording}
               onPause={pauseRecording}
               onResume={resumeRecording}
@@ -190,6 +217,22 @@ const Live = () => {
             />
           </div>
         </div>
+
+        {/* Video Upload Progress Indicator */}
+        {isUploadingVideo && (
+          <div className="fixed bottom-4 right-4 bg-card p-4 rounded-lg shadow-lg border z-50 min-w-[280px]">
+            <div className="flex items-center gap-3">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              <div className="flex-1">
+                <p className="text-sm font-medium">Enviando vídeo...</p>
+                <Progress value={videoUploadProgress} className="h-2 mt-2" />
+                <p className="text-xs text-muted-foreground mt-1">
+                  {videoUploadProgress}% concluído
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AppLayout>
   );
