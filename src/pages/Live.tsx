@@ -17,6 +17,7 @@ import { useLiveBroadcast } from "@/hooks/useLiveBroadcast";
 const Live = () => {
   const navigate = useNavigate();
   const [inputMode, setInputMode] = useState<"stream" | "camera">("stream");
+  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   
   // Ref for video element (for recording)
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
@@ -163,6 +164,8 @@ const Live = () => {
               matchInfo={matchInfo}
               onMatchInfoChange={setMatchInfo}
               disabled={isRecording}
+              selectedMatchId={selectedMatchId}
+              onMatchIdChange={setSelectedMatchId}
             />
 
             {/* Recording Controls */}
