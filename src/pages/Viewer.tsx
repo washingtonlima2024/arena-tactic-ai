@@ -44,11 +44,13 @@ const Viewer = () => {
   const [qualityLevels, setQualityLevels] = useState<{ height: number; bitrate: number; index: number }[]>([]);
   const [currentQuality, setCurrentQuality] = useState<number>(-1); // -1 = auto
 
-  // Check stream type
+  // Check stream type - order matters: check HLS first
   const isHlsStream = streamUrl.toLowerCase().includes('.m3u8');
-  const isMjpegStream = streamUrl.toLowerCase().includes('mjpeg') || 
-                        streamUrl.toLowerCase().includes('mjpg') || 
-                        streamUrl.toLowerCase().includes('/stream');
+  const isMjpegStream = !isHlsStream && (
+    streamUrl.toLowerCase().includes('mjpeg') || 
+    streamUrl.toLowerCase().includes('mjpg') || 
+    streamUrl.toLowerCase().endsWith('/stream')
+  );
 
   // Auto-hide controls after 3 seconds of inactivity
   useEffect(() => {
