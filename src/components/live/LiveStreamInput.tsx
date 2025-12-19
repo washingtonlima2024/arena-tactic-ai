@@ -116,10 +116,13 @@ export const LiveStreamInput = ({
     return url.toLowerCase().includes('.m3u8');
   };
 
-  // Check if URL is MJPEG stream
+  // Check if URL is MJPEG stream (must not be HLS)
   const isMjpegStream = (url: string): boolean => {
     const lowercaseUrl = url.toLowerCase();
-    return lowercaseUrl.includes('mjpeg') || lowercaseUrl.includes('mjpg') || lowercaseUrl.includes('/stream');
+    // Don't treat as MJPEG if it's an HLS stream
+    if (lowercaseUrl.includes('.m3u8')) return false;
+    // Check for explicit MJPEG indicators
+    return lowercaseUrl.includes('mjpeg') || lowercaseUrl.includes('mjpg') || lowercaseUrl.endsWith('/stream');
   };
 
   const getEmbedUrl = (url: string): string => {
