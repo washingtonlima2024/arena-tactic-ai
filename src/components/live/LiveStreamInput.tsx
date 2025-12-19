@@ -2,7 +2,19 @@ import { useState, useRef, useEffect } from "react";
 import Hls from "hls.js";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Link2, Play, ExternalLink, Loader2 } from "lucide-react";
+import { Link2, Play, ExternalLink, Loader2, ChevronDown } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+
+const TEST_STREAMS = [
+  { label: "HLS Test (Mux)", url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" },
+  { label: "MJPEG Local", url: "http://localhost:8000/stream/mjpeg" },
+  { label: "Big Buck Bunny (MP4)", url: "https://live-hls-abr-cdn.livepush.io/vod/bigbuckbunnyclip.mp4" },
+];
 
 interface LiveStreamInputProps {
   streamUrl: string;
@@ -104,6 +116,12 @@ export const LiveStreamInput = ({
     return url.toLowerCase().includes('.m3u8');
   };
 
+  // Check if URL is MJPEG stream
+  const isMjpegStream = (url: string): boolean => {
+    const lowercaseUrl = url.toLowerCase();
+    return lowercaseUrl.includes('mjpeg') || lowercaseUrl.includes('mjpg') || lowercaseUrl.includes('/stream');
+  };
+
   const getEmbedUrl = (url: string): string => {
     // YouTube
     if (url.includes("youtube.com") || url.includes("youtu.be")) {
@@ -127,6 +145,22 @@ export const LiveStreamInput = ({
         <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
           <ExternalLink className="h-12 w-12 mb-2 opacity-50" />
           <p>Cole um link e clique em Preview</p>
+        </div>
+      );
+    }
+
+    // MJPEG streams - use img tag
+    if (isMjpegStream(previewUrl)) {
+      return (
+        <div className="relative w-full h-full">
+          <img
+            src={previewUrl}
+            alt="MJPEG Stream"
+            className="w-full h-full object-contain"
+          />
+          <div className="absolute top-2 left-2 px-2 py-1 rounded bg-orange-500/80 text-white text-xs font-medium">
+            MJPEG
+          </div>
         </div>
       );
     }
@@ -169,13 +203,34 @@ export const LiveStreamInput = ({
         <div className="relative flex-1">
           <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Cole o link da transmissão (YouTube, Twitch, MP4, HLS...)"
+            placeholder="Cole o link da transmissão (YouTube, Twitch, MP4, HLS, MJPEG...)"
             value={streamUrl}
             onChange={(e) => onStreamUrlChange(e.target.value)}
             disabled={isRecording}
             className="pl-10"
           />
         </div>
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" disabled={isRecording}>
+              Teste
+              <ChevronDown className="h-4 w-4 ml-1" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {TEST_STREAMS.map((stream) => (
+              <DropdownMenuItem
+                key={stream.url}
+                onClick={() => {
+                  onStreamUrlChange(stream.url);
+                  setPreviewUrl(stream.url);
+                }}
+              >
+                {stream.label}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
         <Button
           variant="outline"
           onClick={handlePreview}
@@ -193,6 +248,7 @@ export const LiveStreamInput = ({
           <span className="px-2 py-1 rounded bg-muted">Twitch</span>
           <span className="px-2 py-1 rounded bg-muted">MP4 / WebM</span>
           <span className="px-2 py-1 rounded bg-muted">HLS (.m3u8)</span>
+          <span className="px-2 py-1 rounded bg-muted">MJPEG</span>
         </div>
       </div>
 

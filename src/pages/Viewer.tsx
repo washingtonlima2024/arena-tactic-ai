@@ -44,6 +44,12 @@ const Viewer = () => {
   const [qualityLevels, setQualityLevels] = useState<{ height: number; bitrate: number; index: number }[]>([]);
   const [currentQuality, setCurrentQuality] = useState<number>(-1); // -1 = auto
 
+  // Check stream type
+  const isHlsStream = streamUrl.toLowerCase().includes('.m3u8');
+  const isMjpegStream = streamUrl.toLowerCase().includes('mjpeg') || 
+                        streamUrl.toLowerCase().includes('mjpg') || 
+                        streamUrl.toLowerCase().includes('/stream');
+
   // Auto-hide controls after 3 seconds of inactivity
   useEffect(() => {
     let timeout: NodeJS.Timeout;
@@ -75,6 +81,12 @@ const Viewer = () => {
 
   // Initialize HLS.js or native playback
   useEffect(() => {
+    // MJPEG streams don't need video setup
+    if (isMjpegStream) {
+      setIsLoading(false);
+      return;
+    }
+
     const video = videoRef.current;
     if (!video || !streamUrl) return;
 
@@ -143,7 +155,7 @@ const Viewer = () => {
         hlsRef.current = null;
       }
     };
-  }, [streamUrl]);
+  }, [streamUrl, isMjpegStream]);
 
   // Handle fullscreen changes
   useEffect(() => {
@@ -230,21 +242,28 @@ const Viewer = () => {
     return `${Math.round(bitrate / 1000)}kbps`;
   };
 
-  const isHlsStream = streamUrl.toLowerCase().includes('.m3u8');
-
   return (
     <div 
       ref={containerRef}
       className="relative w-full h-screen bg-black overflow-hidden"
-      onClick={togglePlay}
+      onClick={isMjpegStream ? undefined : togglePlay}
     >
-      {/* Video Element */}
-      <video
-        ref={videoRef}
-        className="w-full h-full object-contain"
-        playsInline
-        muted={isMuted}
-      />
+      {/* MJPEG Stream - use img tag */}
+      {isMjpegStream ? (
+        <img
+          src={streamUrl}
+          alt="MJPEG Stream"
+          className="w-full h-full object-contain"
+        />
+      ) : (
+        /* Video Element for HLS and direct video */
+        <video
+          ref={videoRef}
+          className="w-full h-full object-contain"
+          playsInline
+          muted={isMuted}
+        />
+      )}
 
       {/* Loading Spinner */}
       {isLoading && (
@@ -255,15 +274,27 @@ const Viewer = () => {
 
       {/* Live Indicator */}
       <div 
-        className={`absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-600/90 backdrop-blur-sm transition-opacity duration-300 ${
+        className={`absolute top-4 left-4 flex items-center gap-2 transition-opacity duration-300 ${
           showControls ? "opacity-100" : "opacity-0"
         }`}
       >
-        <span className="relative flex h-2 w-2">
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
-          <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
-        </span>
-        <span className="text-white text-sm font-semibold">AO VIVO</span>
+        <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-600/90 backdrop-blur-sm">
+          <span className="relative flex h-2 w-2">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+          </span>
+          <span className="text-white text-sm font-semibold">AO VIVO</span>
+        </div>
+        {isMjpegStream && (
+          <div className="px-2 py-1 rounded bg-orange-500/80 text-white text-xs font-medium">
+            MJPEG
+          </div>
+        )}
+        {isHlsStream && (
+          <div className="px-2 py-1 rounded bg-blue-500/80 text-white text-xs font-medium">
+            HLS
+          </div>
+        )}
       </div>
 
       {/* ArenaPlay Logo */}
