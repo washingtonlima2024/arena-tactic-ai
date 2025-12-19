@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
-import { Link2, Camera, Radio, Settings } from "lucide-react";
+import { Link2, Camera, Radio, Settings, ExternalLink } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LiveStreamInput } from "@/components/live/LiveStreamInput";
 import { LiveCameraInput } from "@/components/live/LiveCameraInput";
@@ -67,6 +67,17 @@ const Live = () => {
               </span>
               <span className="text-red-500 font-semibold">AO VIVO</span>
             </div>
+          )}
+          {streamUrl && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => navigate(`/viewer?url=${encodeURIComponent(streamUrl)}`)}
+              className="border-primary/50 text-primary hover:bg-primary/10"
+            >
+              <ExternalLink className="h-4 w-4 mr-2" />
+              Abrir Player
+            </Button>
           )}
           <Button
             variant="outline"
