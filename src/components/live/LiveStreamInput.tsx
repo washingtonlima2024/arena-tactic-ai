@@ -21,12 +21,14 @@ interface LiveStreamInputProps {
   streamUrl: string;
   onStreamUrlChange: (url: string) => void;
   isRecording: boolean;
+  onVideoElementReady?: (videoElement: HTMLVideoElement | null) => void;
 }
 
 export const LiveStreamInput = ({
   streamUrl,
   onStreamUrlChange,
   isRecording,
+  onVideoElementReady,
 }: LiveStreamInputProps) => {
   const [previewUrl, setPreviewUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -70,6 +72,8 @@ export const LiveStreamInput = ({
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           setIsLoading(false);
           video.play().catch(console.error);
+          // Notify parent that video element is ready
+          onVideoElementReady?.(video);
         });
 
         hls.on(Hls.Events.ERROR, (_, data) => {
@@ -84,6 +88,7 @@ export const LiveStreamInput = ({
         video.addEventListener('loadedmetadata', () => {
           setIsLoading(false);
           video.play().catch(console.error);
+          onVideoElementReady?.(video);
         }, { once: true });
       }
     } else if (isDirectVideo(previewUrl)) {
@@ -91,6 +96,7 @@ export const LiveStreamInput = ({
       video.addEventListener('loadedmetadata', () => {
         setIsLoading(false);
         video.play().catch(console.error);
+        onVideoElementReady?.(video);
       }, { once: true });
       video.addEventListener('error', () => {
         setIsLoading(false);
@@ -98,8 +104,10 @@ export const LiveStreamInput = ({
     } else {
       // For YouTube/Twitch, loading handled by iframe
       setIsLoading(false);
+      // Can't record from iframe - notify with null
+      onVideoElementReady?.(null);
     }
-  }, [previewUrl]);
+  }, [previewUrl, onVideoElementReady]);
 
   const handlePreview = () => {
     setPreviewUrl(streamUrl);
@@ -196,6 +204,15 @@ export const LiveStreamInput = ({
             playsInline
             crossOrigin="anonymous"
           />
+          {isRecording && (
+            <div className="absolute top-2 right-2 px-2 py-1 rounded bg-red-500/80 text-white text-xs font-medium flex items-center gap-1">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+              </span>
+              REC
+            </div>
+          )}
         </div>
       );
     }
