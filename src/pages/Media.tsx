@@ -105,7 +105,34 @@ export default function Media() {
     enabled: !!matchId
   });
   
-  // Use first video as primary for playback, or find by event timestamp
+  // Helper function to find the correct video for an event based on match_half
+  function findVideoForEvent(
+    eventMinute: number | null, 
+    matchHalf: string | null | undefined, 
+    videos: typeof matchVideos
+  ) {
+    if (!videos || videos.length === 0) return null;
+    
+    // First try to match by video_type (first_half, second_half)
+    if (matchHalf) {
+      const videoByHalf = videos.find(v => v.video_type === matchHalf);
+      if (videoByHalf) return videoByHalf;
+    }
+    
+    // Then try to match by start_minute/end_minute range
+    if (eventMinute !== null) {
+      const videoByRange = videos.find(v => 
+        eventMinute >= (v.start_minute ?? 0) && 
+        eventMinute <= (v.end_minute ?? 90)
+      );
+      if (videoByRange) return videoByRange;
+    }
+    
+    // Fallback to first video
+    return videos[0];
+  }
+  
+  // Use first video as primary for UI display
   const matchVideo = matchVideos?.[0] || null;
 
   // Generate clips from events - Use eventMs from metadata as primary timestamp source
@@ -113,6 +140,7 @@ export default function Media() {
     const metadata = (event as any).metadata as { eventMs?: number; videoSecond?: number } | null;
     const eventMs = metadata?.eventMs; // Primary: milliseconds from AI analysis
     const videoSecond = metadata?.videoSecond; // Fallback: seconds from AI analysis
+    const matchHalf = event.match_half;
     
     // Calculate total seconds: prefer eventMs, then videoSecond, then minute+second
     const totalSeconds = eventMs !== undefined 
@@ -123,6 +151,15 @@ export default function Media() {
     
     const displayMinutes = Math.floor(totalSeconds / 60);
     const displaySeconds = Math.floor(totalSeconds % 60);
+    
+    // Find the correct video for this event
+    const eventVideo = findVideoForEvent(event.minute, matchHalf, matchVideos);
+    const canExtract = !!eventVideo;
+    
+    // Calculate video-relative timestamp
+    const videoRelativeSeconds = eventVideo 
+      ? totalSeconds - ((eventVideo.start_minute ?? 0) * 60)
+      : totalSeconds;
     
     return {
       id: event.id,
@@ -136,7 +173,11 @@ export default function Media() {
       minute: displayMinutes,
       second: displaySeconds,
       clipUrl: (event as any).clip_url as string | null,
-      videoSecond: videoSecond ?? totalSeconds
+      videoSecond: videoSecond ?? totalSeconds,
+      matchHalf,
+      canExtract, // Flag: can this clip be extracted?
+      eventVideo, // The video to use for extraction
+      videoRelativeSeconds // Timestamp relative to video start
     };
   }) || [];
   
@@ -308,12 +349,12 @@ export default function Media() {
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <p className="text-sm text-muted-foreground">
-                  {clips.length} eventos • {clips.filter(c => c.clipUrl).length} clips extraídos
+                  {clips.length} eventos • {clips.filter(c => c.clipUrl).length} clips extraídos • {clips.filter(c => c.canExtract && !c.clipUrl).length} podem ser extraídos
                 </p>
                 {matchVideo ? (
                   <Badge variant="success" className="gap-1">
                     <Video className="h-3 w-3" />
-                    Vídeo disponível
+                    {matchVideos?.length} vídeo(s) disponível(is)
                   </Badge>
                 ) : (
                   <Badge variant="warning" className="gap-1">
@@ -323,36 +364,61 @@ export default function Media() {
                 )}
               </div>
               <div className="flex gap-2">
-                {/* Extract video clips button */}
-                {matchVideo && clips.length > 0 && clips.some(c => !c.clipUrl) && (
+                {/* Extract video clips button - only for clips with canExtract */}
+                {matchVideo && clips.length > 0 && clips.some(c => !c.clipUrl && c.canExtract) && (
                   <Button 
                     variant="arena" 
                     size="sm"
                     onClick={async () => {
-                      const eventsWithoutClips = clips
-                        .filter(c => !c.clipUrl)
+                      // Group events by their corresponding video
+                      const eventsToExtract = clips
+                        .filter(c => !c.clipUrl && c.canExtract && c.eventVideo)
                         .map(c => ({
                           id: c.id,
                           minute: c.minute,
                           second: c.second,
-                          metadata: { eventMs: c.eventMs, videoSecond: c.videoSecond }
+                          metadata: { 
+                            eventMs: c.eventMs, 
+                            videoSecond: c.videoRelativeSeconds // Use video-relative timestamp
+                          },
+                          videoUrl: c.eventVideo!.file_url,
+                          videoStartMinute: c.eventVideo!.start_minute ?? 0,
+                          videoDurationSeconds: c.eventVideo!.duration_seconds ?? undefined
                         }));
                       
-                      // Calculate video start minute from events if timestamps exceed video duration
-                      const minEventMinute = Math.min(...eventsWithoutClips.map(e => e.minute || 0));
-                      const videoDuration = matchVideo.duration_seconds ?? 0;
-                      const videoStartMinute = matchVideo.start_minute ?? 
-                        (minEventMinute > videoDuration / 60 ? minEventMinute - 5 : 0);
-                      
-                      await generateAllClips(
-                        eventsWithoutClips, 
-                        matchVideo.file_url, 
-                        matchId,
-                        {
-                          videoStartMinute,
-                          videoDurationSeconds: matchVideo.duration_seconds ?? undefined
+                      // Process each unique video separately
+                      const videoGroups = eventsToExtract.reduce((acc, event) => {
+                        const key = event.videoUrl;
+                        if (!acc[key]) {
+                          acc[key] = {
+                            videoUrl: event.videoUrl,
+                            videoStartMinute: event.videoStartMinute,
+                            videoDurationSeconds: event.videoDurationSeconds,
+                            events: []
+                          };
                         }
-                      );
+                        acc[key].events.push({
+                          id: event.id,
+                          minute: event.minute,
+                          second: event.second,
+                          metadata: event.metadata
+                        });
+                        return acc;
+                      }, {} as Record<string, { videoUrl: string; videoStartMinute: number; videoDurationSeconds?: number; events: any[] }>);
+                      
+                      // Process each video group
+                      for (const group of Object.values(videoGroups)) {
+                        console.log(`[Clips] Extraindo ${group.events.length} clips do vídeo: ${group.videoUrl.slice(-30)}`);
+                        await generateAllClips(
+                          group.events, 
+                          group.videoUrl, 
+                          matchId,
+                          {
+                            videoStartMinute: group.videoStartMinute,
+                            videoDurationSeconds: group.videoDurationSeconds
+                          }
+                        );
+                      }
                       refetchEvents();
                     }}
                     disabled={isGeneratingClips}
@@ -362,7 +428,7 @@ export default function Media() {
                     ) : (
                       <Scissors className="mr-2 h-4 w-4" />
                     )}
-                    Extrair Clips ({clips.filter(c => !c.clipUrl).length})
+                    Extrair Clips ({clips.filter(c => !c.clipUrl && c.canExtract).length})
                   </Button>
                 )}
 
@@ -515,6 +581,7 @@ export default function Media() {
                   const isExtractingFrame = isExtracting(clip.id);
                   const isExtractingClip = isGeneratingClip(clip.id);
                   const hasExtractedClip = !!clip.clipUrl;
+                  const canExtractClip = clip.canExtract;
                   
                   const handlePlayClip = () => {
                     if (!matchVideo && !clip.clipUrl) {
@@ -570,7 +637,7 @@ export default function Media() {
                   };
                   
                   return (
-                    <Card key={clip.id} variant="glow" className="overflow-hidden">
+                    <Card key={clip.id} variant="glow" className={`overflow-hidden ${!canExtractClip ? 'opacity-75' : ''}`}>
                       <div className="relative aspect-video bg-muted">
                         {thumbnail?.imageUrl ? (
                           <img 
@@ -637,15 +704,25 @@ export default function Media() {
                               <CheckCircle className="h-3 w-3" />
                               Clip Pronto
                             </Badge>
-                          ) : (
+                          ) : canExtractClip ? (
                             <Badge variant="secondary" className="backdrop-blur gap-1">
-                              <Clock className="h-3 w-3" />
-                              Via Timestamp
+                              <Scissors className="h-3 w-3" />
+                              Pode Extrair
+                            </Badge>
+                          ) : (
+                            <Badge variant="warning" className="backdrop-blur gap-1">
+                              <AlertCircle className="h-3 w-3" />
+                              Sem Vídeo
                             </Badge>
                           )}
                         </div>
-                        <div className="absolute left-2 top-2">
+                        <div className="absolute left-2 top-2 flex gap-1">
                           <Badge variant="arena">{clip.type}</Badge>
+                          {clip.matchHalf && (
+                            <Badge variant="outline" className="backdrop-blur text-xs">
+                              {clip.matchHalf === 'first_half' ? '1º T' : clip.matchHalf === 'second_half' ? '2º T' : clip.matchHalf}
+                            </Badge>
+                          )}
                         </div>
                         <div className="absolute left-2 bottom-2">
                           <Badge variant="outline" className="backdrop-blur font-mono">
