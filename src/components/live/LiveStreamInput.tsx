@@ -2,13 +2,14 @@ import { useState, useRef, useEffect } from "react";
 import Hls from "hls.js";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { Link2, Play, ExternalLink, Loader2, ChevronDown } from "lucide-react";
+import { Link2, Play, ExternalLink, Loader2, ChevronDown, AlertTriangle } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const TEST_STREAMS = [
   { label: "HLS Local (live.m3u8)", url: "http://localhost:8000/streams/live.m3u8" },
@@ -16,6 +17,12 @@ const TEST_STREAMS = [
   { label: "MJPEG Local", url: "http://localhost:8000/stream/mjpeg" },
   { label: "Big Buck Bunny (MP4)", url: "https://live-hls-abr-cdn.livepush.io/vod/bigbuckbunnyclip.mp4" },
 ];
+
+// Check if running in Lovable preview (not localhost)
+const isLovablePreview = (): boolean => {
+  const hostname = window.location.hostname;
+  return hostname.includes('lovable.app') || hostname.includes('lovableproject.com');
+};
 
 interface LiveStreamInputProps {
   streamUrl: string;
@@ -30,6 +37,7 @@ export const LiveStreamInput = ({
 }: LiveStreamInputProps) => {
   const [previewUrl, setPreviewUrl] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [localStreamError, setLocalStreamError] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const hlsRef = useRef<Hls | null>(null);
 
@@ -55,8 +63,16 @@ export const LiveStreamInput = ({
     }
 
     setIsLoading(true);
+    setLocalStreamError(false);
 
     const isLocal = isLocalStream(previewUrl);
+
+    // Check if trying to use local stream in Lovable preview
+    if (isLocal && isLovablePreview()) {
+      setIsLoading(false);
+      setLocalStreamError(true);
+      return;
+    }
 
     if (isHlsStream(previewUrl)) {
       if (Hls.isSupported()) {
@@ -162,6 +178,27 @@ export const LiveStreamInput = ({
         <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
           <ExternalLink className="h-12 w-12 mb-2 opacity-50" />
           <p>Cole um link e clique em Preview</p>
+        </div>
+      );
+    }
+
+    // Show error for local streams in Lovable preview
+    if (localStreamError) {
+      return (
+        <div className="w-full h-full flex flex-col items-center justify-center p-6">
+          <Alert className="max-w-md bg-yellow-500/10 border-yellow-500/50">
+            <AlertTriangle className="h-5 w-5 text-yellow-500" />
+            <AlertTitle className="text-yellow-500">Stream Local Bloqueado</AlertTitle>
+            <AlertDescription className="text-muted-foreground">
+              <p className="mb-2">
+                Streams locais (localhost) não funcionam no preview do Lovable devido a políticas de segurança do navegador.
+              </p>
+              <p className="font-medium">Para testar, rode localmente:</p>
+              <code className="block mt-1 px-2 py-1 bg-muted rounded text-xs">
+                npm run dev
+              </code>
+            </AlertDescription>
+          </Alert>
         </div>
       );
     }
