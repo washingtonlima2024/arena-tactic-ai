@@ -6,34 +6,21 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-// Process base64 in chunks to prevent memory issues
-function processBase64Chunks(base64String: string, chunkSize = 32768): Uint8Array {
-  const chunks: Uint8Array[] = [];
-  let position = 0;
+// Decode base64 to Uint8Array safely
+function base64ToUint8Array(base64String: string): Uint8Array {
+  // Remove any whitespace or newlines
+  const cleanBase64 = base64String.replace(/\s/g, '');
   
-  while (position < base64String.length) {
-    const chunk = base64String.slice(position, position + chunkSize);
-    const binaryChunk = atob(chunk);
-    const bytes = new Uint8Array(binaryChunk.length);
-    
-    for (let i = 0; i < binaryChunk.length; i++) {
-      bytes[i] = binaryChunk.charCodeAt(i);
-    }
-    
-    chunks.push(bytes);
-    position += chunkSize;
+  // Decode base64 to binary string
+  const binaryString = atob(cleanBase64);
+  
+  // Convert to Uint8Array
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
   }
-
-  const totalLength = chunks.reduce((acc, chunk) => acc + chunk.length, 0);
-  const result = new Uint8Array(totalLength);
-  let offset = 0;
-
-  for (const chunk of chunks) {
-    result.set(chunk, offset);
-    offset += chunk.length;
-  }
-
-  return result;
+  
+  return bytes;
 }
 
 // Detect audio format from base64 data
@@ -107,9 +94,13 @@ serve(async (req) => {
     const { mimeType, extension } = detectAudioFormat(audio);
     console.log('Detected audio format:', mimeType, extension);
 
-    // Process audio in chunks to avoid memory issues
-    const binaryAudio = processBase64Chunks(audio);
+    // Decode base64 to binary
+    const binaryAudio = base64ToUint8Array(audio);
     console.log('Binary audio size:', binaryAudio.length, 'bytes');
+    
+    // Log first few bytes for debugging
+    const headerBytes = Array.from(binaryAudio.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+    console.log('Audio header bytes:', headerBytes);
 
     // Prepare form data for OpenAI Whisper API
     const formData = new FormData();
