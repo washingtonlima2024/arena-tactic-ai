@@ -127,15 +127,27 @@ export function useMatchAnalysis() {
     setIsAnalyzing(true);
 
     try {
-      // Step 1: Transcribe audio
-      setProgress({ stage: 'transcribing', progress: 20, message: 'Transcrevendo áudio com Whisper...' });
+      // Step 1: Transcribe audio/video using large video transcriber (supports up to 200MB)
+      setProgress({ stage: 'transcribing', progress: 20, message: 'Transcrevendo mídia...' });
 
-      const { data: transcriptionData, error: transcriptionError } = await supabase.functions.invoke('transcribe-audio-whisper', {
-        body: { audioUrl }
+      const { data: transcriptionData, error: transcriptionError } = await supabase.functions.invoke('transcribe-large-video', {
+        body: { videoUrl: audioUrl, matchId }
       });
 
-      if (transcriptionError || !transcriptionData?.text) {
+      if (transcriptionError) {
         throw new Error(transcriptionError?.message || 'Falha na transcrição');
+      }
+
+      if (!transcriptionData?.success) {
+        // Check if it requires SRT upload
+        if (transcriptionData?.requiresSrtUpload) {
+          throw new Error(`Arquivo muito grande (${transcriptionData?.videoSizeMB || ''}MB). Faça upload de um arquivo SRT/VTT.`);
+        }
+        throw new Error(transcriptionData?.error || 'Falha na transcrição');
+      }
+
+      if (!transcriptionData?.text) {
+        throw new Error('Transcrição vazia');
       }
 
       console.log('Transcription completed:', transcriptionData.text.length, 'chars');
