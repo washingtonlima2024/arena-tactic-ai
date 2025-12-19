@@ -20,6 +20,18 @@ export const LiveStreamInput = ({
     setPreviewUrl(streamUrl);
   };
 
+  // Check if URL is a direct video file
+  const isDirectVideo = (url: string): boolean => {
+    const videoExtensions = ['.mp4', '.webm', '.ogg', '.mov', '.m4v'];
+    const lowercaseUrl = url.toLowerCase();
+    return videoExtensions.some(ext => lowercaseUrl.includes(ext));
+  };
+
+  // Check if URL is HLS stream
+  const isHlsStream = (url: string): boolean => {
+    return url.toLowerCase().includes('.m3u8');
+  };
+
   const getEmbedUrl = (url: string): string => {
     // YouTube
     if (url.includes("youtube.com") || url.includes("youtu.be")) {
@@ -33,8 +45,58 @@ export const LiveStreamInput = ({
       const channel = url.split("/").pop();
       return `https://player.twitch.tv/?channel=${channel}&parent=${window.location.hostname}`;
     }
-    // Direct HLS/RTMP or other embeddable URL
+    // Direct video or HLS - handled separately
     return url;
+  };
+
+  const renderVideoPreview = () => {
+    if (!previewUrl) {
+      return (
+        <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
+          <ExternalLink className="h-12 w-12 mb-2 opacity-50" />
+          <p>Cole um link e clique em Preview</p>
+        </div>
+      );
+    }
+
+    // Direct video files (MP4, WebM, etc.)
+    if (isDirectVideo(previewUrl)) {
+      return (
+        <video
+          src={previewUrl}
+          className="w-full h-full object-contain"
+          controls
+          autoPlay
+          muted
+          playsInline
+          crossOrigin="anonymous"
+        />
+      );
+    }
+
+    // HLS streams - use video element with native support or fallback
+    if (isHlsStream(previewUrl)) {
+      return (
+        <video
+          src={previewUrl}
+          className="w-full h-full object-contain"
+          controls
+          autoPlay
+          muted
+          playsInline
+        />
+      );
+    }
+
+    // YouTube, Twitch, and other embeddable URLs
+    return (
+      <iframe
+        src={getEmbedUrl(previewUrl)}
+        className="w-full h-full"
+        allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+        allowFullScreen
+      />
+    );
   };
 
   return (
@@ -43,7 +105,7 @@ export const LiveStreamInput = ({
         <div className="relative flex-1">
           <Link2 className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
-            placeholder="Cole o link da transmissão (YouTube, Twitch, HLS...)"
+            placeholder="Cole o link da transmissão (YouTube, Twitch, MP4, HLS...)"
             value={streamUrl}
             onChange={(e) => onStreamUrlChange(e.target.value)}
             disabled={isRecording}
@@ -65,26 +127,14 @@ export const LiveStreamInput = ({
         <div className="flex flex-wrap gap-2">
           <span className="px-2 py-1 rounded bg-muted">YouTube Live</span>
           <span className="px-2 py-1 rounded bg-muted">Twitch</span>
+          <span className="px-2 py-1 rounded bg-muted">MP4 / WebM</span>
           <span className="px-2 py-1 rounded bg-muted">HLS (.m3u8)</span>
-          <span className="px-2 py-1 rounded bg-muted">Embed URL</span>
         </div>
       </div>
 
       {/* Video Preview */}
       <div className="aspect-video bg-black/50 rounded-lg overflow-hidden border border-border">
-        {previewUrl ? (
-          <iframe
-            src={getEmbedUrl(previewUrl)}
-            className="w-full h-full"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowFullScreen
-          />
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center text-muted-foreground">
-            <ExternalLink className="h-12 w-12 mb-2 opacity-50" />
-            <p>Cole um link e clique em Preview</p>
-          </div>
-        )}
+        {renderVideoPreview()}
       </div>
     </div>
   );
