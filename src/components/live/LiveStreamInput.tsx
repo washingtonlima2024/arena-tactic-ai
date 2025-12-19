@@ -63,12 +63,7 @@ export const LiveStreamInput = ({
         const hls = new Hls({
           enableWorker: true,
           lowLatencyMode: true,
-          xhrSetup: (xhr, url) => {
-            // Para streams locais, não forçar credenciais CORS
-            if (isLocalStream(url)) {
-              xhr.withCredentials = false;
-            }
-          }
+          backBufferLength: 90,
         });
         
         hlsRef.current = hls;
@@ -224,9 +219,9 @@ export const LiveStreamInput = ({
             ref={videoRef}
             className="w-full h-full object-contain"
             controls
+            autoPlay
             muted
             playsInline
-            {...(!isLocal && { crossOrigin: "anonymous" })}
           />
           {/* Badges */}
           <div className="absolute top-2 left-2 flex gap-2">
