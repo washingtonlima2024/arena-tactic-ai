@@ -173,25 +173,36 @@ export const LiveStreamInput = ({
 
     // MJPEG streams - use img tag
     if (isMjpegStream(previewUrl)) {
+      const isLocal = isLocalStream(previewUrl);
+      
       return (
         <div className="relative w-full h-full">
           <img
             src={previewUrl}
             alt="MJPEG Stream"
             className="w-full h-full object-contain"
+            {...(!isLocal && { crossOrigin: "anonymous" })}
             onError={(e) => {
               console.error('MJPEG stream failed to load:', previewUrl);
               const target = e.target as HTMLImageElement;
               target.style.display = 'none';
               target.parentElement?.insertAdjacentHTML(
                 'beforeend',
-                '<div class="w-full h-full flex flex-col items-center justify-center text-red-400"><p class="text-center">Erro ao carregar stream MJPEG.<br/>Verifique se o servidor está rodando e CORS está habilitado.</p></div>'
+                `<div class="w-full h-full flex flex-col items-center justify-center text-red-400"><p class="text-center">Erro ao carregar stream MJPEG${isLocal ? ' local' : ''}.<br/>Verifique se o servidor está rodando.</p></div>`
               );
             }}
             onLoad={() => console.log('MJPEG stream loaded successfully')}
           />
-          <div className="absolute top-2 left-2 px-2 py-1 rounded bg-orange-500/80 text-white text-xs font-medium">
-            MJPEG
+          {/* Badges */}
+          <div className="absolute top-2 left-2 flex gap-2">
+            <div className="px-2 py-1 rounded bg-orange-500/80 text-white text-xs font-medium">
+              MJPEG
+            </div>
+            {isLocal && (
+              <div className="px-2 py-1 rounded bg-green-500/80 text-white text-xs font-medium">
+                LOCAL
+              </div>
+            )}
           </div>
         </div>
       );
