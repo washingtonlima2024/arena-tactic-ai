@@ -44,7 +44,7 @@ export const useLiveBroadcast = () => {
     matchDate: new Date().toISOString().slice(0, 16),
   });
   
-  const [streamUrl, setStreamUrl] = useState("");
+  const [streamUrl, setStreamUrl] = useState("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8");
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   
   const [isRecording, setIsRecording] = useState(false);
