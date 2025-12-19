@@ -24,6 +24,9 @@ verify_jwt = false
 [functions.team-chatbot]
 verify_jwt = false
 
+[functions.transcribe-audio]
+verify_jwt = false
+
 [functions.transcribe-audio-whisper]
 verify_jwt = false
 
