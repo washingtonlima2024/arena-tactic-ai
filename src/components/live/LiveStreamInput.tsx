@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 
 const TEST_STREAMS = [
+  { label: "HLS Local (live.m3u8)", url: "http://localhost:8000/streams/live.m3u8" },
   { label: "HLS Test (Mux)", url: "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8" },
   { label: "MJPEG Local", url: "http://localhost:8000/stream/mjpeg" },
   { label: "Big Buck Bunny (MP4)", url: "https://live-hls-abr-cdn.livepush.io/vod/bigbuckbunnyclip.mp4" },
