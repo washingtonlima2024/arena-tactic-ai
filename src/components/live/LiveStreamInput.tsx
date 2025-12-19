@@ -56,11 +56,19 @@ export const LiveStreamInput = ({
 
     setIsLoading(true);
 
+    const isLocal = isLocalStream(previewUrl);
+
     if (isHlsStream(previewUrl)) {
       if (Hls.isSupported()) {
         const hls = new Hls({
           enableWorker: true,
           lowLatencyMode: true,
+          xhrSetup: (xhr, url) => {
+            // Para streams locais, não forçar credenciais CORS
+            if (isLocalStream(url)) {
+              xhr.withCredentials = false;
+            }
+          }
         });
         
         hlsRef.current = hls;
@@ -126,6 +134,16 @@ export const LiveStreamInput = ({
     return lowercaseUrl.includes('mjpeg') || lowercaseUrl.includes('mjpg') || lowercaseUrl.endsWith('/stream');
   };
 
+  // Check if URL is a local stream (localhost, 127.0.0.1, or local network)
+  const isLocalStream = (url: string): boolean => {
+    const lowercaseUrl = url.toLowerCase();
+    return lowercaseUrl.includes('localhost') || 
+           lowercaseUrl.includes('127.0.0.1') || 
+           lowercaseUrl.includes('192.168.') ||
+           lowercaseUrl.includes('10.0.') ||
+           lowercaseUrl.includes('172.16.');
+  };
+
   const getEmbedUrl = (url: string): string => {
     // YouTube
     if (url.includes("youtube.com") || url.includes("youtu.be")) {
@@ -181,6 +199,9 @@ export const LiveStreamInput = ({
 
     // Direct video files or HLS streams - use video element with HLS.js
     if (isDirectVideo(previewUrl) || isHlsStream(previewUrl)) {
+      const isLocal = isLocalStream(previewUrl);
+      const isHls = isHlsStream(previewUrl);
+      
       return (
         <div className="relative w-full h-full">
           {isLoading && (
@@ -194,8 +215,21 @@ export const LiveStreamInput = ({
             controls
             muted
             playsInline
-            crossOrigin="anonymous"
+            {...(!isLocal && { crossOrigin: "anonymous" })}
           />
+          {/* Badges */}
+          <div className="absolute top-2 left-2 flex gap-2">
+            {isHls && (
+              <div className="px-2 py-1 rounded bg-blue-500/80 text-white text-xs font-medium">
+                HLS
+              </div>
+            )}
+            {isLocal && (
+              <div className="px-2 py-1 rounded bg-green-500/80 text-white text-xs font-medium">
+                LOCAL
+              </div>
+            )}
+          </div>
         </div>
       );
     }
