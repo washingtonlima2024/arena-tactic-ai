@@ -33,16 +33,25 @@ export const LiveTranscriptRealtime = ({
   onTranscriptUpdate,
   onEventDetected,
 }: LiveTranscriptRealtimeProps) => {
-  const chunksRef = useRef<TranscriptChunk[]>([]);
-  const bufferRef = useRef<string>("");
+  // Use useState instead of useRef for re-rendering
+  const [chunks, setChunks] = useState<TranscriptChunk[]>([]);
+  const [transcriptBuffer, setTranscriptBuffer] = useState("");
   const recordingTimeRef = useRef<number>(0);
   const pendingTranscriptsRef = useRef<string[]>([]);
   const extractionInProgressRef = useRef(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [eventsExtracted, setEventsExtracted] = useState(0);
+
+  // Auto-scroll to bottom when new transcripts arrive
+  useEffect(() => {
+    if (scrollRef.current) {
+      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    }
+  }, [chunks, transcriptBuffer]);
 
   // Timer for recording time
   useEffect(() => {
@@ -117,7 +126,7 @@ export const LiveTranscriptRealtime = ({
   }, [homeTeam, awayTeam, currentScore, onEventDetected]);
 
   // Save transcript to database
-  const saveTranscriptToDatabase = async (text: string) => {
+  const saveTranscriptToDatabase = async (text: string, fullTranscript: string) => {
     if (!matchId || !text.trim()) return;
     
     setIsSaving(true);
@@ -131,8 +140,6 @@ export const LiveTranscriptRealtime = ({
         .eq("match_id", matchId)
         .eq("audio_type", "live_transcript")
         .maybeSingle();
-
-      const fullTranscript = bufferRef.current.trim();
 
       if (existing) {
         // Update existing transcript
@@ -178,19 +185,21 @@ export const LiveTranscriptRealtime = ({
         timestamp: new Date(),
       };
       
-      chunksRef.current = [...chunksRef.current, newChunk];
-      bufferRef.current = bufferRef.current + " " + text;
-      
-      onTranscriptUpdate?.(bufferRef.current.trim(), chunksRef.current);
-      
-      // Auto-save to database
-      saveTranscriptToDatabase(text);
+      // Use setState for re-rendering
+      setChunks(prev => [...prev, newChunk]);
+      setTranscriptBuffer(prev => {
+        const newBuffer = prev + " " + text;
+        onTranscriptUpdate?.(newBuffer.trim(), [...chunks, newChunk]);
+        // Auto-save to database
+        saveTranscriptToDatabase(text, newBuffer.trim());
+        return newBuffer;
+      });
       
       // Extract events from the new transcript segment
       extractEvents(text);
     },
     onPartialTranscript: (text) => {
-      // Partial transcript is handled by the hook
+      // Partial transcript is handled by the hook - triggers re-render automatically
     },
   });
 
@@ -198,8 +207,8 @@ export const LiveTranscriptRealtime = ({
   useEffect(() => {
     if (isRecording && !scribe.isConnected && !scribe.isConnecting) {
       // Reset state
-      chunksRef.current = [];
-      bufferRef.current = "";
+      setChunks([]);
+      setTranscriptBuffer("");
       
       scribe.connect();
     } else if (!isRecording && scribe.isConnected) {
@@ -207,7 +216,7 @@ export const LiveTranscriptRealtime = ({
     }
   }, [isRecording, scribe.isConnected, scribe.isConnecting, scribe]);
 
-  const wordCount = bufferRef.current.trim().split(/\s+/).filter(Boolean).length + 
+  const wordCount = transcriptBuffer.trim().split(/\s+/).filter(Boolean).length + 
     (scribe.partialTranscript ? scribe.partialTranscript.split(/\s+/).filter(Boolean).length : 0);
 
   return (
@@ -265,9 +274,9 @@ export const LiveTranscriptRealtime = ({
         </div>
       </div>
 
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 max-h-[350px]" ref={scrollRef}>
         <div className="space-y-3 pr-2">
-          {chunksRef.current.length === 0 && !scribe.partialTranscript ? (
+          {chunks.length === 0 && !scribe.partialTranscript ? (
             <div className="text-center text-muted-foreground py-8">
               {isRecording ? (
                 <div className="space-y-2">
