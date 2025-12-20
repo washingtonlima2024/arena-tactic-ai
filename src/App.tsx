@@ -33,6 +33,8 @@ const App = () => (
         <SidebarProvider>
           <Toaster />
           <Sonner />
+          {/* FloatingLivePlayer OUTSIDE BrowserRouter to persist recording across navigation */}
+          <FloatingLivePlayer />
           <BrowserRouter>
             <Routes>
               <Route path="/welcome" element={<Landing />} />
@@ -52,7 +54,6 @@ const App = () => (
               <Route path="*" element={<NotFound />} />
             </Routes>
             <ArenaChatbot />
-            <FloatingLivePlayer />
           </BrowserRouter>
         </SidebarProvider>
       </LiveBroadcastProvider>
