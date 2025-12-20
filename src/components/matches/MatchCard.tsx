@@ -349,6 +349,14 @@ export function MatchCard({ match }: MatchCardProps) {
                 Processando...
               </Button>
             )}
+            {match.status === 'pending' && (
+              <Button variant="arena" size="sm" className="flex-1" asChild>
+                <Link to={`/events?match=${match.id}`}>
+                  <BarChart3 className="mr-1 h-4 w-4" />
+                  Ver Análise
+                </Link>
+              </Button>
+            )}
             {match.status === 'scheduled' && (
               <Button variant="arena-outline" size="sm" className="flex-1" asChild>
                 <Link to="/upload">
