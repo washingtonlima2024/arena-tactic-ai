@@ -110,8 +110,18 @@ export function FloatingLivePlayer() {
 
   const handleConfirmStop = async () => {
     setShowStopConfirm(false);
-    await finishMatch();
-    window.location.href = '/matches';
+    const result = await finishMatch();
+    // Only navigate after finishMatch completes successfully
+    if (result) {
+      console.log('Match finished successfully:', result.matchId);
+      // Use setTimeout to ensure all state updates are flushed
+      setTimeout(() => {
+        window.location.href = '/matches';
+      }, 500);
+    } else {
+      console.error('Failed to finish match');
+      window.location.href = '/matches';
+    }
   };
 
   // Check if we're on live page using window.location
