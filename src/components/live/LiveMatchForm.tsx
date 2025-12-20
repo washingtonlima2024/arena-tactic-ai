@@ -180,7 +180,7 @@ export const LiveMatchForm = ({
                     <span>{match.home_team?.name || "Time 1"}</span>
                     <span className="text-muted-foreground">vs</span>
                     <span>{match.away_team?.name || "Time 2"}</span>
-                    {match.match_date && (
+                    {match.match_date && !isNaN(new Date(match.match_date).getTime()) && (
                       <span className="text-xs text-muted-foreground ml-2">
                         ({format(new Date(match.match_date), "dd/MM/yyyy")})
                       </span>
@@ -211,7 +211,9 @@ export const LiveMatchForm = ({
               <div>
                 <span className="text-muted-foreground">Data:</span>
                 <span className="ml-2 font-medium">
-                  {matchInfo.matchDate ? format(new Date(matchInfo.matchDate), "dd/MM/yyyy HH:mm") : "-"}
+                  {matchInfo.matchDate && !isNaN(new Date(matchInfo.matchDate).getTime()) 
+                    ? format(new Date(matchInfo.matchDate), "dd/MM/yyyy HH:mm") 
+                    : "-"}
                 </span>
               </div>
             </div>
