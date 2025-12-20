@@ -1,28 +1,48 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Clock, Loader2, Mic, Wifi, WifiOff, Save, CheckCircle } from "lucide-react";
+import { FileText, Clock, Loader2, Mic, Wifi, WifiOff, Save, CheckCircle, Zap } from "lucide-react";
 import { useElevenLabsScribe } from "@/hooks/useElevenLabsScribe";
 import { TranscriptChunk } from "@/hooks/useLiveBroadcast";
 import { supabase } from "@/integrations/supabase/client";
 
+interface ExtractedEvent {
+  type: string;
+  minute: number;
+  second: number;
+  description: string;
+  confidence: number;
+}
+
 interface LiveTranscriptRealtimeProps {
   isRecording: boolean;
   matchId?: string | null;
+  homeTeam?: string;
+  awayTeam?: string;
+  currentScore?: { home: number; away: number };
   onTranscriptUpdate?: (buffer: string, chunks: TranscriptChunk[]) => void;
+  onEventDetected?: (event: ExtractedEvent) => void;
 }
 
 export const LiveTranscriptRealtime = ({
   isRecording,
   matchId,
+  homeTeam,
+  awayTeam,
+  currentScore,
   onTranscriptUpdate,
+  onEventDetected,
 }: LiveTranscriptRealtimeProps) => {
   const chunksRef = useRef<TranscriptChunk[]>([]);
   const bufferRef = useRef<string>("");
   const recordingTimeRef = useRef<number>(0);
+  const pendingTranscriptsRef = useRef<string[]>([]);
+  const extractionInProgressRef = useRef(false);
   const [isSaving, setIsSaving] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [eventsExtracted, setEventsExtracted] = useState(0);
 
   // Timer for recording time
   useEffect(() => {
@@ -34,6 +54,67 @@ export const LiveTranscriptRealtime = ({
       return () => clearInterval(timer);
     }
   }, [isRecording]);
+
+  // Extract events from transcript
+  const extractEvents = useCallback(async (transcript: string) => {
+    if (!transcript.trim() || extractionInProgressRef.current) {
+      // Queue the transcript for later processing
+      if (transcript.trim()) {
+        pendingTranscriptsRef.current.push(transcript);
+      }
+      return;
+    }
+
+    extractionInProgressRef.current = true;
+    setIsExtracting(true);
+
+    try {
+      // Combine pending transcripts
+      const allTranscripts = [...pendingTranscriptsRef.current, transcript].join(" ");
+      pendingTranscriptsRef.current = [];
+
+      const currentMinute = Math.floor(recordingTimeRef.current / 60);
+
+      const { data, error } = await supabase.functions.invoke("extract-live-events", {
+        body: {
+          transcript: allTranscripts,
+          homeTeam: homeTeam || "Time Casa",
+          awayTeam: awayTeam || "Time Fora",
+          currentScore: currentScore || { home: 0, away: 0 },
+          currentMinute,
+        },
+      });
+
+      if (error) {
+        console.error("Error extracting events:", error);
+        return;
+      }
+
+      const events = data?.events || [];
+      
+      if (events.length > 0) {
+        console.log(`Extracted ${events.length} events from transcript`);
+        setEventsExtracted((prev) => prev + events.length);
+        
+        // Notify parent component of each detected event
+        events.forEach((event: ExtractedEvent) => {
+          onEventDetected?.(event);
+        });
+      }
+    } catch (error) {
+      console.error("Error calling extract-live-events:", error);
+    } finally {
+      extractionInProgressRef.current = false;
+      setIsExtracting(false);
+
+      // Process any pending transcripts
+      if (pendingTranscriptsRef.current.length > 0) {
+        const pending = pendingTranscriptsRef.current.join(" ");
+        pendingTranscriptsRef.current = [];
+        extractEvents(pending);
+      }
+    }
+  }, [homeTeam, awayTeam, currentScore, onEventDetected]);
 
   // Save transcript to database
   const saveTranscriptToDatabase = async (text: string) => {
@@ -104,6 +185,9 @@ export const LiveTranscriptRealtime = ({
       
       // Auto-save to database
       saveTranscriptToDatabase(text);
+      
+      // Extract events from the new transcript segment
+      extractEvents(text);
     },
     onPartialTranscript: (text) => {
       // Partial transcript is handled by the hook
@@ -166,6 +250,18 @@ export const LiveTranscriptRealtime = ({
           <Badge variant="secondary">
             {wordCount} palavras
           </Badge>
+          {eventsExtracted > 0 && (
+            <Badge variant="outline" className="text-purple-500 border-purple-500/50">
+              <Zap className="h-3 w-3 mr-1" />
+              {eventsExtracted} eventos
+            </Badge>
+          )}
+          {isExtracting && (
+            <Badge variant="outline" className="text-purple-500 border-purple-500/50">
+              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+              Analisando...
+            </Badge>
+          )}
         </div>
       </div>
 

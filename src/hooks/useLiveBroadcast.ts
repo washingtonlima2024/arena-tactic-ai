@@ -672,6 +672,44 @@ export const useLiveBroadcast = () => {
     });
   }, [recordingTime, toast]);
 
+  // Add event detected from AI transcript analysis
+  const addDetectedEvent = useCallback((eventData: {
+    type: string;
+    minute: number;
+    second: number;
+    description: string;
+    confidence?: number;
+    source?: string;
+  }) => {
+    const newEvent: LiveEvent = {
+      id: crypto.randomUUID(),
+      type: eventData.type,
+      minute: eventData.minute,
+      second: eventData.second,
+      description: eventData.description,
+      confidence: eventData.confidence,
+      status: "pending", // AI-detected events start as pending for approval
+      recordingTimestamp: eventData.minute * 60 + eventData.second,
+    };
+
+    // Check for duplicate events (same type within 30 seconds)
+    const isDuplicate = detectedEvents.some(
+      (e) =>
+        e.type === newEvent.type &&
+        Math.abs((e.minute * 60 + e.second) - (newEvent.minute * 60 + newEvent.second)) < 30
+    );
+
+    if (!isDuplicate) {
+      setDetectedEvents((prev) => [...prev, newEvent]);
+      
+      toast({
+        title: "Evento detectado",
+        description: `${newEvent.type}: ${newEvent.description}`,
+        duration: 3000,
+      });
+    }
+  }, [detectedEvents, toast]);
+
   const approveEvent = useCallback((eventId: string) => {
     const event = detectedEvents.find((e) => e.id === eventId);
     if (event) {
@@ -812,6 +850,7 @@ export const useLiveBroadcast = () => {
     pauseRecording,
     resumeRecording,
     addManualEvent,
+    addDetectedEvent,
     approveEvent,
     editEvent,
     removeEvent,

@@ -45,6 +45,7 @@ const Live = () => {
     pauseRecording,
     resumeRecording,
     addManualEvent,
+    addDetectedEvent,
     approveEvent,
     editEvent,
     removeEvent,
@@ -161,8 +162,23 @@ const Live = () => {
                     <LiveTranscriptRealtime
                       isRecording={isRecording}
                       matchId={currentMatchId || selectedMatchId}
+                      homeTeam={matchInfo.homeTeam}
+                      awayTeam={matchInfo.awayTeam}
+                      currentScore={currentScore}
                       onTranscriptUpdate={(buffer, chunks) => {
                         console.log('Transcript updated:', buffer.length, 'chars,', chunks.length, 'chunks');
+                      }}
+                      onEventDetected={(event) => {
+                        console.log('Event detected from transcript:', event);
+                        // Add as detected event to the live events list
+                        addDetectedEvent({
+                          type: event.type,
+                          minute: event.minute,
+                          second: event.second,
+                          description: event.description,
+                          confidence: event.confidence,
+                          source: 'ai-transcript',
+                        });
                       }}
                     />
                   </div>
