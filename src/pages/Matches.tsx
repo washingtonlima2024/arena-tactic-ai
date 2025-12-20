@@ -405,12 +405,17 @@ export default function Matches() {
                         </Button>
                       </>
                     )}
-                    {match.status === 'completed' && (
+                    {(match.status === 'completed' || match.status === 'analyzed') && (
                       <Button variant="arena-outline" size="sm" className="flex-1" asChild>
-                        <Link to={`/analysis?match=${match.id}`}>Ver Análise</Link>
+                        <Link to={`/events?match=${match.id}`}>Ver Análise</Link>
                       </Button>
                     )}
-                    {(match.status === 'analyzing' || match.status === 'pending') && (
+                    {match.status === 'pending' && (
+                      <Button variant="arena-outline" size="sm" className="flex-1" asChild>
+                        <Link to={`/events?match=${match.id}`}>Ver Análise</Link>
+                      </Button>
+                    )}
+                    {match.status === 'analyzing' && (
                       <Button 
                         variant="arena-outline" 
                         size="sm" 
