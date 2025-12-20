@@ -676,6 +676,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
       videoRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
+          const chunkSizeKB = event.data.size / 1024;
+          
           // CRITICAL: Store in regular ref
           videoChunksRef.current.push(event.data);
           
@@ -699,11 +701,20 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             segmentBufferRef.current.addChunk(event.data, currentTime);
           }
           
-          // Log with clear indication of data accumulation
+          // Log with clear indication of data accumulation - ENHANCED FOR DEBUGGING
           const totalSize = allVideoChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
-          console.log(`📹 Video chunk: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s | Total: ${allVideoChunksRef.current.length} chunks (${(totalSize / 1024 / 1024).toFixed(2)} MB)`);
+          const clipChunksTotal = clipVideoChunksRef.current.reduce((acc, c) => acc + c.blob.size, 0);
+          
+          // Warn if chunk is suspiciously small (< 1KB for 5s of video is very small)
+          const warnIcon = chunkSizeKB < 1 ? '⚠️' : '📹';
+          console.log(`${warnIcon} Video chunk: ${chunkSizeKB.toFixed(1)}KB at ${currentTime}s | All: ${allVideoChunksRef.current.length} (${(totalSize / 1024 / 1024).toFixed(2)}MB) | Clip: ${clipVideoChunksRef.current.length} (${(clipChunksTotal / 1024 / 1024).toFixed(2)}MB)`);
+          
+          // DIAGNOSTIC: If chunk is too small, log warning
+          if (chunkSizeKB < 10) {
+            console.warn(`[VideoRecorder] ⚠️ Small chunk detected: ${chunkSizeKB.toFixed(1)}KB - this may cause clip generation issues`);
+          }
         } else {
-          console.warn('⚠️ Empty video chunk received');
+          console.warn('⚠️ Empty video chunk received (0 bytes)');
         }
       };
 
@@ -1485,6 +1496,42 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         return { success: false, error: 'No video data available' };
       }
       
+      // CRITICAL: Validate video data size BEFORE processing with FFmpeg
+      const inputSizeKB = videoData.length / 1024;
+      const inputSizeMB = inputSizeKB / 1024;
+      console.log(`[ClipGen] 📊 Input video data: ${inputSizeKB.toFixed(1)}KB (${inputSizeMB.toFixed(2)}MB)`);
+      
+      // Minimum 100KB of input data for a valid clip (10s of video should be at least 100KB)
+      const MIN_INPUT_SIZE_KB = 100;
+      if (inputSizeKB < MIN_INPUT_SIZE_KB) {
+        console.warn(`[ClipGen] ⚠️ Input video too small: ${inputSizeKB.toFixed(1)}KB < ${MIN_INPUT_SIZE_KB}KB minimum`);
+        console.log(`[ClipGen] 🔍 Diagnostics: clipVideoChunks=${clipVideoChunksRef.current.length}, videoChunks=${videoChunksRef.current.length}, segmentBuffer=${!!segmentBufferRef.current}`);
+        
+        // FALLBACK: Try to download from URL if local chunks failed
+        if (videoUrl) {
+          console.log(`[ClipGen] 🔄 Attempting fallback: downloading from URL: ${videoUrl}`);
+          try {
+            videoData = await fetchFile(videoUrl);
+            relativeStartSeconds = startTimeSeconds;
+            const fallbackSizeKB = videoData.length / 1024;
+            console.log(`[ClipGen] 📥 Downloaded video from URL: ${fallbackSizeKB.toFixed(1)}KB`);
+            
+            if (fallbackSizeKB < MIN_INPUT_SIZE_KB) {
+              console.error(`[ClipGen] ❌ Even URL fallback too small: ${fallbackSizeKB.toFixed(1)}KB`);
+              isGeneratingClipRef.current = false;
+              return { success: false, error: `Video too small even from URL: ${fallbackSizeKB.toFixed(1)}KB` };
+            }
+          } catch (downloadError) {
+            console.error(`[ClipGen] ❌ Failed to download from URL:`, downloadError);
+            isGeneratingClipRef.current = false;
+            return { success: false, error: `Input video too small: ${inputSizeKB.toFixed(1)}KB, and URL download failed` };
+          }
+        } else {
+          isGeneratingClipRef.current = false;
+          return { success: false, error: `Input video too small: ${inputSizeKB.toFixed(1)}KB` };
+        }
+      }
+      
       await ffmpeg.writeFile('input.webm', videoData);
       
       // Convert seconds to FFmpeg timestamp
@@ -1523,13 +1570,17 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       await ffmpeg.deleteFile('input.webm');
       await ffmpeg.deleteFile('output.webm');
       
-      if (clipBlob.size < 500) {
-        console.warn('[ClipGen] Generated clip too small, likely failed');
+      // CRITICAL: Minimum 10KB for a valid clip (671 bytes is just headers)
+      const MIN_CLIP_SIZE_KB = 10;
+      const clipSizeKB = clipBlob.size / 1024;
+      if (clipSizeKB < MIN_CLIP_SIZE_KB) {
+        console.error(`[ClipGen] ❌ Generated clip too small: ${clipSizeKB.toFixed(1)}KB < ${MIN_CLIP_SIZE_KB}KB minimum`);
+        console.log(`[ClipGen] 🔍 This indicates FFmpeg received insufficient video data`);
         isGeneratingClipRef.current = false;
-        return { success: false, error: 'Generated clip too small' };
+        return { success: false, error: `Generated clip too small: ${clipSizeKB.toFixed(1)}KB` };
       }
       
-      console.log(`[ClipGen] Clip generated: ${(clipBlob.size / 1024).toFixed(1)}KB`);
+      console.log(`[ClipGen] ✅ Clip generated: ${clipSizeKB.toFixed(1)}KB`);
       
       // Upload to storage
       const filePath = `${matchId}/${event.id}-${event.type}-${event.minute}min.webm`;
