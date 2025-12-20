@@ -23,43 +23,58 @@ function base64ToUint8Array(base64String: string): Uint8Array {
   return bytes;
 }
 
-// Detect audio format from base64 data
-function detectAudioFormat(base64String: string): { mimeType: string; extension: string } {
-  // Get first few bytes to detect format
-  const header = atob(base64String.slice(0, 50));
-  
-  // WebM signature: 0x1A 0x45 0xDF 0xA3
-  if (header.charCodeAt(0) === 0x1A && header.charCodeAt(1) === 0x45) {
+// Detect audio format from binary data
+function detectAudioFormat(binaryData: Uint8Array): { mimeType: string; extension: string } {
+  // WebM/Matroska signature: 0x1A 0x45 0xDF 0xA3
+  if (binaryData[0] === 0x1A && binaryData[1] === 0x45 && binaryData[2] === 0xDF && binaryData[3] === 0xA3) {
     return { mimeType: 'audio/webm', extension: 'webm' };
   }
   
-  // OGG signature: OggS
-  if (header.startsWith('OggS')) {
+  // OGG signature: OggS (0x4F 0x67 0x67 0x53)
+  if (binaryData[0] === 0x4F && binaryData[1] === 0x67 && binaryData[2] === 0x67 && binaryData[3] === 0x53) {
     return { mimeType: 'audio/ogg', extension: 'ogg' };
   }
   
   // MP4/M4A signature: ftyp at offset 4
-  if (header.slice(4, 8) === 'ftyp') {
+  if (binaryData[4] === 0x66 && binaryData[5] === 0x74 && binaryData[6] === 0x79 && binaryData[7] === 0x70) {
     return { mimeType: 'audio/mp4', extension: 'm4a' };
   }
   
   // WAV signature: RIFF....WAVE
-  if (header.startsWith('RIFF') && header.slice(8, 12) === 'WAVE') {
+  if (binaryData[0] === 0x52 && binaryData[1] === 0x49 && binaryData[2] === 0x46 && binaryData[3] === 0x46) {
     return { mimeType: 'audio/wav', extension: 'wav' };
   }
   
-  // MP3 signature: ID3 or 0xFF 0xFB
-  if (header.startsWith('ID3') || (header.charCodeAt(0) === 0xFF && (header.charCodeAt(1) & 0xE0) === 0xE0)) {
+  // MP3 signature: ID3 or sync bytes 0xFF 0xFB/0xFF 0xFA/0xFF 0xF3
+  if ((binaryData[0] === 0x49 && binaryData[1] === 0x44 && binaryData[2] === 0x33) || 
+      (binaryData[0] === 0xFF && (binaryData[1] & 0xE0) === 0xE0)) {
     return { mimeType: 'audio/mpeg', extension: 'mp3' };
   }
   
   // FLAC signature
-  if (header.startsWith('fLaC')) {
+  if (binaryData[0] === 0x66 && binaryData[1] === 0x4C && binaryData[2] === 0x61 && binaryData[3] === 0x43) {
     return { mimeType: 'audio/flac', extension: 'flac' };
   }
   
-  // Default to webm for browser recordings
+  // EBML/WebM variant - check for EBML header which can start differently
+  // EBML elements can have various headers, but 0x1A is common
+  if (binaryData[0] === 0x1A) {
+    return { mimeType: 'audio/webm', extension: 'webm' };
+  }
+  
+  // Default to webm for browser recordings - OpenAI accepts webm
   return { mimeType: 'audio/webm', extension: 'webm' };
+}
+
+// Create a File from binary data
+function createAudioFile(binaryData: Uint8Array, filename: string, mimeType: string): File {
+  // Create an ArrayBuffer copy to avoid type issues
+  const buffer = new ArrayBuffer(binaryData.length);
+  const view = new Uint8Array(buffer);
+  view.set(binaryData);
+  
+  const blob = new Blob([buffer], { type: mimeType });
+  return new File([blob], filename, { type: mimeType });
 }
 
 serve(async (req) => {
@@ -90,11 +105,7 @@ serve(async (req) => {
     console.log('Processing audio transcription...');
     console.log('Audio base64 length:', audio.length);
 
-    // Detect the actual audio format
-    const { mimeType, extension } = detectAudioFormat(audio);
-    console.log('Detected audio format:', mimeType, extension);
-
-    // Decode base64 to binary
+    // Decode base64 to binary first
     const binaryAudio = base64ToUint8Array(audio);
     console.log('Binary audio size:', binaryAudio.length, 'bytes');
     
@@ -102,16 +113,28 @@ serve(async (req) => {
     const headerBytes = Array.from(binaryAudio.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
     console.log('Audio header bytes:', headerBytes);
 
+    // Detect the actual audio format from binary data
+    const { mimeType, extension } = detectAudioFormat(binaryAudio);
+    console.log('Detected audio format:', mimeType, extension);
+
+    // Check minimum size - should be at least 1KB for valid audio
+    if (binaryAudio.length < 1000) {
+      console.log('Audio too short, returning empty');
+      return new Response(
+        JSON.stringify({ success: true, text: '' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
+
     // Prepare form data for OpenAI Whisper API
     const formData = new FormData();
-    const arrayBuffer = binaryAudio.buffer.slice(binaryAudio.byteOffset, binaryAudio.byteOffset + binaryAudio.byteLength) as ArrayBuffer;
-    const blob = new Blob([arrayBuffer], { type: mimeType });
-    formData.append('file', blob, `audio.${extension}`);
+    const file = createAudioFile(binaryAudio, `recording.${extension}`, mimeType);
+    formData.append('file', file);
     formData.append('model', 'whisper-1');
     formData.append('language', 'pt'); // Portuguese
     formData.append('response_format', 'json');
 
-    console.log('Sending to OpenAI Whisper API...');
+    console.log('Sending to OpenAI Whisper API with file:', `recording.${extension}`, 'size:', binaryAudio.length);
 
     // Send to OpenAI Whisper API
     const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -125,6 +148,62 @@ serve(async (req) => {
     if (!response.ok) {
       const errorText = await response.text();
       console.error('OpenAI API error:', response.status, errorText);
+      
+      // If format not supported, try with different extension
+      if (errorText.includes('Invalid file format')) {
+        console.log('Retrying with ogg format...');
+        
+        const retryFormData = new FormData();
+        const retryFile = createAudioFile(binaryAudio, 'recording.ogg', 'audio/ogg');
+        retryFormData.append('file', retryFile);
+        retryFormData.append('model', 'whisper-1');
+        retryFormData.append('language', 'pt');
+        retryFormData.append('response_format', 'json');
+        
+        const retryResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openAIApiKey}`,
+          },
+          body: retryFormData,
+        });
+        
+        if (retryResponse.ok) {
+          const retryResult = await retryResponse.json();
+          console.log('Retry transcription successful:', retryResult.text?.substring(0, 100));
+          return new Response(
+            JSON.stringify({ success: true, text: retryResult.text }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+        
+        // Try one more time with mp3
+        console.log('Retrying with mp3 format...');
+        const mp3FormData = new FormData();
+        const mp3File = createAudioFile(binaryAudio, 'recording.mp3', 'audio/mpeg');
+        mp3FormData.append('file', mp3File);
+        mp3FormData.append('model', 'whisper-1');
+        mp3FormData.append('language', 'pt');
+        mp3FormData.append('response_format', 'json');
+        
+        const mp3Response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${openAIApiKey}`,
+          },
+          body: mp3FormData,
+        });
+        
+        if (mp3Response.ok) {
+          const mp3Result = await mp3Response.json();
+          console.log('MP3 retry transcription successful:', mp3Result.text?.substring(0, 100));
+          return new Response(
+            JSON.stringify({ success: true, text: mp3Result.text }),
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+          );
+        }
+      }
+      
       return new Response(
         JSON.stringify({ success: false, error: `Transcription failed: ${errorText}` }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
