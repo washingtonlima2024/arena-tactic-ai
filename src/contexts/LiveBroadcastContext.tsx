@@ -1902,15 +1902,40 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             console.log('Video chunk saved for approved event, URL:', chunkUrl);
           }
           
-          // Generate clip using the returned URL
+          // Generate clip with retry logic (up to 3 attempts)
           const videoUrl = chunkUrl || latestVideoChunkUrl;
           if (videoUrl) {
             console.log('Generating clip for approved event with URL:', videoUrl);
-            const clipResult = await generateClipForEvent(event, videoUrl);
             
-            // CRITICAL: If clip generation failed, delete the event
+            const MAX_RETRIES = 3;
+            const RETRY_DELAYS = [2000, 4000, 6000]; // 2s, 4s, 6s delays
+            let clipResult: { success: boolean; clipUrl?: string; error?: string } = { success: false };
+            
+            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+              console.log(`[ClipGen] Attempt ${attempt}/${MAX_RETRIES} for event ${event.id}`);
+              clipResult = await generateClipForEvent(event, videoUrl);
+              
+              if (clipResult.success) {
+                console.log(`✅ Clip generated successfully on attempt ${attempt}`);
+                break;
+              }
+              
+              // If not the last attempt, wait before retrying
+              if (attempt < MAX_RETRIES) {
+                const delay = RETRY_DELAYS[attempt - 1];
+                console.log(`⏳ Retry ${attempt} failed, waiting ${delay}ms before next attempt...`);
+                toast({
+                  title: "Gerando clip...",
+                  description: `Tentativa ${attempt} falhou, tentando novamente...`,
+                  duration: delay,
+                });
+                await new Promise(resolve => setTimeout(resolve, delay));
+              }
+            }
+            
+            // CRITICAL: If all retries failed, delete the event
             if (!clipResult.success) {
-              console.warn(`❌ Clip generation failed for event ${event.id}: ${clipResult.error}`);
+              console.warn(`❌ All ${MAX_RETRIES} attempts failed for event ${event.id}: ${clipResult.error}`);
               
               // Delete from database
               const { error: deleteError } = await supabase
@@ -1921,7 +1946,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
               if (deleteError) {
                 console.error('Error deleting event after clip failure:', deleteError);
               } else {
-                console.log(`🗑️ Event ${event.id} deleted from database (no clip)`);
+                console.log(`🗑️ Event ${event.id} deleted from database (no clip after ${MAX_RETRIES} attempts)`);
               }
               
               // Remove from local state
@@ -1939,7 +1964,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
               
               toast({
                 title: "Evento removido",
-                description: `Clip não pôde ser gerado: ${clipResult.error}`,
+                description: `Clip não gerado após ${MAX_RETRIES} tentativas: ${clipResult.error}`,
                 variant: "destructive"
               });
               return;
