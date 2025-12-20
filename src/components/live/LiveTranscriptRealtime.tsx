@@ -370,7 +370,7 @@ export const LiveTranscriptRealtime = ({
         {isConnected ? (
           <Badge variant="outline" className="text-green-500 border-green-500/50">
             <Wifi className="h-3 w-3 mr-1" />
-            {audioSource === "mic" ? "ElevenLabs" : "Whisper"}
+            Kakttus AI
           </Badge>
         ) : !isRecording ? null : (
           <Badge variant="outline" className="text-muted-foreground border-muted-foreground/50">
@@ -412,7 +412,7 @@ export const LiveTranscriptRealtime = ({
                   {isConnecting ? (
                     <>
                       <Loader2 className="h-8 w-8 mx-auto animate-spin text-primary" />
-                      <p>Conectando ao {audioSource === "mic" ? "ElevenLabs Scribe" : "Whisper"}...</p>
+                      <p>Conectando ao Kakttus AI...</p>
                     </>
                   ) : isConnected ? (
                     <>
@@ -444,8 +444,8 @@ export const LiveTranscriptRealtime = ({
                   <p>Inicie a gravação para ver a transcrição</p>
                   <p className="text-xs">
                     {audioSource === "mic" 
-                      ? "Usando microfone (ElevenLabs - tempo real)" 
-                      : "Usando áudio do vídeo (Whisper - a cada 10s)"}
+                      ? "Usando microfone (tempo real)" 
+                      : "Usando áudio do vídeo (a cada 10s)"}
                   </p>
                 </div>
               )}
@@ -489,7 +489,7 @@ export const LiveTranscriptRealtime = ({
                         </Badge>
                       )}
                       {audioSource === "video" && (
-                        <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">Whisper</Badge>
+                        <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">Kakttus</Badge>
                       )}
                     </div>
                     <p className={`text-sm ${isLatest ? "text-foreground font-medium" : "text-foreground/80"}`}>
@@ -511,9 +511,7 @@ export const LiveTranscriptRealtime = ({
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
             </span>
-            {audioSource === "mic" 
-              ? "Transcrição em tempo real via ElevenLabs Scribe" 
-              : "Transcrição do áudio do vídeo via OpenAI Whisper"}
+            Transcrição em tempo real via Kakttus AI
           </p>
         </div>
       )}

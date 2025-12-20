@@ -230,12 +230,20 @@ export default function Matches() {
               Gerencie e analise suas partidas de futebol
             </p>
           </div>
-          <Button variant="arena" asChild>
-            <Link to="/upload">
-              <Plus className="mr-2 h-4 w-4" />
-              Importar Partida
-            </Link>
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" asChild>
+              <Link to="/live">
+                <Mic className="mr-2 h-4 w-4" />
+                Ao Vivo
+              </Link>
+            </Button>
+            <Button variant="arena" asChild>
+              <Link to="/upload">
+                <Plus className="mr-2 h-4 w-4" />
+                Importar Partida
+              </Link>
+            </Button>
+          </div>
         </div>
 
         {/* Filters */}
