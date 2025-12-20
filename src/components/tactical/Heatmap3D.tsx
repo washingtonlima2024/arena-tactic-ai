@@ -2,6 +2,8 @@ import { useRef, useMemo, useState, useCallback } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
+import { WebGLWrapper } from '@/components/ui/WebGLWrapper';
+import { OfficialFootballField } from './OfficialFootballField';
 
 interface Player {
   x: number;
@@ -1150,8 +1152,20 @@ export function Heatmap3D({
     }
   };
 
+  const fallback = (
+    <div className="relative w-full h-[500px] rounded-xl overflow-hidden">
+      <OfficialFootballField theme="grass" className="w-full h-full" />
+      <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+        <p className="text-white text-sm">Mapa de calor 3D indisponível (WebGL não suportado)</p>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="relative w-full h-[500px] rounded-xl overflow-hidden bg-gradient-to-b from-background/50 to-background border border-border">
+    <WebGLWrapper 
+      className="relative w-full h-[500px] rounded-xl overflow-hidden bg-gradient-to-b from-background/50 to-background border border-border"
+      fallback={fallback}
+    >
       {/* Team labels */}
       <div className="absolute top-4 left-4 z-10 flex items-center gap-2 bg-black/60 backdrop-blur-sm px-3 py-1.5 rounded-full border border-white/10">
         <div 
@@ -1263,6 +1277,6 @@ export function Heatmap3D({
           autoRotate={false}
         />
       </Canvas>
-    </div>
+    </WebGLWrapper>
   );
 }
