@@ -18,16 +18,12 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
   const [committedTranscripts, setCommittedTranscripts] = useState<Array<{ id: string; text: string; timestamp: Date }>>([]);
 
   const audioContextRef = useRef<AudioContext | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
-  const headerChunkRef = useRef<Blob | null>(null); // Store the WebM header from first chunk
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const isProcessingRef = useRef(false);
-  const hasAudioActivityRef = useRef(false);
-  const chunkCountRef = useRef(0);
+  const isRecordingRef = useRef(false);
 
   // Check if there's actual audio activity using analyser
   const checkAudioActivity = useCallback(() => {
@@ -40,47 +36,65 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
     const average = dataArray.reduce((sum, value) => sum + value, 0) / dataArray.length;
     
     // Threshold for detecting actual audio (not just silence/noise)
-    const hasActivity = average > 5;
-    
-    if (hasActivity) {
-      hasAudioActivityRef.current = true;
-    }
-    
-    return hasActivity;
+    return average > 5;
   }, []);
 
-  // Process and send audio chunk to Whisper
-  const processAudioChunk = useCallback(async () => {
-    if (isProcessingRef.current || chunksRef.current.length === 0) return;
+  // Record a complete audio segment and transcribe it
+  const recordAndTranscribe = useCallback(async () => {
+    if (isProcessingRef.current || !streamRef.current || !isRecordingRef.current) return;
 
-    // Check if there was any audio activity in this period
-    if (!hasAudioActivityRef.current) {
+    // Check audio activity first
+    if (!checkAudioActivity()) {
       console.log("No audio activity detected, skipping transcription");
-      chunksRef.current = [];
       return;
     }
 
     isProcessingRef.current = true;
-    hasAudioActivityRef.current = false; // Reset for next period
-    setPartialTranscript("Transcrevendo...");
-    onPartialTranscript?.("Transcrevendo...");
+    setPartialTranscript("Gravando...");
+    onPartialTranscript?.("Gravando...");
 
     try {
-      // Create a complete WebM blob with header + data chunks
-      const blobParts: Blob[] = [];
-      
-      // Always include the header chunk (first chunk contains WebM header)
-      if (headerChunkRef.current) {
-        blobParts.push(headerChunkRef.current);
-      }
-      
-      // Add all data chunks
-      blobParts.push(...chunksRef.current);
-      
-      const audioBlob = new Blob(blobParts, { type: "audio/webm;codecs=opus" });
-      chunksRef.current = []; // Clear chunks after collecting
+      // Create a new MediaRecorder for each segment to get complete WebM files
+      const mediaRecorder = new MediaRecorder(streamRef.current, {
+        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+          ? "audio/webm;codecs=opus"
+          : "audio/webm",
+      });
 
-      // Skip if too small (less than 5KB - more conservative threshold)
+      const chunks: Blob[] = [];
+
+      const recordingPromise = new Promise<Blob>((resolve) => {
+        mediaRecorder.ondataavailable = (event) => {
+          if (event.data.size > 0) {
+            chunks.push(event.data);
+          }
+        };
+
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(chunks, { type: "audio/webm;codecs=opus" });
+          resolve(blob);
+        };
+      });
+
+      // Start recording
+      mediaRecorder.start();
+
+      // Record for the chunk duration (minus some buffer time)
+      const recordDuration = Math.min(chunkDurationMs - 500, 9500);
+      
+      await new Promise(resolve => setTimeout(resolve, recordDuration));
+
+      // Stop recording
+      if (mediaRecorder.state !== "inactive") {
+        mediaRecorder.stop();
+      }
+
+      setPartialTranscript("Transcrevendo...");
+      onPartialTranscript?.("Transcrevendo...");
+
+      const audioBlob = await recordingPromise;
+
+      // Skip if too small
       if (audioBlob.size < 5000) {
         console.log("Audio chunk too small, skipping:", audioBlob.size);
         setPartialTranscript("");
@@ -92,6 +106,11 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
       // Convert blob to base64
       const arrayBuffer = await audioBlob.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
+      
+      // Log first bytes to verify WebM header
+      const headerBytes = Array.from(uint8Array.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+      console.log("Audio header bytes:", headerBytes);
+      
       let binary = "";
       for (let i = 0; i < uint8Array.length; i++) {
         binary += String.fromCharCode(uint8Array[i]);
@@ -113,7 +132,7 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
       if (data?.success && data?.text?.trim()) {
         const transcriptText = data.text.trim();
         
-        // Filter out Whisper hallucinations - common patterns when audio is empty/low quality
+        // Filter out Whisper hallucinations
         const hallucinations = [
           "Legendas by",
           "Legendado por",
@@ -159,7 +178,7 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
       setPartialTranscript("");
       onPartialTranscript?.("");
     }
-  }, [onTranscript, onPartialTranscript, language]);
+  }, [onTranscript, onPartialTranscript, language, chunkDurationMs, checkAudioActivity]);
 
   // Connect to video element and start capturing audio
   const connect = useCallback(async (videoElement: HTMLVideoElement) => {
@@ -179,13 +198,11 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
       audioContextRef.current = audioContext;
 
       // Create media element source from video
-      // Note: This can only be done once per video element
       let source: MediaElementAudioSourceNode;
       try {
         source = audioContext.createMediaElementSource(videoElement);
         sourceNodeRef.current = source;
       } catch (err) {
-        // If source already exists, we might need to reuse existing context
         console.error("Error creating media element source:", err);
         setError("Erro ao conectar ao áudio do vídeo. Tente recarregar a página.");
         setIsConnecting(false);
@@ -208,42 +225,31 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
 
       streamRef.current = destination.stream;
 
-      // Create MediaRecorder
-      const mediaRecorder = new MediaRecorder(destination.stream, {
-        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : "audio/webm",
-      });
-
-      mediaRecorderRef.current = mediaRecorder;
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          // First chunk contains the WebM header - save it
-          if (chunkCountRef.current === 0) {
-            headerChunkRef.current = event.data;
-            console.log("Saved WebM header chunk:", event.data.size, "bytes");
-          }
-          chunkCountRef.current++;
-          chunksRef.current.push(event.data);
-          // Check audio activity when receiving data
-          checkAudioActivity();
-        }
-      };
-
-      // Start recording with time slices
-      mediaRecorder.start(1000); // Collect data every second
-
-      // Set up interval to process chunks
-      intervalRef.current = setInterval(() => {
-        processAudioChunk();
-      }, chunkDurationMs);
-
       // Unmute video so audio plays
       videoElement.muted = false;
       videoElement.volume = 1;
 
+      isRecordingRef.current = true;
       setIsConnected(true);
+      
+      // Start the recording/transcription cycle
+      // Small delay to let audio context initialize
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Set up interval to record and transcribe
+      intervalRef.current = setInterval(() => {
+        if (isRecordingRef.current && !isProcessingRef.current) {
+          recordAndTranscribe();
+        }
+      }, chunkDurationMs);
+
+      // Start first transcription after a short delay
+      setTimeout(() => {
+        if (isRecordingRef.current) {
+          recordAndTranscribe();
+        }
+      }, 1000);
+
       console.log("Video audio transcription connected successfully");
     } catch (err) {
       console.error("Error connecting to video audio:", err);
@@ -251,22 +257,18 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
     } finally {
       setIsConnecting(false);
     }
-  }, [isConnected, isConnecting, chunkDurationMs, processAudioChunk, checkAudioActivity]);
+  }, [isConnected, isConnecting, chunkDurationMs, recordAndTranscribe]);
 
   // Disconnect and cleanup
   const disconnect = useCallback(() => {
+    isRecordingRef.current = false;
+
     if (intervalRef.current) {
       clearInterval(intervalRef.current);
       intervalRef.current = null;
     }
 
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== "inactive") {
-      mediaRecorderRef.current.stop();
-    }
-    mediaRecorderRef.current = null;
-
-    // Don't close the audio context as it may be reused
-    // Just disconnect nodes
+    // Disconnect nodes
     if (sourceNodeRef.current) {
       try {
         sourceNodeRef.current.disconnect();
@@ -281,12 +283,7 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
     audioContextRef.current = null;
     sourceNodeRef.current = null;
     analyserRef.current = null;
-
     streamRef.current = null;
-    chunksRef.current = [];
-    headerChunkRef.current = null;
-    chunkCountRef.current = 0;
-    hasAudioActivityRef.current = false;
 
     setIsConnected(false);
     setPartialTranscript("");
