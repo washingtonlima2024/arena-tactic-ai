@@ -17,7 +17,7 @@ import { LiveSummaryDialog } from "@/components/live/LiveSummaryDialog";
 import { LiveEventPlayer } from "@/components/live/LiveEventPlayer";
 import { LiveAnalysisPanel } from "@/components/live/LiveAnalysisPanel";
 import { LiveTacticalField } from "@/components/tactical/LiveTacticalField";
-import { useLiveBroadcast } from "@/hooks/useLiveBroadcast";
+import { useLiveBroadcastContext } from "@/contexts/LiveBroadcastContext";
 import { useEventBasedAnalysis } from "@/hooks/useEventBasedAnalysis";
 import { useNavigate } from "react-router-dom";
 
@@ -31,6 +31,7 @@ const Live = () => {
   // Video element state
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   
+  // Use global context instead of local hook
   const {
     matchInfo,
     setMatchInfo,
@@ -46,11 +47,9 @@ const Live = () => {
     currentScore,
     currentMatchId,
     transcriptBuffer,
-    // Video recording states
     isRecordingVideo,
     videoUploadProgress,
     isUploadingVideo,
-    // Finish states
     isFinishing,
     finishResult,
     resetFinishResult,
@@ -65,7 +64,7 @@ const Live = () => {
     removeEvent,
     updateScore,
     finishMatch,
-  } = useLiveBroadcast();
+  } = useLiveBroadcastContext();
 
   const hasVideoSource = streamUrl || cameraStream;
 
@@ -107,10 +106,10 @@ const Live = () => {
     setVideoElement(element);
   }, []);
 
-  // Modified start recording to pass video element
+  // Modified start recording to pass video element AND selectedMatchId
   const handleStartRecording = useCallback(() => {
-    startRecording(videoElement);
-  }, [startRecording, videoElement]);
+    startRecording(videoElement, selectedMatchId);
+  }, [startRecording, videoElement, selectedMatchId]);
 
   // Handle finish button click - show confirmation dialog
   const handleFinishClick = useCallback(() => {
@@ -130,6 +129,7 @@ const Live = () => {
   const handleSummaryClose = useCallback(() => {
     setShowSummaryDialog(false);
     resetFinishResult();
+    setSelectedMatchId(null);
   }, [resetFinishResult]);
 
   return (
