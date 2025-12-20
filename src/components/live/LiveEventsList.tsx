@@ -1,7 +1,8 @@
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Check, X, Edit2, Clock } from "lucide-react";
-import { LiveEvent } from "@/hooks/useLiveBroadcast";
+import { Check, X, Edit2, Clock, Play, ExternalLink } from "lucide-react";
+import { LiveEvent } from "@/contexts/LiveBroadcastContext";
+import { Badge } from "@/components/ui/badge";
 
 interface LiveEventsListProps {
   detectedEvents: LiveEvent[];
@@ -104,6 +105,13 @@ export const LiveEventsList = ({
                       <span className="text-xs text-muted-foreground">
                         {event.minute}'{event.second > 0 ? event.second + '"' : ""}
                       </span>
+                      {/* Clip badge */}
+                      {event.clipUrl && (
+                        <Badge variant="secondary" className="text-xs gap-1 bg-primary/20 text-primary border-primary/30">
+                          <Play className="h-2.5 w-2.5" />
+                          Clip
+                        </Badge>
+                      )}
                     </div>
                     <p className="text-xs text-muted-foreground truncate">
                       {event.description}
@@ -114,6 +122,22 @@ export const LiveEventsList = ({
                       </span>
                     )}
                   </div>
+
+                  {/* Clip play button */}
+                  {event.clipUrl && (
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-primary hover:text-primary/80 hover:bg-primary/10"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        window.open(event.clipUrl, '_blank');
+                      }}
+                      title="Ver clip"
+                    >
+                      <ExternalLink className="h-4 w-4" />
+                    </Button>
+                  )}
 
                   {/* Actions */}
                   {event.source === "detected" && (

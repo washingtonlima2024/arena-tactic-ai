@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -38,7 +38,8 @@ import {
   RefreshCw,
   FileText,
   Film,
-  StopCircle
+  StopCircle,
+  Radio
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -56,6 +57,7 @@ import { TranscriptionAnalysisDialog } from '@/components/events/TranscriptionAn
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getEventTeam, getEventTimeMs as getEventTimeMsHelper, formatEventTime } from '@/lib/eventHelpers';
+import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
 
 // EventRow component for rendering individual events
 interface EventRowProps {
@@ -200,6 +202,9 @@ export default function Events() {
     reset: resetClipProgress 
   } = useClipGeneration();
   
+  // Live broadcast context for realtime updates
+  const { isRecording, currentMatchId: liveMatchId } = useLiveBroadcastContext();
+  
   // Centralized match selection
   const { currentMatchId, selectedMatch, matches, isLoading: matchesLoading, setSelectedMatch } = useMatchSelection();
   
@@ -213,6 +218,51 @@ export default function Events() {
   const [showResetDialog, setShowResetDialog] = useState(false);
   
   const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useMatchEvents(currentMatchId);
+
+  // Real-time subscription for live match events
+  useEffect(() => {
+    if (!currentMatchId) return;
+    
+    // Check if this is an active live match
+    const isLiveMatch = isRecording && liveMatchId === currentMatchId;
+    
+    const channel = supabase
+      .channel(`events-realtime-${currentMatchId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'match_events',
+        filter: `match_id=eq.${currentMatchId}`
+      }, (payload) => {
+        console.log('New event received in realtime:', payload);
+        refetchEvents();
+        if (isLiveMatch) {
+          toast.success('Novo evento detectado!', {
+            description: payload.new.description || payload.new.event_type
+          });
+        }
+      })
+      .on('postgres_changes', {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'match_events',
+        filter: `match_id=eq.${currentMatchId}`
+      }, (payload) => {
+        console.log('Event updated in realtime:', payload);
+        refetchEvents();
+        // Check if clip was added
+        if (payload.new.clip_url && !payload.old.clip_url) {
+          toast.success('Clip gerado!', {
+            description: `Clip do evento ${payload.new.event_type} está pronto`
+          });
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentMatchId, refetchEvents, isRecording, liveMatchId]);
 
   // Handle refine events - simplified
   const handleRefineEvents = async () => {

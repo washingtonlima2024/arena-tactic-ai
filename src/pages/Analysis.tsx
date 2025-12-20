@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -33,7 +33,8 @@ import {
   Star,
   Clock,
   User,
-  Trash2
+  Trash2,
+  Radio
 } from 'lucide-react';
 import { useMatchAnalysis, useMatchEvents, ExtendedTacticalAnalysis } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -42,11 +43,17 @@ import { useEventBasedAnalysis } from '@/hooks/useEventBasedAnalysis';
 import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
 import { ReimportMatchDialog } from '@/components/events/ReimportMatchDialog';
+import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
 
 export default function Analysis() {
+  const queryClient = useQueryClient();
+  
+  // Live broadcast context for realtime updates
+  const { isRecording, currentMatchId: liveMatchId } = useLiveBroadcastContext();
+  
   // Centralized match selection
   const { currentMatchId, selectedMatch, matches, isLoading: matchesLoading, setSelectedMatch } = useMatchSelection();
   
@@ -57,8 +64,41 @@ export default function Analysis() {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const { data: analysis, isLoading: analysisLoading } = useMatchAnalysis(currentMatchId);
-  const { data: events = [] } = useMatchEvents(currentMatchId);
+  const { data: events = [], refetch: refetchEvents } = useMatchEvents(currentMatchId);
   const { thumbnails, getThumbnail } = useThumbnailGeneration(currentMatchId || undefined);
+
+  // Real-time subscription for live match analysis updates
+  useEffect(() => {
+    if (!currentMatchId) return;
+    
+    const isLiveMatch = isRecording && liveMatchId === currentMatchId;
+    
+    const channel = supabase
+      .channel(`analysis-realtime-${currentMatchId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'match_events',
+        filter: `match_id=eq.${currentMatchId}`
+      }, (payload) => {
+        console.log('Analysis: Event change received:', payload);
+        // Refetch events to update analysis
+        refetchEvents();
+        queryClient.invalidateQueries({ queryKey: ['match-events', currentMatchId] });
+        
+        if (isLiveMatch && payload.eventType === 'INSERT') {
+          toast({
+            title: "Análise atualizada",
+            description: "Novo evento adicionado à análise tática",
+          });
+        }
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [currentMatchId, refetchEvents, queryClient, isRecording, liveMatchId]);
 
   // Fetch video for the match
   const { data: matchVideo } = useQuery({
