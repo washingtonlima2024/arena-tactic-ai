@@ -237,7 +237,7 @@ export function useAllCompletedMatches() {
   return useQuery({
     queryKey: ['completed-matches'],
     queryFn: async () => {
-      // Fetch matches with teams
+      // Fetch matches with teams (including live matches for partial analysis)
       const { data: matches, error: matchError } = await supabase
         .from('matches')
         .select(`
@@ -245,7 +245,7 @@ export function useAllCompletedMatches() {
           home_team:teams!matches_home_team_id_fkey(*),
           away_team:teams!matches_away_team_id_fkey(*)
         `)
-        .eq('status', 'completed')
+        .in('status', ['completed', 'live'])
         .order('created_at', { ascending: false });
 
       if (matchError) throw matchError;
