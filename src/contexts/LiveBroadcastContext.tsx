@@ -198,6 +198,151 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [currentMatchId]);
 
+  // Load existing events from database when match is selected
+  const loadExistingEvents = useCallback(async (matchId: string) => {
+    console.log('📥 Loading existing events for match:', matchId);
+    try {
+      const { data: events, error } = await supabase
+        .from('match_events')
+        .select('*')
+        .eq('match_id', matchId)
+        .order('minute', { ascending: true });
+      
+      if (error) {
+        console.error('Error loading events:', error);
+        return;
+      }
+      
+      if (events && events.length > 0) {
+        console.log(`📥 Found ${events.length} existing events`);
+        
+        const pending = events.filter(e => e.approval_status === 'pending');
+        const approved = events.filter(e => e.approval_status === 'approved');
+        
+        const mapEvent = (e: typeof events[0]): LiveEvent => ({
+          id: e.id,
+          type: e.event_type,
+          minute: e.minute || 0,
+          second: e.second || 0,
+          description: e.description || '',
+          confidence: (e.metadata as any)?.confidence,
+          status: e.approval_status as 'pending' | 'approved' | 'rejected',
+          recordingTimestamp: (e.metadata as any)?.videoSecond,
+          clipUrl: e.clip_url || undefined,
+        });
+        
+        setDetectedEvents(pending.map(mapEvent));
+        setApprovedEvents(approved.map(mapEvent));
+        
+        console.log(`✅ Loaded ${pending.length} pending + ${approved.length} approved events`);
+      } else {
+        console.log('📥 No existing events found');
+      }
+    } catch (error) {
+      console.error('Error loading existing events:', error);
+    }
+  }, []);
+
+  // REALTIME: Listen for new events inserted into match_events
+  useEffect(() => {
+    if (!currentMatchId) return;
+    
+    console.log('🔴 Setting up realtime listener for match:', currentMatchId);
+    
+    const channel = supabase
+      .channel(`live-events-${currentMatchId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'INSERT',
+          schema: 'public',
+          table: 'match_events',
+          filter: `match_id=eq.${currentMatchId}`
+        },
+        (payload) => {
+          const newDbEvent = payload.new as any;
+          console.log('🔴 Realtime: New event received:', newDbEvent.event_type, newDbEvent.id);
+          
+          // Map to LiveEvent format
+          const newEvent: LiveEvent = {
+            id: newDbEvent.id,
+            type: newDbEvent.event_type,
+            minute: newDbEvent.minute || 0,
+            second: newDbEvent.second || 0,
+            description: newDbEvent.description || '',
+            confidence: newDbEvent.metadata?.confidence,
+            status: newDbEvent.approval_status as 'pending' | 'approved' | 'rejected',
+            recordingTimestamp: newDbEvent.metadata?.videoSecond,
+            clipUrl: newDbEvent.clip_url || undefined,
+          };
+          
+          // Add to appropriate list if not already present
+          if (newEvent.status === 'pending') {
+            setDetectedEvents(prev => {
+              const exists = prev.some(e => e.id === newEvent.id);
+              if (!exists) {
+                console.log('✅ Realtime: Added to detectedEvents:', newEvent.type);
+                return [...prev, newEvent];
+              }
+              return prev;
+            });
+          } else if (newEvent.status === 'approved') {
+            setApprovedEvents(prev => {
+              const exists = prev.some(e => e.id === newEvent.id);
+              if (!exists) {
+                console.log('✅ Realtime: Added to approvedEvents:', newEvent.type);
+                return [...prev, newEvent];
+              }
+              return prev;
+            });
+          }
+        }
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'match_events',
+          filter: `match_id=eq.${currentMatchId}`
+        },
+        (payload) => {
+          const updatedEvent = payload.new as any;
+          console.log('🔴 Realtime: Event updated:', updatedEvent.id, updatedEvent.approval_status);
+          
+          // If status changed to approved, move from detected to approved
+          if (updatedEvent.approval_status === 'approved') {
+            setDetectedEvents(prev => prev.filter(e => e.id !== updatedEvent.id));
+            setApprovedEvents(prev => {
+              const exists = prev.some(e => e.id === updatedEvent.id);
+              if (!exists) {
+                return [...prev, {
+                  id: updatedEvent.id,
+                  type: updatedEvent.event_type,
+                  minute: updatedEvent.minute || 0,
+                  second: updatedEvent.second || 0,
+                  description: updatedEvent.description || '',
+                  confidence: updatedEvent.metadata?.confidence,
+                  status: 'approved' as const,
+                  recordingTimestamp: updatedEvent.metadata?.videoSecond,
+                  clipUrl: updatedEvent.clip_url || undefined,
+                }];
+              }
+              return prev;
+            });
+          }
+        }
+      )
+      .subscribe((status) => {
+        console.log('🔴 Realtime subscription status:', status);
+      });
+
+    return () => {
+      console.log('🔴 Cleaning up realtime listener for match:', currentMatchId);
+      supabase.removeChannel(channel);
+    };
+  }, [currentMatchId]);
+
   // Save transcript to database
   const saveTranscriptToDatabase = useCallback(async (matchId?: string) => {
     if (!transcriptBuffer.trim()) return;
@@ -1073,7 +1218,10 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           console.error('[startRecording] Failed to create video record:', videoCreateError);
         }
       } else {
-        // For existing match, check if there's already a video
+        // For existing match, load existing events and check for video
+        console.log('[startRecording] Loading existing events for match:', matchId);
+        loadExistingEvents(matchId);
+        
         const { data: existingVideo } = await supabase
           .from('videos')
           .select('id')
@@ -1150,7 +1298,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         variant: "destructive",
       });
     }
-  }, [cameraStream, toast, createTempMatch, startVideoRecording, startVideoRecordingFromStream, processAudioChunk]);
+  }, [cameraStream, toast, createTempMatch, startVideoRecording, startVideoRecordingFromStream, processAudioChunk, loadExistingEvents]);
 
   // Stop recording
   const stopRecording = useCallback(() => {
