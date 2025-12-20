@@ -70,6 +70,7 @@ const Live = () => {
     removeEvent,
     updateScore,
     finishMatch,
+    getClipChunksForTime,
   } = useLiveBroadcastContext();
 
   const hasVideoSource = streamUrl || cameraStream;
@@ -360,6 +361,7 @@ const Live = () => {
                 videoElement={videoElement}
                 recordingTime={recordingTime}
                 isRecording={isRecording}
+                getClipChunks={getClipChunksForTime}
               />
             )}
           </div>

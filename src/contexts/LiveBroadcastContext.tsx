@@ -47,6 +47,11 @@ export interface FinishMatchResult {
   duration: number;
 }
 
+export interface VideoChunk {
+  blob: Blob;
+  timestamp: number;
+}
+
 interface LiveBroadcastContextType {
   // State
   matchInfo: MatchInfo;
@@ -97,6 +102,7 @@ interface LiveBroadcastContextType {
   resetFinishResult: () => void;
   setTranscriptBuffer: (buffer: string) => void;
   setTranscriptChunks: (chunks: TranscriptChunk[]) => void;
+  getClipChunksForTime: (startTime: number, endTime: number) => VideoChunk[];
 }
 
 const LiveBroadcastContext = createContext<LiveBroadcastContextType | null>(null);
@@ -2304,6 +2310,30 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     videoChunksRef.current = []; // Reset video chunks
   }, []);
 
+  // NEW: Get clip chunks for a specific time range (for real-time replay)
+  const getClipChunksForTime = useCallback((startTime: number, endTime: number): VideoChunk[] => {
+    console.log('[getClipChunksForTime] Searching chunks for range:', startTime, '-', endTime);
+    console.log('[getClipChunksForTime] Available chunks:', clipVideoChunksRef.current.length);
+    
+    if (clipVideoChunksRef.current.length === 0) {
+      console.log('[getClipChunksForTime] No chunks available');
+      return [];
+    }
+
+    // Filter chunks that fall within the time range
+    const matchingChunks = clipVideoChunksRef.current.filter(chunk => {
+      // Each chunk covers approximately 5 seconds of video
+      const chunkStartTime = chunk.timestamp;
+      const chunkEndTime = chunk.timestamp + 5; // Approximate chunk duration
+      
+      // Check if chunk overlaps with requested range
+      return chunkStartTime <= endTime && chunkEndTime >= startTime;
+    });
+
+    console.log('[getClipChunksForTime] Found', matchingChunks.length, 'matching chunks');
+    return matchingChunks;
+  }, []);
+
   const value: LiveBroadcastContextType = {
     matchInfo,
     setMatchInfo,
@@ -2344,6 +2374,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     resetFinishResult,
     setTranscriptBuffer,
     setTranscriptChunks,
+    getClipChunksForTime,
   };
 
   return (
