@@ -335,6 +335,25 @@ export default function Events() {
     enabled: !!currentMatchId
   });
 
+  // Check if match is from live recording (to hide VideoUploadCard)
+  const { data: analysisJobSource } = useQuery({
+    queryKey: ['analysis-job-source', currentMatchId],
+    queryFn: async () => {
+      if (!currentMatchId) return null;
+      const { data } = await supabase
+        .from('analysis_jobs')
+        .select('result')
+        .eq('match_id', currentMatchId)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      return data;
+    },
+    enabled: !!currentMatchId
+  });
+
+  const isLiveRecordedMatch = (analysisJobSource?.result as any)?.source === 'live';
+
   // Filter events by type and approval status
   const filteredEvents = events.filter(event => {
     // Type filter
@@ -971,8 +990,8 @@ export default function Events() {
           )}
         </div>
 
-        {/* Video Upload Card - Show when no videos exist */}
-        {currentMatchId && (!matchVideos || matchVideos.length === 0) && events.length > 0 && (
+        {/* Video Upload Card - Show only for non-live matches without videos */}
+        {currentMatchId && (!matchVideos || matchVideos.length === 0) && events.length > 0 && !isLiveRecordedMatch && (
           <VideoUploadCard
             matchId={currentMatchId}
             eventsCount={events.length}
@@ -982,6 +1001,23 @@ export default function Events() {
               toast.success('Vídeo vinculado aos eventos!');
             }}
           />
+        )}
+        
+        {/* Info card for live-recorded matches without clips */}
+        {currentMatchId && isLiveRecordedMatch && (!matchVideos || matchVideos.length === 0) && events.length > 0 && (
+          <Card variant="glass" className="border-blue-500/30 bg-blue-500/5">
+            <CardContent className="flex items-center gap-3 py-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-500/10">
+                <Radio className="h-5 w-5 text-blue-500" />
+              </div>
+              <div>
+                <p className="font-medium text-blue-400">Partida Gravada ao Vivo</p>
+                <p className="text-sm text-muted-foreground">
+                  Os clips são gerados automaticamente durante a transmissão.
+                </p>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         <div className="grid gap-6 lg:grid-cols-3">
