@@ -166,6 +166,28 @@ export const useLiveBroadcast = () => {
     };
   }, [isRecording, isPaused, saveTranscriptToDatabase, transcriptBuffer]);
 
+  // REAL-TIME: Save score to database whenever it changes during recording
+  useEffect(() => {
+    if (!isRecording || !tempMatchIdRef.current) return;
+    
+    const saveScoreToDatabase = async () => {
+      try {
+        await supabase
+          .from("matches")
+          .update({
+            home_score: currentScore.home,
+            away_score: currentScore.away,
+          })
+          .eq("id", tempMatchIdRef.current);
+        console.log("Score saved in real-time:", currentScore);
+      } catch (error) {
+        console.error("Error saving score:", error);
+      }
+    };
+    
+    saveScoreToDatabase();
+  }, [currentScore, isRecording]);
+
   // Create temporary match on start for auto-saving
   const createTempMatch = useCallback(async () => {
     try {
@@ -644,26 +666,54 @@ export const useLiveBroadcast = () => {
     }
   }, [isPaused]);
 
-  const addManualEvent = useCallback((type: string) => {
+  const addManualEvent = useCallback(async (type: string) => {
+    const matchId = tempMatchIdRef.current;
     const minute = Math.floor(recordingTime / 60);
     const second = recordingTime % 60;
 
+    const eventId = crypto.randomUUID();
     const newEvent: LiveEvent = {
-      id: crypto.randomUUID(),
+      id: eventId,
       type,
       minute,
       second,
       description: `${type} aos ${minute}'${second}"`,
       status: "approved",
-      recordingTimestamp: recordingTime, // NEW: Store recording time
+      recordingTimestamp: recordingTime,
     };
 
+    // Update local state
     setApprovedEvents((prev) => [...prev, newEvent]);
 
     if (type === "goal_home") {
       setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
     } else if (type === "goal_away") {
       setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
+    }
+
+    // REAL-TIME: Save event to database immediately
+    if (matchId) {
+      try {
+        await supabase.from("match_events").insert({
+          id: eventId,
+          match_id: matchId,
+          event_type: type,
+          minute,
+          second,
+          description: newEvent.description,
+          approval_status: "approved",
+          is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(type),
+          match_half: minute < 45 ? 'first' : 'second',
+          metadata: {
+            eventMs: recordingTime * 1000,
+            videoSecond: recordingTime,
+            source: 'live-manual'
+          }
+        });
+        console.log("Manual event saved in real-time:", type);
+      } catch (error) {
+        console.error("Error saving manual event:", error);
+      }
     }
 
     toast({
@@ -740,9 +790,12 @@ export const useLiveBroadcast = () => {
     }
   }, [detectedEvents, recordingTime, matchInfo, toast]);
 
-  const approveEvent = useCallback((eventId: string) => {
+  const approveEvent = useCallback(async (eventId: string) => {
     const event = detectedEvents.find((e) => e.id === eventId);
+    const matchId = tempMatchIdRef.current;
+    
     if (event) {
+      // Update local state
       setDetectedEvents((prev) => prev.filter((e) => e.id !== eventId));
       setApprovedEvents((prev) => [...prev, { ...event, status: "approved" }]);
 
@@ -752,6 +805,32 @@ export const useLiveBroadcast = () => {
           setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
         } else if (desc.includes(matchInfo.awayTeam.toLowerCase())) {
           setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
+        }
+      }
+
+      // REAL-TIME: Save approved event to database immediately
+      if (matchId) {
+        try {
+          await supabase.from("match_events").insert({
+            id: event.id,
+            match_id: matchId,
+            event_type: event.type,
+            minute: event.minute,
+            second: event.second,
+            description: event.description,
+            approval_status: "approved",
+            is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(event.type),
+            match_half: event.minute < 45 ? 'first' : 'second',
+            metadata: {
+              eventMs: (event.recordingTimestamp || (event.minute * 60 + event.second)) * 1000,
+              videoSecond: event.recordingTimestamp || (event.minute * 60 + event.second),
+              source: 'live-approved',
+              confidence: event.confidence
+            }
+          });
+          console.log("Approved event saved in real-time:", event.type);
+        } catch (error) {
+          console.error("Error saving approved event:", error);
         }
       }
     }
@@ -822,26 +901,9 @@ export const useLiveBroadcast = () => {
         // Save final transcript
         await saveTranscriptToDatabase(matchId);
 
-        // Save approved events with metadata for clip extraction
-        if (approvedEvents.length > 0) {
-          const eventsToInsert = approvedEvents.map((e) => ({
-            match_id: matchId,
-            event_type: e.type,
-            minute: e.minute,
-            second: e.second,
-            description: e.description,
-            approval_status: "approved",
-            is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(e.type),
-            match_half: e.minute < 45 ? 'first' : 'second',
-            metadata: {
-              eventMs: (e.recordingTimestamp || (e.minute * 60 + e.second)) * 1000,
-              videoSecond: e.recordingTimestamp || (e.minute * 60 + e.second),
-              source: 'live'
-            }
-          }));
-
-          await supabase.from("match_events").insert(eventsToInsert);
-        }
+        // Events already saved in real-time, no need to insert again
+        // Just log for debugging
+        console.log(`Finish match: ${approvedEvents.length} events already saved in real-time`);
 
         // NEW: Create analysis_job for consistency with imported matches
         await supabase.from("analysis_jobs").insert({
