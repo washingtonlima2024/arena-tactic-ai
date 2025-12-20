@@ -23,9 +23,11 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
   const sourceNodeRef = useRef<MediaElementAudioSourceNode | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const chunksRef = useRef<Blob[]>([]);
+  const headerChunkRef = useRef<Blob | null>(null); // Store the WebM header from first chunk
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const isProcessingRef = useRef(false);
   const hasAudioActivityRef = useRef(false);
+  const chunkCountRef = useRef(0);
 
   // Check if there's actual audio activity using analyser
   const checkAudioActivity = useCallback(() => {
@@ -64,7 +66,18 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
     onPartialTranscript?.("Transcrevendo...");
 
     try {
-      const audioBlob = new Blob(chunksRef.current, { type: "audio/webm;codecs=opus" });
+      // Create a complete WebM blob with header + data chunks
+      const blobParts: Blob[] = [];
+      
+      // Always include the header chunk (first chunk contains WebM header)
+      if (headerChunkRef.current) {
+        blobParts.push(headerChunkRef.current);
+      }
+      
+      // Add all data chunks
+      blobParts.push(...chunksRef.current);
+      
+      const audioBlob = new Blob(blobParts, { type: "audio/webm;codecs=opus" });
       chunksRef.current = []; // Clear chunks after collecting
 
       // Skip if too small (less than 5KB - more conservative threshold)
@@ -206,6 +219,12 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
+          // First chunk contains the WebM header - save it
+          if (chunkCountRef.current === 0) {
+            headerChunkRef.current = event.data;
+            console.log("Saved WebM header chunk:", event.data.size, "bytes");
+          }
+          chunkCountRef.current++;
           chunksRef.current.push(event.data);
           // Check audio activity when receiving data
           checkAudioActivity();
@@ -265,6 +284,8 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
 
     streamRef.current = null;
     chunksRef.current = [];
+    headerChunkRef.current = null;
+    chunkCountRef.current = 0;
     hasAudioActivityRef.current = false;
 
     setIsConnected(false);
