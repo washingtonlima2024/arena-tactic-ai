@@ -386,9 +386,10 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       videoElementRef.current = videoElement;
 
       console.log(`Starting video recording: ${canvas.width}x${canvas.height}`);
-
+      // NOTE: Always draw frames, even before isRecording is true
+      // This ensures we capture video from the very start
       const drawFrame = () => {
-        if (ctx && videoElementRef.current && isRecording && !isPaused) {
+        if (ctx && videoElementRef.current) {
           ctx.drawImage(videoElementRef.current, 0, 0, canvas.width, canvas.height);
         }
         animationFrameRef.current = requestAnimationFrame(drawFrame);
@@ -641,13 +642,18 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           if (!eventsError && eventsData?.events && eventsData.events.length > 0) {
             console.log(`Detected ${eventsData.events.length} new events - saving to database...`);
             
+            // Calculate REAL minute/second based on actual recordingTime
+            // (AI-returned minute may be wrong since it doesn't know the real recording time)
+            const realMinute = Math.floor(recordingTime / 60);
+            const realSecond = recordingTime % 60;
+            
             // Call addDetectedEvent via ref for each event (saves to DB + state)
             for (const e of eventsData.events) {
               if (addDetectedEventRef.current) {
                 await addDetectedEventRef.current({
                   type: e.type,
-                  minute: e.minute || currentMinute,
-                  second: e.second || 0,
+                  minute: realMinute,  // Use real recording time, not AI-guessed time
+                  second: realSecond,
                   description: e.description,
                   confidence: e.confidence || 0.8,
                   source: 'live-transcription'
