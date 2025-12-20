@@ -1084,6 +1084,28 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           setCurrentVideoId(existingVideo.id);
           currentVideoIdRef.current = existingVideo.id;
           console.log('[startRecording] Using existing video record:', existingVideo.id);
+        } else {
+          // Create video record for existing match if none exists
+          try {
+            const { data: videoRecord, error: videoError } = await supabase.from('videos').insert({
+              match_id: matchId,
+              file_url: '',
+              file_name: 'Gravação em andamento',
+              video_type: 'full',
+              status: 'recording',
+              start_minute: 0,
+            }).select('id').single();
+
+            if (videoError) {
+              console.error('[startRecording] Error creating video for existing match:', videoError);
+            } else if (videoRecord) {
+              setCurrentVideoId(videoRecord.id);
+              currentVideoIdRef.current = videoRecord.id;
+              console.log('[startRecording] ✅ Video record created for existing match:', videoRecord.id);
+            }
+          } catch (videoCreateError) {
+            console.error('[startRecording] Failed to create video for existing match:', videoCreateError);
+          }
         }
       }
 
