@@ -109,9 +109,13 @@ export function useRealtimeClipGeneration({ matchId, segmentBuffer }: UseRealtim
       // Get video blob from segment buffer
       const videoBlob = segmentBuffer.getBlobForTimeRange(start, end);
       
-      if (!videoBlob || videoBlob.size < 1000) {
-        console.warn('[RealtimeClip] No valid video data for time range');
-        return { eventId: event.id, clipUrl: null, error: 'No video data available' };
+      // Validate video blob size (minimum 100KB for 10s of video)
+      const MIN_INPUT_SIZE_KB = 100;
+      const inputSizeKB = videoBlob ? videoBlob.size / 1024 : 0;
+      
+      if (!videoBlob || inputSizeKB < MIN_INPUT_SIZE_KB) {
+        console.warn(`[RealtimeClip] ❌ Video data insufficient: ${inputSizeKB.toFixed(1)}KB < ${MIN_INPUT_SIZE_KB}KB minimum`);
+        return { eventId: event.id, clipUrl: null, error: `Video data too small: ${inputSizeKB.toFixed(1)}KB` };
       }
 
       console.log(`[RealtimeClip] Video blob size: ${(videoBlob.size / 1024).toFixed(1)}KB`);
@@ -165,9 +169,12 @@ export function useRealtimeClipGeneration({ matchId, segmentBuffer }: UseRealtim
       await ffmpeg.deleteFile('input.webm');
       await ffmpeg.deleteFile('output.webm');
 
-      if (clipBlob.size < 500) {
-        console.warn('[RealtimeClip] Generated clip too small, likely failed');
-        return { eventId: event.id, clipUrl: null, error: 'Clip generation failed' };
+      // CRITICAL: Minimum 10KB for a valid clip (671 bytes is just headers)
+      const MIN_CLIP_SIZE_KB = 10;
+      const clipSizeKB = clipBlob.size / 1024;
+      if (clipSizeKB < MIN_CLIP_SIZE_KB) {
+        console.error(`[RealtimeClip] ❌ Generated clip too small: ${clipSizeKB.toFixed(1)}KB < ${MIN_CLIP_SIZE_KB}KB minimum`);
+        return { eventId: event.id, clipUrl: null, error: `Clip too small: ${clipSizeKB.toFixed(1)}KB` };
       }
 
       console.log(`[RealtimeClip] Clip generated: ${(clipBlob.size / 1024).toFixed(1)}KB`);
