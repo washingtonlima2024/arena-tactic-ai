@@ -297,6 +297,9 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
     };
   }, [disconnect]);
 
+  // Expose analyser for volume visualization
+  const getAnalyser = useCallback(() => analyserRef.current, []);
+
   return {
     isConnected,
     isConnecting,
@@ -305,5 +308,6 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
     error,
     connect,
     disconnect,
+    getAnalyser,
   };
 };

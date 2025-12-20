@@ -8,6 +8,7 @@ import { TranscriptChunk } from "@/hooks/useLiveBroadcast";
 import { supabase } from "@/integrations/supabase/client";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { VolumeIndicator } from "./VolumeIndicator";
 
 const LANGUAGES = [
   { code: "pt", label: "Português", flag: "🇧🇷" },
@@ -61,10 +62,10 @@ export const LiveTranscriptRealtime = ({
   const [isExtracting, setIsExtracting] = useState(false);
   const [eventsExtracted, setEventsExtracted] = useState(0);
 
-  // Auto-scroll to bottom when new transcripts arrive
+  // Auto-scroll to top when new transcripts arrive (since we reversed the order)
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+      scrollRef.current.scrollTop = 0;
     }
   }, [chunks, transcriptBuffer]);
 
@@ -389,6 +390,14 @@ export const LiveTranscriptRealtime = ({
             Analisando...
           </Badge>
         )}
+        
+        {/* Volume Indicator */}
+        {isRecording && isConnected && audioSource === "video" && (
+          <VolumeIndicator 
+            analyser={videoTranscription.getAnalyser()} 
+            isActive={isConnected}
+          />
+        )}
       </div>
 
       <ScrollArea className="flex-1 max-h-[350px]" ref={scrollRef}>
@@ -439,32 +448,54 @@ export const LiveTranscriptRealtime = ({
               )}
             </div>
           ) : (
-            <>
-              {/* Committed transcripts */}
-              {committedTranscripts.map((transcript) => (
-                <div key={transcript.id} className="border-l-2 border-primary/30 pl-3 py-1">
-                  <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-                    <Clock className="h-3 w-3" />
-                    <span>{new Date(transcript.timestamp).toLocaleTimeString()}</span>
-                    {audioSource === "video" && (
-                      <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">Whisper</Badge>
-                    )}
-                  </div>
-                  <p className="text-sm text-foreground">{transcript.text}</p>
-                </div>
-              ))}
-              
-              {/* Partial transcript (live) */}
+            <div className="flex flex-col-reverse">
+              {/* Partial transcript (live) - always at bottom visually but shows at top due to reverse */}
               {partialTranscript && (
-                <div className="border-l-2 border-yellow-500/50 pl-3 py-1 animate-pulse">
+                <div className="border-l-4 border-yellow-500 pl-3 py-2 bg-yellow-500/10 rounded-r-lg animate-pulse mb-2">
                   <div className="flex items-center gap-2 text-xs text-yellow-500 mb-1">
                     {audioSource === "mic" ? <Mic className="h-3 w-3" /> : <Video className="h-3 w-3" />}
-                    <span>Ao vivo</span>
+                    <span className="font-semibold">Ao vivo</span>
                   </div>
-                  <p className="text-sm text-foreground/80 italic">{partialTranscript}</p>
+                  <p className="text-sm text-foreground italic">{partialTranscript}</p>
                 </div>
               )}
-            </>
+
+              {/* Committed transcripts - reversed order so newest shows at top */}
+              {[...committedTranscripts].reverse().map((transcript, index) => {
+                const isLatest = index === 0;
+                
+                return (
+                  <div 
+                    key={transcript.id} 
+                    className={`
+                      pl-3 py-2 mb-2 rounded-r-lg transition-all duration-300
+                      ${isLatest 
+                        ? "border-l-4 border-primary bg-primary/10 shadow-lg scale-[1.02]" 
+                        : "border-l-2 border-muted-foreground/30 opacity-70 hover:opacity-100"
+                      }
+                    `}
+                  >
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
+                      <Clock className="h-3 w-3" />
+                      <span className={isLatest ? "font-semibold text-foreground" : ""}>
+                        {new Date(transcript.timestamp).toLocaleTimeString()}
+                      </span>
+                      {isLatest && (
+                        <Badge variant="default" className="text-[10px] px-1.5 py-0 h-4 bg-primary">
+                          Mais recente
+                        </Badge>
+                      )}
+                      {audioSource === "video" && (
+                        <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">Whisper</Badge>
+                      )}
+                    </div>
+                    <p className={`text-sm ${isLatest ? "text-foreground font-medium" : "text-foreground/80"}`}>
+                      {transcript.text}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </ScrollArea>
