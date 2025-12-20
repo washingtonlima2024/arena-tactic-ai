@@ -400,8 +400,8 @@ export const LiveTranscriptRealtime = ({
         )}
       </div>
 
-      <ScrollArea className="flex-1 max-h-[350px]" ref={scrollRef}>
-        <div className="space-y-3 pr-2">
+      <ScrollArea className="flex-1 max-h-[350px]">
+        <div ref={scrollRef} className="space-y-3 pr-2">
           {chunks.length === 0 && committedTranscripts.length === 0 && !partialTranscript ? (
             <div className="text-center text-muted-foreground py-8">
               {isRecording ? (
