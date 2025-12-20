@@ -22,7 +22,7 @@ import {
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
 import { Progress } from '@/components/ui/progress';
-import { Search, Filter, Plus, Calendar, Trophy, Loader2, Video, Trash2, RefreshCw, Mic } from 'lucide-react';
+import { Search, Filter, Plus, Calendar, Trophy, Loader2, Video, Trash2, RefreshCw, Mic, Radio } from 'lucide-react';
 import { useMatches, Match } from '@/hooks/useMatches';
 import { useDeleteMatch } from '@/hooks/useDeleteMatch';
 import { Link, useNavigate } from 'react-router-dom';
@@ -389,6 +389,22 @@ export default function Matches() {
                   )}
 
                   <div className="flex gap-2 mt-4">
+                    {/* Live match buttons */}
+                    {match.status === 'live' && (
+                      <>
+                        <Button variant="arena" size="sm" className="flex-1 animate-pulse" asChild>
+                          <Link to="/live">
+                            <Radio className="mr-2 h-4 w-4" />
+                            Ver Ao Vivo
+                          </Link>
+                        </Button>
+                        <Button variant="arena-outline" size="sm" className="flex-1" asChild>
+                          <Link to={`/analysis?match=${match.id}`}>
+                            Análise Parcial
+                          </Link>
+                        </Button>
+                      </>
+                    )}
                     {match.status === 'completed' && (
                       <Button variant="arena-outline" size="sm" className="flex-1" asChild>
                         <Link to={`/analysis?match=${match.id}`}>Ver Análise</Link>
