@@ -39,7 +39,8 @@ import {
   FileText,
   Film,
   StopCircle,
-  Radio
+  Radio,
+  Upload
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -58,6 +59,7 @@ import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getEventTeam, getEventTimeMs as getEventTimeMsHelper, formatEventTime } from '@/lib/eventHelpers';
 import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
+import { VideoUploadCard } from '@/components/events/VideoUploadCard';
 
 // EventRow component for rendering individual events
 interface EventRowProps {
@@ -969,6 +971,19 @@ export default function Events() {
           )}
         </div>
 
+        {/* Video Upload Card - Show when no videos exist */}
+        {currentMatchId && (!matchVideos || matchVideos.length === 0) && events.length > 0 && (
+          <VideoUploadCard
+            matchId={currentMatchId}
+            eventsCount={events.length}
+            onVideoUploaded={() => {
+              queryClient.invalidateQueries({ queryKey: ['match-videos', currentMatchId] });
+              refetchEvents();
+              toast.success('Vídeo vinculado aos eventos!');
+            }}
+          />
+        )}
+
         <div className="grid gap-6 lg:grid-cols-3">
           {/* Timeline */}
           <div className="lg:col-span-2">
@@ -1217,6 +1232,64 @@ export default function Events() {
                       </Badge>
                     </div>
                   ))}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Clip Status Summary */}
+            {events.length > 0 && (
+              <Card variant="glass" className={eventsWithoutClips > 0 ? 'border-yellow-500/30' : 'border-green-500/30'}>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Film className="h-5 w-5 text-primary" />
+                    Clips
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                      <span className="text-sm">Com clip</span>
+                    </div>
+                    <Badge variant="success">{eventsWithClips}</Badge>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 text-yellow-500" />
+                      <span className="text-sm">Sem clip</span>
+                    </div>
+                    <Badge variant="warning">{eventsWithoutClips}</Badge>
+                  </div>
+                  {/* Progress bar */}
+                  <div className="space-y-1">
+                    <div className="h-2 overflow-hidden rounded-full bg-muted">
+                      <div 
+                        className="h-full bg-gradient-to-r from-green-500 to-primary transition-all" 
+                        style={{ 
+                          width: `${events.length > 0 ? (eventsWithClips / events.length) * 100 : 0}%` 
+                        }}
+                      />
+                    </div>
+                    <p className="text-xs text-muted-foreground text-center">
+                      {events.length > 0 ? Math.round((eventsWithClips / events.length) * 100) : 0}% completo
+                    </p>
+                  </div>
+                  {eventsWithoutClips > 0 && matchVideo && !matchVideo.file_url.includes('embed') && (
+                    <Button
+                      variant="arena"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => handleGenerateClips('all', eventsWithoutClips)}
+                      disabled={isGenerating}
+                    >
+                      {isGenerating ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Scissors className="h-4 w-4 mr-2" />
+                      )}
+                      Gerar {eventsWithoutClips} clips
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             )}
