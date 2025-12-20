@@ -273,6 +273,7 @@ const Live = () => {
               recordingTime={recordingTime}
               hasVideoSource={!!hasVideoSource}
               hasMatchInfo={!!(matchInfo.homeTeam && matchInfo.awayTeam)}
+              currentMatchId={currentMatchId}
               onStart={handleStartRecording}
               onStop={stopRecording}
               onPause={pauseRecording}
