@@ -1,8 +1,9 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
-import { Link2, Camera, Radio, Settings, ExternalLink, Loader2, Video } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { Link2, Camera, Radio, Settings, ExternalLink, Loader2, Video, BarChart3 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LiveStreamInput } from "@/components/live/LiveStreamInput";
 import { LiveCameraInput } from "@/components/live/LiveCameraInput";
@@ -14,7 +15,10 @@ import { LiveTranscriptRealtime } from "@/components/live/LiveTranscriptRealtime
 import { LiveFinishDialog } from "@/components/live/LiveFinishDialog";
 import { LiveSummaryDialog } from "@/components/live/LiveSummaryDialog";
 import { LiveEventPlayer } from "@/components/live/LiveEventPlayer";
+import { LiveAnalysisPanel } from "@/components/live/LiveAnalysisPanel";
+import { LiveTacticalField } from "@/components/tactical/LiveTacticalField";
 import { useLiveBroadcast } from "@/hooks/useLiveBroadcast";
+import { useEventBasedAnalysis } from "@/hooks/useEventBasedAnalysis";
 import { useNavigate } from "react-router-dom";
 
 const Live = () => {
@@ -64,6 +68,38 @@ const Live = () => {
   } = useLiveBroadcast();
 
   const hasVideoSource = streamUrl || cameraStream;
+
+  // Convert approved events for the analysis hook
+  const analysisEvents = useMemo(() => {
+    return approvedEvents.map(event => ({
+      id: event.id,
+      event_type: event.type,
+      minute: event.minute,
+      second: event.second,
+      description: event.description,
+      is_highlight: true,
+      metadata: { team: event.type.includes('home') ? 'home' : event.type.includes('away') ? 'away' : null }
+    }));
+  }, [approvedEvents]);
+
+  // Use the analysis hook with live events
+  const liveAnalysis = useEventBasedAnalysis(
+    analysisEvents,
+    { name: matchInfo.homeTeam || 'Time Casa' },
+    { name: matchInfo.awayTeam || 'Time Visitante' }
+  );
+
+  // Convert events for tactical field (with estimated positions)
+  const tacticalEvents = useMemo(() => {
+    return approvedEvents.map(event => ({
+      id: event.id,
+      event_type: event.type,
+      minute: event.minute,
+      description: event.description,
+      position_x: null,
+      position_y: null,
+    }));
+  }, [approvedEvents]);
 
   // Callback to receive video element from LiveStreamInput
   const handleVideoElementReady = useCallback((element: HTMLVideoElement | null) => {
@@ -281,7 +317,61 @@ const Live = () => {
           </div>
         </div>
 
-        {/* Video Upload Progress Indicator */}
+        {/* Live Tactical Analysis Section */}
+        {approvedEvents.length > 0 && (
+          <div className="glass-card p-6 rounded-xl">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-2.5 rounded-lg bg-gradient-to-br from-primary/20 to-primary/10 border border-primary/30">
+                <BarChart3 className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-foreground">Análise Tática Ao Vivo</h2>
+                <p className="text-sm text-muted-foreground">
+                  Atualiza automaticamente com cada evento aprovado
+                </p>
+              </div>
+              <Badge variant="outline" className="ml-auto bg-green-500/10 border-green-500/30 text-green-500">
+                <span className="relative flex h-2 w-2 mr-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-500 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
+                </span>
+                Análise Ativa
+              </Badge>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Tactical Field */}
+              <div className="bg-muted/20 rounded-xl p-4 border border-border/50">
+                <h3 className="text-sm font-medium text-muted-foreground mb-3">
+                  Campo Tático • Eventos Animados
+                </h3>
+                <div className="aspect-[3/2] relative">
+                  <LiveTacticalField
+                    events={tacticalEvents}
+                    homeTeam={matchInfo.homeTeam}
+                    awayTeam={matchInfo.awayTeam}
+                    className="w-full h-full"
+                  />
+                </div>
+              </div>
+
+              {/* Analysis Panel */}
+              <div>
+                <LiveAnalysisPanel
+                  homeTeam={matchInfo.homeTeam || 'Time Casa'}
+                  awayTeam={matchInfo.awayTeam || 'Time Visitante'}
+                  homeStats={liveAnalysis.homeStats}
+                  awayStats={liveAnalysis.awayStats}
+                  insights={liveAnalysis.insights}
+                  keyMoments={liveAnalysis.keyMoments}
+                  matchSummary={liveAnalysis.matchSummary}
+                  possession={liveAnalysis.possession}
+                  eventsCount={approvedEvents.length}
+                />
+              </div>
+            </div>
+          </div>
+        )}
         {isUploadingVideo && (
           <div className="fixed bottom-4 right-4 bg-card p-4 rounded-lg shadow-lg border z-50 min-w-[280px]">
             <div className="flex items-center gap-3">
