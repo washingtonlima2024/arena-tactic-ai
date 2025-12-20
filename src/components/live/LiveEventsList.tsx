@@ -1,8 +1,15 @@
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Check, X, Edit2, Clock, Play, ExternalLink } from "lucide-react";
+import { Check, X, Edit2, Clock, Play, ExternalLink, Share2, Copy, Download, Twitter } from "lucide-react";
 import { LiveEvent } from "@/contexts/LiveBroadcastContext";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { toast } from "@/hooks/use-toast";
 
 interface LiveEventsListProps {
   detectedEvents: LiveEvent[];
@@ -60,6 +67,53 @@ const getEventLabel = (type: string) => {
   }
 };
 
+const handleCopyLink = async (clipUrl: string) => {
+  try {
+    await navigator.clipboard.writeText(clipUrl);
+    toast({
+      title: "Link copiado",
+      description: "Link do clip copiado para a área de transferência",
+    });
+  } catch (error) {
+    toast({
+      title: "Erro",
+      description: "Não foi possível copiar o link",
+      variant: "destructive",
+    });
+  }
+};
+
+const handleShareTwitter = (clipUrl: string, eventType: string) => {
+  const text = encodeURIComponent(`🔥 ${getEventLabel(eventType)} incrível! Confira o lance:`);
+  const url = encodeURIComponent(clipUrl);
+  window.open(`https://twitter.com/intent/tweet?text=${text}&url=${url}`, '_blank');
+};
+
+const handleDownload = async (clipUrl: string, eventType: string) => {
+  try {
+    const response = await fetch(clipUrl);
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `clip-${eventType}-${Date.now()}.mp4`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    toast({
+      title: "Download iniciado",
+      description: "O clip está sendo baixado",
+    });
+  } catch (error) {
+    toast({
+      title: "Erro no download",
+      description: "Não foi possível baixar o clip",
+      variant: "destructive",
+    });
+  }
+};
+
 export const LiveEventsList = ({
   detectedEvents,
   approvedEvents,
@@ -98,7 +152,7 @@ export const LiveEventsList = ({
                 <div className="flex items-start gap-2">
                   <span className="text-xl">{getEventIcon(event.type)}</span>
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <span className="font-medium text-sm">
                         {getEventLabel(event.type)}
                       </span>
@@ -123,7 +177,37 @@ export const LiveEventsList = ({
                     )}
                   </div>
 
-                  {/* Clip play button */}
+                  {/* Share dropdown for clips */}
+                  {event.clipUrl && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button
+                          size="icon"
+                          variant="ghost"
+                          className="h-7 w-7 text-primary hover:text-primary/80 hover:bg-primary/10"
+                          title="Compartilhar clip"
+                        >
+                          <Share2 className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleShareTwitter(event.clipUrl!, event.type)}>
+                          <Twitter className="h-4 w-4 mr-2" />
+                          Compartilhar no X
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleCopyLink(event.clipUrl!)}>
+                          <Copy className="h-4 w-4 mr-2" />
+                          Copiar Link
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleDownload(event.clipUrl!, event.type)}>
+                          <Download className="h-4 w-4 mr-2" />
+                          Baixar Clip
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+
+                  {/* Play button */}
                   {event.clipUrl && (
                     <Button
                       size="icon"

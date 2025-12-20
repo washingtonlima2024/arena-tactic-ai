@@ -34,9 +34,12 @@ serve(async (req) => {
       `${e.minute}'${e.second}" - ${e.type}: ${e.description}`
     ).join('\n');
 
-    const prompt = `Você é um analista de futebol especializado. Analise o seguinte evento em tempo real:
+    const eventsCount = (allEvents || []).length + 1;
+
+    const prompt = `Você é um analista de futebol especializado em tempo real. Analise o seguinte evento:
 
 PARTIDA: ${homeTeam || 'Time A'} ${score?.home || 0} x ${score?.away || 0} ${awayTeam || 'Time B'}
+TOTAL DE EVENTOS ATÉ AGORA: ${eventsCount}
 
 NOVO EVENTO:
 - Tipo: ${event.type}
@@ -49,10 +52,14 @@ ${eventsSummary || 'Nenhum evento anterior'}
 Forneça uma análise JSON com:
 1. "expandedDescription": Descrição expandida e profissional do evento (2-3 frases)
 2. "tacticalInsight": Insight tático sobre o momento do jogo
-3. "estimatedPosition": { "x": number 0-100, "y": number 0-100 } - posição estimada no campo onde ocorreu
+3. "estimatedPosition": { "x": number 0-100, "y": number 0-100 } - posição estimada no campo
 4. "partialSummary": Resumo parcial da partida até agora (2-3 frases)
 5. "momentum": "home" | "away" | "neutral" - qual time está dominando
 6. "intensity": "low" | "medium" | "high" - intensidade do jogo
+7. "possessionEstimate": number 0-100 - posse de bola estimada do time da casa
+8. "dangerLevel": number 0-1 - nível de perigo do evento (0=baixo, 1=muito alto)
+9. "suggestedHighlight": boolean - se este evento deve ser um destaque
+10. "contextualNote": string curto - nota contextual sobre o momento (ex: "Pressão alta", "Contra-ataque perigoso")
 
 Responda APENAS com JSON válido.`;
 
@@ -65,10 +72,9 @@ Responda APENAS com JSON válido.`;
       body: JSON.stringify({
         model: "google/gemini-2.5-flash",
         messages: [
-          { role: "system", content: "Você é um analista de futebol profissional. Responda sempre em JSON válido." },
+          { role: "system", content: "Você é um analista de futebol profissional especializado em análise tática em tempo real. Responda sempre em JSON válido." },
           { role: "user", content: prompt }
         ],
-        temperature: 0.7,
       }),
     });
 
@@ -93,16 +99,29 @@ Responda APENAS com JSON válido.`;
       }
     } catch (parseError) {
       console.error('Failed to parse AI response:', parseError);
-      // Default analysis
+      // Default analysis with new fields
       analysis = {
         expandedDescription: event.description,
         tacticalInsight: "Momento importante da partida.",
         estimatedPosition: { x: 50, y: 50 },
         partialSummary: `Partida em andamento: ${homeTeam} ${score?.home || 0} x ${score?.away || 0} ${awayTeam}`,
         momentum: "neutral",
-        intensity: "medium"
+        intensity: "medium",
+        possessionEstimate: 50,
+        dangerLevel: 0.5,
+        suggestedHighlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(event.type),
+        contextualNote: "Jogo equilibrado"
       };
     }
+
+    // Ensure all new fields exist with defaults
+    analysis = {
+      ...analysis,
+      possessionEstimate: analysis.possessionEstimate ?? 50,
+      dangerLevel: analysis.dangerLevel ?? 0.5,
+      suggestedHighlight: analysis.suggestedHighlight ?? ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(event.type),
+      contextualNote: analysis.contextualNote ?? ""
+    };
 
     // Initialize Supabase client
     const supabaseUrl = Deno.env.get('SUPABASE_URL')!;
@@ -120,6 +139,7 @@ Responda APENAS com JSON válido.`;
         },
         position_x: analysis.estimatedPosition?.x || 50,
         position_y: analysis.estimatedPosition?.y || 50,
+        is_highlight: analysis.suggestedHighlight
       })
       .eq('id', event.id);
 
@@ -136,6 +156,18 @@ Responda APENAS com JSON válido.`;
       .limit(1)
       .maybeSingle();
 
+    const analysisResult = {
+      source: 'live',
+      isPartial: true,
+      eventsAnalyzed: eventsCount,
+      partialSummary: analysis.partialSummary,
+      momentum: analysis.momentum,
+      intensity: analysis.intensity,
+      possessionEstimate: analysis.possessionEstimate,
+      lastEventAnalysis: analysis,
+      lastUpdated: new Date().toISOString()
+    };
+
     if (existingJob) {
       const existingResult = existingJob.result as Record<string, any> || {};
       await supabase
@@ -143,11 +175,8 @@ Responda APENAS com JSON válido.`;
         .update({
           result: {
             ...existingResult,
-            partialSummary: analysis.partialSummary,
-            momentum: analysis.momentum,
-            intensity: analysis.intensity,
-            lastEventAnalysis: analysis,
-            lastUpdated: new Date().toISOString()
+            ...analysisResult,
+            eventsAnalyzed: eventsCount
           },
           current_step: `Analisando: ${event.type}`,
           progress: Math.min(90, (existingResult.progress || 0) + 5)
@@ -162,18 +191,11 @@ Responda APENAS com JSON válido.`;
           status: 'processing',
           progress: 10,
           current_step: `Analisando: ${event.type}`,
-          result: {
-            source: 'live',
-            partialSummary: analysis.partialSummary,
-            momentum: analysis.momentum,
-            intensity: analysis.intensity,
-            lastEventAnalysis: analysis,
-            lastUpdated: new Date().toISOString()
-          }
+          result: analysisResult
         });
     }
 
-    console.log('Live analysis generated successfully');
+    console.log('Live analysis generated successfully for event:', event.type);
 
     return new Response(
       JSON.stringify({ success: true, analysis }),

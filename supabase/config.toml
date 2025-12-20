@@ -15,6 +15,9 @@ verify_jwt = false
 [functions.extract-live-events]
 verify_jwt = false
 
+[functions.finalize-match-analysis]
+verify_jwt = false
+
 [functions.generate-live-analysis]
 verify_jwt = false
 

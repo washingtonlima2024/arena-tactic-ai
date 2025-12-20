@@ -159,6 +159,14 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const isGeneratingClipRef = useRef(false);
 
+  // CRITICAL: Keep tempMatchIdRef synchronized with currentMatchId state
+  useEffect(() => {
+    if (currentMatchId && !tempMatchIdRef.current) {
+      tempMatchIdRef.current = currentMatchId;
+      console.log('✅ tempMatchIdRef synced from currentMatchId:', currentMatchId);
+    }
+  }, [currentMatchId]);
+
   // Save transcript to database
   const saveTranscriptToDatabase = useCallback(async (matchId?: string) => {
     if (!transcriptBuffer.trim()) return;
@@ -1021,9 +1029,27 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
   // Add manual event
   const addManualEvent = useCallback(async (type: string) => {
-    const matchId = tempMatchIdRef.current;
+    // CRITICAL: Use multiple fallbacks for matchId
+    const matchId = tempMatchIdRef.current || currentMatchId;
     const minute = Math.floor(recordingTime / 60);
     const second = recordingTime % 60;
+
+    console.log('=== ADD MANUAL EVENT ===');
+    console.log('type:', type);
+    console.log('tempMatchIdRef.current:', tempMatchIdRef.current);
+    console.log('currentMatchId state:', currentMatchId);
+    console.log('matchId used:', matchId);
+    console.log('isRecording:', isRecording);
+
+    if (!matchId) {
+      console.error('❌ CRITICAL: No matchId available - event will NOT be saved to database');
+      toast({
+        title: "Erro",
+        description: "Inicie a gravação antes de adicionar eventos",
+        variant: "destructive"
+      });
+      return;
+    }
 
     const eventId = crypto.randomUUID();
     const newEvent: LiveEvent = {
@@ -1044,7 +1070,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
     }
 
-      if (matchId) {
+    // Always save to database since we validated matchId
+    {
         try {
           await supabase.from("match_events").insert({
             id: eventId,
@@ -1092,7 +1119,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       title: "Evento adicionado",
       description: newEvent.description,
     });
-  }, [recordingTime, toast, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis]);
+  }, [recordingTime, toast, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis, currentMatchId, isRecording]);
 
   // Add detected event from AI
   const addDetectedEvent = useCallback((eventData: {
