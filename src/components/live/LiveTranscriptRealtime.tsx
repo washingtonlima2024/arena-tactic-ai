@@ -62,10 +62,13 @@ export const LiveTranscriptRealtime = ({
   const [isExtracting, setIsExtracting] = useState(false);
   const [eventsExtracted, setEventsExtracted] = useState(0);
 
-  // Auto-scroll to top when new transcripts arrive (since we reversed the order)
+  // Auto-scroll suave para manter o conteúdo mais recente visível no topo
   useEffect(() => {
     if (scrollRef.current) {
-      scrollRef.current.scrollTop = 0;
+      scrollRef.current.scrollTo({
+        top: 0,
+        behavior: 'smooth'
+      });
     }
   }, [chunks, transcriptBuffer]);
 
@@ -448,10 +451,10 @@ export const LiveTranscriptRealtime = ({
               )}
             </div>
           ) : (
-            <div className="flex flex-col-reverse">
-              {/* Partial transcript (live) - always at bottom visually but shows at top due to reverse */}
+            <div className="flex flex-col">
+              {/* Partial transcript (live) - sempre no topo */}
               {partialTranscript && (
-                <div className="border-l-4 border-yellow-500 pl-3 py-2 bg-yellow-500/10 rounded-r-lg animate-pulse mb-2">
+                <div className="border-l-4 border-yellow-500 pl-3 py-2 bg-yellow-500/10 rounded-r-lg animate-pulse mb-3 sticky top-0 z-10">
                   <div className="flex items-center gap-2 text-xs text-yellow-500 mb-1">
                     {audioSource === "mic" ? <Mic className="h-3 w-3" /> : <Video className="h-3 w-3" />}
                     <span className="font-semibold">Ao vivo</span>
@@ -460,7 +463,7 @@ export const LiveTranscriptRealtime = ({
                 </div>
               )}
 
-              {/* Committed transcripts - reversed order so newest shows at top */}
+              {/* Committed transcripts - mais recente primeiro, com animação de entrada */}
               {[...committedTranscripts].reverse().map((transcript, index) => {
                 const isLatest = index === 0;
                 
@@ -468,10 +471,10 @@ export const LiveTranscriptRealtime = ({
                   <div 
                     key={transcript.id} 
                     className={`
-                      pl-3 py-2 mb-2 rounded-r-lg transition-all duration-300
+                      pl-3 py-2 mb-2 rounded-r-lg transition-all duration-500 animate-fade-in
                       ${isLatest 
-                        ? "border-l-4 border-primary bg-primary/10 shadow-lg scale-[1.02]" 
-                        : "border-l-2 border-muted-foreground/30 opacity-70 hover:opacity-100"
+                        ? "border-l-4 border-primary bg-primary/10 shadow-lg transform scale-[1.02]" 
+                        : "border-l-2 border-muted-foreground/30 opacity-60 hover:opacity-100"
                       }
                     `}
                   >
