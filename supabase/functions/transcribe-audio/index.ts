@@ -126,97 +126,72 @@ serve(async (req) => {
       );
     }
 
-    // Prepare form data for OpenAI Whisper API
-    const formData = new FormData();
-    const file = createAudioFile(binaryAudio, `recording.${extension}`, mimeType);
-    formData.append('file', file);
-    formData.append('model', 'whisper-1');
-    formData.append('language', language); // Dynamic language
-    formData.append('response_format', 'json');
+    // Function to try transcription with specific format
+    const tryTranscribe = async (ext: string, mime: string): Promise<{ success: boolean; text?: string; error?: string }> => {
+      const formData = new FormData();
+      const file = createAudioFile(binaryAudio, `recording.${ext}`, mime);
+      formData.append('file', file);
+      formData.append('model', 'whisper-1');
+      formData.append('language', language);
+      formData.append('response_format', 'json');
 
-    console.log('Sending to OpenAI Whisper API with file:', `recording.${extension}`, 'size:', binaryAudio.length);
+      console.log(`Trying transcription with format: ${ext} (${mime}), size: ${binaryAudio.length}`);
 
-    // Send to OpenAI Whisper API
-    const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${openAIApiKey}`,
-      },
-      body: formData,
-    });
+      const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${openAIApiKey}`,
+        },
+        body: formData,
+      });
 
-    if (!response.ok) {
-      const errorText = await response.text();
-      console.error('OpenAI API error:', response.status, errorText);
-      
-      // If format not supported, try with different extension
-      if (errorText.includes('Invalid file format')) {
-        console.log('Retrying with ogg format...');
-        
-        const retryFormData = new FormData();
-        const retryFile = createAudioFile(binaryAudio, 'recording.ogg', 'audio/ogg');
-        retryFormData.append('file', retryFile);
-        retryFormData.append('model', 'whisper-1');
-        retryFormData.append('language', language);
-        retryFormData.append('response_format', 'json');
-        
-        const retryResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${openAIApiKey}`,
-          },
-          body: retryFormData,
-        });
-        
-        if (retryResponse.ok) {
-          const retryResult = await retryResponse.json();
-          console.log('Retry transcription successful:', retryResult.text?.substring(0, 100));
-          return new Response(
-            JSON.stringify({ success: true, text: retryResult.text }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
-        
-        // Try one more time with mp3
-        console.log('Retrying with mp3 format...');
-        const mp3FormData = new FormData();
-        const mp3File = createAudioFile(binaryAudio, 'recording.mp3', 'audio/mpeg');
-        mp3FormData.append('file', mp3File);
-        mp3FormData.append('model', 'whisper-1');
-        mp3FormData.append('language', language);
-        mp3FormData.append('response_format', 'json');
-        
-        const mp3Response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${openAIApiKey}`,
-          },
-          body: mp3FormData,
-        });
-        
-        if (mp3Response.ok) {
-          const mp3Result = await mp3Response.json();
-          console.log('MP3 retry transcription successful:', mp3Result.text?.substring(0, 100));
-          return new Response(
-            JSON.stringify({ success: true, text: mp3Result.text }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-          );
-        }
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Transcription failed with ${ext}:`, response.status, errorText);
+        return { success: false, error: errorText };
       }
-      
+
+      const result = await response.json();
+      console.log(`Transcription successful with ${ext}:`, result.text?.substring(0, 100));
+      return { success: true, text: result.text };
+    };
+
+    // Try formats in order of compatibility
+    // OpenAI Whisper works best with: mp3, mp4, mpeg, mpga, m4a, wav, webm, ogg
+    const formatsToTry = [
+      { ext: 'ogg', mime: 'audio/ogg' },  // Most compatible for browser recordings
+      { ext: 'webm', mime: 'audio/webm' },
+      { ext: 'mp3', mime: 'audio/mpeg' },
+      { ext: 'wav', mime: 'audio/wav' },
+    ];
+
+    // Start with detected format first
+    let result = await tryTranscribe(extension, mimeType);
+    
+    // If failed, try fallback formats
+    if (!result.success) {
+      for (const format of formatsToTry) {
+        if (format.ext === extension) continue; // Skip already tried format
+        
+        console.log(`Retrying with ${format.ext} format...`);
+        result = await tryTranscribe(format.ext, format.mime);
+        
+        if (result.success) break;
+      }
+    }
+
+    if (result.success) {
       return new Response(
-        JSON.stringify({ success: false, error: `Transcription failed: ${errorText}` }),
+        JSON.stringify({ success: true, text: result.text }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    } else {
+      console.error('All transcription attempts failed');
+      return new Response(
+        JSON.stringify({ success: false, error: `Transcription failed: ${result.error}` }),
         { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
-
-    const result = await response.json();
-    console.log('Transcription successful:', result.text?.substring(0, 100));
-
-    return new Response(
-      JSON.stringify({ success: true, text: result.text }),
-      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-    );
 
   } catch (error: unknown) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';

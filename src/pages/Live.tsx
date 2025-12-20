@@ -193,13 +193,18 @@ const Live = () => {
               <span className="text-red-500 font-semibold">AO VIVO</span>
               {currentMatchId && (
                 <span className="flex items-center gap-1 text-xs bg-green-500/20 text-green-500 px-2 py-1 rounded-full border border-green-500/30 ml-2">
-                  ✓ Partida Registrada
+              ✓ Partida Registrada
                 </span>
               )}
-              {isRecordingVideo && (
-                <span className="flex items-center gap-1 text-xs text-muted-foreground ml-2">
+              {isRecordingVideo ? (
+                <span className="flex items-center gap-1 text-xs bg-green-500/10 text-green-500 px-2 py-1 rounded-full border border-green-500/30 ml-2">
                   <Video className="h-3 w-3" />
                   Gravando vídeo
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 text-xs bg-yellow-500/10 text-yellow-500 px-2 py-1 rounded-full border border-yellow-500/30 ml-2">
+                  <Video className="h-3 w-3" />
+                  Apenas áudio
                 </span>
               )}
             </div>

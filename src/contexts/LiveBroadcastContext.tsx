@@ -762,9 +762,99 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [matchInfo, currentScore, recordingTime, isProcessingAudio]);
 
+  // Start video recording from camera stream directly (when no videoElement available)
+  const startVideoRecordingFromStream = useCallback((stream: MediaStream) => {
+    try {
+      console.log('[startVideoRecordingFromStream] Starting video recording from camera stream...');
+      
+      // Initialize segment buffer for 5-minute segments
+      initializeSegmentBuffer();
+      segmentBufferRef.current?.start(Date.now());
+      setSegmentCount(0);
+      
+      const mimeTypes = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+        'video/mp4',
+        ''
+      ];
+
+      let selectedMimeType = '';
+      for (const mimeType of mimeTypes) {
+        if (mimeType === '' || MediaRecorder.isTypeSupported(mimeType)) {
+          selectedMimeType = mimeType;
+          break;
+        }
+      }
+
+      const recorderOptions: MediaRecorderOptions = {};
+      if (selectedMimeType) {
+        recorderOptions.mimeType = selectedMimeType;
+      }
+
+      const videoRecorder = new MediaRecorder(stream, recorderOptions);
+
+      videoRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          videoChunksRef.current.push(event.data);
+          
+          // Add chunk to segment buffer with current recording time
+          if (segmentBufferRef.current) {
+            segmentBufferRef.current.addChunk(event.data, recordingTime);
+          }
+          
+          console.log(`[CameraStream] Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${recordingTime}s`);
+        }
+      };
+
+      videoRecorder.onerror = (event) => {
+        console.error('[CameraStream] Video recorder error:', event);
+      };
+
+      videoRecorderRef.current = videoRecorder;
+      videoRecorder.start(5000); // 5-second chunks
+      setIsRecordingVideo(true);
+
+      // Start periodic chunk saving for clip generation (every 20 seconds)
+      chunkSaveIntervalRef.current = setInterval(() => {
+        saveVideoChunk();
+      }, 20000);
+      
+      // Save first chunk after 10 seconds to enable early clip generation
+      setTimeout(() => {
+        if (videoChunksRef.current.length > 0) {
+          console.log('[CameraStream] Saving initial video chunk...');
+          saveVideoChunk();
+        }
+      }, 10000);
+
+      console.log('[CameraStream] Video recording started with mimeType:', selectedMimeType || 'default');
+      
+      toast({
+        title: "Gravação de vídeo iniciada",
+        description: "Capturando vídeo da câmera",
+      });
+
+    } catch (error) {
+      console.error('[CameraStream] Error starting video recording:', error);
+      toast({
+        title: "Erro na gravação de vídeo",
+        description: "Não foi possível iniciar a gravação do vídeo da câmera",
+        variant: "destructive",
+      });
+    }
+  }, [toast, saveVideoChunk, initializeSegmentBuffer, recordingTime]);
+
   // Start recording - Now accepts existingMatchId to continue existing match
   const startRecording = useCallback(async (videoElement?: HTMLVideoElement | null, existingMatchId?: string | null) => {
     try {
+      console.log('[startRecording] Starting...', { 
+        hasVideoElement: !!videoElement, 
+        hasCameraStream: !!cameraStream,
+        existingMatchId 
+      });
+      
       let audioStream: MediaStream;
       
       if (cameraStream) {
@@ -907,7 +997,9 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       audioChunksRef.current = [];
       videoChunksRef.current = [];
 
+      // CRITICAL FIX: Start video recording from videoElement OR cameraStream
       if (videoElement) {
+        console.log('[startRecording] Using videoElement for video recording');
         if (videoElement.readyState >= 2) {
           startVideoRecording(videoElement);
         } else {
@@ -915,6 +1007,12 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             startVideoRecording(videoElement);
           }, { once: true });
         }
+      } else if (cameraStream) {
+        // NEW: If no videoElement but we have cameraStream, record directly from it
+        console.log('[startRecording] No videoElement, using cameraStream directly for video recording');
+        startVideoRecordingFromStream(cameraStream);
+      } else {
+        console.warn('[startRecording] No video source available - audio only recording');
       }
 
       transcriptionIntervalRef.current = setInterval(() => {
@@ -925,9 +1023,10 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         processAudioChunk();
       }, 5000);
 
+      const hasVideoRecording = !!videoElement || !!cameraStream;
       toast({
         title: "Transmissão iniciada",
-        description: videoElement 
+        description: hasVideoRecording 
           ? "Gravando áudio e vídeo..." 
           : "Gravando áudio e salvando transcrição automaticamente...",
       });
@@ -939,7 +1038,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         variant: "destructive",
       });
     }
-  }, [cameraStream, toast, createTempMatch, startVideoRecording, processAudioChunk]);
+  }, [cameraStream, toast, createTempMatch, startVideoRecording, startVideoRecordingFromStream, processAudioChunk]);
 
   // Stop recording
   const stopRecording = useCallback(() => {
