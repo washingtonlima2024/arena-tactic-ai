@@ -123,10 +123,10 @@ const Live = () => {
           </Button>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left Column - Video Source & Controls */}
-          <div className="lg:col-span-2 space-y-6">
-            {/* Video Source Tabs */}
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+          {/* Left Column - Video Source + Transcript & Controls */}
+          <div className="xl:col-span-2 space-y-6">
+            {/* Video Source + Transcript Side by Side */}
             <div className="glass-card p-6 rounded-xl">
               <Tabs value={inputMode} onValueChange={(v) => setInputMode(v as "stream" | "camera")}>
                 <TabsList className="grid w-full grid-cols-2 mb-6">
@@ -140,22 +140,42 @@ const Live = () => {
                   </TabsTrigger>
                 </TabsList>
 
-                <TabsContent value="stream">
-                  <LiveStreamInput 
-                    streamUrl={streamUrl} 
-                    onStreamUrlChange={setStreamUrl}
-                    isRecording={isRecording}
-                    onVideoElementReady={handleVideoElementReady}
-                  />
-                </TabsContent>
+                {/* Video + Transcript Grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  {/* Video Player */}
+                  <div>
+                    <TabsContent value="stream" className="mt-0">
+                      <LiveStreamInput 
+                        streamUrl={streamUrl} 
+                        onStreamUrlChange={setStreamUrl}
+                        isRecording={isRecording}
+                        onVideoElementReady={handleVideoElementReady}
+                      />
+                    </TabsContent>
 
-                <TabsContent value="camera">
-                  <LiveCameraInput 
-                    cameraStream={cameraStream}
-                    onCameraStreamChange={setCameraStream}
-                    isRecording={isRecording}
-                  />
-                </TabsContent>
+                    <TabsContent value="camera" className="mt-0">
+                      <LiveCameraInput 
+                        cameraStream={cameraStream}
+                        onCameraStreamChange={setCameraStream}
+                        isRecording={isRecording}
+                      />
+                    </TabsContent>
+                  </div>
+
+                  {/* Live Transcript - Side by side with video */}
+                  <div className="h-full">
+                    <LiveTranscript
+                      transcriptBuffer={transcriptBuffer}
+                      transcriptChunks={transcriptChunks}
+                      isSaving={isSavingTranscript}
+                      lastSavedAt={lastSavedAt}
+                      isRecording={isRecording}
+                      isProcessingAudio={isProcessingAudio}
+                      lastProcessedAt={lastProcessedAt}
+                      onProcessNow={processAudioChunk}
+                    />
+                  </div>
+                </div>
               </Tabs>
             </div>
 
@@ -196,18 +216,6 @@ const Live = () => {
               disabled={!isRecording}
               isRecording={isRecording}
               recordingTime={recordingTime}
-            />
-
-            {/* Live Transcript */}
-            <LiveTranscript
-              transcriptBuffer={transcriptBuffer}
-              transcriptChunks={transcriptChunks}
-              isSaving={isSavingTranscript}
-              lastSavedAt={lastSavedAt}
-              isRecording={isRecording}
-              isProcessingAudio={isProcessingAudio}
-              lastProcessedAt={lastProcessedAt}
-              onProcessNow={processAudioChunk}
             />
 
             {/* Events List */}
