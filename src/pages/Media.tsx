@@ -19,7 +19,8 @@ import {
   Pause,
   Film,
   CheckCircle,
-  X
+  X,
+  Link
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -41,6 +42,7 @@ import { TeamPlaylist } from '@/components/media/TeamPlaylist';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
 import { SocialContentDialog } from '@/components/media/SocialContentDialog';
 import { ExportPreviewDialog } from '@/components/media/ExportPreviewDialog';
+import { LinkVideoDialog } from '@/components/media/LinkVideoDialog';
 import { toast } from '@/hooks/use-toast';
 
 // Social platform icons
@@ -72,6 +74,7 @@ export default function Media() {
   const [exportPreviewOpen, setExportPreviewOpen] = useState(false);
   const [selectedPlatform, setSelectedPlatform] = useState<string>('');
   const [isGeneratingSocial, setIsGeneratingSocial] = useState(false);
+  const [linkVideoDialogOpen, setLinkVideoDialogOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const queryClient = useQueryClient();
@@ -358,10 +361,20 @@ export default function Media() {
                     {matchVideos?.length} vídeo(s) disponível(is)
                   </Badge>
                 ) : (
-                  <Badge variant="warning" className="gap-1">
-                    <AlertCircle className="h-3 w-3" />
-                    Sem vídeo vinculado
-                  </Badge>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="warning" className="gap-1">
+                      <AlertCircle className="h-3 w-3" />
+                      Sem vídeo vinculado
+                    </Badge>
+                    <Button 
+                      variant="outline" 
+                      size="sm"
+                      onClick={() => setLinkVideoDialogOpen(true)}
+                    >
+                      <Link className="h-3 w-3 mr-1" />
+                      Vincular Vídeo
+                    </Button>
+                  </div>
                 )}
               </div>
               <div className="flex gap-2">
@@ -987,6 +1000,16 @@ export default function Media() {
               awayTeam={selectedMatch?.away_team?.name || 'Time Fora'}
               homeScore={selectedMatch?.home_score || 0}
               awayScore={selectedMatch?.away_score || 0}
+            />
+
+            {/* Link Video Dialog */}
+            <LinkVideoDialog
+              open={linkVideoDialogOpen}
+              onOpenChange={setLinkVideoDialogOpen}
+              matchId={matchId}
+              onVideoLinked={() => {
+                queryClient.invalidateQueries({ queryKey: ['match-videos', matchId] });
+              }}
             />
           </TabsContent>
         </Tabs>
