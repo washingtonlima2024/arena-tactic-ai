@@ -132,8 +132,9 @@ export default function Media() {
     return videos[0];
   }
   
-  // Use first video as primary for UI display
-  const matchVideo = matchVideos?.[0] || null;
+  // Use first video with valid URL as primary for UI display
+  const matchVideo = matchVideos?.find(v => v.file_url && v.file_url.length > 0) || null;
+  const hasRecordingInProgress = matchVideos?.some(v => v.status === 'recording' && (!v.file_url || v.file_url.length === 0));
 
   // Generate clips from events - Use eventMs from metadata as primary timestamp source
   const clips = events?.map((event) => {
@@ -512,8 +513,28 @@ export default function Media() {
               onVignetteComplete={() => setShowingVignette(false)}
             />
 
+            {/* Recording in progress warning */}
+            {hasRecordingInProgress && (
+              <Card variant="glass" className="border-warning/50 bg-warning/5">
+                <CardContent className="py-4">
+                  <div className="flex items-center gap-4">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-warning/20">
+                      <Loader2 className="h-5 w-5 text-warning animate-spin" />
+                    </div>
+                    <div className="flex-1">
+                      <p className="font-medium">Gravação em andamento</p>
+                      <p className="text-sm text-muted-foreground">
+                        Finalize a gravação na página Live para visualizar os cortes do vídeo
+                      </p>
+                    </div>
+                    <Badge variant="warning">Aguardando</Badge>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* No video warning */}
-            {!matchVideo && clips.length > 0 && (
+            {!matchVideo && !hasRecordingInProgress && clips.length > 0 && (
               <Card variant="glass" className="border-warning/50 bg-warning/5">
                 <CardContent className="py-4">
                   <div className="flex items-center gap-4">
@@ -584,10 +605,15 @@ export default function Media() {
                   const canExtractClip = clip.canExtract;
                   
                   const handlePlayClip = () => {
-                    if (!matchVideo && !clip.clipUrl) {
+                    // Check if video URL is empty (recording in progress)
+                    if (!clip.clipUrl && (!matchVideo?.file_url || matchVideo.file_url.length === 0)) {
                       toast({
-                        title: "Vídeo não disponível",
-                        description: "Faça upload do vídeo da partida para reproduzir",
+                        title: hasRecordingInProgress 
+                          ? "Gravação em andamento" 
+                          : "Vídeo não disponível",
+                        description: hasRecordingInProgress
+                          ? "Finalize a gravação na página Live para visualizar os cortes"
+                          : "Faça upload do vídeo da partida para reproduzir",
                         variant: "destructive"
                       });
                       return;
