@@ -168,6 +168,10 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   // CRITICAL: Ref to access current recording time in closures (fixes stale closure bug)
   const recordingTimeRef = useRef(0);
   
+  // NEW: Separate ref for clip generation - NOT cleared after saveVideoChunk
+  // This maintains a rolling buffer of video chunks for real-time clip generation
+  const clipVideoChunksRef = useRef<{ blob: Blob; timestamp: number }[]>([]);
+  
   // Ref to hold addDetectedEvent function (to avoid circular dependency in processAudioChunk)
   const addDetectedEventRef = useRef<((eventData: {
     type: string;
@@ -518,12 +522,21 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           // CRITICAL: Use ref to get current recording time (fixes stale closure)
           const currentTime = recordingTimeRef.current;
           
+          // NEW: Also add to clipVideoChunksRef for real-time clip generation
+          clipVideoChunksRef.current.push({ blob: event.data, timestamp: currentTime });
+          
+          // Keep only last 2 minutes of chunks for clips (24 chunks at 5s each)
+          const maxClipChunks = 24;
+          if (clipVideoChunksRef.current.length > maxClipChunks) {
+            clipVideoChunksRef.current = clipVideoChunksRef.current.slice(-maxClipChunks);
+          }
+          
           // Add chunk to segment buffer with current recording time
           if (segmentBufferRef.current) {
             segmentBufferRef.current.addChunk(event.data, currentTime);
           }
           
-          console.log(`Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s, chunks: ${videoChunksRef.current.length}`);
+          console.log(`Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s, chunks: ${videoChunksRef.current.length}, clipChunks: ${clipVideoChunksRef.current.length}`);
         }
       };
 
@@ -812,12 +825,21 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           // CRITICAL: Use ref to get current recording time (fixes stale closure)
           const currentTime = recordingTimeRef.current;
           
+          // NEW: Also add to clipVideoChunksRef for real-time clip generation
+          clipVideoChunksRef.current.push({ blob: event.data, timestamp: currentTime });
+          
+          // Keep only last 2 minutes of chunks for clips (24 chunks at 5s each)
+          const maxClipChunks = 24;
+          if (clipVideoChunksRef.current.length > maxClipChunks) {
+            clipVideoChunksRef.current = clipVideoChunksRef.current.slice(-maxClipChunks);
+          }
+          
           // Add chunk to segment buffer with current recording time
           if (segmentBufferRef.current) {
             segmentBufferRef.current.addChunk(event.data, currentTime);
           }
           
-          console.log(`[CameraStream] Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s, chunks: ${videoChunksRef.current.length}`);
+          console.log(`[CameraStream] Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s, chunks: ${videoChunksRef.current.length}, clipChunks: ${clipVideoChunksRef.current.length}`);
         }
       };
 
@@ -1010,6 +1032,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       
       audioChunksRef.current = [];
       videoChunksRef.current = [];
+      clipVideoChunksRef.current = []; // Reset clip chunks on new recording
 
       // CRITICAL FIX: Start video recording from videoElement OR cameraStream
       if (videoElement) {
@@ -1122,13 +1145,14 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     return ffmpeg;
   }, []);
 
-  // Generate clip for event using FFmpeg - now supports both URL and segment buffer
+  // Generate clip for event using FFmpeg - PRIORITIZES clipVideoChunksRef for real-time clips
   const generateClipForEvent = useCallback(async (event: LiveEvent, videoUrl?: string) => {
     const matchId = tempMatchIdRef.current;
     if (!matchId || isGeneratingClipRef.current) return;
     
     isGeneratingClipRef.current = true;
     console.log(`[ClipGen] Generating clip for event ${event.id} at ${event.recordingTimestamp}s...`);
+    console.log(`[ClipGen] Available sources - clipVideoChunks: ${clipVideoChunksRef.current.length}, videoChunks: ${videoChunksRef.current.length}, segmentBuffer: ${!!segmentBufferRef.current}`);
     
     try {
       const ffmpeg = await loadFFmpeg();
@@ -1138,10 +1162,55 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       const { start: startTimeSeconds, duration: durationSeconds } = calculateClipWindow(eventSeconds, 5, 5);
       
       let videoData: Uint8Array;
-      let relativeStartSeconds = startTimeSeconds;
+      let relativeStartSeconds = 0; // Default to 0 for raw chunks
       
-      // Try to use segment buffer first (for real-time clips)
-      if (segmentBufferRef.current) {
+      // PRIORITY 1: Use clipVideoChunksRef (maintained specifically for clips, never cleared)
+      if (clipVideoChunksRef.current.length > 0) {
+        // Filter chunks that overlap with the clip window
+        const relevantChunks = clipVideoChunksRef.current.filter(chunk => {
+          // Each chunk is 5 seconds, so check if it overlaps with [startTimeSeconds, startTimeSeconds + durationSeconds]
+          const chunkEnd = chunk.timestamp + 5;
+          return chunk.timestamp <= (startTimeSeconds + durationSeconds) && chunkEnd >= startTimeSeconds;
+        });
+        
+        if (relevantChunks.length > 0) {
+          console.log(`[ClipGen] Using clipVideoChunksRef: ${relevantChunks.length} relevant chunks (${clipVideoChunksRef.current.length} total)`);
+          const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
+          const rawBlob = new Blob(relevantChunks.map(c => c.blob), { type: mimeType });
+          
+          if (rawBlob.size > 1000) {
+            const arrayBuffer = await rawBlob.arrayBuffer();
+            videoData = new Uint8Array(arrayBuffer);
+            // Calculate relative start within the filtered chunks
+            const firstChunkTime = Math.min(...relevantChunks.map(c => c.timestamp));
+            relativeStartSeconds = Math.max(0, startTimeSeconds - firstChunkTime);
+            console.log(`[ClipGen] Clip blob size: ${(rawBlob.size / 1024).toFixed(1)}KB, relative start: ${relativeStartSeconds}s`);
+          } else {
+            console.log(`[ClipGen] clipVideoChunksRef blob too small (${rawBlob.size}B), trying fallbacks...`);
+            videoData = null as any;
+          }
+        } else {
+          console.log(`[ClipGen] No relevant chunks found in clipVideoChunksRef for time range [${startTimeSeconds}, ${startTimeSeconds + durationSeconds}]`);
+          videoData = null as any;
+        }
+      }
+      
+      // PRIORITY 2: Use all video chunks (may be more complete)
+      if (!videoData && videoChunksRef.current.length > 0) {
+        console.log(`[ClipGen] Falling back to videoChunksRef: ${videoChunksRef.current.length} chunks`);
+        const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
+        const rawBlob = new Blob(videoChunksRef.current, { type: mimeType });
+        
+        if (rawBlob.size > 1000) {
+          const arrayBuffer = await rawBlob.arrayBuffer();
+          videoData = new Uint8Array(arrayBuffer);
+          relativeStartSeconds = startTimeSeconds;
+          console.log(`[ClipGen] videoChunksRef blob size: ${(rawBlob.size / 1024).toFixed(1)}KB`);
+        }
+      }
+      
+      // PRIORITY 3: Use segment buffer
+      if (!videoData && segmentBufferRef.current) {
         const segment = segmentBufferRef.current.getSegmentForTime(eventSeconds);
         const videoBlob = segmentBufferRef.current.getBlobForTimeRange(startTimeSeconds, startTimeSeconds + durationSeconds);
         
@@ -1150,38 +1219,21 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           const arrayBuffer = await videoBlob.arrayBuffer();
           videoData = new Uint8Array(arrayBuffer);
           
-          // Calculate relative start within segment
           if (segment) {
             relativeStartSeconds = Math.max(0, startTimeSeconds - segment.startTime);
           }
-        } else if (videoChunksRef.current.length > 0) {
-          // FALLBACK: Use raw video chunks if segment buffer is empty
-          console.log(`[ClipGen] Segment buffer empty, using raw videoChunks (${videoChunksRef.current.length} chunks)`);
-          const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
-          const rawBlob = new Blob(videoChunksRef.current, { type: mimeType });
-          const arrayBuffer = await rawBlob.arrayBuffer();
-          videoData = new Uint8Array(arrayBuffer);
-          relativeStartSeconds = startTimeSeconds; // Use absolute time for raw chunks
-        } else if (videoUrl) {
-          console.log(`[ClipGen] Segment buffer empty, falling back to URL: ${videoUrl}`);
-          videoData = await fetchFile(videoUrl);
-        } else {
-          console.warn('[ClipGen] No video data available');
-          isGeneratingClipRef.current = false;
-          return;
         }
-      } else if (videoChunksRef.current.length > 0) {
-        // FALLBACK: No segment buffer, use raw chunks
-        console.log(`[ClipGen] No segment buffer, using raw videoChunks (${videoChunksRef.current.length} chunks)`);
-        const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
-        const rawBlob = new Blob(videoChunksRef.current, { type: mimeType });
-        const arrayBuffer = await rawBlob.arrayBuffer();
-        videoData = new Uint8Array(arrayBuffer);
-      } else if (videoUrl) {
-        console.log(`[ClipGen] Using video URL: ${videoUrl}`);
+      }
+      
+      // PRIORITY 4: Download from URL (last resort)
+      if (!videoData && videoUrl) {
+        console.log(`[ClipGen] Falling back to video URL: ${videoUrl}`);
         videoData = await fetchFile(videoUrl);
-      } else {
-        console.warn('[ClipGen] No video source available');
+        relativeStartSeconds = startTimeSeconds;
+      }
+      
+      if (!videoData) {
+        console.warn('[ClipGen] No video data available from any source');
         isGeneratingClipRef.current = false;
         return;
       }
@@ -1927,6 +1979,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     setTranscriptChunks([]);
     setRecordingTime(0);
     setLatestVideoChunkUrl(null);
+    clipVideoChunksRef.current = []; // Reset clip chunks
+    videoChunksRef.current = []; // Reset video chunks
   }, []);
 
   const value: LiveBroadcastContextType = {
