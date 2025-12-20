@@ -676,18 +676,19 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
       videoRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
+          // CRITICAL: Store in regular ref
           videoChunksRef.current.push(event.data);
           
-          // CRITICAL FIX: Also store in permanent ref that is NEVER cleared
+          // CRITICAL: Also store in permanent ref that is NEVER cleared during recording
           allVideoChunksRef.current.push(event.data);
           
-          // CRITICAL: Use ref to get current recording time (fixes stale closure)
+          // Use ref to get current recording time (fixes stale closure)
           const currentTime = recordingTimeRef.current;
           
-          // NEW: Also add to clipVideoChunksRef for real-time clip generation
+          // Also add to clipVideoChunksRef for real-time clip generation
           clipVideoChunksRef.current.push({ blob: event.data, timestamp: currentTime });
           
-          // Keep only last 3 minutes of chunks for clips (36 chunks at 5s each) - INCREASED from 24
+          // Keep only last 3 minutes of clips (36 chunks at 5s each)
           const maxClipChunks = 36;
           if (clipVideoChunksRef.current.length > maxClipChunks) {
             clipVideoChunksRef.current = clipVideoChunksRef.current.slice(-maxClipChunks);
@@ -698,7 +699,11 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             segmentBufferRef.current.addChunk(event.data, currentTime);
           }
           
-          console.log(`Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s, chunks: ${videoChunksRef.current.length}, allChunks: ${allVideoChunksRef.current.length}, clipChunks: ${clipVideoChunksRef.current.length}`);
+          // Log with clear indication of data accumulation
+          const totalSize = allVideoChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
+          console.log(`📹 Video chunk: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s | Total: ${allVideoChunksRef.current.length} chunks (${(totalSize / 1024 / 1024).toFixed(2)} MB)`);
+        } else {
+          console.warn('⚠️ Empty video chunk received');
         }
       };
 
@@ -1931,9 +1936,14 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     let videoUrl: string | null = null;
     let videoId: string | null = null;
     
-    console.log('[finishMatch] Starting with matchId:', matchId);
-    console.log('[finishMatch] Video chunks available:', videoChunksRef.current.length);
-    console.log('[finishMatch] Approved events in state:', approvedEvents.length);
+    console.log('=== FINISH MATCH START ===');
+    console.log('[finishMatch] matchId:', matchId);
+    console.log('[finishMatch] allVideoChunks:', allVideoChunksRef.current.length);
+    console.log('[finishMatch] videoChunks:', videoChunksRef.current.length);
+    console.log('[finishMatch] clipVideoChunks:', clipVideoChunksRef.current.length);
+    console.log('[finishMatch] approvedEvents:', approvedEvents.length);
+    console.log('[finishMatch] isRecordingVideo:', isRecordingVideo);
+    console.log('[finishMatch] videoRecorder state:', videoRecorderRef.current?.state);
     
     // STEP 0: Sync approved events from database (in case state is stale)
     let syncedEventsCount = approvedEvents.length;
@@ -1970,26 +1980,48 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       console.error('[finishMatch] Error syncing events from DB:', syncError);
     }
     
-    // STEP 1: Save video - UPDATE existing record created at start (not INSERT)
+  // STEP 1: Save video - UPDATE existing record created at start (not INSERT)
     // CRITICAL FIX: Use allVideoChunksRef first (never cleared), fallback to videoChunksRef
     const existingVideoId = currentVideoIdRef.current;
+    
+    // CRITICAL: Force MediaRecorder to flush any remaining data before saving
+    if (videoRecorderRef.current && videoRecorderRef.current.state === 'recording') {
+      console.log('[finishMatch] Requesting final data from MediaRecorder...');
+      videoRecorderRef.current.requestData();
+      // Give it a moment to flush
+      await new Promise(resolve => setTimeout(resolve, 500));
+    }
+    
     try {
-      const chunksToUse = allVideoChunksRef.current.length > 0 
-        ? allVideoChunksRef.current 
-        : videoChunksRef.current;
+      // Combine all sources to maximize chances of having video data
+      let chunksToUse = allVideoChunksRef.current.length > 0 
+        ? [...allVideoChunksRef.current]  // Clone to prevent mutation issues
+        : [...videoChunksRef.current];
       
-      console.log(`[finishMatch] Video sources - allVideoChunks: ${allVideoChunksRef.current.length}, videoChunks: ${videoChunksRef.current.length}, using: ${chunksToUse.length}`);
+      // Also check clipVideoChunksRef as additional fallback
+      if (chunksToUse.length === 0 && clipVideoChunksRef.current.length > 0) {
+        console.log('[finishMatch] Using clipVideoChunksRef as fallback source');
+        chunksToUse = clipVideoChunksRef.current.map(c => c.blob);
+      }
+      
+      console.log(`[finishMatch] Video sources - allVideoChunks: ${allVideoChunksRef.current.length}, videoChunks: ${videoChunksRef.current.length}, clipChunks: ${clipVideoChunksRef.current.length}, using: ${chunksToUse.length}`);
       console.log(`[finishMatch] Existing video ID from startRecording: ${existingVideoId}`);
       
       if (matchId && chunksToUse.length > 0) {
         toast({ 
           title: "Salvando vídeo...", 
-          description: "Aguarde o upload da gravação" 
+          description: `Aguarde o upload (${chunksToUse.length} segmentos)` 
         });
         
         const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
         const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
         const videoBlob = new Blob(chunksToUse, { type: mimeType });
+        
+        // Validate blob size before upload
+        if (videoBlob.size < 1000) {
+          console.error('[finishMatch] Video blob too small, likely corrupted:', videoBlob.size);
+          throw new Error('Video data too small - recording may have failed');
+        }
         
         console.log(`[finishMatch] Saving final video: ${(videoBlob.size / (1024 * 1024)).toFixed(2)} MB from ${chunksToUse.length} chunks`);
         
@@ -2290,7 +2322,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
     
     return result;
-  }, [stopRecording, currentScore, matchInfo, approvedEvents, transcriptBuffer, recordingTime, saveTranscriptToDatabase, toast, generateClipForEvent]);
+  }, [stopRecording, currentScore, matchInfo, approvedEvents, transcriptBuffer, recordingTime, saveTranscriptToDatabase, toast, generateClipForEvent, isRecordingVideo]);
 
   // Reset finish result
   const resetFinishResult = useCallback(() => {
@@ -2305,9 +2337,12 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     setTranscriptBuffer("");
     setTranscriptChunks([]);
     setRecordingTime(0);
+    recordingTimeRef.current = 0;
     setLatestVideoChunkUrl(null);
+    // CRITICAL: Only reset video chunks AFTER finishMatch completes
     clipVideoChunksRef.current = []; // Reset clip chunks
     videoChunksRef.current = []; // Reset video chunks
+    allVideoChunksRef.current = []; // Reset permanent chunks
   }, []);
 
   // NEW: Get clip chunks for a specific time range (for real-time replay)
