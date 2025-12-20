@@ -67,6 +67,9 @@ export const useLiveBroadcast = () => {
   const [isProcessingAudio, setIsProcessingAudio] = useState(false);
   const [lastProcessedAt, setLastProcessedAt] = useState<Date | null>(null);
   
+  // NEW: Current match ID as state (refs don't trigger re-renders)
+  const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
+  
   // NEW: Video recording states
   const [isRecordingVideo, setIsRecordingVideo] = useState(false);
   const [videoUploadProgress, setVideoUploadProgress] = useState(0);
@@ -189,7 +192,9 @@ export const useLiveBroadcast = () => {
   }, [currentScore, isRecording]);
 
   // Create temporary match on start for auto-saving
-  const createTempMatch = useCallback(async () => {
+  const createTempMatch = useCallback(async (): Promise<string | null> => {
+    console.log("Creating match with info:", matchInfo);
+    
     try {
       const { data: match, error } = await supabase
         .from("matches")
@@ -206,15 +211,38 @@ export const useLiveBroadcast = () => {
         .select()
         .single();
 
-      if (!error && match) {
+      if (error) {
+        console.error("Error creating match:", error);
+        toast({
+          title: "Erro ao criar partida",
+          description: error.message,
+          variant: "destructive",
+        });
+        return null;
+      }
+
+      if (match) {
         tempMatchIdRef.current = match.id;
+        setCurrentMatchId(match.id);
+        console.log("Match created successfully:", match.id);
+        toast({
+          title: "Partida registrada",
+          description: "A partida foi criada e está sendo composta em tempo real",
+        });
         return match.id;
       }
+      
+      return null;
     } catch (error) {
-      console.error("Error creating temp match:", error);
+      console.error("Unexpected error creating match:", error);
+      toast({
+        title: "Erro inesperado",
+        description: "Não foi possível criar a partida",
+        variant: "destructive",
+      });
+      return null;
     }
-    return null;
-  }, [matchInfo]);
+  }, [matchInfo, toast]);
 
   // NEW: Start video recording from video element
   const startVideoRecording = useCallback((videoElement: HTMLVideoElement) => {
@@ -429,8 +457,19 @@ export const useLiveBroadcast = () => {
       // Store audio stream for video recording
       audioStreamRef.current = audioStream;
 
-      // Create temp match for auto-saving transcripts
-      await createTempMatch();
+      // Create match FIRST - abort if it fails
+      const matchId = await createTempMatch();
+      if (!matchId) {
+        toast({
+          title: "Erro ao iniciar",
+          description: "Não foi possível criar a partida. Verifique os dados e tente novamente.",
+          variant: "destructive",
+        });
+        // Cleanup audio stream
+        audioStream.getTracks().forEach(track => track.stop());
+        audioStreamRef.current = null;
+        return;
+      }
 
       // Find a supported mimeType
       const mimeTypes = [
@@ -950,6 +989,7 @@ export const useLiveBroadcast = () => {
   const resetFinishResult = useCallback(() => {
     setFinishResult(null);
     tempMatchIdRef.current = null;
+    setCurrentMatchId(null);
   }, []);
 
   return {
@@ -975,8 +1015,8 @@ export const useLiveBroadcast = () => {
     isRecordingVideo,
     videoUploadProgress,
     isUploadingVideo,
-    // Expose current match ID for transcript saving
-    currentMatchId: tempMatchIdRef.current,
+    // Expose current match ID as state for reactivity
+    currentMatchId,
     // Finish match states
     isFinishing,
     finishResult,
