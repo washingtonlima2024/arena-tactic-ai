@@ -245,7 +245,7 @@ export function useAllCompletedMatches() {
           home_team:teams!matches_home_team_id_fkey(*),
           away_team:teams!matches_away_team_id_fkey(*)
         `)
-        .in('status', ['completed', 'live'])
+        .in('status', ['completed', 'live', 'analyzed'])
         .order('created_at', { ascending: false });
 
       if (matchError) throw matchError;
