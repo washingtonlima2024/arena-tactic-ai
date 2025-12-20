@@ -191,6 +191,7 @@ export type Database = {
           position_x: number | null
           position_y: number | null
           second: number | null
+          video_id: string | null
         }
         Insert: {
           approval_status?: string | null
@@ -210,6 +211,7 @@ export type Database = {
           position_x?: number | null
           position_y?: number | null
           second?: number | null
+          video_id?: string | null
         }
         Update: {
           approval_status?: string | null
@@ -229,6 +231,7 @@ export type Database = {
           position_x?: number | null
           position_y?: number | null
           second?: number | null
+          video_id?: string | null
         }
         Relationships: [
           {
@@ -243,6 +246,13 @@ export type Database = {
             columns: ["player_id"]
             isOneToOne: false
             referencedRelation: "players"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_events_video_id_fkey"
+            columns: ["video_id"]
+            isOneToOne: false
+            referencedRelation: "videos"
             referencedColumns: ["id"]
           },
         ]

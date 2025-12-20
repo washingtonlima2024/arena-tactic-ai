@@ -1355,9 +1355,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
   // Finish match - generates all remaining clips and saves everything
   const finishMatch = useCallback(async (): Promise<FinishMatchResult | null> => {
-    stopRecording();
     setIsFinishing(true);
-
+    
     try {
       const matchId = tempMatchIdRef.current;
       
@@ -1367,7 +1366,88 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           description: "Aguarde o upload da gravação" 
         });
         
-        const videoUrl = await saveRecordedVideo(matchId);
+        // IMPORTANT: Save video BEFORE stopping recording to ensure all chunks are captured
+        let videoUrl: string | null = null;
+        let videoId: string | null = null;
+        
+        if (videoChunksRef.current.length > 0) {
+          const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
+          const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+          const videoBlob = new Blob(videoChunksRef.current, { type: mimeType });
+          
+          console.log(`Saving final video: ${(videoBlob.size / (1024 * 1024)).toFixed(2)} MB`);
+          
+          setIsUploadingVideo(true);
+          setVideoUploadProgress(20);
+          
+          const filePath = `live-${matchId}-${Date.now()}.${extension}`;
+          
+          const { error: uploadError } = await supabase.storage
+            .from('match-videos')
+            .upload(filePath, videoBlob, {
+              contentType: mimeType,
+              upsert: true
+            });
+
+          if (uploadError) {
+            console.error('Error uploading video:', uploadError);
+          } else {
+            setVideoUploadProgress(70);
+            
+            const { data: urlData } = supabase.storage
+              .from('match-videos')
+              .getPublicUrl(filePath);
+
+            videoUrl = urlData.publicUrl;
+            
+            // Insert video record and get its ID
+            const { data: videoRecord, error: insertError } = await supabase.from('videos').insert({
+              match_id: matchId,
+              file_url: videoUrl,
+              file_name: `Transmissão ao vivo`,
+              video_type: 'full',
+              start_minute: 0,
+              end_minute: Math.ceil(recordingTime / 60),
+              duration_seconds: recordingTime,
+              status: 'complete'
+            }).select('id').single();
+
+            if (insertError) {
+              console.error('Error inserting video record:', insertError);
+            } else {
+              videoId = videoRecord?.id || null;
+              console.log('Video record created with ID:', videoId);
+            }
+            
+            setVideoUploadProgress(100);
+            console.log('Final video saved successfully:', videoUrl);
+          }
+          
+          setIsUploadingVideo(false);
+        }
+        
+        // NOW stop recording after video is saved
+        stopRecording();
+        
+        // Link ALL events from this match to the video
+        if (videoId) {
+          toast({ 
+            title: "Vinculando eventos ao vídeo...", 
+            description: "Associando clips e eventos" 
+          });
+          
+          const { error: linkError } = await supabase
+            .from('match_events')
+            .update({ video_id: videoId })
+            .eq('match_id', matchId)
+            .is('video_id', null);
+          
+          if (linkError) {
+            console.error('Error linking events to video:', linkError);
+          } else {
+            console.log('All events linked to video:', videoId);
+          }
+        }
 
         // Generate clips for all approved events that don't have clips yet
         if (videoUrl && approvedEvents.length > 0) {
@@ -1402,11 +1482,12 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
         await saveTranscriptToDatabase(matchId);
 
-        console.log(`Finish match: ${approvedEvents.length} events already saved in real-time`);
+        console.log(`Finish match: ${approvedEvents.length} events saved`);
 
         // Create analysis job with summary
         await supabase.from("analysis_jobs").insert({
           match_id: matchId,
+          video_id: videoId,
           status: 'completed',
           progress: 100,
           current_step: 'Análise ao vivo concluída',
@@ -1414,6 +1495,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           result: {
             eventsDetected: approvedEvents.length,
             eventsWithClips: approvedEvents.filter(e => e.clipUrl).length,
+            videoUrl: videoUrl,
             source: 'live',
             duration: recordingTime,
             transcriptWords: transcriptBuffer.split(" ").length,
@@ -1439,16 +1521,18 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         
         toast({ 
           title: "Partida finalizada!", 
-          description: `${approvedEvents.length} eventos salvos. Acesse a página de Análise para ver o resumo completo.` 
+          description: `${approvedEvents.length} eventos salvos${videoUrl ? ' com vídeo' : ''}. Acesse Análise para ver os clips.` 
         });
         
         return result;
       }
 
+      stopRecording();
       setIsFinishing(false);
       return null;
     } catch (error) {
       console.error("Error finishing match:", error);
+      stopRecording();
       toast({
         title: "Erro ao salvar partida",
         description: "Tente novamente",
@@ -1457,7 +1541,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       setIsFinishing(false);
       return null;
     }
-  }, [stopRecording, currentScore, matchInfo, approvedEvents, transcriptBuffer, recordingTime, saveTranscriptToDatabase, saveRecordedVideo, toast, generateClipForEvent]);
+  }, [stopRecording, currentScore, matchInfo, approvedEvents, transcriptBuffer, recordingTime, saveTranscriptToDatabase, toast, generateClipForEvent]);
 
   // Reset finish result
   const resetFinishResult = useCallback(() => {
