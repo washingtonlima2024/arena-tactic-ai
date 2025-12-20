@@ -141,7 +141,7 @@ export const LiveTranscriptRealtime = ({
   }, [homeTeam, awayTeam, currentScore, onEventDetected]);
 
   // Save transcript to database
-  const saveTranscriptToDatabase = async (text: string, fullTranscript: string) => {
+  const saveTranscriptToDatabase = useCallback(async (text: string, fullTranscript: string) => {
     if (!matchId || !text.trim()) return;
     
     setIsSaving(true);
@@ -185,7 +185,7 @@ export const LiveTranscriptRealtime = ({
     } finally {
       setIsSaving(false);
     }
-  };
+  }, [matchId]);
 
   // Callback for video audio transcription
   const handleVideoTranscript = useCallback((text: string) => {
@@ -200,16 +200,20 @@ export const LiveTranscriptRealtime = ({
       timestamp: new Date(),
     };
     
-    setChunks(prev => [...prev, newChunk]);
+    setChunks(prev => {
+      const updated = [...prev, newChunk];
+      return updated;
+    });
+    
     setTranscriptBuffer(prev => {
       const newBuffer = prev + " " + text;
-      onTranscriptUpdate?.(newBuffer.trim(), [...chunks, newChunk]);
+      onTranscriptUpdate?.(newBuffer.trim(), []);
       saveTranscriptToDatabase(text, newBuffer.trim());
       return newBuffer;
     });
     
     extractEvents(text);
-  }, [chunks, onTranscriptUpdate, extractEvents]);
+  }, [onTranscriptUpdate, extractEvents, saveTranscriptToDatabase]);
 
   // ElevenLabs Scribe for microphone
   const scribe = useElevenLabsScribe({
