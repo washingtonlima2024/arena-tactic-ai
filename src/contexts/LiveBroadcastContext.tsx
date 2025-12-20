@@ -158,6 +158,16 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   const chunkSaveIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const isGeneratingClipRef = useRef(false);
+  
+  // Ref to hold addDetectedEvent function (to avoid circular dependency in processAudioChunk)
+  const addDetectedEventRef = useRef<((eventData: {
+    type: string;
+    minute: number;
+    second: number;
+    description: string;
+    confidence?: number;
+    source?: string;
+  }) => Promise<void>) | null>(null);
 
   // CRITICAL: Keep tempMatchIdRef synchronized with currentMatchId state
   useEffect(() => {
@@ -629,20 +639,21 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           console.log("Events extraction result:", eventsData);
 
           if (!eventsError && eventsData?.events && eventsData.events.length > 0) {
-            const currentRecordingTime = recordingTime;
-            const newEvents: LiveEvent[] = eventsData.events.map((e: any) => ({
-              id: crypto.randomUUID(),
-              type: e.type,
-              minute: e.minute || currentMinute,
-              second: e.second || 0,
-              description: e.description,
-              confidence: e.confidence || 0.8,
-              status: "pending" as const,
-              recordingTimestamp: currentRecordingTime,
-            }));
-
-            console.log(`Detected ${newEvents.length} new events`);
-            setDetectedEvents((prev) => [...prev, ...newEvents]);
+            console.log(`Detected ${eventsData.events.length} new events - saving to database...`);
+            
+            // Call addDetectedEvent via ref for each event (saves to DB + state)
+            for (const e of eventsData.events) {
+              if (addDetectedEventRef.current) {
+                await addDetectedEventRef.current({
+                  type: e.type,
+                  minute: e.minute || currentMinute,
+                  second: e.second || 0,
+                  description: e.description,
+                  confidence: e.confidence || 0.8,
+                  source: 'live-transcription'
+                });
+              }
+            }
           }
         } else {
           console.log("No text in transcription result");
@@ -1229,7 +1240,11 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [detectedEvents, recordingTime, matchInfo, toast, currentMatchId, saveVideoChunk]);
 
-  // Approve event - now UPDATES existing record instead of inserting
+  // Keep ref synchronized with the latest addDetectedEvent function
+  useEffect(() => {
+    addDetectedEventRef.current = addDetectedEvent;
+  }, [addDetectedEvent]);
+
   const approveEvent = useCallback(async (eventId: string) => {
     const event = detectedEvents.find((e) => e.id === eventId);
     const matchId = tempMatchIdRef.current || currentMatchId;
