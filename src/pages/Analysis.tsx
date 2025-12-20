@@ -90,11 +90,30 @@ export default function Analysis() {
     cancel: cancelClipGeneration 
   } = useClipGeneration();
 
+  // Check if this is a live match
+  const isLiveMatch = selectedMatch?.status === 'live' || (isRecording && liveMatchId === currentMatchId);
+
+  // Polling every 10 seconds for live matches
+  useEffect(() => {
+    if (!currentMatchId || !isLiveMatch) return;
+    
+    console.log('Starting live match polling for:', currentMatchId);
+    
+    const pollInterval = setInterval(() => {
+      console.log('Polling live match events...');
+      refetchEvents();
+      queryClient.invalidateQueries({ queryKey: ['match-video', currentMatchId] });
+    }, 10000);
+
+    return () => {
+      console.log('Stopping live match polling');
+      clearInterval(pollInterval);
+    };
+  }, [currentMatchId, isLiveMatch, refetchEvents, queryClient]);
+
   // Real-time subscription for live match analysis updates
   useEffect(() => {
     if (!currentMatchId) return;
-    
-    const isLiveMatch = isRecording && liveMatchId === currentMatchId;
     
     const channel = supabase
       .channel(`analysis-realtime-${currentMatchId}`)
@@ -121,7 +140,7 @@ export default function Analysis() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [currentMatchId, refetchEvents, queryClient, isRecording, liveMatchId]);
+  }, [currentMatchId, refetchEvents, queryClient, isLiveMatch]);
 
   // Fetch video for the match
   const { data: matchVideo } = useQuery({
@@ -373,7 +392,15 @@ export default function Analysis() {
               <SelectContent>
                 {matches.map(match => (
                   <SelectItem key={match.id} value={match.id}>
-                    {match.home_team?.short_name || 'Casa'} vs {match.away_team?.short_name || 'Visitante'}
+                    <div className="flex items-center gap-2">
+                      <span>{match.home_team?.short_name || 'Casa'} vs {match.away_team?.short_name || 'Visitante'}</span>
+                      {match.status === 'live' && (
+                        <Badge variant="destructive" className="text-xs px-1.5 py-0 gap-1 animate-pulse">
+                          <Radio className="h-2.5 w-2.5" />
+                          AO VIVO
+                        </Badge>
+                      )}
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>
