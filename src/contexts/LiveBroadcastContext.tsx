@@ -172,6 +172,10 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   // This maintains a rolling buffer of video chunks for real-time clip generation
   const clipVideoChunksRef = useRef<{ blob: Blob; timestamp: number }[]>([]);
   
+  // CRITICAL FIX: Permanent storage for ALL video chunks - NEVER cleared during recording
+  // Used by finishMatch to ensure video is always saved even if videoChunksRef is empty
+  const allVideoChunksRef = useRef<Blob[]>([]);
+  
   // Ref to hold addDetectedEvent function (to avoid circular dependency in processAudioChunk)
   const addDetectedEventRef = useRef<((eventData: {
     type: string;
@@ -519,14 +523,17 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         if (event.data.size > 0) {
           videoChunksRef.current.push(event.data);
           
+          // CRITICAL FIX: Also store in permanent ref that is NEVER cleared
+          allVideoChunksRef.current.push(event.data);
+          
           // CRITICAL: Use ref to get current recording time (fixes stale closure)
           const currentTime = recordingTimeRef.current;
           
           // NEW: Also add to clipVideoChunksRef for real-time clip generation
           clipVideoChunksRef.current.push({ blob: event.data, timestamp: currentTime });
           
-          // Keep only last 2 minutes of chunks for clips (24 chunks at 5s each)
-          const maxClipChunks = 24;
+          // Keep only last 3 minutes of chunks for clips (36 chunks at 5s each) - INCREASED from 24
+          const maxClipChunks = 36;
           if (clipVideoChunksRef.current.length > maxClipChunks) {
             clipVideoChunksRef.current = clipVideoChunksRef.current.slice(-maxClipChunks);
           }
@@ -536,7 +543,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             segmentBufferRef.current.addChunk(event.data, currentTime);
           }
           
-          console.log(`Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s, chunks: ${videoChunksRef.current.length}, clipChunks: ${clipVideoChunksRef.current.length}`);
+          console.log(`Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s, chunks: ${videoChunksRef.current.length}, allChunks: ${allVideoChunksRef.current.length}, clipChunks: ${clipVideoChunksRef.current.length}`);
         }
       };
 
@@ -822,14 +829,17 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         if (event.data.size > 0) {
           videoChunksRef.current.push(event.data);
           
+          // CRITICAL FIX: Also store in permanent ref that is NEVER cleared
+          allVideoChunksRef.current.push(event.data);
+          
           // CRITICAL: Use ref to get current recording time (fixes stale closure)
           const currentTime = recordingTimeRef.current;
           
           // NEW: Also add to clipVideoChunksRef for real-time clip generation
           clipVideoChunksRef.current.push({ blob: event.data, timestamp: currentTime });
           
-          // Keep only last 2 minutes of chunks for clips (24 chunks at 5s each)
-          const maxClipChunks = 24;
+          // Keep only last 3 minutes of chunks for clips (36 chunks at 5s each) - INCREASED from 24
+          const maxClipChunks = 36;
           if (clipVideoChunksRef.current.length > maxClipChunks) {
             clipVideoChunksRef.current = clipVideoChunksRef.current.slice(-maxClipChunks);
           }
@@ -839,7 +849,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             segmentBufferRef.current.addChunk(event.data, currentTime);
           }
           
-          console.log(`[CameraStream] Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s, chunks: ${videoChunksRef.current.length}, clipChunks: ${clipVideoChunksRef.current.length}`);
+          console.log(`[CameraStream] Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s, chunks: ${videoChunksRef.current.length}, allChunks: ${allVideoChunksRef.current.length}, clipChunks: ${clipVideoChunksRef.current.length}`);
         }
       };
 
@@ -1033,6 +1043,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       audioChunksRef.current = [];
       videoChunksRef.current = [];
       clipVideoChunksRef.current = []; // Reset clip chunks on new recording
+      allVideoChunksRef.current = []; // CRITICAL: Reset permanent chunks on NEW recording only
 
       // CRITICAL FIX: Start video recording from videoElement OR cameraStream
       if (videoElement) {
@@ -1720,8 +1731,15 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
     
     // STEP 1: Save video FIRST (most critical step)
+    // CRITICAL FIX: Use allVideoChunksRef first (never cleared), fallback to videoChunksRef
     try {
-      if (matchId && videoChunksRef.current.length > 0) {
+      const chunksToUse = allVideoChunksRef.current.length > 0 
+        ? allVideoChunksRef.current 
+        : videoChunksRef.current;
+      
+      console.log(`[finishMatch] Video sources - allVideoChunks: ${allVideoChunksRef.current.length}, videoChunks: ${videoChunksRef.current.length}, using: ${chunksToUse.length}`);
+      
+      if (matchId && chunksToUse.length > 0) {
         toast({ 
           title: "Salvando vídeo...", 
           description: "Aguarde o upload da gravação" 
@@ -1729,9 +1747,9 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         
         const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
         const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
-        const videoBlob = new Blob(videoChunksRef.current, { type: mimeType });
+        const videoBlob = new Blob(chunksToUse, { type: mimeType });
         
-        console.log(`[finishMatch] Saving final video: ${(videoBlob.size / (1024 * 1024)).toFixed(2)} MB`);
+        console.log(`[finishMatch] Saving final video: ${(videoBlob.size / (1024 * 1024)).toFixed(2)} MB from ${chunksToUse.length} chunks`);
         
         setIsUploadingVideo(true);
         setVideoUploadProgress(20);
@@ -1762,7 +1780,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           videoUrl = urlData.publicUrl;
           console.log('[finishMatch] Video uploaded to:', videoUrl);
           
-          // Insert video record and get its ID
+          // Insert video record and get its ID - with robust retry logic
           console.log('[finishMatch] Inserting video record into videos table...');
           const { data: videoRecord, error: insertError } = await supabase.from('videos').insert({
             match_id: matchId,
@@ -1770,8 +1788,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
             video_type: 'full',
             start_minute: 0,
-            end_minute: Math.ceil(recordingTime / 60),
-            duration_seconds: recordingTime,
+            end_minute: Math.ceil(recordingTimeRef.current / 60),
+            duration_seconds: recordingTimeRef.current,
             status: 'complete'
           }).select('id').single();
 
@@ -1785,8 +1803,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
               file_name: `Transmissão ao vivo`,
               video_type: 'full',
               start_minute: 0,
-              end_minute: Math.ceil(recordingTime / 60),
-              duration_seconds: recordingTime,
+              end_minute: Math.ceil(recordingTimeRef.current / 60),
+              duration_seconds: recordingTimeRef.current,
               status: 'complete'
             });
             
@@ -1799,8 +1817,9 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
                 .from('videos')
                 .select('id')
                 .eq('match_id', matchId)
-                .eq('file_url', videoUrl)
-                .single();
+                .order('created_at', { ascending: false })
+                .limit(1)
+                .maybeSingle();
               videoId = fetchedVideo?.id || null;
             }
           } else {
@@ -1812,8 +1831,59 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         }
         
         setIsUploadingVideo(false);
+      } else if (matchId && chunksToUse.length === 0) {
+        // FALLBACK: Try to find existing video in storage
+        console.log('[finishMatch] No local chunks - checking storage for existing video...');
+        const { data: storageFiles } = await supabase.storage
+          .from('match-videos')
+          .list('', { 
+            search: `live-${matchId}`,
+            limit: 5,
+            sortBy: { column: 'created_at', order: 'desc' }
+          });
+        
+        if (storageFiles && storageFiles.length > 0) {
+          const existingFile = storageFiles[0];
+          const { data: urlData } = supabase.storage
+            .from('match-videos')
+            .getPublicUrl(existingFile.name);
+          
+          videoUrl = urlData.publicUrl;
+          console.log('[finishMatch] Found existing video in storage:', videoUrl);
+          
+          // Check if video record exists
+          const { data: existingVideo } = await supabase
+            .from('videos')
+            .select('id')
+            .eq('match_id', matchId)
+            .maybeSingle();
+          
+          if (!existingVideo) {
+            // Insert video record for the found file
+            const { data: newVideo, error: insertErr } = await supabase.from('videos').insert({
+              match_id: matchId,
+              file_url: videoUrl,
+              file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
+              video_type: 'full',
+              start_minute: 0,
+              end_minute: Math.ceil(recordingTimeRef.current / 60),
+              duration_seconds: recordingTimeRef.current,
+              status: 'complete'
+            }).select('id').maybeSingle();
+            
+            if (!insertErr && newVideo) {
+              videoId = newVideo.id;
+              console.log('[finishMatch] Video record created from storage file:', videoId);
+            }
+          } else {
+            videoId = existingVideo.id;
+            console.log('[finishMatch] Using existing video record:', videoId);
+          }
+        } else {
+          console.log('[finishMatch] No video found in storage either');
+        }
       } else {
-        console.log('[finishMatch] No video chunks to save - videoChunks:', videoChunksRef.current.length);
+        console.log('[finishMatch] No matchId or video chunks available');
       }
     } catch (videoError) {
       console.error('[finishMatch] Critical error saving video:', videoError);
