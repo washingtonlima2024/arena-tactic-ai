@@ -673,6 +673,7 @@ export const useLiveBroadcast = () => {
   }, [recordingTime, toast]);
 
   // Add event detected from AI transcript analysis
+  // When goal is detected, auto-update score
   const addDetectedEvent = useCallback((eventData: {
     type: string;
     minute: number;
@@ -689,26 +690,55 @@ export const useLiveBroadcast = () => {
       description: eventData.description,
       confidence: eventData.confidence,
       status: "pending", // AI-detected events start as pending for approval
-      recordingTimestamp: eventData.minute * 60 + eventData.second,
+      recordingTimestamp: recordingTime, // Use current recording time for accurate clip seeking
     };
 
     // Check for duplicate events (same type within 30 seconds)
     const isDuplicate = detectedEvents.some(
       (e) =>
         e.type === newEvent.type &&
-        Math.abs((e.minute * 60 + e.second) - (newEvent.minute * 60 + newEvent.second)) < 30
+        Math.abs((e.recordingTimestamp || 0) - (newEvent.recordingTimestamp || 0)) < 30
     );
 
     if (!isDuplicate) {
       setDetectedEvents((prev) => [...prev, newEvent]);
       
-      toast({
-        title: "Evento detectado",
-        description: `${newEvent.type}: ${newEvent.description}`,
-        duration: 3000,
-      });
+      // AUTO-UPDATE SCORE: If goal detected with high confidence, update score immediately
+      if ((eventData.type === 'goal' || eventData.type === 'goal_home' || eventData.type === 'goal_away') 
+          && eventData.confidence && eventData.confidence >= 0.8) {
+        const desc = eventData.description.toLowerCase();
+        
+        if (eventData.type === 'goal_home' || (eventData.type === 'goal' && matchInfo.homeTeam && desc.includes(matchInfo.homeTeam.toLowerCase()))) {
+          setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
+          toast({
+            title: "⚽ GOL! " + matchInfo.homeTeam,
+            description: eventData.description,
+            duration: 5000,
+          });
+        } else if (eventData.type === 'goal_away' || (eventData.type === 'goal' && matchInfo.awayTeam && desc.includes(matchInfo.awayTeam.toLowerCase()))) {
+          setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
+          toast({
+            title: "⚽ GOL! " + matchInfo.awayTeam,
+            description: eventData.description,
+            duration: 5000,
+          });
+        } else {
+          // Generic goal toast if can't determine team
+          toast({
+            title: "⚽ GOL Detectado!",
+            description: eventData.description + " (confirme qual time)",
+            duration: 5000,
+          });
+        }
+      } else {
+        toast({
+          title: "Evento detectado",
+          description: `${newEvent.type}: ${newEvent.description}`,
+          duration: 3000,
+        });
+      }
     }
-  }, [detectedEvents, toast]);
+  }, [detectedEvents, recordingTime, matchInfo, toast]);
 
   const approveEvent = useCallback((eventId: string) => {
     const event = detectedEvents.find((e) => e.id === eventId);
