@@ -7,7 +7,7 @@ export interface Match {
   date: string;
   competition: string;
   venue: string;
-  status: 'scheduled' | 'live' | 'completed' | 'analyzing';
+  status: 'scheduled' | 'live' | 'completed' | 'analyzing' | 'analyzed';
   score: {
     home: number;
     away: number;

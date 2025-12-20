@@ -748,14 +748,27 @@ export const useLiveBroadcast = () => {
     }));
   }, []);
 
-  const finishMatch = useCallback(async () => {
+  // NEW: Finish match data for dialog
+  interface FinishMatchResult {
+    matchId: string;
+    videoUrl: string | null;
+    eventsCount: number;
+    transcriptWords: number;
+    duration: number;
+  }
+
+  const [finishResult, setFinishResult] = useState<FinishMatchResult | null>(null);
+  const [isFinishing, setIsFinishing] = useState(false);
+
+  const finishMatch = useCallback(async (): Promise<FinishMatchResult | null> => {
     stopRecording();
+    setIsFinishing(true);
 
     try {
       const matchId = tempMatchIdRef.current;
       
       if (matchId) {
-        // NEW: Save recorded video first
+        // Save recorded video first
         toast({ 
           title: "Salvando vídeo...", 
           description: "Aguarde o upload da gravação" 
@@ -763,7 +776,7 @@ export const useLiveBroadcast = () => {
         
         const videoUrl = await saveRecordedVideo(matchId);
 
-        // Update the temp match with final data (including team IDs)
+        // Update the temp match with final data - status 'analyzed' for full integration
         await supabase
           .from("matches")
           .update({
@@ -772,7 +785,7 @@ export const useLiveBroadcast = () => {
             home_score: currentScore.home,
             away_score: currentScore.away,
             competition: matchInfo.competition,
-            status: "completed",
+            status: "analyzed", // CHANGED: Use 'analyzed' so match has full access to features
           })
           .eq("id", matchId);
 
@@ -800,16 +813,36 @@ export const useLiveBroadcast = () => {
           await supabase.from("match_events").insert(eventsToInsert);
         }
 
-        toast({
-          title: "Partida finalizada",
-          description: videoUrl 
-            ? `Vídeo e ${approvedEvents.length} eventos salvos. Clips podem ser extraídos na página de Mídia.`
-            : `Transcrição salva (${transcriptBuffer.split(" ").length} palavras)`,
+        // NEW: Create analysis_job for consistency with imported matches
+        await supabase.from("analysis_jobs").insert({
+          match_id: matchId,
+          status: 'completed',
+          progress: 100,
+          current_step: 'Análise ao vivo concluída',
+          completed_at: new Date().toISOString(),
+          result: {
+            eventsDetected: approvedEvents.length,
+            source: 'live',
+            duration: recordingTime,
+            transcriptWords: transcriptBuffer.split(" ").length
+          }
         });
+
+        const result: FinishMatchResult = {
+          matchId,
+          videoUrl,
+          eventsCount: approvedEvents.length,
+          transcriptWords: transcriptBuffer.split(" ").length,
+          duration: recordingTime,
+        };
+
+        setFinishResult(result);
+        setIsFinishing(false);
+        return result;
       }
 
-      tempMatchIdRef.current = null;
-      navigate("/matches");
+      setIsFinishing(false);
+      return null;
     } catch (error) {
       console.error("Error finishing match:", error);
       toast({
@@ -817,8 +850,15 @@ export const useLiveBroadcast = () => {
         description: "Tente novamente",
         variant: "destructive",
       });
+      setIsFinishing(false);
+      return null;
     }
-  }, [stopRecording, currentScore, matchInfo, approvedEvents, transcriptBuffer, saveTranscriptToDatabase, saveRecordedVideo, toast, navigate]);
+  }, [stopRecording, currentScore, matchInfo, approvedEvents, transcriptBuffer, recordingTime, saveTranscriptToDatabase, saveRecordedVideo, toast]);
+
+  const resetFinishResult = useCallback(() => {
+    setFinishResult(null);
+    tempMatchIdRef.current = null;
+  }, []);
 
   return {
     matchInfo,
@@ -839,12 +879,16 @@ export const useLiveBroadcast = () => {
     lastSavedAt,
     isProcessingAudio,
     lastProcessedAt,
-    // NEW: Video recording exports
+    // Video recording exports
     isRecordingVideo,
     videoUploadProgress,
     isUploadingVideo,
-    // NEW: Expose current match ID for transcript saving
+    // Expose current match ID for transcript saving
     currentMatchId: tempMatchIdRef.current,
+    // Finish match states
+    isFinishing,
+    finishResult,
+    resetFinishResult,
     startRecording,
     stopRecording,
     pauseRecording,
