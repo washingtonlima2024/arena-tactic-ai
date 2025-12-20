@@ -527,15 +527,19 @@ export default function Events() {
     return thumb ? { imageUrl: thumb.image_url } : undefined;
   };
 
-  // Handle clip generation
+  // Handle clip generation - supports multiple videos (first_half, second_half)
   const handleGenerateClips = async (mode: 'highlights' | 'all' | 'selected', limit: number = 20) => {
-    if (!currentMatchId || !matchVideo) {
+    if (!currentMatchId || !matchVideos || matchVideos.length === 0) {
       toast.error('Nenhum vídeo disponível para esta partida');
       return;
     }
 
-    // Check if video is direct MP4 (not embed)
-    if (matchVideo.file_url.includes('embed') || matchVideo.file_url.includes('xtream.tech')) {
+    // Check if any video is a direct file (not embed)
+    const directVideos = matchVideos.filter(v => 
+      !v.file_url.includes('embed') && !v.file_url.includes('xtream.tech')
+    );
+    
+    if (directVideos.length === 0) {
       toast.error('Extração de clips só funciona com vídeos MP4 diretos, não com embeds');
       return;
     }
@@ -564,21 +568,53 @@ export default function Events() {
     const clipsCount = Math.min(eventsToProcess.length, limit);
     toast.info(`Iniciando extração de ${clipsCount} clips...`);
 
-    // Calculate video start minute from events if needed
-    const minEventMinute = Math.min(...eventsToProcess.map(e => e.minute || 0));
-    const videoStartMinute = matchVideo.start_minute ?? 
-      (minEventMinute > (matchVideo.duration_seconds ?? 0) / 60 ? minEventMinute - 5 : 0);
+    // Group events by video (based on match_half or minute)
+    const firstHalfVideo = directVideos.find(v => v.video_type === 'first_half') || directVideos[0];
+    const secondHalfVideo = directVideos.find(v => v.video_type === 'second_half') || directVideos[0];
     
-    await generateAllClips(
-      eventsToProcess.slice(0, limit),
-      matchVideo.file_url,
-      currentMatchId,
-      {
-        limit,
-        videoStartMinute,
-        videoDurationSeconds: matchVideo.duration_seconds ?? undefined
-      }
-    );
+    // Process first half events
+    const firstHalfEventsToProcess = eventsToProcess.filter(e => {
+      const eventHalf = (e as any).match_half || e.metadata?.half;
+      if (eventHalf) return eventHalf === 'first';
+      return (e.minute || 0) < 45;
+    }).slice(0, limit);
+    
+    // Process second half events
+    const secondHalfEventsToProcess = eventsToProcess.filter(e => {
+      const eventHalf = (e as any).match_half || e.metadata?.half;
+      if (eventHalf) return eventHalf === 'second';
+      return (e.minute || 0) >= 45;
+    }).slice(0, limit);
+
+    // Generate clips for first half
+    if (firstHalfEventsToProcess.length > 0 && firstHalfVideo) {
+      console.log(`Generating ${firstHalfEventsToProcess.length} clips for first half from video:`, firstHalfVideo.file_url);
+      await generateAllClips(
+        firstHalfEventsToProcess,
+        firstHalfVideo.file_url,
+        currentMatchId,
+        {
+          limit,
+          videoStartMinute: firstHalfVideo.start_minute ?? 0,
+          videoDurationSeconds: firstHalfVideo.duration_seconds ?? undefined
+        }
+      );
+    }
+
+    // Generate clips for second half
+    if (secondHalfEventsToProcess.length > 0 && secondHalfVideo) {
+      console.log(`Generating ${secondHalfEventsToProcess.length} clips for second half from video:`, secondHalfVideo.file_url);
+      await generateAllClips(
+        secondHalfEventsToProcess,
+        secondHalfVideo.file_url,
+        currentMatchId,
+        {
+          limit,
+          videoStartMinute: secondHalfVideo.start_minute ?? 45, // Second half starts at 45'
+          videoDurationSeconds: secondHalfVideo.duration_seconds ?? undefined
+        }
+      );
+    }
 
     // Refresh events to show updated clip_url
     refetchEvents();
