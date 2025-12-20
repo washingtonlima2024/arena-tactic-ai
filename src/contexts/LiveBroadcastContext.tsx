@@ -1421,6 +1421,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   const addManualEvent = useCallback(async (type: string) => {
     // CRITICAL: Use multiple fallbacks for matchId
     const matchId = tempMatchIdRef.current || currentMatchId;
+    const videoId = currentVideoIdRef.current;
     
     // CRITICAL: Use recordingTimeRef.current to get actual recording time (fixes stale closure)
     const currentRecordingTime = recordingTimeRef.current;
@@ -1432,8 +1433,20 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     console.log('tempMatchIdRef.current:', tempMatchIdRef.current);
     console.log('currentMatchId state:', currentMatchId);
     console.log('matchId used:', matchId);
+    console.log('videoId:', videoId);
     console.log('isRecording:', isRecording);
     console.log('currentRecordingTime:', currentRecordingTime);
+
+    // CRITICAL: Block event creation without video - video MUST exist first
+    if (!videoId) {
+      console.error('❌ CRITICAL: No videoId available - cannot create event without video');
+      toast({
+        title: "Erro",
+        description: "Não é possível adicionar evento sem vídeo. Inicie a gravação primeiro.",
+        variant: "destructive"
+      });
+      return;
+    }
 
     if (!matchId) {
       console.error('❌ CRITICAL: No matchId available - event will NOT be saved to database');
@@ -1464,53 +1477,49 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
     }
 
-    // Always save to database since we validated matchId
-    // CRITICAL: Include video_id so events are linked from the start
-    const videoId = currentVideoIdRef.current;
-    {
-        try {
-          await supabase.from("match_events").insert({
-            id: eventId,
-            match_id: matchId,
-            video_id: videoId, // NEW: Link event to video from the start
-            event_type: type,
-            minute,
-            second,
-            description: newEvent.description,
-            approval_status: "approved",
-            is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(type),
-            match_half: minute < 45 ? 'first' : 'second',
-            metadata: {
-              eventMs: currentRecordingTime * 1000,
-              videoSecond: currentRecordingTime,
-              source: 'live-manual'
-            }
-          });
-          console.log(`Manual event saved at ${currentRecordingTime}s with video_id ${videoId}:`, type);
-          
-          // IMMEDIATE: Save video chunk and get URL directly (fixes race condition)
-          let chunkUrl: string | null = null;
-          if (videoChunksRef.current.length > 0) {
-            chunkUrl = await saveVideoChunk();
-            console.log('Video chunk saved for manual event, URL:', chunkUrl);
-          }
-          
-          // Generate clip using the returned URL (not stale state)
-          const videoUrl = chunkUrl || latestVideoChunkUrl;
-          if (videoUrl) {
-            console.log('Generating clip for manual event with URL:', videoUrl);
-            generateClipForEvent(newEvent, videoUrl);
-          } else {
-            console.log('No video URL available for clip generation');
-          }
-
-          // Trigger live analysis immediately
-          console.log('Triggering live analysis for manual event:', type);
-          triggerLiveAnalysis(newEvent);
-        } catch (error) {
-          console.error("Error saving manual event:", error);
+    // Always save to database since we validated matchId and videoId
+    try {
+      await supabase.from("match_events").insert({
+        id: eventId,
+        match_id: matchId,
+        video_id: videoId,
+        event_type: type,
+        minute,
+        second,
+        description: newEvent.description,
+        approval_status: "approved",
+        is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(type),
+        match_half: minute < 45 ? 'first' : 'second',
+        metadata: {
+          eventMs: currentRecordingTime * 1000,
+          videoSecond: currentRecordingTime,
+          source: 'live-manual'
         }
+      });
+      console.log(`Manual event saved at ${currentRecordingTime}s with video_id ${videoId}:`, type);
+      
+      // IMMEDIATE: Save video chunk and get URL directly (fixes race condition)
+      let chunkUrl: string | null = null;
+      if (videoChunksRef.current.length > 0) {
+        chunkUrl = await saveVideoChunk();
+        console.log('Video chunk saved for manual event, URL:', chunkUrl);
       }
+      
+      // Generate clip using the returned URL (not stale state)
+      const videoUrl = chunkUrl || latestVideoChunkUrl;
+      if (videoUrl) {
+        console.log('Generating clip for manual event with URL:', videoUrl);
+        generateClipForEvent(newEvent, videoUrl);
+      } else {
+        console.log('No video URL available for clip generation');
+      }
+
+      // Trigger live analysis immediately
+      console.log('Triggering live analysis for manual event:', type);
+      triggerLiveAnalysis(newEvent);
+    } catch (error) {
+      console.error("Error saving manual event:", error);
+    }
 
     toast({
       title: "Evento adicionado",
@@ -1528,6 +1537,19 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     source?: string;
   }) => {
     const matchId = tempMatchIdRef.current || currentMatchId;
+    const videoId = currentVideoIdRef.current;
+    
+    // CRITICAL: Block event creation without video - video MUST exist first
+    if (!videoId) {
+      console.warn('⚠️ Cannot save detected event - no video recording. Event ignored.');
+      return;
+    }
+
+    if (!matchId) {
+      console.warn('⚠️ Cannot save detected event - no matchId. Event ignored.');
+      return;
+    }
+
     const eventId = crypto.randomUUID();
     
     // CRITICAL: Use recordingTimeRef.current to get actual recording time (fixes stale closure)
@@ -1554,39 +1576,33 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       setDetectedEvents((prev) => [...prev, newEvent]);
       
       // IMMEDIATELY save to database (pending approval)
-      // CRITICAL: Include video_id so events are linked from the start
-      const videoId = currentVideoIdRef.current;
-      if (matchId) {
-        try {
-          await supabase.from("match_events").insert({
-            id: eventId,
-            match_id: matchId,
-            video_id: videoId, // NEW: Link event to video from the start
-            event_type: eventData.type,
-            minute: eventData.minute,
-            second: eventData.second,
-            description: eventData.description,
-            approval_status: "pending",
-            is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(eventData.type),
-            match_half: eventData.minute < 45 ? 'first' : 'second',
-            metadata: {
-              eventMs: currentRecordingTime * 1000,
-              videoSecond: currentRecordingTime,
-              source: eventData.source || 'live-detected',
-              confidence: eventData.confidence
-            }
-          });
-          console.log(`✅ Detected event saved at ${currentRecordingTime}s with video_id ${videoId}:`, eventData.type);
-          
-          // Save video chunk for potential clip generation later
-          if (videoChunksRef.current.length > 0) {
-            saveVideoChunk();
+      try {
+        await supabase.from("match_events").insert({
+          id: eventId,
+          match_id: matchId,
+          video_id: videoId, // REQUIRED: Event MUST have video
+          event_type: eventData.type,
+          minute: eventData.minute,
+          second: eventData.second,
+          description: eventData.description,
+          approval_status: "pending",
+          is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(eventData.type),
+          match_half: eventData.minute < 45 ? 'first' : 'second',
+          metadata: {
+            eventMs: currentRecordingTime * 1000,
+            videoSecond: currentRecordingTime,
+            source: eventData.source || 'live-detected',
+            confidence: eventData.confidence
           }
-        } catch (error) {
-          console.error("Error saving detected event to database:", error);
+        });
+        console.log(`✅ Detected event saved at ${currentRecordingTime}s with video_id ${videoId}:`, eventData.type);
+        
+        // Save video chunk for potential clip generation later
+        if (videoChunksRef.current.length > 0) {
+          saveVideoChunk();
         }
-      } else {
-        console.warn("⚠️ No matchId available - event only saved locally");
+      } catch (error) {
+        console.error("Error saving detected event to database:", error);
       }
       
       if ((eventData.type === 'goal' || eventData.type === 'goal_home' || eventData.type === 'goal_away') 
