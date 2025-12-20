@@ -115,6 +115,11 @@ const Live = () => {
                 <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
               </span>
               <span className="text-red-500 font-semibold">AO VIVO</span>
+              {currentMatchId && (
+                <span className="flex items-center gap-1 text-xs bg-green-500/20 text-green-500 px-2 py-1 rounded-full border border-green-500/30 ml-2">
+                  ✓ Partida Registrada
+                </span>
+              )}
               {isRecordingVideo && (
                 <span className="flex items-center gap-1 text-xs text-muted-foreground ml-2">
                   <Video className="h-3 w-3" />
