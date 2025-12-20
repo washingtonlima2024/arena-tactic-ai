@@ -165,6 +165,7 @@ const Live = () => {
                       homeTeam={matchInfo.homeTeam}
                       awayTeam={matchInfo.awayTeam}
                       currentScore={currentScore}
+                      videoElement={videoElementRef.current}
                       onTranscriptUpdate={(buffer, chunks) => {
                         console.log('Transcript updated:', buffer.length, 'chars,', chunks.length, 'chunks');
                       }}

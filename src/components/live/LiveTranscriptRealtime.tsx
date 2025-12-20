@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Clock, Loader2, Mic, Wifi, WifiOff, Save, CheckCircle, Zap } from "lucide-react";
+import { FileText, Clock, Loader2, Mic, Wifi, WifiOff, Save, CheckCircle, Zap, Video } from "lucide-react";
 import { useElevenLabsScribe } from "@/hooks/useElevenLabsScribe";
+import { useVideoAudioTranscription } from "@/hooks/useVideoAudioTranscription";
 import { TranscriptChunk } from "@/hooks/useLiveBroadcast";
 import { supabase } from "@/integrations/supabase/client";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
 interface ExtractedEvent {
   type: string;
@@ -20,6 +22,7 @@ interface LiveTranscriptRealtimeProps {
   homeTeam?: string;
   awayTeam?: string;
   currentScore?: { home: number; away: number };
+  videoElement?: HTMLVideoElement | null;
   onTranscriptUpdate?: (buffer: string, chunks: TranscriptChunk[]) => void;
   onEventDetected?: (event: ExtractedEvent) => void;
 }
@@ -30,9 +33,13 @@ export const LiveTranscriptRealtime = ({
   homeTeam,
   awayTeam,
   currentScore,
+  videoElement,
   onTranscriptUpdate,
   onEventDetected,
 }: LiveTranscriptRealtimeProps) => {
+  // Audio source: "mic" for microphone (ElevenLabs), "video" for video audio (Whisper)
+  const [audioSource, setAudioSource] = useState<"mic" | "video">("mic");
+  
   // Use useState instead of useRef for re-rendering
   const [chunks, setChunks] = useState<TranscriptChunk[]>([]);
   const [transcriptBuffer, setTranscriptBuffer] = useState("");
@@ -172,124 +179,209 @@ export const LiveTranscriptRealtime = ({
     }
   };
 
+  // Callback for video audio transcription
+  const handleVideoTranscript = useCallback((text: string) => {
+    const minute = Math.floor(recordingTimeRef.current / 60);
+    const second = recordingTimeRef.current % 60;
+    
+    const newChunk: TranscriptChunk = {
+      id: crypto.randomUUID(),
+      text,
+      minute,
+      second,
+      timestamp: new Date(),
+    };
+    
+    setChunks(prev => [...prev, newChunk]);
+    setTranscriptBuffer(prev => {
+      const newBuffer = prev + " " + text;
+      onTranscriptUpdate?.(newBuffer.trim(), [...chunks, newChunk]);
+      saveTranscriptToDatabase(text, newBuffer.trim());
+      return newBuffer;
+    });
+    
+    extractEvents(text);
+  }, [chunks, onTranscriptUpdate, extractEvents]);
+
+  // ElevenLabs Scribe for microphone
   const scribe = useElevenLabsScribe({
     onTranscript: (text) => {
-      const minute = Math.floor(recordingTimeRef.current / 60);
-      const second = recordingTimeRef.current % 60;
-      
-      const newChunk: TranscriptChunk = {
-        id: crypto.randomUUID(),
-        text,
-        minute,
-        second,
-        timestamp: new Date(),
-      };
-      
-      // Use setState for re-rendering
-      setChunks(prev => [...prev, newChunk]);
-      setTranscriptBuffer(prev => {
-        const newBuffer = prev + " " + text;
-        onTranscriptUpdate?.(newBuffer.trim(), [...chunks, newChunk]);
-        // Auto-save to database
-        saveTranscriptToDatabase(text, newBuffer.trim());
-        return newBuffer;
-      });
-      
-      // Extract events from the new transcript segment
-      extractEvents(text);
+      if (audioSource !== "mic") return;
+      handleVideoTranscript(text);
     },
     onPartialTranscript: (text) => {
-      // Partial transcript is handled by the hook - triggers re-render automatically
+      // Partial transcript is handled by the hook
     },
   });
 
-  // Connect/disconnect based on recording state
+  // Video audio transcription hook
+  const videoTranscription = useVideoAudioTranscription({
+    onTranscript: (text) => {
+      if (audioSource !== "video") return;
+      handleVideoTranscript(text);
+    },
+    onPartialTranscript: (text) => {
+      // Handled by hook
+    },
+    chunkDurationMs: 10000, // Send chunks every 10 seconds
+  });
+
+  // Connect/disconnect based on recording state and audio source
   useEffect(() => {
-    if (isRecording && !scribe.isConnected && !scribe.isConnecting) {
-      // Reset state
+    if (isRecording) {
+      // Reset state when starting
       setChunks([]);
       setTranscriptBuffer("");
+      setEventsExtracted(0);
       
-      scribe.connect();
-    } else if (!isRecording && scribe.isConnected) {
-      scribe.disconnect();
+      if (audioSource === "mic") {
+        // Disconnect video if connected
+        if (videoTranscription.isConnected) {
+          videoTranscription.disconnect();
+        }
+        // Connect microphone
+        if (!scribe.isConnected && !scribe.isConnecting) {
+          scribe.connect();
+        }
+      } else if (audioSource === "video" && videoElement) {
+        // Disconnect microphone if connected
+        if (scribe.isConnected) {
+          scribe.disconnect();
+        }
+        // Connect to video audio
+        if (!videoTranscription.isConnected && !videoTranscription.isConnecting) {
+          videoTranscription.connect(videoElement);
+        }
+      }
+    } else {
+      // Disconnect both when not recording
+      if (scribe.isConnected) {
+        scribe.disconnect();
+      }
+      if (videoTranscription.isConnected) {
+        videoTranscription.disconnect();
+      }
     }
-  }, [isRecording, scribe.isConnected, scribe.isConnecting, scribe]);
+  }, [isRecording, audioSource, videoElement]);
+
+  // Get active transcription state
+  const activeTranscription = audioSource === "mic" ? scribe : videoTranscription;
+  const isConnected = activeTranscription.isConnected;
+  const isConnecting = audioSource === "mic" ? scribe.isConnecting : videoTranscription.isConnecting;
+  const partialTranscript = activeTranscription.partialTranscript;
+  const committedTranscripts = activeTranscription.committedTranscripts;
+  const transcriptionError = activeTranscription.error;
 
   const wordCount = transcriptBuffer.trim().split(/\s+/).filter(Boolean).length + 
-    (scribe.partialTranscript ? scribe.partialTranscript.split(/\s+/).filter(Boolean).length : 0);
+    (partialTranscript ? partialTranscript.split(/\s+/).filter(Boolean).length : 0);
 
   return (
     <div className="glass-card p-4 rounded-xl h-full min-h-[300px] flex flex-col">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <h3 className="font-semibold flex items-center gap-2 text-foreground">
           <FileText className="h-5 w-5 text-primary" />
           Transcrição Ao Vivo
         </h3>
-        <div className="flex items-center gap-2 flex-wrap">
-          {isSaving && (
-            <Badge variant="outline" className="text-yellow-500 border-yellow-500/50">
-              <Save className="h-3 w-3 mr-1 animate-pulse" />
-              Salvando...
-            </Badge>
-          )}
-          {!isSaving && lastSavedAt && (
-            <Badge variant="outline" className="text-green-500 border-green-500/50">
-              <CheckCircle className="h-3 w-3 mr-1" />
-              Salvo
-            </Badge>
-          )}
-          {scribe.isConnecting && (
-            <Badge variant="outline" className="text-blue-500 border-blue-500/50">
-              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-              Conectando...
-            </Badge>
-          )}
-          {scribe.isConnected ? (
-            <Badge variant="outline" className="text-green-500 border-green-500/50">
-              <Wifi className="h-3 w-3 mr-1" />
-              ElevenLabs
-            </Badge>
-          ) : !isRecording ? null : (
-            <Badge variant="outline" className="text-muted-foreground border-muted-foreground/50">
-              <WifiOff className="h-3 w-3 mr-1" />
-              Desconectado
-            </Badge>
-          )}
-          <Badge variant="secondary">
-            {wordCount} palavras
+        
+        {/* Audio Source Toggle */}
+        <ToggleGroup
+          type="single"
+          value={audioSource}
+          onValueChange={(value) => value && setAudioSource(value as "mic" | "video")}
+          disabled={isRecording}
+          className="h-8"
+        >
+          <ToggleGroupItem value="mic" className="text-xs px-2 h-7 gap-1">
+            <Mic className="h-3 w-3" />
+            Microfone
+          </ToggleGroupItem>
+          <ToggleGroupItem 
+            value="video" 
+            className="text-xs px-2 h-7 gap-1"
+            disabled={!videoElement}
+          >
+            <Video className="h-3 w-3" />
+            Áudio do Vídeo
+          </ToggleGroupItem>
+        </ToggleGroup>
+      </div>
+
+      {/* Status Badges */}
+      <div className="flex items-center gap-2 flex-wrap mb-3">
+        {isSaving && (
+          <Badge variant="outline" className="text-yellow-500 border-yellow-500/50">
+            <Save className="h-3 w-3 mr-1 animate-pulse" />
+            Salvando...
           </Badge>
-          {eventsExtracted > 0 && (
-            <Badge variant="outline" className="text-purple-500 border-purple-500/50">
-              <Zap className="h-3 w-3 mr-1" />
-              {eventsExtracted} eventos
-            </Badge>
-          )}
-          {isExtracting && (
-            <Badge variant="outline" className="text-purple-500 border-purple-500/50">
-              <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-              Analisando...
-            </Badge>
-          )}
-        </div>
+        )}
+        {!isSaving && lastSavedAt && (
+          <Badge variant="outline" className="text-green-500 border-green-500/50">
+            <CheckCircle className="h-3 w-3 mr-1" />
+            Salvo
+          </Badge>
+        )}
+        {isConnecting && (
+          <Badge variant="outline" className="text-blue-500 border-blue-500/50">
+            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+            Conectando...
+          </Badge>
+        )}
+        {isConnected ? (
+          <Badge variant="outline" className="text-green-500 border-green-500/50">
+            <Wifi className="h-3 w-3 mr-1" />
+            {audioSource === "mic" ? "ElevenLabs" : "Whisper"}
+          </Badge>
+        ) : !isRecording ? null : (
+          <Badge variant="outline" className="text-muted-foreground border-muted-foreground/50">
+            <WifiOff className="h-3 w-3 mr-1" />
+            Desconectado
+          </Badge>
+        )}
+        <Badge variant="secondary">
+          {wordCount} palavras
+        </Badge>
+        {eventsExtracted > 0 && (
+          <Badge variant="outline" className="text-purple-500 border-purple-500/50">
+            <Zap className="h-3 w-3 mr-1" />
+            {eventsExtracted} eventos
+          </Badge>
+        )}
+        {isExtracting && (
+          <Badge variant="outline" className="text-purple-500 border-purple-500/50">
+            <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+            Analisando...
+          </Badge>
+        )}
       </div>
 
       <ScrollArea className="flex-1 max-h-[350px]" ref={scrollRef}>
         <div className="space-y-3 pr-2">
-          {chunks.length === 0 && !scribe.partialTranscript ? (
+          {chunks.length === 0 && committedTranscripts.length === 0 && !partialTranscript ? (
             <div className="text-center text-muted-foreground py-8">
               {isRecording ? (
                 <div className="space-y-2">
-                  {scribe.isConnecting ? (
+                  {isConnecting ? (
                     <>
                       <Loader2 className="h-8 w-8 mx-auto animate-spin text-primary" />
-                      <p>Conectando ao ElevenLabs Scribe...</p>
+                      <p>Conectando ao {audioSource === "mic" ? "ElevenLabs Scribe" : "Whisper"}...</p>
                     </>
-                  ) : scribe.isConnected ? (
+                  ) : isConnected ? (
                     <>
-                      <Mic className="h-8 w-8 mx-auto text-green-500 animate-pulse" />
-                      <p>Ouvindo...</p>
-                      <p className="text-xs">Transcrição em tempo real</p>
+                      {audioSource === "mic" ? (
+                        <Mic className="h-8 w-8 mx-auto text-green-500 animate-pulse" />
+                      ) : (
+                        <Video className="h-8 w-8 mx-auto text-green-500 animate-pulse" />
+                      )}
+                      <p>Ouvindo {audioSource === "mic" ? "microfone" : "áudio do vídeo"}...</p>
+                      <p className="text-xs">
+                        {audioSource === "mic" ? "Transcrição em tempo real" : "Transcrição a cada 10s"}
+                      </p>
+                    </>
+                  ) : audioSource === "video" && !videoElement ? (
+                    <>
+                      <Video className="h-8 w-8 mx-auto text-yellow-500" />
+                      <p>Carregue um vídeo primeiro</p>
+                      <p className="text-xs">O vídeo precisa estar em reprodução</p>
                     </>
                   ) : (
                     <>
@@ -299,30 +391,40 @@ export const LiveTranscriptRealtime = ({
                   )}
                 </div>
               ) : (
-                <p>Inicie a gravação para ver a transcrição</p>
+                <div className="space-y-2">
+                  <p>Inicie a gravação para ver a transcrição</p>
+                  <p className="text-xs">
+                    {audioSource === "mic" 
+                      ? "Usando microfone (ElevenLabs - tempo real)" 
+                      : "Usando áudio do vídeo (Whisper - a cada 10s)"}
+                  </p>
+                </div>
               )}
             </div>
           ) : (
             <>
               {/* Committed transcripts */}
-              {scribe.committedTranscripts.map((transcript) => (
+              {committedTranscripts.map((transcript) => (
                 <div key={transcript.id} className="border-l-2 border-primary/30 pl-3 py-1">
                   <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
                     <Clock className="h-3 w-3" />
                     <span>{new Date(transcript.timestamp).toLocaleTimeString()}</span>
+                    {audioSource === "video" && (
+                      <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">Whisper</Badge>
+                    )}
                   </div>
                   <p className="text-sm text-foreground">{transcript.text}</p>
                 </div>
               ))}
               
               {/* Partial transcript (live) */}
-              {scribe.partialTranscript && (
+              {partialTranscript && (
                 <div className="border-l-2 border-yellow-500/50 pl-3 py-1 animate-pulse">
                   <div className="flex items-center gap-2 text-xs text-yellow-500 mb-1">
-                    <Mic className="h-3 w-3" />
+                    {audioSource === "mic" ? <Mic className="h-3 w-3" /> : <Video className="h-3 w-3" />}
                     <span>Ao vivo</span>
                   </div>
-                  <p className="text-sm text-foreground/80 italic">{scribe.partialTranscript}</p>
+                  <p className="text-sm text-foreground/80 italic">{partialTranscript}</p>
                 </div>
               )}
             </>
@@ -331,21 +433,23 @@ export const LiveTranscriptRealtime = ({
       </ScrollArea>
 
       {/* Status indicator */}
-      {isRecording && scribe.isConnected && (
+      {isRecording && isConnected && (
         <div className="mt-3 pt-3 border-t border-border">
           <p className="text-xs text-muted-foreground flex items-center gap-2">
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
             </span>
-            Transcrição em tempo real via ElevenLabs Scribe
+            {audioSource === "mic" 
+              ? "Transcrição em tempo real via ElevenLabs Scribe" 
+              : "Transcrição do áudio do vídeo via OpenAI Whisper"}
           </p>
         </div>
       )}
 
-      {scribe.error && (
+      {transcriptionError && (
         <div className="mt-2 p-2 bg-destructive/10 rounded text-xs text-destructive">
-          {scribe.error}
+          {transcriptionError}
         </div>
       )}
     </div>
