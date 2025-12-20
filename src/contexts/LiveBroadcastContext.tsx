@@ -1353,7 +1353,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }));
   }, []);
 
-  // Finish match
+  // Finish match - generates all remaining clips and saves everything
   const finishMatch = useCallback(async (): Promise<FinishMatchResult | null> => {
     stopRecording();
     setIsFinishing(true);
@@ -1368,6 +1368,25 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         });
         
         const videoUrl = await saveRecordedVideo(matchId);
+
+        // Generate clips for all approved events that don't have clips yet
+        if (videoUrl && approvedEvents.length > 0) {
+          const eventsWithoutClips = approvedEvents.filter(e => !e.clipUrl);
+          
+          if (eventsWithoutClips.length > 0) {
+            toast({ 
+              title: "Gerando clips...", 
+              description: `Processando ${eventsWithoutClips.length} eventos` 
+            });
+            
+            // Generate clips sequentially to avoid overwhelming FFmpeg
+            for (const event of eventsWithoutClips) {
+              if (!isGeneratingClipRef.current) {
+                await generateClipForEvent(event, videoUrl);
+              }
+            }
+          }
+        }
 
         await supabase
           .from("matches")
@@ -1385,6 +1404,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
         console.log(`Finish match: ${approvedEvents.length} events already saved in real-time`);
 
+        // Create analysis job with summary
         await supabase.from("analysis_jobs").insert({
           match_id: matchId,
           status: 'completed',
@@ -1393,9 +1413,16 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           completed_at: new Date().toISOString(),
           result: {
             eventsDetected: approvedEvents.length,
+            eventsWithClips: approvedEvents.filter(e => e.clipUrl).length,
             source: 'live',
             duration: recordingTime,
-            transcriptWords: transcriptBuffer.split(" ").length
+            transcriptWords: transcriptBuffer.split(" ").length,
+            summary: {
+              goals: approvedEvents.filter(e => e.type.includes('goal')).length,
+              cards: approvedEvents.filter(e => e.type.includes('card')).length,
+              fouls: approvedEvents.filter(e => e.type === 'foul').length,
+              totalEvents: approvedEvents.length,
+            }
           }
         });
 
@@ -1409,6 +1436,12 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
         setFinishResult(result);
         setIsFinishing(false);
+        
+        toast({ 
+          title: "Partida finalizada!", 
+          description: `${approvedEvents.length} eventos salvos. Acesse a página de Análise para ver o resumo completo.` 
+        });
+        
         return result;
       }
 
@@ -1424,7 +1457,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       setIsFinishing(false);
       return null;
     }
-  }, [stopRecording, currentScore, matchInfo, approvedEvents, transcriptBuffer, recordingTime, saveTranscriptToDatabase, saveRecordedVideo, toast]);
+  }, [stopRecording, currentScore, matchInfo, approvedEvents, transcriptBuffer, recordingTime, saveTranscriptToDatabase, saveRecordedVideo, toast, generateClipForEvent]);
 
   // Reset finish result
   const resetFinishResult = useCallback(() => {
