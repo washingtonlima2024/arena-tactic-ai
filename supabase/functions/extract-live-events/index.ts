@@ -13,7 +13,16 @@ serve(async (req) => {
   try {
     const { transcript, homeTeam, awayTeam, currentScore, currentMinute } = await req.json();
 
-    if (!transcript) {
+    console.log("=== EXTRACT-LIVE-EVENTS CALLED ===");
+    console.log("Home Team:", homeTeam);
+    console.log("Away Team:", awayTeam);
+    console.log("Current Score:", JSON.stringify(currentScore));
+    console.log("Current Minute:", currentMinute);
+    console.log("Transcript length:", transcript?.length || 0);
+    console.log("Transcript preview:", transcript?.substring(0, 300) || "EMPTY");
+
+    if (!transcript || transcript.trim().length < 10) {
+      console.log("Transcript too short or empty, returning empty events");
       return new Response(
         JSON.stringify({ events: [] }),
         { headers: { ...corsHeaders, "Content-Type": "application/json" } }
@@ -25,25 +34,50 @@ serve(async (req) => {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    const systemPrompt = `Você é um analista de futebol especializado em identificar eventos de partidas a partir de transcrições de áudio de narradores.
+    const systemPrompt = `Você é um analista especializado em identificar eventos de futebol a partir de narrações em tempo real de partidas brasileiras.
 
-Contexto da partida:
+CONTEXTO DA PARTIDA:
 - Time Casa: ${homeTeam || "Time Casa"}
-- Time Fora: ${awayTeam || "Time Fora"}
+- Time Fora: ${awayTeam || "Time Fora"}  
 - Placar atual: ${currentScore?.home || 0} x ${currentScore?.away || 0}
 - Minuto aproximado: ${currentMinute || 0}
 
-Analise o texto transcrito e identifique eventos de futebol. Para cada evento encontrado, retorne:
-- type: tipo do evento (goal, yellow_card, red_card, shot, foul, substitution, halftime, fulltime, corner, penalty, offside, save)
-- minute: minuto do evento (use o minuto aproximado fornecido se não for mencionado)
-- second: segundo do evento (0 se não especificado)
-- description: descrição curta do evento
-- confidence: nível de confiança de 0 a 1
+IMPORTANTE - EXPRESSÕES DE NARRADORES BRASILEIROS:
+Narradores brasileiros usam expressões características. Identifique QUALQUER menção a:
 
-Retorne APENAS eventos claramente identificados. Se não houver eventos claros, retorne um array vazio.
+🥅 GOL: "GOL!", "GOOOOL!", "GOLAÇO!", "É gol!", "gol de...", "abre o placar", "marca", "faz o gol", "amplia", "empata", "vira o jogo", "balançou as redes", "estufou a rede", "para o fundo do gol"
 
-IMPORTANTE: Retorne a resposta APENAS como um JSON válido no formato:
-{"events": [{"type": "...", "minute": 0, "second": 0, "description": "...", "confidence": 0.9}]}`;
+⚠️ FALTA: "falta!", "marcou falta", "derrubou", "fez falta", "entrada dura", "falta perigosa", "falta na entrada da área"
+
+⚽ CHUTE/FINALIZAÇÃO: "chuta!", "finaliza!", "arremata!", "tenta o gol", "bateu forte", "mandou pra fora", "passou raspando", "acertou a trave", "no travessão", "isolou", "mandou longe"
+
+🚩 ESCANTEIO: "escanteio!", "córner!", "sai pela linha de fundo", "vai cobrar escanteio"
+
+🟨 CARTÃO AMARELO: "cartão amarelo", "amarelou", "foi advertido", "levou amarelo"
+
+🟥 CARTÃO VERMELHO: "cartão vermelho!", "expulso!", "foi pra fora", "levou vermelho", "direto pro chuveiro"
+
+⚖️ PÊNALTI: "pênalti!", "penalidade máxima!", "na marca da cal", "vai bater o pênalti"
+
+🧤 DEFESA: "defendeu!", "o goleiro pegou!", "grande defesa!", "espalmou!", "tirou o gol"
+
+📴 IMPEDIMENTO: "impedimento!", "estava impedido", "bandeira levantada"
+
+🔄 SUBSTITUIÇÃO: "substituição", "vai entrar", "vai sair", "sai... entra..."
+
+⏸️ INTERVALO: "fim do primeiro tempo", "intervalo", "vai pro descanso"
+
+🏁 FIM DE JOGO: "fim de jogo!", "apita o árbitro", "acabou!", "termina a partida"
+
+REGRAS DE DETECÇÃO:
+1. Seja MENOS RESTRITIVO - se houver INDÍCIO de evento, retorne-o
+2. Para eventos incertos, use confidence entre 0.4-0.7
+3. Para eventos claros (ex: "GOOOOL!"), use confidence 0.8-1.0
+4. O campo description deve ser em português, curto (máx 50 chars)
+5. Se identificar gol, SEMPRE retorne com type "goal"
+
+FORMATO DE RESPOSTA (JSON VÁLIDO):
+{"events": [{"type": "goal", "minute": 15, "second": 30, "description": "Gol de cabeça após escanteio", "confidence": 0.95}]}`;
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -72,6 +106,9 @@ IMPORTANTE: Retorne a resposta APENAS como um JSON válido no formato:
     const data = await response.json();
     const content = data.choices?.[0]?.message?.content || "";
 
+    console.log("=== AI RESPONSE ===");
+    console.log("Raw AI content:", content);
+
     // Parse the JSON response
     let events = [];
     try {
@@ -80,12 +117,16 @@ IMPORTANTE: Retorne a resposta APENAS como um JSON válido no formato:
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
         events = parsed.events || [];
+        console.log("Parsed events:", JSON.stringify(events));
+      } else {
+        console.log("No JSON found in AI response");
       }
     } catch (parseError) {
       console.error("Error parsing AI response:", parseError);
+      console.error("Content that failed to parse:", content);
     }
 
-    console.log(`Extracted ${events.length} events from transcript`);
+    console.log(`✅ Extracted ${events.length} events from transcript`);
 
     return new Response(
       JSON.stringify({ events }),
