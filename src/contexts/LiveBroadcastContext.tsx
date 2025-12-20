@@ -257,8 +257,12 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   }, [currentScore, isRecording]);
 
   // NEW: Save video chunks periodically for real-time clip generation
-  const saveVideoChunk = useCallback(async () => {
-    if (videoChunksRef.current.length === 0 || !tempMatchIdRef.current) return;
+  // Returns the URL directly to avoid race condition with state
+  const saveVideoChunk = useCallback(async (): Promise<string | null> => {
+    if (videoChunksRef.current.length === 0 || !tempMatchIdRef.current) {
+      console.log('No video chunks or no match ID - cannot save chunk');
+      return null;
+    }
     
     try {
       const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
@@ -266,6 +270,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       const videoBlob = new Blob(videoChunksRef.current, { type: mimeType });
       
       const filePath = `live-chunks/${tempMatchIdRef.current}/chunk-${Date.now()}.${extension}`;
+      console.log(`Saving video chunk: ${filePath}, size: ${(videoBlob.size / 1024).toFixed(1)} KB`);
       
       const { error: uploadError } = await supabase.storage
         .from('match-videos')
@@ -274,16 +279,22 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           upsert: true
         });
 
-      if (!uploadError) {
-        const { data: urlData } = supabase.storage
-          .from('match-videos')
-          .getPublicUrl(filePath);
-        
-        setLatestVideoChunkUrl(urlData.publicUrl);
-        console.log('Video chunk saved:', filePath);
+      if (uploadError) {
+        console.error('Error uploading video chunk:', uploadError);
+        return null;
       }
+
+      const { data: urlData } = supabase.storage
+        .from('match-videos')
+        .getPublicUrl(filePath);
+      
+      const chunkUrl = urlData.publicUrl;
+      setLatestVideoChunkUrl(chunkUrl);
+      console.log('Video chunk saved successfully:', chunkUrl);
+      return chunkUrl;
     } catch (error) {
       console.error('Error saving video chunk:', error);
+      return null;
     }
   }, []);
 
@@ -1027,42 +1038,49 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
     }
 
-    if (matchId) {
-      try {
-        await supabase.from("match_events").insert({
-          id: eventId,
-          match_id: matchId,
-          event_type: type,
-          minute,
-          second,
-          description: newEvent.description,
-          approval_status: "approved",
-          is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(type),
-          match_half: minute < 45 ? 'first' : 'second',
-          metadata: {
-            eventMs: recordingTime * 1000,
-            videoSecond: recordingTime,
-            source: 'live-manual'
+      if (matchId) {
+        try {
+          await supabase.from("match_events").insert({
+            id: eventId,
+            match_id: matchId,
+            event_type: type,
+            minute,
+            second,
+            description: newEvent.description,
+            approval_status: "approved",
+            is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(type),
+            match_half: minute < 45 ? 'first' : 'second',
+            metadata: {
+              eventMs: recordingTime * 1000,
+              videoSecond: recordingTime,
+              source: 'live-manual'
+            }
+          });
+          console.log("Manual event saved in real-time:", type);
+          
+          // IMMEDIATE: Save video chunk and get URL directly (fixes race condition)
+          let chunkUrl: string | null = null;
+          if (videoChunksRef.current.length > 0) {
+            chunkUrl = await saveVideoChunk();
+            console.log('Video chunk saved for manual event, URL:', chunkUrl);
           }
-        });
-        console.log("Manual event saved in real-time:", type);
-        
-        // IMMEDIATE: Save video chunk first, then generate clip
-        if (videoChunksRef.current.length > 0) {
-          await saveVideoChunk();
-        }
-        
-        // Generate clip if video chunk is available
-        if (latestVideoChunkUrl) {
-          generateClipForEvent(newEvent, latestVideoChunkUrl);
-        }
+          
+          // Generate clip using the returned URL (not stale state)
+          const videoUrl = chunkUrl || latestVideoChunkUrl;
+          if (videoUrl) {
+            console.log('Generating clip for manual event with URL:', videoUrl);
+            generateClipForEvent(newEvent, videoUrl);
+          } else {
+            console.log('No video URL available for clip generation');
+          }
 
-        // Trigger live analysis
-        triggerLiveAnalysis(newEvent);
-      } catch (error) {
-        console.error("Error saving manual event:", error);
+          // Trigger live analysis immediately
+          console.log('Triggering live analysis for manual event:', type);
+          triggerLiveAnalysis(newEvent);
+        } catch (error) {
+          console.error("Error saving manual event:", error);
+        }
       }
-    }
 
     toast({
       title: "Evento adicionado",
@@ -1173,17 +1191,24 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           });
           console.log("Approved event saved in real-time:", event.type);
           
-          // IMMEDIATE: Save video chunk first, then generate clip
+          // IMMEDIATE: Save video chunk and get URL directly (fixes race condition)
+          let chunkUrl: string | null = null;
           if (videoChunksRef.current.length > 0) {
-            await saveVideoChunk();
+            chunkUrl = await saveVideoChunk();
+            console.log('Video chunk saved for approved event, URL:', chunkUrl);
           }
           
-          // Generate clip if video chunk is available
-          if (latestVideoChunkUrl) {
-            generateClipForEvent(event, latestVideoChunkUrl);
+          // Generate clip using the returned URL (not stale state)
+          const videoUrl = chunkUrl || latestVideoChunkUrl;
+          if (videoUrl) {
+            console.log('Generating clip for approved event with URL:', videoUrl);
+            generateClipForEvent(event, videoUrl);
+          } else {
+            console.log('No video URL available for clip generation');
           }
 
-          // Trigger live analysis
+          // Trigger live analysis immediately
+          console.log('Triggering live analysis for approved event:', event.type);
           triggerLiveAnalysis(event);
         } catch (error) {
           console.error("Error saving approved event:", error);

@@ -1,5 +1,4 @@
 import { useRef, useState, useEffect, useCallback } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
 import { useLiveBroadcastContext } from "@/contexts/LiveBroadcastContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -23,8 +22,6 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export function FloatingLivePlayer() {
-  const navigate = useNavigate();
-  const location = useLocation();
   const {
     isRecording,
     isPaused,
@@ -33,7 +30,6 @@ export function FloatingLivePlayer() {
     currentScore,
     pauseRecording,
     resumeRecording,
-    stopRecording,
     finishMatch,
   } = useLiveBroadcastContext();
 
@@ -95,11 +91,16 @@ export function FloatingLivePlayer() {
     };
   }, [isDragging, handleMouseMove, handleMouseUp]);
 
-  // Navigate to live page on double click
+  // Navigate to live page on double click - use window.location since we're outside Router
   const handleDoubleClick = () => {
-    if (location.pathname !== '/live') {
-      navigate('/live');
+    if (window.location.pathname !== '/live') {
+      window.location.href = '/live';
     }
+  };
+
+  // Navigate to live page
+  const goToLive = () => {
+    window.location.href = '/live';
   };
 
   // Handle stop recording
@@ -110,16 +111,34 @@ export function FloatingLivePlayer() {
   const handleConfirmStop = async () => {
     setShowStopConfirm(false);
     await finishMatch();
-    navigate('/matches');
+    window.location.href = '/matches';
   };
+
+  // Check if we're on live page using window.location
+  const [isOnLivePage, setIsOnLivePage] = useState(false);
+  
+  useEffect(() => {
+    const checkPath = () => {
+      setIsOnLivePage(window.location.pathname === '/live');
+    };
+    
+    checkPath();
+    
+    // Listen for popstate (back/forward navigation)
+    window.addEventListener('popstate', checkPath);
+    
+    // Periodic check for navigation
+    const interval = setInterval(checkPath, 500);
+    
+    return () => {
+      window.removeEventListener('popstate', checkPath);
+      clearInterval(interval);
+    };
+  }, []);
 
   // Don't show if not recording or already on live page
   if (!isRecording) return null;
-  
-  // Show minimal badge on live page
-  if (location.pathname === '/live') {
-    return null;
-  }
+  if (isOnLivePage) return null;
 
   return (
     <>
@@ -214,7 +233,7 @@ export function FloatingLivePlayer() {
                 <Button
                   variant="arena"
                   size="sm"
-                  onClick={() => navigate('/live')}
+                  onClick={goToLive}
                   className="flex-1"
                 >
                   Ir para Live
