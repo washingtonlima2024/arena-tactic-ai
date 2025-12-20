@@ -165,6 +165,9 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const isGeneratingClipRef = useRef(false);
   
+  // CRITICAL: Ref to access current recording time in closures (fixes stale closure bug)
+  const recordingTimeRef = useRef(0);
+  
   // Ref to hold addDetectedEvent function (to avoid circular dependency in processAudioChunk)
   const addDetectedEventRef = useRef<((eventData: {
     type: string;
@@ -228,11 +231,15 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [transcriptBuffer]);
 
-  // Timer effect
+  // Timer effect - also updates recordingTimeRef for use in closures
   useEffect(() => {
     if (isRecording && !isPaused) {
       timerRef.current = setInterval(() => {
-        setRecordingTime((prev) => prev + 1);
+        setRecordingTime((prev) => {
+          const newTime = prev + 1;
+          recordingTimeRef.current = newTime; // Keep ref synced for closures
+          return newTime;
+        });
       }, 1000);
     } else {
       if (timerRef.current) {
@@ -508,12 +515,15 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         if (event.data.size > 0) {
           videoChunksRef.current.push(event.data);
           
+          // CRITICAL: Use ref to get current recording time (fixes stale closure)
+          const currentTime = recordingTimeRef.current;
+          
           // Add chunk to segment buffer with current recording time
           if (segmentBufferRef.current) {
-            segmentBufferRef.current.addChunk(event.data, recordingTime);
+            segmentBufferRef.current.addChunk(event.data, currentTime);
           }
           
-          console.log(`Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${recordingTime}s`);
+          console.log(`Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s, chunks: ${videoChunksRef.current.length}`);
         }
       };
 
@@ -548,7 +558,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         variant: "destructive",
       });
     }
-  }, [isRecording, isPaused, toast, saveVideoChunk, initializeSegmentBuffer, recordingTime]);
+  }, [isRecording, isPaused, toast, saveVideoChunk, initializeSegmentBuffer]);
 
   // Save recorded video
   const saveRecordedVideo = useCallback(async (matchId: string): Promise<string | null> => {
@@ -799,12 +809,15 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         if (event.data.size > 0) {
           videoChunksRef.current.push(event.data);
           
+          // CRITICAL: Use ref to get current recording time (fixes stale closure)
+          const currentTime = recordingTimeRef.current;
+          
           // Add chunk to segment buffer with current recording time
           if (segmentBufferRef.current) {
-            segmentBufferRef.current.addChunk(event.data, recordingTime);
+            segmentBufferRef.current.addChunk(event.data, currentTime);
           }
           
-          console.log(`[CameraStream] Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${recordingTime}s`);
+          console.log(`[CameraStream] Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s, chunks: ${videoChunksRef.current.length}`);
         }
       };
 
@@ -844,7 +857,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         variant: "destructive",
       });
     }
-  }, [toast, saveVideoChunk, initializeSegmentBuffer, recordingTime]);
+  }, [toast, saveVideoChunk, initializeSegmentBuffer]);
 
   // Start recording - Now accepts existingMatchId to continue existing match
   const startRecording = useCallback(async (videoElement?: HTMLVideoElement | null, existingMatchId?: string | null) => {
@@ -990,6 +1003,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       // Only reset if new match
       if (!existingMatchId) {
         setRecordingTime(0);
+        recordingTimeRef.current = 0; // CRITICAL: Reset ref too
         setTranscriptBuffer("");
         setTranscriptChunks([]);
       }
@@ -1140,6 +1154,14 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           if (segment) {
             relativeStartSeconds = Math.max(0, startTimeSeconds - segment.startTime);
           }
+        } else if (videoChunksRef.current.length > 0) {
+          // FALLBACK: Use raw video chunks if segment buffer is empty
+          console.log(`[ClipGen] Segment buffer empty, using raw videoChunks (${videoChunksRef.current.length} chunks)`);
+          const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
+          const rawBlob = new Blob(videoChunksRef.current, { type: mimeType });
+          const arrayBuffer = await rawBlob.arrayBuffer();
+          videoData = new Uint8Array(arrayBuffer);
+          relativeStartSeconds = startTimeSeconds; // Use absolute time for raw chunks
         } else if (videoUrl) {
           console.log(`[ClipGen] Segment buffer empty, falling back to URL: ${videoUrl}`);
           videoData = await fetchFile(videoUrl);
@@ -1148,6 +1170,13 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           isGeneratingClipRef.current = false;
           return;
         }
+      } else if (videoChunksRef.current.length > 0) {
+        // FALLBACK: No segment buffer, use raw chunks
+        console.log(`[ClipGen] No segment buffer, using raw videoChunks (${videoChunksRef.current.length} chunks)`);
+        const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
+        const rawBlob = new Blob(videoChunksRef.current, { type: mimeType });
+        const arrayBuffer = await rawBlob.arrayBuffer();
+        videoData = new Uint8Array(arrayBuffer);
       } else if (videoUrl) {
         console.log(`[ClipGen] Using video URL: ${videoUrl}`);
         videoData = await fetchFile(videoUrl);
