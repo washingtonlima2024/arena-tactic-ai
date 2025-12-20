@@ -4,6 +4,8 @@ import { OrbitControls, PerspectiveCamera, Line, Text } from '@react-three/drei'
 import * as THREE from 'three';
 import { FIFA_FIELD, FIELD_CALCULATIONS } from '@/constants/fieldDimensions';
 import { cn } from '@/lib/utils';
+import { WebGLWrapper } from '@/components/ui/WebGLWrapper';
+import { OfficialFootballField } from './OfficialFootballField';
 
 interface OfficialField3DProps {
   className?: string;
@@ -495,8 +497,21 @@ export function OfficialField3D({
 }: OfficialField3DProps) {
   const preset = CAMERA_PRESETS[cameraPreset];
 
+  const fallback = (
+    <div className={cn("w-full h-[500px] rounded-xl overflow-hidden", className)}>
+      <OfficialFootballField theme="grass" className="w-full h-full" />
+      <div className="absolute bottom-4 left-4 bg-background/80 backdrop-blur-sm rounded-lg px-3 py-2 text-xs">
+        <div className="font-semibold text-foreground">Campo FIFA (2D)</div>
+        <div className="text-muted-foreground">WebGL não disponível</div>
+      </div>
+    </div>
+  );
+
   return (
-    <div className={cn("w-full h-[500px] rounded-xl overflow-hidden bg-muted/30", className)}>
+    <WebGLWrapper 
+      className={cn("w-full h-[500px] rounded-xl overflow-hidden bg-muted/30 relative", className)}
+      fallback={fallback}
+    >
       <Canvas shadows>
         <PerspectiveCamera
           makeDefault
@@ -538,6 +553,6 @@ export function OfficialField3D({
         <div className="font-semibold text-foreground">Campo FIFA Oficial</div>
         <div className="text-muted-foreground">105m × 68m • Escala 1:1</div>
       </div>
-    </div>
+    </WebGLWrapper>
   );
 }
