@@ -183,7 +183,7 @@ export function ProjectSelector() {
                         {match.competition}
                       </span>
                     )}
-                    {match.match_date && (
+                    {match.match_date && !isNaN(new Date(match.match_date).getTime()) && (
                       <span className="flex items-center gap-1">
                         <Calendar className="h-3 w-3" />
                         {format(new Date(match.match_date), 'dd/MM', { locale: ptBR })}
