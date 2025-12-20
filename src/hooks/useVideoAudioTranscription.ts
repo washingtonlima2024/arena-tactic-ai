@@ -4,11 +4,12 @@ import { supabase } from "@/integrations/supabase/client";
 interface UseVideoAudioTranscriptionOptions {
   onTranscript?: (text: string) => void;
   onPartialTranscript?: (text: string) => void;
-  chunkDurationMs?: number; // How often to send audio chunks (default: 10 seconds)
+  chunkDurationMs?: number;
+  language?: string; // ISO language code: 'pt', 'es', 'en'
 }
 
 export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOptions = {}) => {
-  const { onTranscript, onPartialTranscript, chunkDurationMs = 10000 } = options;
+  const { onTranscript, onPartialTranscript, chunkDurationMs = 10000, language = "pt" } = options;
 
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -84,10 +85,10 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
       }
       const base64Audio = btoa(binary);
 
-      console.log("Sending audio chunk to Whisper:", audioBlob.size, "bytes");
+      console.log("Sending audio chunk to Whisper:", audioBlob.size, "bytes, language:", language);
 
       const { data, error: fnError } = await supabase.functions.invoke("transcribe-audio", {
-        body: { audio: base64Audio },
+        body: { audio: base64Audio, language },
       });
 
       if (fnError) {
@@ -145,7 +146,7 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
       setPartialTranscript("");
       onPartialTranscript?.("");
     }
-  }, [onTranscript, onPartialTranscript]);
+  }, [onTranscript, onPartialTranscript, language]);
 
   // Connect to video element and start capturing audio
   const connect = useCallback(async (videoElement: HTMLVideoElement) => {

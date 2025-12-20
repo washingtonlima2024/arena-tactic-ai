@@ -83,7 +83,7 @@ serve(async (req) => {
   }
 
   try {
-    const { audio } = await req.json();
+    const { audio, language = 'pt' } = await req.json();
     
     if (!audio) {
       console.error('No audio data provided');
@@ -103,7 +103,7 @@ serve(async (req) => {
     }
 
     console.log('Processing audio transcription...');
-    console.log('Audio base64 length:', audio.length);
+    console.log('Audio base64 length:', audio.length, 'Language:', language);
 
     // Decode base64 to binary first
     const binaryAudio = base64ToUint8Array(audio);
@@ -131,7 +131,7 @@ serve(async (req) => {
     const file = createAudioFile(binaryAudio, `recording.${extension}`, mimeType);
     formData.append('file', file);
     formData.append('model', 'whisper-1');
-    formData.append('language', 'pt'); // Portuguese
+    formData.append('language', language); // Dynamic language
     formData.append('response_format', 'json');
 
     console.log('Sending to OpenAI Whisper API with file:', `recording.${extension}`, 'size:', binaryAudio.length);
@@ -157,7 +157,7 @@ serve(async (req) => {
         const retryFile = createAudioFile(binaryAudio, 'recording.ogg', 'audio/ogg');
         retryFormData.append('file', retryFile);
         retryFormData.append('model', 'whisper-1');
-        retryFormData.append('language', 'pt');
+        retryFormData.append('language', language);
         retryFormData.append('response_format', 'json');
         
         const retryResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
@@ -183,7 +183,7 @@ serve(async (req) => {
         const mp3File = createAudioFile(binaryAudio, 'recording.mp3', 'audio/mpeg');
         mp3FormData.append('file', mp3File);
         mp3FormData.append('model', 'whisper-1');
-        mp3FormData.append('language', 'pt');
+        mp3FormData.append('language', language);
         mp3FormData.append('response_format', 'json');
         
         const mp3Response = await fetch('https://api.openai.com/v1/audio/transcriptions', {

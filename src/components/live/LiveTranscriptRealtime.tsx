@@ -1,12 +1,19 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Clock, Loader2, Mic, Wifi, WifiOff, Save, CheckCircle, Zap, Video } from "lucide-react";
+import { FileText, Clock, Loader2, Mic, Wifi, WifiOff, Save, CheckCircle, Zap, Video, Globe } from "lucide-react";
 import { useElevenLabsScribe } from "@/hooks/useElevenLabsScribe";
 import { useVideoAudioTranscription } from "@/hooks/useVideoAudioTranscription";
 import { TranscriptChunk } from "@/hooks/useLiveBroadcast";
 import { supabase } from "@/integrations/supabase/client";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+
+const LANGUAGES = [
+  { code: "pt", label: "Português", flag: "🇧🇷" },
+  { code: "es", label: "Español", flag: "🇪🇸" },
+  { code: "en", label: "English", flag: "🇺🇸" },
+] as const;
 
 interface ExtractedEvent {
   type: string;
@@ -39,6 +46,7 @@ export const LiveTranscriptRealtime = ({
 }: LiveTranscriptRealtimeProps) => {
   // Audio source: "mic" for microphone (ElevenLabs), "video" for video audio (Whisper)
   const [audioSource, setAudioSource] = useState<"mic" | "video">("mic");
+  const [transcriptionLanguage, setTranscriptionLanguage] = useState<string>("pt");
   
   // Use useState instead of useRef for re-rendering
   const [chunks, setChunks] = useState<TranscriptChunk[]>([]);
@@ -223,7 +231,8 @@ export const LiveTranscriptRealtime = ({
     onPartialTranscript: (text) => {
       // Handled by hook
     },
-    chunkDurationMs: 10000, // Send chunks every 10 seconds
+    chunkDurationMs: 10000,
+    language: transcriptionLanguage,
   });
 
   // Connect/disconnect based on recording state and audio source
@@ -283,27 +292,51 @@ export const LiveTranscriptRealtime = ({
           Transcrição Ao Vivo
         </h3>
         
-        {/* Audio Source Toggle */}
-        <ToggleGroup
-          type="single"
-          value={audioSource}
-          onValueChange={(value) => value && setAudioSource(value as "mic" | "video")}
-          disabled={isRecording}
-          className="h-8"
-        >
-          <ToggleGroupItem value="mic" className="text-xs px-2 h-7 gap-1">
-            <Mic className="h-3 w-3" />
-            Microfone
-          </ToggleGroupItem>
-          <ToggleGroupItem 
-            value="video" 
-            className="text-xs px-2 h-7 gap-1"
-            disabled={!videoElement}
+        <div className="flex items-center gap-2">
+          {/* Language Selector (only for video/Whisper mode) */}
+          {audioSource === "video" && (
+            <Select
+              value={transcriptionLanguage}
+              onValueChange={setTranscriptionLanguage}
+              disabled={isRecording}
+            >
+              <SelectTrigger className="w-[110px] h-7 text-xs">
+                <Globe className="h-3 w-3 mr-1" />
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {LANGUAGES.map((lang) => (
+                  <SelectItem key={lang.code} value={lang.code} className="text-xs">
+                    <span className="mr-1">{lang.flag}</span>
+                    {lang.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+
+          {/* Audio Source Toggle */}
+          <ToggleGroup
+            type="single"
+            value={audioSource}
+            onValueChange={(value) => value && setAudioSource(value as "mic" | "video")}
+            disabled={isRecording}
+            className="h-8"
           >
-            <Video className="h-3 w-3" />
-            Áudio do Vídeo
-          </ToggleGroupItem>
-        </ToggleGroup>
+            <ToggleGroupItem value="mic" className="text-xs px-2 h-7 gap-1">
+              <Mic className="h-3 w-3" />
+              Microfone
+            </ToggleGroupItem>
+            <ToggleGroupItem 
+              value="video" 
+              className="text-xs px-2 h-7 gap-1"
+              disabled={!videoElement}
+            >
+              <Video className="h-3 w-3" />
+              Áudio do Vídeo
+            </ToggleGroupItem>
+          </ToggleGroup>
+        </div>
       </div>
 
       {/* Status Badges */}
