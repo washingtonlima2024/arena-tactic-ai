@@ -1,31 +1,21 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 import { 
   Play, 
-  Pause, 
-  SkipBack, 
-  SkipForward, 
-  Volume2, 
-  VolumeX,
-  Maximize2,
-  X,
-  Film
+  Film,
+  Video
 } from 'lucide-react';
-import { LiveEvent } from '@/hooks/useLiveBroadcast';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
+import { LiveEvent, VideoChunk } from '@/contexts/LiveBroadcastContext';
+import { LiveEventReplayModal } from './LiveEventReplayModal';
 
 interface LiveEventPlayerProps {
   events: LiveEvent[];
   videoElement: HTMLVideoElement | null;
   recordingTime: number;
   isRecording: boolean;
+  getClipChunks: (startTime: number, endTime: number) => VideoChunk[];
 }
 
 const getEventIcon = (type: string) => {
@@ -78,16 +68,11 @@ const getEventLabel = (type: string) => {
 
 export function LiveEventPlayer({ 
   events, 
-  videoElement, 
   recordingTime,
-  isRecording 
+  getClipChunks 
 }: LiveEventPlayerProps) {
   const [selectedEvent, setSelectedEvent] = useState<LiveEvent | null>(null);
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [isMuted, setIsMuted] = useState(true);
-  const [showFullscreen, setShowFullscreen] = useState(false);
-  const playerRef = useRef<HTMLVideoElement>(null);
-  const clipVideoRef = useRef<HTMLVideoElement>(null);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   // Sort events by time (most recent first) - handle undefined timestamps safely
   const sortedEvents = [...events]
@@ -98,25 +83,11 @@ export function LiveEventPlayer({
       return timestampB - timestampA;
     });
 
-  // Handle event click - seek video to that timestamp
+  // Handle event click - open modal to play clip
   const handleEventClick = (event: LiveEvent) => {
-    try {
-      setSelectedEvent(event);
-      
-      if (videoElement && event.recordingTimestamp !== undefined && event.recordingTimestamp !== null) {
-        // Calculate the offset - go back 5 seconds before the event
-        const seekTime = Math.max(0, event.recordingTimestamp - 5);
-        
-        // If the video is a live stream, we can't seek
-        // But if it's a recorded video element, we might be able to
-        if (videoElement.duration && !isNaN(videoElement.duration) && isFinite(videoElement.duration)) {
-          videoElement.currentTime = Math.min(seekTime, videoElement.duration);
-          videoElement.play().catch(err => console.warn('Não foi possível reproduzir:', err));
-        }
-      }
-    } catch (error) {
-      console.warn('Erro ao selecionar evento:', error);
-    }
+    console.log('[LiveEventPlayer] Event clicked:', event.type, event.recordingTimestamp);
+    setSelectedEvent(event);
+    setIsModalOpen(true);
   };
 
   // Format timestamp for display
@@ -137,6 +108,9 @@ export function LiveEventPlayer({
     return `há ${Math.floor(diff / 3600)}h`;
   };
 
+  // Count events with clips available
+  const eventsWithClips = sortedEvents.filter(e => e.clipUrl || e.recordingTimestamp !== undefined).length;
+
   if (events.length === 0) {
     return null;
   }
@@ -149,162 +123,89 @@ export function LiveEventPlayer({
             <Film className="h-5 w-5 text-primary" />
             Replay de Eventos
           </h3>
-          <Badge variant="outline" className="text-xs">
-            {events.length} clip{events.length !== 1 ? 's' : ''}
-          </Badge>
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="text-xs flex items-center gap-1">
+              <Video className="h-3 w-3" />
+              {eventsWithClips} clip{eventsWithClips !== 1 ? 's' : ''}
+            </Badge>
+          </div>
         </div>
 
-        {/* Mini Player */}
-        {selectedEvent && (
-          <div className="mb-4 rounded-lg overflow-hidden bg-black/50 aspect-video relative">
-            <div className="absolute inset-0 flex items-center justify-center">
-              <div className="text-center">
-                <span className="text-4xl mb-2 block">{getEventIcon(selectedEvent.type)}</span>
-                <p className="text-white font-semibold">{getEventLabel(selectedEvent.type)}</p>
-                <p className="text-white/70 text-sm">
-                  {formatTimestamp(selectedEvent.recordingTimestamp || 0)}
-                </p>
-                <p className="text-white/50 text-xs mt-1">{selectedEvent.description}</p>
-              </div>
-            </div>
-
-            {/* Controls Overlay */}
-            <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/80 to-transparent p-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8 text-white hover:bg-white/20"
-                    onClick={() => {
-                      const idx = sortedEvents.findIndex(e => e.id === selectedEvent.id);
-                      if (idx < sortedEvents.length - 1) {
-                        handleEventClick(sortedEvents[idx + 1]);
-                      }
-                    }}
-                  >
-                    <SkipBack className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8 text-white hover:bg-white/20"
-                    onClick={() => setIsPlaying(!isPlaying)}
-                  >
-                    {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8 text-white hover:bg-white/20"
-                    onClick={() => {
-                      const idx = sortedEvents.findIndex(e => e.id === selectedEvent.id);
-                      if (idx > 0) {
-                        handleEventClick(sortedEvents[idx - 1]);
-                      }
-                    }}
-                  >
-                    <SkipForward className="h-4 w-4" />
-                  </Button>
-                </div>
-                <div className="flex items-center gap-1">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8 text-white hover:bg-white/20"
-                    onClick={() => setIsMuted(!isMuted)}
-                  >
-                    {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-8 w-8 text-white hover:bg-white/20"
-                    onClick={() => setShowFullscreen(true)}
-                  >
-                    <Maximize2 className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-            </div>
-
-            {/* Close button */}
-            <Button
-              size="icon"
-              variant="ghost"
-              className="absolute top-2 right-2 h-6 w-6 text-white hover:bg-white/20"
-              onClick={() => setSelectedEvent(null)}
-            >
-              <X className="h-3 w-3" />
-            </Button>
-          </div>
-        )}
+        {/* Info Banner */}
+        <div className="mb-3 p-2 rounded-lg bg-primary/10 border border-primary/20">
+          <p className="text-xs text-primary">
+            Clique em um evento para assistir o replay em tempo real
+          </p>
+        </div>
 
         {/* Events Timeline */}
-        <ScrollArea className="h-[200px]">
+        <ScrollArea className="h-[250px]">
           <div className="space-y-2 pr-2">
-            {sortedEvents.map((event, index) => (
-              <button
-                key={event.id}
-                onClick={() => handleEventClick(event)}
-                className={`w-full p-2 rounded-lg border transition-all text-left hover:scale-[1.02] ${
-                  selectedEvent?.id === event.id
-                    ? 'bg-primary/20 border-primary/50 ring-1 ring-primary/30'
-                    : 'bg-muted/30 border-border/50 hover:bg-muted/50'
-                }`}
-              >
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">{getEventIcon(event.type)}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <span className="font-medium text-sm">{getEventLabel(event.type)}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {formatTimestamp(event.recordingTimestamp || 0)}
+            {sortedEvents.map((event) => {
+              const hasClip = event.clipUrl || event.recordingTimestamp !== undefined;
+              
+              return (
+                <button
+                  key={event.id}
+                  onClick={() => handleEventClick(event)}
+                  disabled={!hasClip}
+                  className={`w-full p-3 rounded-lg border transition-all text-left hover:scale-[1.02] ${
+                    hasClip
+                      ? 'bg-muted/30 border-border/50 hover:bg-muted/50 hover:border-primary/30 cursor-pointer'
+                      : 'bg-muted/10 border-border/30 opacity-50 cursor-not-allowed'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="text-xl">{getEventIcon(event.type)}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-0.5">
+                        <span className="font-medium text-sm">{getEventLabel(event.type)}</span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatTimestamp(event.recordingTimestamp || 0)}
+                        </span>
+                      </div>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {event.description}
+                      </p>
+                    </div>
+                    <div className="flex flex-col items-end gap-1">
+                      <Badge 
+                        variant={event.clipUrl ? 'default' : 'secondary'} 
+                        className="text-[10px] px-1.5"
+                      >
+                        {event.clipUrl ? 'Salvo' : 'Memória'}
+                      </Badge>
+                      <span className="text-[10px] text-muted-foreground">
+                        {getRelativeTime(event.recordingTimestamp || 0)}
                       </span>
                     </div>
-                    <p className="text-xs text-muted-foreground truncate">
-                      {event.description}
-                    </p>
+                    {hasClip && (
+                      <Button 
+                        size="icon" 
+                        variant="ghost" 
+                        className="h-8 w-8 text-primary hover:bg-primary/10 shrink-0"
+                      >
+                        <Play className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
-                  <div className="flex items-center gap-1">
-                    <Badge variant="secondary" className="text-[10px] px-1.5">
-                      {getRelativeTime(event.recordingTimestamp || 0)}
-                    </Badge>
-                    <Play className="h-3 w-3 text-primary" />
-                  </div>
-                </div>
-              </button>
-            ))}
+                </button>
+              );
+            })}
           </div>
         </ScrollArea>
       </div>
 
-      {/* Fullscreen Dialog */}
-      <Dialog open={showFullscreen} onOpenChange={setShowFullscreen}>
-        <DialogContent className="max-w-4xl p-0 overflow-hidden">
-          <DialogHeader className="p-4 pb-0">
-            <DialogTitle className="flex items-center gap-2">
-              <span className="text-xl">{selectedEvent && getEventIcon(selectedEvent.type)}</span>
-              {selectedEvent && getEventLabel(selectedEvent.type)}
-              <span className="text-muted-foreground font-normal text-sm">
-                {selectedEvent && formatTimestamp(selectedEvent.recordingTimestamp || 0)}
-              </span>
-            </DialogTitle>
-          </DialogHeader>
-          <div className="aspect-video bg-black flex items-center justify-center">
-            {selectedEvent && (
-              <div className="text-center">
-                <span className="text-6xl mb-4 block">{getEventIcon(selectedEvent.type)}</span>
-                <p className="text-white text-xl font-semibold">{getEventLabel(selectedEvent.type)}</p>
-                <p className="text-white/70 mt-2">{selectedEvent.description}</p>
-                <p className="text-white/50 text-sm mt-4">
-                  Clique no vídeo principal para ver o replay
-                </p>
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Replay Modal */}
+      <LiveEventReplayModal
+        event={selectedEvent}
+        isOpen={isModalOpen}
+        onClose={() => {
+          setIsModalOpen(false);
+          setSelectedEvent(null);
+        }}
+        getClipChunks={getClipChunks}
+      />
     </>
   );
 }
