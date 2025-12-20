@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { VideoSegmentBuffer, VideoSegment, calculateClipWindow } from '@/utils/videoSegmentBuffer';
 
 export interface MatchInfo {
   homeTeam: string;
@@ -141,6 +142,10 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   
   // NEW: Latest video chunk URL for real-time clip generation
   const [latestVideoChunkUrl, setLatestVideoChunkUrl] = useState<string | null>(null);
+  
+  // NEW: Segment buffer for 5-minute segment recording
+  const segmentBufferRef = useRef<VideoSegmentBuffer | null>(null);
+  const [segmentCount, setSegmentCount] = useState(0);
 
   // Refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -156,6 +161,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   const animationFrameRef = useRef<number | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const chunkSaveIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const segmentSaveIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const isGeneratingClipRef = useRef(false);
   
@@ -274,6 +280,66 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     saveScoreToDatabase();
   }, [currentScore, isRecording]);
 
+  // Upload a video segment to storage
+  const uploadSegment = useCallback(async (segment: VideoSegment): Promise<string | null> => {
+    const matchId = tempMatchIdRef.current;
+    if (!matchId || !segment.blob) return null;
+    
+    try {
+      const filePath = `live-segments/${matchId}/${segment.id}.webm`;
+      console.log(`[SegmentUpload] Uploading segment ${segment.id}, size: ${(segment.blob.size / 1024 / 1024).toFixed(2)}MB`);
+      
+      const { error: uploadError } = await supabase.storage
+        .from('match-videos')
+        .upload(filePath, segment.blob, {
+          contentType: 'video/webm',
+          upsert: true
+        });
+
+      if (uploadError) {
+        console.error('[SegmentUpload] Upload error:', uploadError);
+        return null;
+      }
+
+      const { data: urlData } = supabase.storage
+        .from('match-videos')
+        .getPublicUrl(filePath);
+      
+      segment.url = urlData.publicUrl;
+      setSegmentCount(prev => prev + 1);
+      console.log(`[SegmentUpload] Segment uploaded: ${urlData.publicUrl}`);
+      
+      toast({
+        title: "Segmento salvo",
+        description: `Segmento ${segmentCount + 1} salvo com sucesso`,
+        duration: 2000,
+      });
+      
+      return urlData.publicUrl;
+    } catch (error) {
+      console.error('[SegmentUpload] Error:', error);
+      return null;
+    }
+  }, [segmentCount, toast]);
+
+  // Initialize segment buffer with upload callback
+  const initializeSegmentBuffer = useCallback(() => {
+    if (segmentBufferRef.current) return;
+    
+    segmentBufferRef.current = new VideoSegmentBuffer(
+      {
+        segmentDurationMs: 5 * 60 * 1000, // 5 minutes
+        overlapDurationMs: 1 * 60 * 1000, // 1 minute overlap
+        maxSegments: 3,
+      },
+      async (segment) => {
+        await uploadSegment(segment);
+      }
+    );
+    
+    console.log('[SegmentBuffer] Initialized with 5-minute segments and 1-minute overlap');
+  }, [uploadSegment]);
+
   // NEW: Save video chunks periodically for real-time clip generation
   // Returns the URL directly to avoid race condition with state
   const saveVideoChunk = useCallback(async (): Promise<string | null> => {
@@ -375,7 +441,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [matchInfo, toast]);
 
-  // Start video recording
+  // Start video recording with segment buffer
   const startVideoRecording = useCallback((videoElement: HTMLVideoElement) => {
     try {
       const canvas = document.createElement('canvas');
@@ -386,6 +452,12 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       videoElementRef.current = videoElement;
 
       console.log(`Starting video recording: ${canvas.width}x${canvas.height}`);
+      
+      // Initialize segment buffer for 5-minute segments
+      initializeSegmentBuffer();
+      segmentBufferRef.current?.start(Date.now());
+      setSegmentCount(0);
+      
       // NOTE: Always draw frames, even before isRecording is true
       // This ensures we capture video from the very start
       const drawFrame = () => {
@@ -435,7 +507,13 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       videoRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           videoChunksRef.current.push(event.data);
-          console.log(`Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB`);
+          
+          // Add chunk to segment buffer with current recording time
+          if (segmentBufferRef.current) {
+            segmentBufferRef.current.addChunk(event.data, recordingTime);
+          }
+          
+          console.log(`Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${recordingTime}s`);
         }
       };
 
@@ -444,7 +522,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       };
 
       videoRecorderRef.current = videoRecorder;
-      videoRecorder.start(5000);
+      videoRecorder.start(5000); // 5-second chunks
       setIsRecordingVideo(true);
 
       // Start periodic chunk saving for clip generation (every 20 seconds)
@@ -460,7 +538,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         }
       }, 10000);
 
-      console.log('Video recording started with mimeType:', selectedMimeType || 'default');
+      console.log('Video recording started with segment buffer, mimeType:', selectedMimeType || 'default');
 
     } catch (error) {
       console.error('Error starting video recording:', error);
@@ -470,7 +548,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         variant: "destructive",
       });
     }
-  }, [isRecording, isPaused, toast, saveVideoChunk]);
+  }, [isRecording, isPaused, toast, saveVideoChunk, initializeSegmentBuffer, recordingTime]);
 
   // Save recorded video
   const saveRecordedVideo = useCallback(async (matchId: string): Promise<string | null> => {
@@ -546,8 +624,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [recordingTime, toast]);
 
-  // Stop video recording
-  const stopVideoRecording = useCallback(() => {
+  // Stop video recording and flush segment buffer
+  const stopVideoRecording = useCallback(async () => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
       animationFrameRef.current = null;
@@ -561,9 +639,20 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       clearInterval(chunkSaveIntervalRef.current);
       chunkSaveIntervalRef.current = null;
     }
+    
+    if (segmentSaveIntervalRef.current) {
+      clearInterval(segmentSaveIntervalRef.current);
+      segmentSaveIntervalRef.current = null;
+    }
+    
+    // Flush any remaining segment data
+    if (segmentBufferRef.current) {
+      console.log('[SegmentBuffer] Flushing remaining segments...');
+      await segmentBufferRef.current.flush();
+    }
 
     setIsRecordingVideo(false);
-    console.log('Video recording stopped');
+    console.log('Video recording stopped, segments flushed');
   }, []);
 
   // Process audio chunk
@@ -920,70 +1009,113 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     return ffmpeg;
   }, []);
 
-  // Generate clip for event using FFmpeg
-  const generateClipForEvent = useCallback(async (event: LiveEvent, videoUrl: string) => {
+  // Generate clip for event using FFmpeg - now supports both URL and segment buffer
+  const generateClipForEvent = useCallback(async (event: LiveEvent, videoUrl?: string) => {
     const matchId = tempMatchIdRef.current;
-    if (!matchId || !videoUrl || isGeneratingClipRef.current) return;
+    if (!matchId || isGeneratingClipRef.current) return;
     
     isGeneratingClipRef.current = true;
-    console.log(`Generating clip for event ${event.id}...`);
+    console.log(`[ClipGen] Generating clip for event ${event.id} at ${event.recordingTimestamp}s...`);
     
     try {
       const ffmpeg = await loadFFmpeg();
       
-      // Calculate timestamps (3s before, 5s after)
+      // Calculate timestamps (5s before, 5s after)
       const eventSeconds = event.recordingTimestamp || (event.minute * 60 + event.second);
-      const startTimeSeconds = Math.max(0, eventSeconds - 3);
-      const durationSeconds = 8;
+      const { start: startTimeSeconds, duration: durationSeconds } = calculateClipWindow(eventSeconds, 5, 5);
       
-      // Download the video chunk
-      const videoData = await fetchFile(videoUrl);
-      await ffmpeg.writeFile('input.mp4', videoData);
+      let videoData: Uint8Array;
+      let relativeStartSeconds = startTimeSeconds;
       
-      // Convert ms to FFmpeg timestamp
-      const hours = Math.floor(startTimeSeconds / 3600);
-      const minutes = Math.floor((startTimeSeconds % 3600) / 60);
-      const seconds = startTimeSeconds % 60;
+      // Try to use segment buffer first (for real-time clips)
+      if (segmentBufferRef.current) {
+        const segment = segmentBufferRef.current.getSegmentForTime(eventSeconds);
+        const videoBlob = segmentBufferRef.current.getBlobForTimeRange(startTimeSeconds, startTimeSeconds + durationSeconds);
+        
+        if (videoBlob && videoBlob.size > 1000) {
+          console.log(`[ClipGen] Using segment buffer, blob size: ${(videoBlob.size / 1024).toFixed(1)}KB`);
+          const arrayBuffer = await videoBlob.arrayBuffer();
+          videoData = new Uint8Array(arrayBuffer);
+          
+          // Calculate relative start within segment
+          if (segment) {
+            relativeStartSeconds = Math.max(0, startTimeSeconds - segment.startTime);
+          }
+        } else if (videoUrl) {
+          console.log(`[ClipGen] Segment buffer empty, falling back to URL: ${videoUrl}`);
+          videoData = await fetchFile(videoUrl);
+        } else {
+          console.warn('[ClipGen] No video data available');
+          isGeneratingClipRef.current = false;
+          return;
+        }
+      } else if (videoUrl) {
+        console.log(`[ClipGen] Using video URL: ${videoUrl}`);
+        videoData = await fetchFile(videoUrl);
+      } else {
+        console.warn('[ClipGen] No video source available');
+        isGeneratingClipRef.current = false;
+        return;
+      }
+      
+      await ffmpeg.writeFile('input.webm', videoData);
+      
+      // Convert seconds to FFmpeg timestamp
+      const hours = Math.floor(relativeStartSeconds / 3600);
+      const minutes = Math.floor((relativeStartSeconds % 3600) / 60);
+      const seconds = relativeStartSeconds % 60;
       const startTimestamp = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toFixed(3).padStart(6, '0')}`;
+      
+      console.log(`[ClipGen] Extracting from ${startTimestamp} for ${durationSeconds}s`);
       
       // Extract clip
       await ffmpeg.exec([
         '-ss', startTimestamp,
-        '-i', 'input.mp4',
+        '-i', 'input.webm',
         '-t', durationSeconds.toString(),
-        '-c', 'copy',
+        '-c:v', 'libvpx-vp9',
+        '-c:a', 'libopus',
+        '-b:v', '1M',
         '-avoid_negative_ts', 'make_zero',
-        'output.mp4'
+        'output.webm'
       ]);
       
       // Read output
-      const clipData = await ffmpeg.readFile('output.mp4');
+      const clipData = await ffmpeg.readFile('output.webm');
       let clipBlob: Blob;
       if (clipData instanceof Uint8Array) {
-        // Create a new ArrayBuffer and copy the data
         const buffer = new ArrayBuffer(clipData.length);
         const view = new Uint8Array(buffer);
         view.set(clipData);
-        clipBlob = new Blob([buffer], { type: 'video/mp4' });
+        clipBlob = new Blob([buffer], { type: 'video/webm' });
       } else {
-        clipBlob = new Blob([clipData as BlobPart], { type: 'video/mp4' });
+        clipBlob = new Blob([clipData as BlobPart], { type: 'video/webm' });
       }
       
       // Clean up
-      await ffmpeg.deleteFile('input.mp4');
-      await ffmpeg.deleteFile('output.mp4');
+      await ffmpeg.deleteFile('input.webm');
+      await ffmpeg.deleteFile('output.webm');
+      
+      if (clipBlob.size < 500) {
+        console.warn('[ClipGen] Generated clip too small, likely failed');
+        isGeneratingClipRef.current = false;
+        return;
+      }
+      
+      console.log(`[ClipGen] Clip generated: ${(clipBlob.size / 1024).toFixed(1)}KB`);
       
       // Upload to storage
-      const filePath = `${matchId}/${event.id}.mp4`;
+      const filePath = `${matchId}/${event.id}-${event.type}-${event.minute}min.webm`;
       const { error: uploadError } = await supabase.storage
         .from('event-clips')
         .upload(filePath, clipBlob, {
-          contentType: 'video/mp4',
+          contentType: 'video/webm',
           upsert: true
         });
 
       if (uploadError) {
-        console.error('Clip upload error:', uploadError);
+        console.error('[ClipGen] Upload error:', uploadError);
+        isGeneratingClipRef.current = false;
         return;
       }
 
@@ -1005,11 +1137,11 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         e.id === event.id ? { ...e, clipUrl } : e
       ));
 
-      console.log(`Clip generated for event ${event.id}:`, clipUrl);
+      console.log(`[ClipGen] Clip uploaded for event ${event.id}:`, clipUrl);
       
       toast({
-        title: "Clip gerado",
-        description: `Clip do evento ${event.type} criado com sucesso`,
+        title: "Clip gerado em tempo real",
+        description: `Clip do ${event.type} aos ${event.minute}' criado`,
       });
     } catch (error) {
       console.error('Error generating clip:', error);
