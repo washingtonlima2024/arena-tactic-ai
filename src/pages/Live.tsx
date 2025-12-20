@@ -11,8 +11,8 @@ import { LiveMatchForm } from "@/components/live/LiveMatchForm";
 import { LiveRecordingPanel } from "@/components/live/LiveRecordingPanel";
 import { LiveEventsList } from "@/components/live/LiveEventsList";
 import { LiveScoreDisplay } from "@/components/live/LiveScoreDisplay";
-import { LiveTranscript } from "@/components/live/LiveTranscript";
-import { useLiveBroadcast } from "@/hooks/useLiveBroadcast";
+import { LiveTranscriptRealtime } from "@/components/live/LiveTranscriptRealtime";
+import { useLiveBroadcast, TranscriptChunk } from "@/hooks/useLiveBroadcast";
 
 const Live = () => {
   const navigate = useNavigate();
@@ -164,15 +164,12 @@ const Live = () => {
 
                   {/* Live Transcript - Side by side with video */}
                   <div className="h-full">
-                    <LiveTranscript
-                      transcriptBuffer={transcriptBuffer}
-                      transcriptChunks={transcriptChunks}
-                      isSaving={isSavingTranscript}
-                      lastSavedAt={lastSavedAt}
+                    <LiveTranscriptRealtime
                       isRecording={isRecording}
-                      isProcessingAudio={isProcessingAudio}
-                      lastProcessedAt={lastProcessedAt}
-                      onProcessNow={processAudioChunk}
+                      onTranscriptUpdate={(buffer, chunks) => {
+                        // Optionally sync with useLiveBroadcast state
+                        console.log('Transcript updated:', buffer.length, 'chars,', chunks.length, 'chunks');
+                      }}
                     />
                   </div>
                 </div>

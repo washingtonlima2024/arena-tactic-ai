@@ -9,6 +9,9 @@ verify_jwt = false
 [functions.arena-tts]
 verify_jwt = false
 
+[functions.elevenlabs-scribe-token]
+verify_jwt = false
+
 [functions.extract-live-events]
 verify_jwt = false
 
