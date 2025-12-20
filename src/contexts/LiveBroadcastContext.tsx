@@ -1379,10 +1379,23 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     return ffmpeg;
   }, []);
 
+  // Result type for clip generation
+  interface ClipGenerationResult {
+    success: boolean;
+    clipUrl?: string;
+    error?: string;
+  }
+
   // Generate clip for event using FFmpeg - PRIORITIZES clipVideoChunksRef for real-time clips
-  const generateClipForEvent = useCallback(async (event: LiveEvent, videoUrl?: string) => {
+  // Returns {success: true, clipUrl} if clip was generated, {success: false, error} otherwise
+  const generateClipForEvent = useCallback(async (event: LiveEvent, videoUrl?: string): Promise<ClipGenerationResult> => {
     const matchId = tempMatchIdRef.current;
-    if (!matchId || isGeneratingClipRef.current) return;
+    if (!matchId) {
+      return { success: false, error: 'No match ID' };
+    }
+    if (isGeneratingClipRef.current) {
+      return { success: false, error: 'Already generating clip' };
+    }
     
     isGeneratingClipRef.current = true;
     console.log(`[ClipGen] Generating clip for event ${event.id} at ${event.recordingTimestamp}s...`);
@@ -1469,7 +1482,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       if (!videoData) {
         console.warn('[ClipGen] No video data available from any source');
         isGeneratingClipRef.current = false;
-        return;
+        return { success: false, error: 'No video data available' };
       }
       
       await ffmpeg.writeFile('input.webm', videoData);
@@ -1513,7 +1526,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       if (clipBlob.size < 500) {
         console.warn('[ClipGen] Generated clip too small, likely failed');
         isGeneratingClipRef.current = false;
-        return;
+        return { success: false, error: 'Generated clip too small' };
       }
       
       console.log(`[ClipGen] Clip generated: ${(clipBlob.size / 1024).toFixed(1)}KB`);
@@ -1530,7 +1543,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       if (uploadError) {
         console.error('[ClipGen] Upload error:', uploadError);
         isGeneratingClipRef.current = false;
-        return;
+        return { success: false, error: uploadError.message };
       }
 
       // Get public URL
@@ -1557,12 +1570,16 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         title: "Clip gerado em tempo real",
         description: `Clip do ${event.type} aos ${event.minute}' criado`,
       });
+
+      return { success: true, clipUrl };
     } catch (error) {
       console.error('Error generating clip:', error);
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
     } finally {
       isGeneratingClipRef.current = false;
     }
   }, [loadFFmpeg, toast]);
+
 
   // Call live analysis edge function
   const triggerLiveAnalysis = useCallback(async (event: LiveEvent) => {
@@ -1889,9 +1906,66 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           const videoUrl = chunkUrl || latestVideoChunkUrl;
           if (videoUrl) {
             console.log('Generating clip for approved event with URL:', videoUrl);
-            generateClipForEvent(event, videoUrl);
+            const clipResult = await generateClipForEvent(event, videoUrl);
+            
+            // CRITICAL: If clip generation failed, delete the event
+            if (!clipResult.success) {
+              console.warn(`❌ Clip generation failed for event ${event.id}: ${clipResult.error}`);
+              
+              // Delete from database
+              const { error: deleteError } = await supabase
+                .from('match_events')
+                .delete()
+                .eq('id', event.id);
+              
+              if (deleteError) {
+                console.error('Error deleting event after clip failure:', deleteError);
+              } else {
+                console.log(`🗑️ Event ${event.id} deleted from database (no clip)`);
+              }
+              
+              // Remove from local state
+              setApprovedEvents((prev) => prev.filter((e) => e.id !== event.id));
+              
+              // Revert score if it was a goal
+              if (event.type === "goal") {
+                const desc = event.description.toLowerCase();
+                if (matchInfo.homeTeam && desc.includes(matchInfo.homeTeam.toLowerCase())) {
+                  setCurrentScore((prev) => ({ ...prev, home: Math.max(0, prev.home - 1) }));
+                } else if (matchInfo.awayTeam && desc.includes(matchInfo.awayTeam.toLowerCase())) {
+                  setCurrentScore((prev) => ({ ...prev, away: Math.max(0, prev.away - 1) }));
+                }
+              }
+              
+              toast({
+                title: "Evento removido",
+                description: `Clip não pôde ser gerado: ${clipResult.error}`,
+                variant: "destructive"
+              });
+              return;
+            }
           } else {
-            console.log('No video URL available for clip generation - clips can be generated later from Analysis page');
+            console.warn('❌ No video URL available for clip generation - deleting event');
+            
+            // Delete event from database since no clip can be generated
+            const { error: deleteError } = await supabase
+              .from('match_events')
+              .delete()
+              .eq('id', event.id);
+            
+            if (!deleteError) {
+              console.log(`🗑️ Event ${event.id} deleted from database (no video URL)`);
+            }
+            
+            // Remove from local state
+            setApprovedEvents((prev) => prev.filter((e) => e.id !== event.id));
+            
+            toast({
+              title: "Evento removido",
+              description: "Sem vídeo disponível para gerar clip",
+              variant: "destructive"
+            });
+            return;
           }
 
           // Trigger live analysis immediately
@@ -1902,7 +1976,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         }
       }
     }
-  }, [detectedEvents, matchInfo, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis, currentMatchId]);
+  }, [detectedEvents, matchInfo, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis, currentMatchId, toast]);
 
   // Edit event
   const editEvent = useCallback((eventId: string, updates: Partial<LiveEvent>) => {
