@@ -42,33 +42,70 @@ export function LinkVideoDialog({ open, onOpenChange, matchId, onVideoLinked }: 
   const loadStorageFiles = async () => {
     setIsLoadingFiles(true);
     try {
-      const { data, error } = await supabase.storage
+      const allFiles: StorageFile[] = [];
+
+      // 1. List files at root level (including those matching the matchId pattern)
+      const { data: rootData, error: rootError } = await supabase.storage
         .from('match-videos')
         .list('', {
+          limit: 200,
+          sortBy: { column: 'created_at', order: 'desc' }
+        });
+
+      if (rootError) {
+        console.error('Error loading root files:', rootError);
+      } else if (rootData) {
+        // Filter video files at root - prioritize those containing the matchId
+        const rootVideos = rootData.filter(f => 
+          (f.name.endsWith('.mp4') || f.name.endsWith('.webm') || f.name.endsWith('.mov')) &&
+          !f.name.startsWith('.') // Skip hidden files
+        );
+        
+        // Sort to show matchId-related files first
+        rootVideos.sort((a, b) => {
+          const aHasMatchId = a.name.includes(matchId);
+          const bHasMatchId = b.name.includes(matchId);
+          if (aHasMatchId && !bHasMatchId) return -1;
+          if (!aHasMatchId && bHasMatchId) return 1;
+          return 0;
+        });
+        
+        allFiles.push(...(rootVideos as StorageFile[]));
+      }
+
+      // 2. Also try to list files in a folder named with the matchId
+      const { data: matchFolderData, error: matchFolderError } = await supabase.storage
+        .from('match-videos')
+        .list(matchId, {
           limit: 100,
           sortBy: { column: 'created_at', order: 'desc' }
         });
 
-      if (error) {
-        console.error('Error loading storage files:', error);
-        toast({
-          title: 'Erro',
-          description: 'Não foi possível carregar os vídeos do storage',
-          variant: 'destructive'
-        });
-        return;
+      if (!matchFolderError && matchFolderData) {
+        const matchFolderVideos = matchFolderData.filter(f => 
+          (f.name.endsWith('.mp4') || f.name.endsWith('.webm') || f.name.endsWith('.mov')) &&
+          !f.name.startsWith('.')
+        ).map(f => ({
+          ...f,
+          name: `${matchId}/${f.name}` // Include folder path
+        }));
+        allFiles.push(...(matchFolderVideos as StorageFile[]));
       }
 
-      // Filter only video files
-      const videoFiles = (data || []).filter(f => 
-        f.name.endsWith('.mp4') || 
-        f.name.endsWith('.webm') || 
-        f.name.endsWith('.mov')
-      );
+      // 3. Also check for "live-{matchId}" prefix pattern (used by live recordings)
+      const livePrefix = `live-${matchId}`;
+      const matchingLiveFiles = allFiles.filter(f => f.name.includes(matchId));
+      
+      console.log(`Found ${allFiles.length} video files, ${matchingLiveFiles.length} matching this match`);
 
-      setStorageFiles(videoFiles as StorageFile[]);
+      setStorageFiles(allFiles);
     } catch (error) {
       console.error('Error:', error);
+      toast({
+        title: 'Erro',
+        description: 'Não foi possível carregar os vídeos do storage',
+        variant: 'destructive'
+      });
     } finally {
       setIsLoadingFiles(false);
     }
