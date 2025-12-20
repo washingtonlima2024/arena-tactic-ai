@@ -1,5 +1,4 @@
-import { useState, useRef, useCallback, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useState, useCallback } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -12,14 +11,19 @@ import { LiveRecordingPanel } from "@/components/live/LiveRecordingPanel";
 import { LiveEventsList } from "@/components/live/LiveEventsList";
 import { LiveScoreDisplay } from "@/components/live/LiveScoreDisplay";
 import { LiveTranscriptRealtime } from "@/components/live/LiveTranscriptRealtime";
-import { useLiveBroadcast, TranscriptChunk } from "@/hooks/useLiveBroadcast";
+import { LiveFinishDialog } from "@/components/live/LiveFinishDialog";
+import { LiveSummaryDialog } from "@/components/live/LiveSummaryDialog";
+import { useLiveBroadcast } from "@/hooks/useLiveBroadcast";
+import { useNavigate } from "react-router-dom";
 
 const Live = () => {
   const navigate = useNavigate();
   const [inputMode, setInputMode] = useState<"stream" | "camera">("stream");
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
+  const [showFinishDialog, setShowFinishDialog] = useState(false);
+  const [showSummaryDialog, setShowSummaryDialog] = useState(false);
   
-  // Video element state (not ref, so it triggers re-render)
+  // Video element state
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   
   const {
@@ -36,10 +40,15 @@ const Live = () => {
     approvedEvents,
     currentScore,
     currentMatchId,
-    // NEW: Video recording states
+    transcriptBuffer,
+    // Video recording states
     isRecordingVideo,
     videoUploadProgress,
     isUploadingVideo,
+    // Finish states
+    isFinishing,
+    finishResult,
+    resetFinishResult,
     startRecording,
     stopRecording,
     pauseRecording,
@@ -65,6 +74,26 @@ const Live = () => {
   const handleStartRecording = useCallback(() => {
     startRecording(videoElement);
   }, [startRecording, videoElement]);
+
+  // Handle finish button click - show confirmation dialog
+  const handleFinishClick = useCallback(() => {
+    setShowFinishDialog(true);
+  }, []);
+
+  // Handle confirm finish
+  const handleConfirmFinish = useCallback(async () => {
+    const result = await finishMatch();
+    setShowFinishDialog(false);
+    if (result) {
+      setShowSummaryDialog(true);
+    }
+  }, [finishMatch]);
+
+  // Handle summary dialog close
+  const handleSummaryClose = useCallback(() => {
+    setShowSummaryDialog(false);
+    resetFinishResult();
+  }, [resetFinishResult]);
 
   return (
     <AppLayout>
@@ -171,7 +200,6 @@ const Live = () => {
                       }}
                       onEventDetected={(event) => {
                         console.log('Event detected from transcript:', event);
-                        // Add as detected event to the live events list
                         addDetectedEvent({
                           type: event.type,
                           minute: event.minute,
@@ -207,7 +235,7 @@ const Live = () => {
               onStop={stopRecording}
               onPause={pauseRecording}
               onResume={resumeRecording}
-              onFinish={finishMatch}
+              onFinish={handleFinishClick}
               onAddManualEvent={addManualEvent}
             />
           </div>
@@ -253,6 +281,28 @@ const Live = () => {
           </div>
         )}
       </div>
+
+      {/* Finish Confirmation Dialog */}
+      <LiveFinishDialog
+        isOpen={showFinishDialog}
+        onClose={() => setShowFinishDialog(false)}
+        onConfirm={handleConfirmFinish}
+        matchInfo={matchInfo}
+        score={currentScore}
+        recordingTime={recordingTime}
+        eventsCount={approvedEvents.length}
+        transcriptWords={transcriptBuffer?.split(" ").filter(w => w.trim()).length || 0}
+        isFinishing={isFinishing}
+      />
+
+      {/* Summary Dialog */}
+      <LiveSummaryDialog
+        isOpen={showSummaryDialog}
+        onClose={handleSummaryClose}
+        result={finishResult}
+        matchInfo={matchInfo}
+        score={currentScore}
+      />
     </AppLayout>
   );
 };

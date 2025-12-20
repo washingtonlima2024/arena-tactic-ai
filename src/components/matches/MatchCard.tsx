@@ -21,6 +21,7 @@ const statusLabels = {
   live: 'Ao Vivo',
   completed: 'Concluída',
   analyzing: 'Analisando',
+  analyzed: 'Analisada',
 };
 
 const statusColors = {
@@ -28,6 +29,7 @@ const statusColors = {
   live: 'destructive',
   completed: 'success',
   analyzing: 'arena',
+  analyzed: 'success',
 } as const;
 
 export function MatchCard({ match }: MatchCardProps) {
@@ -47,7 +49,7 @@ export function MatchCard({ match }: MatchCardProps) {
         .select('*')
         .eq('match_id', match.id)
         .eq('video_type', 'full')
-        .single();
+        .maybeSingle();
       
       if (fullVideo) return fullVideo;
       
@@ -58,11 +60,27 @@ export function MatchCard({ match }: MatchCardProps) {
         .eq('match_id', match.id)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single();
+        .maybeSingle();
       
       return anyVideo;
     },
-    enabled: match.status === 'completed' || match.status === 'analyzing',
+    enabled: match.status === 'completed' || match.status === 'analyzing' || match.status === 'analyzed',
+  });
+
+  // Check if match came from live stream
+  const { data: isFromLive } = useQuery({
+    queryKey: ['match-from-live', match.id],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('analysis_jobs')
+        .select('result')
+        .eq('match_id', match.id)
+        .maybeSingle();
+      
+      const result = data?.result as { source?: string } | null;
+      return result?.source === 'live';
+    },
+    enabled: match.status === 'completed' || match.status === 'analyzed',
   });
 
   const formattedDate = new Date(match.date).toLocaleDateString('pt-BR', {
@@ -155,9 +173,16 @@ export function MatchCard({ match }: MatchCardProps) {
                     </span>
                     <TeamBadge team={match.awayTeam} size="sm" />
                   </div>
-                  <Badge variant="arena" className="text-[10px]">
-                    {match.status === 'completed' ? 'Finalizado' : 'Ao vivo'}
-                  </Badge>
+                  <div className="flex items-center gap-1">
+                    {isFromLive && (
+                      <Badge variant="secondary" className="text-[10px]">
+                        📺 Live
+                      </Badge>
+                    )}
+                    <Badge variant="arena" className="text-[10px]">
+                      {match.status === 'completed' || match.status === 'analyzed' ? 'Finalizado' : 'Ao vivo'}
+                    </Badge>
+                  </div>
                 </div>
               </div>
               {/* Expand button */}
@@ -182,7 +207,7 @@ export function MatchCard({ match }: MatchCardProps) {
                       {match.score.home} - {match.score.away}
                     </span>
                     <Badge variant="arena" className="mt-1 text-[10px]">
-                      {match.status === 'completed' ? 'Finalizado' : match.status === 'analyzing' ? 'Analisando' : 'Agendado'}
+                      {match.status === 'completed' || match.status === 'analyzed' ? 'Finalizado' : match.status === 'analyzing' ? 'Analisando' : 'Agendado'}
                     </Badge>
                   </div>
                   <div className="flex flex-col items-center gap-1">
@@ -265,7 +290,7 @@ export function MatchCard({ match }: MatchCardProps) {
 
           {/* Actions */}
           <div className="flex gap-2">
-            {match.status === 'completed' && (
+            {(match.status === 'completed' || match.status === 'analyzed') && (
               <>
                 <Button variant="arena-outline" size="sm" className="flex-1" asChild>
                   <Link to={`/analysis?match=${match.id}`}>
