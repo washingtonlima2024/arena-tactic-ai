@@ -1,6 +1,8 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
+import { FFmpeg } from '@ffmpeg/ffmpeg';
+import { fetchFile, toBlobURL } from '@ffmpeg/util';
 
 export interface MatchInfo {
   homeTeam: string;
@@ -154,6 +156,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   const animationFrameRef = useRef<number | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
   const chunkSaveIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const ffmpegRef = useRef<FFmpeg | null>(null);
+  const isGeneratingClipRef = useRef(false);
 
   // Save transcript to database
   const saveTranscriptToDatabase = useCallback(async (matchId?: string) => {
@@ -850,21 +854,119 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [isPaused]);
 
-  // NEW: Generate clip for event
+  // Load FFmpeg for clip generation
+  const loadFFmpeg = useCallback(async () => {
+    if (ffmpegRef.current?.loaded) return ffmpegRef.current;
+
+    const ffmpeg = new FFmpeg();
+    ffmpegRef.current = ffmpeg;
+
+    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+    await ffmpeg.load({
+      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+    });
+
+    return ffmpeg;
+  }, []);
+
+  // Generate clip for event using FFmpeg
   const generateClipForEvent = useCallback(async (event: LiveEvent, videoUrl: string) => {
-    if (!tempMatchIdRef.current) return;
+    const matchId = tempMatchIdRef.current;
+    if (!matchId || !videoUrl || isGeneratingClipRef.current) return;
+    
+    isGeneratingClipRef.current = true;
+    console.log(`Generating clip for event ${event.id}...`);
     
     try {
-      // Save clip request - will be processed by FFmpeg on client
-      console.log(`Clip generation queued for event ${event.id}`);
+      const ffmpeg = await loadFFmpeg();
       
-      // For now, store the video timestamp info in the event
-      // The clip will be generated when the user views the Events page
-      // or via batch processing after match finishes
+      // Calculate timestamps (3s before, 5s after)
+      const eventSeconds = event.recordingTimestamp || (event.minute * 60 + event.second);
+      const startTimeSeconds = Math.max(0, eventSeconds - 3);
+      const durationSeconds = 8;
+      
+      // Download the video chunk
+      const videoData = await fetchFile(videoUrl);
+      await ffmpeg.writeFile('input.mp4', videoData);
+      
+      // Convert ms to FFmpeg timestamp
+      const hours = Math.floor(startTimeSeconds / 3600);
+      const minutes = Math.floor((startTimeSeconds % 3600) / 60);
+      const seconds = startTimeSeconds % 60;
+      const startTimestamp = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toFixed(3).padStart(6, '0')}`;
+      
+      // Extract clip
+      await ffmpeg.exec([
+        '-ss', startTimestamp,
+        '-i', 'input.mp4',
+        '-t', durationSeconds.toString(),
+        '-c', 'copy',
+        '-avoid_negative_ts', 'make_zero',
+        'output.mp4'
+      ]);
+      
+      // Read output
+      const clipData = await ffmpeg.readFile('output.mp4');
+      let clipBlob: Blob;
+      if (clipData instanceof Uint8Array) {
+        // Create a new ArrayBuffer and copy the data
+        const buffer = new ArrayBuffer(clipData.length);
+        const view = new Uint8Array(buffer);
+        view.set(clipData);
+        clipBlob = new Blob([buffer], { type: 'video/mp4' });
+      } else {
+        clipBlob = new Blob([clipData as BlobPart], { type: 'video/mp4' });
+      }
+      
+      // Clean up
+      await ffmpeg.deleteFile('input.mp4');
+      await ffmpeg.deleteFile('output.mp4');
+      
+      // Upload to storage
+      const filePath = `${matchId}/${event.id}.mp4`;
+      const { error: uploadError } = await supabase.storage
+        .from('event-clips')
+        .upload(filePath, clipBlob, {
+          contentType: 'video/mp4',
+          upsert: true
+        });
+
+      if (uploadError) {
+        console.error('Clip upload error:', uploadError);
+        return;
+      }
+
+      // Get public URL
+      const { data: urlData } = supabase.storage
+        .from('event-clips')
+        .getPublicUrl(filePath);
+
+      const clipUrl = urlData.publicUrl;
+
+      // Update database
+      await supabase
+        .from('match_events')
+        .update({ clip_url: clipUrl })
+        .eq('id', event.id);
+
+      // Update local state
+      setApprovedEvents(prev => prev.map(e => 
+        e.id === event.id ? { ...e, clipUrl } : e
+      ));
+
+      console.log(`Clip generated for event ${event.id}:`, clipUrl);
+      
+      toast({
+        title: "Clip gerado",
+        description: `Clip do evento ${event.type} criado com sucesso`,
+      });
     } catch (error) {
       console.error('Error generating clip:', error);
+    } finally {
+      isGeneratingClipRef.current = false;
     }
-  }, []);
+  }, [loadFFmpeg, toast]);
 
   // Add manual event
   const addManualEvent = useCallback(async (type: string) => {
