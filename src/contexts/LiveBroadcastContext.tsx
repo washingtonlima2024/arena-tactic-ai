@@ -300,7 +300,13 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
   // Create temporary match
   const createTempMatch = useCallback(async (): Promise<string | null> => {
-    console.log("Creating match with info:", matchInfo);
+    // PREVENT DUPLICATE: If we already have a match ID, don't create a new one
+    if (tempMatchIdRef.current) {
+      console.log("Match already exists, reusing:", tempMatchIdRef.current);
+      return tempMatchIdRef.current;
+    }
+
+    console.log("Creating new match with info:", matchInfo);
     
     try {
       const { data: match, error } = await supabase
