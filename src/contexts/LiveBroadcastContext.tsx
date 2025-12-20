@@ -1711,15 +1711,9 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     console.log('isRecording:', isRecording);
     console.log('currentRecordingTime:', currentRecordingTime);
 
-    // CRITICAL: Block event creation without video - video MUST exist first
+    // Warn but don't block if no videoId - will be linked in finishMatch
     if (!videoId) {
-      console.error('❌ CRITICAL: No videoId available - cannot create event without video');
-      toast({
-        title: "Erro",
-        description: "Não é possível adicionar evento sem vídeo. Inicie a gravação primeiro.",
-        variant: "destructive"
-      });
-      return;
+      console.warn('⚠️ No videoId available - event will be linked to video at finish');
     }
 
     if (!matchId) {
@@ -1751,12 +1745,12 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
     }
 
-    // Always save to database since we validated matchId and videoId
+    // Save to database - video_id may be null, will be linked in finishMatch
     try {
       await supabase.from("match_events").insert({
         id: eventId,
         match_id: matchId,
-        video_id: videoId,
+        video_id: videoId || null, // Allow null - will be linked at finish
         event_type: type,
         minute,
         second,
@@ -1770,7 +1764,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           source: 'live-manual'
         }
       });
-      console.log(`Manual event saved at ${currentRecordingTime}s with video_id ${videoId}:`, type);
+      console.log(`Manual event saved at ${currentRecordingTime}s ${videoId ? 'with video_id ' + videoId : '(video will be linked at finish)'}:`, type);
       
       // IMMEDIATE: Save video chunk and get URL directly (fixes race condition)
       let chunkUrl: string | null = null;
@@ -1802,6 +1796,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   }, [toast, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis, currentMatchId, isRecording]);
 
   // Add detected event from AI - NOW SAVES TO DATABASE IMMEDIATELY
+  // Events are saved with video_id if available, otherwise linked in finishMatch
   const addDetectedEvent = useCallback(async (eventData: {
     type: string;
     minute: number;
@@ -1811,13 +1806,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     source?: string;
   }) => {
     const matchId = tempMatchIdRef.current || currentMatchId;
-    const videoId = currentVideoIdRef.current;
-    
-    // CRITICAL: Block event creation without video - video MUST exist first
-    if (!videoId) {
-      console.warn('⚠️ Cannot save detected event - no video recording. Event ignored.');
-      return;
-    }
+    const videoId = currentVideoIdRef.current; // May be null during recording start
 
     if (!matchId) {
       console.warn('⚠️ Cannot save detected event - no matchId. Event ignored.');
@@ -1850,11 +1839,12 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       setDetectedEvents((prev) => [...prev, newEvent]);
       
       // IMMEDIATELY save to database (pending approval)
+      // video_id may be null - will be linked in finishMatch
       try {
         await supabase.from("match_events").insert({
           id: eventId,
           match_id: matchId,
-          video_id: videoId, // REQUIRED: Event MUST have video
+          video_id: videoId || null, // Allow null - will be linked at finish
           event_type: eventData.type,
           minute: eventData.minute,
           second: eventData.second,
@@ -1869,7 +1859,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             confidence: eventData.confidence
           }
         });
-        console.log(`✅ Detected event saved at ${currentRecordingTime}s with video_id ${videoId}:`, eventData.type);
+        console.log(`✅ Detected event saved at ${currentRecordingTime}s ${videoId ? 'with video_id ' + videoId : '(video will be linked at finish)'}:`, eventData.type);
         
         // Save video chunk for potential clip generation later
         if (videoChunksRef.current.length > 0) {
@@ -2357,24 +2347,51 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       console.error('[finishMatch] Error stopping recording:', stopError);
     }
     
-    // STEP 3: Link events to video (if video was saved)
+    // STEP 3: Link events to video (if video was saved or create placeholder video)
     try {
-      if (matchId && videoId) {
-        toast({ 
-          title: "Vinculando eventos ao vídeo...", 
-          description: "Associando clips e eventos" 
-        });
+      if (matchId) {
+        // If no videoId exists yet, create a placeholder video record
+        // This ensures events can always be linked
+        if (!videoId && !existingVideoId) {
+          console.log('[finishMatch] Creating placeholder video record for event linking...');
+          const { data: placeholderVideo } = await supabase.from('videos').insert({
+            match_id: matchId,
+            file_url: '', // No file yet
+            file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
+            video_type: 'full',
+            start_minute: 0,
+            end_minute: Math.ceil(recordingTimeRef.current / 60),
+            duration_seconds: recordingTimeRef.current,
+            status: 'pending' // Will be updated when video is linked
+          }).select('id').maybeSingle();
+          
+          if (placeholderVideo) {
+            videoId = placeholderVideo.id;
+            console.log('[finishMatch] Placeholder video created:', videoId);
+          }
+        }
         
-        const { error: linkError, count } = await supabase
-          .from('match_events')
-          .update({ video_id: videoId })
-          .eq('match_id', matchId)
-          .is('video_id', null);
-        
-        if (linkError) {
-          console.error('[finishMatch] Error linking events to video:', linkError);
+        // Now link all events without video_id
+        if (videoId || existingVideoId) {
+          const linkVideoId = videoId || existingVideoId;
+          toast({ 
+            title: "Vinculando eventos ao vídeo...", 
+            description: "Associando clips e eventos" 
+          });
+          
+          const { error: linkError, count } = await supabase
+            .from('match_events')
+            .update({ video_id: linkVideoId })
+            .eq('match_id', matchId)
+            .is('video_id', null);
+          
+          if (linkError) {
+            console.error('[finishMatch] Error linking events to video:', linkError);
+          } else {
+            console.log('[finishMatch] Events linked to video:', linkVideoId, 'count:', count);
+          }
         } else {
-          console.log('[finishMatch] Events linked to video:', videoId, 'count:', count);
+          console.log('[finishMatch] No video ID available for linking events');
         }
       }
     } catch (linkError) {
