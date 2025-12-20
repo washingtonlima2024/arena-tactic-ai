@@ -707,13 +707,32 @@ export default function Events() {
                   Novo Evento
                 </Button>
                 
+                {/* Regenerate Missing Clips Button */}
+                {matchVideo && !matchVideo.file_url.includes('embed') && eventsWithoutClips > 0 && (
+                  <Button 
+                    variant="arena" 
+                    onClick={() => handleGenerateClips('all', eventsWithoutClips)}
+                    disabled={isGenerating}
+                  >
+                    {isGenerating ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Regenerar Clips
+                    <Badge variant="secondary" className="ml-2 text-xs bg-background/20">
+                      {eventsWithoutClips} sem clip
+                    </Badge>
+                  </Button>
+                )}
+                
                 {/* Clip Generation Dropdown */}
                 {matchVideo && !matchVideo.file_url.includes('embed') && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <Button 
                         variant="secondary" 
-                        disabled={isGenerating || eventsWithoutClips === 0}
+                        disabled={isGenerating}
                       >
                         {isGenerating ? (
                           <Loader2 className="mr-2 h-4 w-4 animate-spin" />
