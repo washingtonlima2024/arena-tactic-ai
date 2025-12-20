@@ -35,12 +35,7 @@ const Live = () => {
     detectedEvents,
     approvedEvents,
     currentScore,
-    transcriptBuffer,
-    transcriptChunks,
-    isSavingTranscript,
-    lastSavedAt,
-    isProcessingAudio,
-    lastProcessedAt,
+    currentMatchId,
     // NEW: Video recording states
     isRecordingVideo,
     videoUploadProgress,
@@ -55,7 +50,6 @@ const Live = () => {
     removeEvent,
     updateScore,
     finishMatch,
-    processAudioChunk,
   } = useLiveBroadcast();
 
   const hasVideoSource = streamUrl || cameraStream;
@@ -166,8 +160,8 @@ const Live = () => {
                   <div className="h-full">
                     <LiveTranscriptRealtime
                       isRecording={isRecording}
+                      matchId={currentMatchId || selectedMatchId}
                       onTranscriptUpdate={(buffer, chunks) => {
-                        // Optionally sync with useLiveBroadcast state
                         console.log('Transcript updated:', buffer.length, 'chars,', chunks.length, 'chunks');
                       }}
                     />

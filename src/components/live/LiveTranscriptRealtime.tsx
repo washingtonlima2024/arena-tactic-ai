@@ -1,22 +1,28 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Clock, Loader2, Mic, Wifi, WifiOff } from "lucide-react";
+import { FileText, Clock, Loader2, Mic, Wifi, WifiOff, Save, CheckCircle } from "lucide-react";
 import { useElevenLabsScribe } from "@/hooks/useElevenLabsScribe";
 import { TranscriptChunk } from "@/hooks/useLiveBroadcast";
+import { supabase } from "@/integrations/supabase/client";
 
 interface LiveTranscriptRealtimeProps {
   isRecording: boolean;
+  matchId?: string | null;
   onTranscriptUpdate?: (buffer: string, chunks: TranscriptChunk[]) => void;
 }
 
 export const LiveTranscriptRealtime = ({
   isRecording,
+  matchId,
   onTranscriptUpdate,
 }: LiveTranscriptRealtimeProps) => {
   const chunksRef = useRef<TranscriptChunk[]>([]);
   const bufferRef = useRef<string>("");
   const recordingTimeRef = useRef<number>(0);
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Timer for recording time
   useEffect(() => {
@@ -28,6 +34,55 @@ export const LiveTranscriptRealtime = ({
       return () => clearInterval(timer);
     }
   }, [isRecording]);
+
+  // Save transcript to database
+  const saveTranscriptToDatabase = async (text: string) => {
+    if (!matchId || !text.trim()) return;
+    
+    setIsSaving(true);
+    setSaveError(null);
+    
+    try {
+      // Check if there's already a transcript for this match
+      const { data: existing } = await supabase
+        .from("generated_audio")
+        .select("id, script")
+        .eq("match_id", matchId)
+        .eq("audio_type", "live_transcript")
+        .maybeSingle();
+
+      const fullTranscript = bufferRef.current.trim();
+
+      if (existing) {
+        // Update existing transcript
+        await supabase
+          .from("generated_audio")
+          .update({
+            script: fullTranscript,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id);
+      } else {
+        // Create new transcript entry
+        await supabase
+          .from("generated_audio")
+          .insert({
+            match_id: matchId,
+            audio_type: "live_transcript",
+            script: fullTranscript,
+            voice: "elevenlabs-scribe",
+          });
+      }
+
+      setLastSavedAt(new Date());
+      console.log("Transcript saved to database:", fullTranscript.length, "chars");
+    } catch (error) {
+      console.error("Error saving transcript:", error);
+      setSaveError(error instanceof Error ? error.message : "Erro ao salvar");
+    } finally {
+      setIsSaving(false);
+    }
+  };
 
   const scribe = useElevenLabsScribe({
     onTranscript: (text) => {
@@ -46,6 +101,9 @@ export const LiveTranscriptRealtime = ({
       bufferRef.current = bufferRef.current + " " + text;
       
       onTranscriptUpdate?.(bufferRef.current.trim(), chunksRef.current);
+      
+      // Auto-save to database
+      saveTranscriptToDatabase(text);
     },
     onPartialTranscript: (text) => {
       // Partial transcript is handled by the hook
@@ -75,7 +133,19 @@ export const LiveTranscriptRealtime = ({
           <FileText className="h-5 w-5 text-primary" />
           Transcrição Ao Vivo
         </h3>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          {isSaving && (
+            <Badge variant="outline" className="text-yellow-500 border-yellow-500/50">
+              <Save className="h-3 w-3 mr-1 animate-pulse" />
+              Salvando...
+            </Badge>
+          )}
+          {!isSaving && lastSavedAt && (
+            <Badge variant="outline" className="text-green-500 border-green-500/50">
+              <CheckCircle className="h-3 w-3 mr-1" />
+              Salvo
+            </Badge>
+          )}
           {scribe.isConnecting && (
             <Badge variant="outline" className="text-blue-500 border-blue-500/50">
               <Loader2 className="h-3 w-3 mr-1 animate-spin" />
