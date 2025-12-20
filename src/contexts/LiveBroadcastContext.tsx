@@ -792,19 +792,43 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
       const videoUrl = urlData.publicUrl;
 
-      const { error: insertError } = await supabase.from('videos').insert({
-        match_id: matchId,
-        file_url: videoUrl,
-        file_name: `Transmissão ao vivo`,
-        video_type: 'full',
-        start_minute: 0,
-        end_minute: Math.ceil(recordingTime / 60),
-        duration_seconds: recordingTime,
-        status: 'complete'
-      });
+      // FIXED: Update existing video record instead of inserting a new one
+      const videoId = currentVideoIdRef.current;
+      if (videoId) {
+        console.log(`Updating existing video record ${videoId} with URL:`, videoUrl);
+        const { error: updateError } = await supabase
+          .from('videos')
+          .update({
+            file_url: videoUrl,
+            file_name: `Transmissão ao vivo`,
+            end_minute: Math.ceil(recordingTime / 60),
+            duration_seconds: recordingTime,
+            status: 'complete'
+          })
+          .eq('id', videoId);
 
-      if (insertError) {
-        console.error('Error inserting video record:', insertError);
+        if (updateError) {
+          console.error('Error updating video record:', updateError);
+        } else {
+          console.log('Video record updated successfully');
+        }
+      } else {
+        // Fallback: insert new record if no existing video ID
+        console.log('No existing video ID, inserting new record');
+        const { error: insertError } = await supabase.from('videos').insert({
+          match_id: matchId,
+          file_url: videoUrl,
+          file_name: `Transmissão ao vivo`,
+          video_type: 'full',
+          start_minute: 0,
+          end_minute: Math.ceil(recordingTime / 60),
+          duration_seconds: recordingTime,
+          status: 'complete'
+        });
+
+        if (insertError) {
+          console.error('Error inserting video record:', insertError);
+        }
       }
 
       setVideoUploadProgress(100);
@@ -824,6 +848,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       setIsUploadingVideo(false);
     }
   }, [recordingTime, toast]);
+
 
   // Stop video recording and flush segment buffer
   const stopVideoRecording = useCallback(async () => {
