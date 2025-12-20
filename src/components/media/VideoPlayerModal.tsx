@@ -57,6 +57,7 @@ export function VideoPlayerModal({
   const [iframeKey, setIframeKey] = useState(0);
 
   const hasDirectClip = !!clip?.clipUrl;
+  const hasValidMatchVideo = !!matchVideo?.file_url && matchVideo.file_url.length > 0;
 
   // Get video duration for validation
   const getVideoDuration = useCallback(() => {
@@ -158,7 +159,7 @@ export function VideoPlayerModal({
   }, [isOpen, clip?.id, calculateInitialTimestamp]);
 
   if (!clip) return null;
-  if (!hasDirectClip && !matchVideo) return null;
+  if (!hasDirectClip && !hasValidMatchVideo) return null;
 
   const isEmbed = matchVideo ? (matchVideo.file_url.includes('xtream.tech') || matchVideo.file_url.includes('embed')) : false;
   
