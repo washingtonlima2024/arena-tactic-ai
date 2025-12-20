@@ -1493,6 +1493,45 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     let videoUrl: string | null = null;
     let videoId: string | null = null;
     
+    console.log('[finishMatch] Starting with matchId:', matchId);
+    console.log('[finishMatch] Video chunks available:', videoChunksRef.current.length);
+    console.log('[finishMatch] Approved events in state:', approvedEvents.length);
+    
+    // STEP 0: Sync approved events from database (in case state is stale)
+    let syncedEventsCount = approvedEvents.length;
+    try {
+      if (matchId) {
+        const { data: dbEvents, error: dbError } = await supabase
+          .from('match_events')
+          .select('*')
+          .eq('match_id', matchId);
+        
+        if (!dbError && dbEvents) {
+          syncedEventsCount = Math.max(approvedEvents.length, dbEvents.length);
+          console.log(`[finishMatch] Events synced - state: ${approvedEvents.length}, db: ${dbEvents.length}, using: ${syncedEventsCount}`);
+          
+          // If DB has more events than state, update state
+          if (dbEvents.length > approvedEvents.length) {
+            const mappedEvents: LiveEvent[] = dbEvents.map((e) => ({
+              id: e.id,
+              type: e.event_type,
+              minute: e.minute || 0,
+              second: e.second || 0,
+              description: e.description || "",
+              status: "approved" as const,
+              recordingTimestamp: e.metadata && typeof e.metadata === 'object' && 'videoSecond' in e.metadata 
+                ? (e.metadata as any).videoSecond 
+                : (e.minute || 0) * 60 + (e.second || 0),
+              clipUrl: e.clip_url || undefined
+            }));
+            setApprovedEvents(mappedEvents);
+          }
+        }
+      }
+    } catch (syncError) {
+      console.error('[finishMatch] Error syncing events from DB:', syncError);
+    }
+    
     // STEP 1: Save video FIRST (most critical step)
     try {
       if (matchId && videoChunksRef.current.length > 0) {
@@ -1505,7 +1544,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
         const videoBlob = new Blob(videoChunksRef.current, { type: mimeType });
         
-        console.log(`Saving final video: ${(videoBlob.size / (1024 * 1024)).toFixed(2)} MB`);
+        console.log(`[finishMatch] Saving final video: ${(videoBlob.size / (1024 * 1024)).toFixed(2)} MB`);
         
         setIsUploadingVideo(true);
         setVideoUploadProgress(20);
@@ -1520,7 +1559,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           });
 
         if (uploadError) {
-          console.error('Error uploading video:', uploadError);
+          console.error('[finishMatch] CRITICAL: Video upload failed:', uploadError);
           toast({
             title: "Erro no upload do vídeo",
             description: "O vídeo não foi salvo, mas os eventos foram preservados",
@@ -1534,12 +1573,14 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             .getPublicUrl(filePath);
 
           videoUrl = urlData.publicUrl;
+          console.log('[finishMatch] Video uploaded to:', videoUrl);
           
           // Insert video record and get its ID
+          console.log('[finishMatch] Inserting video record into videos table...');
           const { data: videoRecord, error: insertError } = await supabase.from('videos').insert({
             match_id: matchId,
             file_url: videoUrl,
-            file_name: `Transmissão ao vivo`,
+            file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
             video_type: 'full',
             start_minute: 0,
             end_minute: Math.ceil(recordingTime / 60),
@@ -1548,20 +1589,47 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           }).select('id').single();
 
           if (insertError) {
-            console.error('Error inserting video record:', insertError);
+            console.error('[finishMatch] CRITICAL: Failed to insert video record:', insertError);
+            // Retry with simpler insert
+            console.log('[finishMatch] Retrying video insert without select...');
+            const { error: retryError } = await supabase.from('videos').insert({
+              match_id: matchId,
+              file_url: videoUrl,
+              file_name: `Transmissão ao vivo`,
+              video_type: 'full',
+              start_minute: 0,
+              end_minute: Math.ceil(recordingTime / 60),
+              duration_seconds: recordingTime,
+              status: 'complete'
+            });
+            
+            if (retryError) {
+              console.error('[finishMatch] CRITICAL: Video insert retry also failed:', retryError);
+            } else {
+              console.log('[finishMatch] Video record inserted on retry');
+              // Fetch the video ID
+              const { data: fetchedVideo } = await supabase
+                .from('videos')
+                .select('id')
+                .eq('match_id', matchId)
+                .eq('file_url', videoUrl)
+                .single();
+              videoId = fetchedVideo?.id || null;
+            }
           } else {
             videoId = videoRecord?.id || null;
-            console.log('Video record created with ID:', videoId);
+            console.log('[finishMatch] Video record created successfully with ID:', videoId);
           }
           
           setVideoUploadProgress(100);
-          console.log('Final video saved successfully:', videoUrl);
         }
         
         setIsUploadingVideo(false);
+      } else {
+        console.log('[finishMatch] No video chunks to save - videoChunks:', videoChunksRef.current.length);
       }
     } catch (videoError) {
-      console.error('Critical error saving video:', videoError);
+      console.error('[finishMatch] Critical error saving video:', videoError);
       setIsUploadingVideo(false);
       toast({
         title: "Erro crítico no vídeo",
@@ -1574,7 +1642,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     try {
       stopRecording();
     } catch (stopError) {
-      console.error('Error stopping recording:', stopError);
+      console.error('[finishMatch] Error stopping recording:', stopError);
     }
     
     // STEP 3: Link events to video (if video was saved)
@@ -1585,20 +1653,20 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           description: "Associando clips e eventos" 
         });
         
-        const { error: linkError } = await supabase
+        const { error: linkError, count } = await supabase
           .from('match_events')
           .update({ video_id: videoId })
           .eq('match_id', matchId)
           .is('video_id', null);
         
         if (linkError) {
-          console.error('Error linking events to video:', linkError);
+          console.error('[finishMatch] Error linking events to video:', linkError);
         } else {
-          console.log('All events linked to video:', videoId);
+          console.log('[finishMatch] Events linked to video:', videoId, 'count:', count);
         }
       }
     } catch (linkError) {
-      console.error('Error in event linking:', linkError);
+      console.error('[finishMatch] Error in event linking:', linkError);
     }
 
     // STEP 4: Generate clips for approved events (non-critical, can fail)
@@ -1618,14 +1686,14 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
               try {
                 await generateClipForEvent(event, videoUrl);
               } catch (clipError) {
-                console.warn('Failed to generate clip for event:', event.id, clipError);
+                console.warn('[finishMatch] Failed to generate clip for event:', event.id, clipError);
               }
             }
           }
         }
       }
     } catch (clipsError) {
-      console.error('Error generating clips:', clipsError);
+      console.error('[finishMatch] Error generating clips:', clipsError);
       // Non-critical - clips can be generated later from Events page
     }
 
@@ -1643,24 +1711,26 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             status: "analyzed",
           })
           .eq("id", matchId);
+        console.log('[finishMatch] Match record updated');
       }
     } catch (matchUpdateError) {
-      console.error('Error updating match:', matchUpdateError);
+      console.error('[finishMatch] Error updating match:', matchUpdateError);
     }
 
     // STEP 6: Save transcript
     try {
       if (matchId) {
         await saveTranscriptToDatabase(matchId);
+        console.log('[finishMatch] Transcript saved');
       }
     } catch (transcriptError) {
-      console.error('Error saving transcript:', transcriptError);
+      console.error('[finishMatch] Error saving transcript:', transcriptError);
     }
 
     // STEP 7: Create analysis job record
     try {
       if (matchId) {
-        await supabase.from("analysis_jobs").insert({
+        const { error: analysisError } = await supabase.from("analysis_jobs").insert({
           match_id: matchId,
           video_id: videoId,
           status: 'completed',
@@ -1668,7 +1738,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           current_step: 'Análise ao vivo concluída',
           completed_at: new Date().toISOString(),
           result: {
-            eventsDetected: approvedEvents.length,
+            eventsDetected: syncedEventsCount,
             eventsWithClips: approvedEvents.filter(e => e.clipUrl).length,
             videoUrl: videoUrl,
             source: 'live',
@@ -1678,23 +1748,31 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
               goals: approvedEvents.filter(e => e.type.includes('goal')).length,
               cards: approvedEvents.filter(e => e.type.includes('card')).length,
               fouls: approvedEvents.filter(e => e.type === 'foul').length,
-              totalEvents: approvedEvents.length,
+              totalEvents: syncedEventsCount,
             }
           }
         });
+        
+        if (analysisError) {
+          console.error('[finishMatch] Error creating analysis job:', analysisError);
+        } else {
+          console.log('[finishMatch] Analysis job created with source: live');
+        }
       }
     } catch (analysisError) {
-      console.error('Error creating analysis job:', analysisError);
+      console.error('[finishMatch] Error creating analysis job:', analysisError);
     }
 
     // STEP 8: Prepare result and clean up
     const result: FinishMatchResult | null = matchId ? {
       matchId,
       videoUrl,
-      eventsCount: approvedEvents.length,
+      eventsCount: syncedEventsCount,
       transcriptWords: transcriptBuffer.split(" ").length,
       duration: recordingTime,
     } : null;
+
+    console.log('[finishMatch] Complete. Result:', result);
 
     setFinishResult(result);
     setIsFinishing(false);
@@ -1702,7 +1780,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     if (matchId) {
       toast({ 
         title: "Partida finalizada!", 
-        description: `${approvedEvents.length} eventos salvos${videoUrl ? ' com vídeo' : ''}. Acesse Eventos para ver os clips.` 
+        description: `${syncedEventsCount} eventos salvos${videoUrl ? ' com vídeo' : ''}. Acesse Eventos para ver os clips.` 
       });
     }
     

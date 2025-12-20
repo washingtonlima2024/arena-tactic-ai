@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useImperativeHandle, forwardRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Camera, CameraOff, RefreshCw } from "lucide-react";
@@ -7,6 +7,7 @@ interface LiveCameraInputProps {
   cameraStream: MediaStream | null;
   onCameraStreamChange: (stream: MediaStream | null) => void;
   isRecording: boolean;
+  onVideoElementReady?: (element: HTMLVideoElement | null) => void;
 }
 
 interface DeviceInfo {
@@ -14,11 +15,16 @@ interface DeviceInfo {
   label: string;
 }
 
-export const LiveCameraInput = ({
+export interface LiveCameraInputRef {
+  getVideoElement: () => HTMLVideoElement | null;
+}
+
+export const LiveCameraInput = forwardRef<LiveCameraInputRef, LiveCameraInputProps>(({
   cameraStream,
   onCameraStreamChange,
   isRecording,
-}: LiveCameraInputProps) => {
+  onVideoElementReady,
+}, ref) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [devices, setDevices] = useState<{ video: DeviceInfo[]; audio: DeviceInfo[] }>({
     video: [],
@@ -28,6 +34,11 @@ export const LiveCameraInput = ({
   const [selectedAudio, setSelectedAudio] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
+  // Expose video element via ref
+  useImperativeHandle(ref, () => ({
+    getVideoElement: () => videoRef.current
+  }), []);
+
   useEffect(() => {
     loadDevices();
   }, []);
@@ -35,8 +46,17 @@ export const LiveCameraInput = ({
   useEffect(() => {
     if (videoRef.current && cameraStream) {
       videoRef.current.srcObject = cameraStream;
+      // Notify parent when video element is ready with stream
+      if (onVideoElementReady) {
+        videoRef.current.onloadeddata = () => {
+          console.log('[LiveCameraInput] Video element ready with stream');
+          onVideoElementReady(videoRef.current);
+        };
+      }
+    } else if (!cameraStream && onVideoElementReady) {
+      onVideoElementReady(null);
     }
-  }, [cameraStream]);
+  }, [cameraStream, onVideoElementReady]);
 
   const loadDevices = async () => {
     try {
@@ -179,4 +199,6 @@ export const LiveCameraInput = ({
       </div>
     </div>
   );
-};
+});
+
+LiveCameraInput.displayName = "LiveCameraInput";
