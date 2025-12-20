@@ -1368,8 +1368,11 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   const addManualEvent = useCallback(async (type: string) => {
     // CRITICAL: Use multiple fallbacks for matchId
     const matchId = tempMatchIdRef.current || currentMatchId;
-    const minute = Math.floor(recordingTime / 60);
-    const second = recordingTime % 60;
+    
+    // CRITICAL: Use recordingTimeRef.current to get actual recording time (fixes stale closure)
+    const currentRecordingTime = recordingTimeRef.current;
+    const minute = Math.floor(currentRecordingTime / 60);
+    const second = currentRecordingTime % 60;
 
     console.log('=== ADD MANUAL EVENT ===');
     console.log('type:', type);
@@ -1377,6 +1380,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     console.log('currentMatchId state:', currentMatchId);
     console.log('matchId used:', matchId);
     console.log('isRecording:', isRecording);
+    console.log('currentRecordingTime:', currentRecordingTime);
 
     if (!matchId) {
       console.error('❌ CRITICAL: No matchId available - event will NOT be saved to database');
@@ -1396,7 +1400,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       second,
       description: `${type} aos ${minute}'${second}"`,
       status: "approved",
-      recordingTimestamp: recordingTime,
+      recordingTimestamp: currentRecordingTime,
     };
 
     setApprovedEvents((prev) => [...prev, newEvent]);
@@ -1421,12 +1425,12 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(type),
             match_half: minute < 45 ? 'first' : 'second',
             metadata: {
-              eventMs: recordingTime * 1000,
-              videoSecond: recordingTime,
+              eventMs: currentRecordingTime * 1000,
+              videoSecond: currentRecordingTime,
               source: 'live-manual'
             }
           });
-          console.log("Manual event saved in real-time:", type);
+          console.log(`Manual event saved at ${currentRecordingTime}s:`, type);
           
           // IMMEDIATE: Save video chunk and get URL directly (fixes race condition)
           let chunkUrl: string | null = null;
@@ -1456,7 +1460,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       title: "Evento adicionado",
       description: newEvent.description,
     });
-  }, [recordingTime, toast, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis, currentMatchId, isRecording]);
+  }, [toast, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis, currentMatchId, isRecording]);
 
   // Add detected event from AI - NOW SAVES TO DATABASE IMMEDIATELY
   const addDetectedEvent = useCallback(async (eventData: {
@@ -1470,6 +1474,9 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     const matchId = tempMatchIdRef.current || currentMatchId;
     const eventId = crypto.randomUUID();
     
+    // CRITICAL: Use recordingTimeRef.current to get actual recording time (fixes stale closure)
+    const currentRecordingTime = recordingTimeRef.current;
+    
     const newEvent: LiveEvent = {
       id: eventId,
       type: eventData.type,
@@ -1478,7 +1485,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       description: eventData.description,
       confidence: eventData.confidence,
       status: "pending",
-      recordingTimestamp: recordingTime,
+      recordingTimestamp: currentRecordingTime,
     };
 
     const isDuplicate = detectedEvents.some(
@@ -1504,13 +1511,13 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(eventData.type),
             match_half: eventData.minute < 45 ? 'first' : 'second',
             metadata: {
-              eventMs: recordingTime * 1000,
-              videoSecond: recordingTime,
+              eventMs: currentRecordingTime * 1000,
+              videoSecond: currentRecordingTime,
               source: eventData.source || 'live-detected',
               confidence: eventData.confidence
             }
           });
-          console.log("✅ Detected event saved immediately to database:", eventData.type);
+          console.log(`✅ Detected event saved at ${currentRecordingTime}s:`, eventData.type);
           
           // Save video chunk for potential clip generation later
           if (videoChunksRef.current.length > 0) {
@@ -1556,7 +1563,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         });
       }
     }
-  }, [detectedEvents, recordingTime, matchInfo, toast, currentMatchId, saveVideoChunk]);
+  }, [detectedEvents, matchInfo, toast, currentMatchId, saveVideoChunk]);
 
   // Keep ref synchronized with the latest addDetectedEvent function
   useEffect(() => {
