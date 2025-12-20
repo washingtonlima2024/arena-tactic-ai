@@ -436,10 +436,18 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       videoRecorder.start(5000);
       setIsRecordingVideo(true);
 
-      // NEW: Start periodic chunk saving for clip generation (every 30 seconds)
+      // Start periodic chunk saving for clip generation (every 20 seconds)
       chunkSaveIntervalRef.current = setInterval(() => {
         saveVideoChunk();
-      }, 30000);
+      }, 20000);
+      
+      // Save first chunk after 10 seconds to enable early clip generation
+      setTimeout(() => {
+        if (videoChunksRef.current.length > 0) {
+          console.log('Saving initial video chunk for early clip generation...');
+          saveVideoChunk();
+        }
+      }, 10000);
 
       console.log('Video recording started with mimeType:', selectedMimeType || 'default');
 
@@ -1121,8 +1129,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     });
   }, [recordingTime, toast, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis, currentMatchId, isRecording]);
 
-  // Add detected event from AI
-  const addDetectedEvent = useCallback((eventData: {
+  // Add detected event from AI - NOW SAVES TO DATABASE IMMEDIATELY
+  const addDetectedEvent = useCallback(async (eventData: {
     type: string;
     minute: number;
     second: number;
@@ -1130,8 +1138,11 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     confidence?: number;
     source?: string;
   }) => {
+    const matchId = tempMatchIdRef.current || currentMatchId;
+    const eventId = crypto.randomUUID();
+    
     const newEvent: LiveEvent = {
-      id: crypto.randomUUID(),
+      id: eventId,
       type: eventData.type,
       minute: eventData.minute,
       second: eventData.second,
@@ -1149,6 +1160,39 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
     if (!isDuplicate) {
       setDetectedEvents((prev) => [...prev, newEvent]);
+      
+      // IMMEDIATELY save to database (pending approval)
+      if (matchId) {
+        try {
+          await supabase.from("match_events").insert({
+            id: eventId,
+            match_id: matchId,
+            event_type: eventData.type,
+            minute: eventData.minute,
+            second: eventData.second,
+            description: eventData.description,
+            approval_status: "pending",
+            is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(eventData.type),
+            match_half: eventData.minute < 45 ? 'first' : 'second',
+            metadata: {
+              eventMs: recordingTime * 1000,
+              videoSecond: recordingTime,
+              source: eventData.source || 'live-detected',
+              confidence: eventData.confidence
+            }
+          });
+          console.log("✅ Detected event saved immediately to database:", eventData.type);
+          
+          // Save video chunk for potential clip generation later
+          if (videoChunksRef.current.length > 0) {
+            saveVideoChunk();
+          }
+        } catch (error) {
+          console.error("Error saving detected event to database:", error);
+        }
+      } else {
+        console.warn("⚠️ No matchId available - event only saved locally");
+      }
       
       if ((eventData.type === 'goal' || eventData.type === 'goal_home' || eventData.type === 'goal_away') 
           && eventData.confidence && eventData.confidence >= 0.8) {
@@ -1183,12 +1227,12 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         });
       }
     }
-  }, [detectedEvents, recordingTime, matchInfo, toast]);
+  }, [detectedEvents, recordingTime, matchInfo, toast, currentMatchId, saveVideoChunk]);
 
-  // Approve event
+  // Approve event - now UPDATES existing record instead of inserting
   const approveEvent = useCallback(async (eventId: string) => {
     const event = detectedEvents.find((e) => e.id === eventId);
-    const matchId = tempMatchIdRef.current;
+    const matchId = tempMatchIdRef.current || currentMatchId;
     
     if (event) {
       setDetectedEvents((prev) => prev.filter((e) => e.id !== eventId));
@@ -1205,50 +1249,64 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
       if (matchId) {
         try {
-          await supabase.from("match_events").insert({
-            id: event.id,
-            match_id: matchId,
-            event_type: event.type,
-            minute: event.minute,
-            second: event.second,
-            description: event.description,
-            approval_status: "approved",
-            is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(event.type),
-            match_half: event.minute < 45 ? 'first' : 'second',
-            metadata: {
-              eventMs: (event.recordingTimestamp || (event.minute * 60 + event.second)) * 1000,
-              videoSecond: event.recordingTimestamp || (event.minute * 60 + event.second),
-              source: 'live-approved',
-              confidence: event.confidence
-            }
-          });
-          console.log("Approved event saved in real-time:", event.type);
+          // UPDATE existing event (already saved when detected) instead of INSERT
+          const { error: updateError } = await supabase
+            .from("match_events")
+            .update({
+              approval_status: "approved",
+              approved_at: new Date().toISOString(),
+            })
+            .eq("id", event.id);
           
-          // IMMEDIATE: Save video chunk and get URL directly (fixes race condition)
+          if (updateError) {
+            // Fallback: try insert if update fails (event might not exist)
+            console.warn("Update failed, trying insert:", updateError);
+            await supabase.from("match_events").insert({
+              id: event.id,
+              match_id: matchId,
+              event_type: event.type,
+              minute: event.minute,
+              second: event.second,
+              description: event.description,
+              approval_status: "approved",
+              is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(event.type),
+              match_half: event.minute < 45 ? 'first' : 'second',
+              metadata: {
+                eventMs: (event.recordingTimestamp || (event.minute * 60 + event.second)) * 1000,
+                videoSecond: event.recordingTimestamp || (event.minute * 60 + event.second),
+                source: 'live-approved',
+                confidence: event.confidence
+              }
+            });
+          }
+          
+          console.log("✅ Event approved and saved:", event.type);
+          
+          // IMMEDIATE: Save video chunk and get URL directly
           let chunkUrl: string | null = null;
           if (videoChunksRef.current.length > 0) {
             chunkUrl = await saveVideoChunk();
             console.log('Video chunk saved for approved event, URL:', chunkUrl);
           }
           
-          // Generate clip using the returned URL (not stale state)
+          // Generate clip using the returned URL
           const videoUrl = chunkUrl || latestVideoChunkUrl;
           if (videoUrl) {
             console.log('Generating clip for approved event with URL:', videoUrl);
             generateClipForEvent(event, videoUrl);
           } else {
-            console.log('No video URL available for clip generation');
+            console.log('No video URL available for clip generation - clips can be generated later from Analysis page');
           }
 
           // Trigger live analysis immediately
           console.log('Triggering live analysis for approved event:', event.type);
           triggerLiveAnalysis(event);
         } catch (error) {
-          console.error("Error saving approved event:", error);
+          console.error("Error approving event:", error);
         }
       }
     }
-  }, [detectedEvents, matchInfo, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis]);
+  }, [detectedEvents, matchInfo, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis, currentMatchId]);
 
   // Edit event
   const editEvent = useCallback((eventId: string, updates: Partial<LiveEvent>) => {
