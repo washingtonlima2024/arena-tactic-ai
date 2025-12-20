@@ -805,6 +805,8 @@ export const useLiveBroadcast = () => {
     isRecordingVideo,
     videoUploadProgress,
     isUploadingVideo,
+    // NEW: Expose current match ID for transcript saving
+    currentMatchId: tempMatchIdRef.current,
     startRecording,
     stopRecording,
     pauseRecording,
