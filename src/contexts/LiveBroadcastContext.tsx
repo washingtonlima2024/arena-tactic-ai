@@ -968,6 +968,40 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [loadFFmpeg, toast]);
 
+  // Call live analysis edge function
+  const triggerLiveAnalysis = useCallback(async (event: LiveEvent) => {
+    const matchId = tempMatchIdRef.current;
+    if (!matchId) return;
+
+    try {
+      await supabase.functions.invoke('generate-live-analysis', {
+        body: {
+          matchId,
+          event: {
+            id: event.id,
+            type: event.type,
+            minute: event.minute,
+            second: event.second,
+            description: event.description,
+            confidence: event.confidence,
+          },
+          allEvents: approvedEvents.map(e => ({
+            type: e.type,
+            minute: e.minute,
+            second: e.second,
+            description: e.description,
+          })),
+          homeTeam: matchInfo.homeTeam,
+          awayTeam: matchInfo.awayTeam,
+          score: currentScore,
+        }
+      });
+      console.log('Live analysis triggered for event:', event.type);
+    } catch (error) {
+      console.error('Error triggering live analysis:', error);
+    }
+  }, [approvedEvents, matchInfo, currentScore]);
+
   // Add manual event
   const addManualEvent = useCallback(async (type: string) => {
     const matchId = tempMatchIdRef.current;
@@ -1013,10 +1047,18 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         });
         console.log("Manual event saved in real-time:", type);
         
+        // IMMEDIATE: Save video chunk first, then generate clip
+        if (videoChunksRef.current.length > 0) {
+          await saveVideoChunk();
+        }
+        
         // Generate clip if video chunk is available
         if (latestVideoChunkUrl) {
-          await generateClipForEvent(newEvent, latestVideoChunkUrl);
+          generateClipForEvent(newEvent, latestVideoChunkUrl);
         }
+
+        // Trigger live analysis
+        triggerLiveAnalysis(newEvent);
       } catch (error) {
         console.error("Error saving manual event:", error);
       }
@@ -1026,7 +1068,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       title: "Evento adicionado",
       description: newEvent.description,
     });
-  }, [recordingTime, toast, latestVideoChunkUrl, generateClipForEvent]);
+  }, [recordingTime, toast, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis]);
 
   // Add detected event from AI
   const addDetectedEvent = useCallback((eventData: {
@@ -1131,16 +1173,24 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           });
           console.log("Approved event saved in real-time:", event.type);
           
+          // IMMEDIATE: Save video chunk first, then generate clip
+          if (videoChunksRef.current.length > 0) {
+            await saveVideoChunk();
+          }
+          
           // Generate clip if video chunk is available
           if (latestVideoChunkUrl) {
-            await generateClipForEvent(event, latestVideoChunkUrl);
+            generateClipForEvent(event, latestVideoChunkUrl);
           }
+
+          // Trigger live analysis
+          triggerLiveAnalysis(event);
         } catch (error) {
           console.error("Error saving approved event:", error);
         }
       }
     }
-  }, [detectedEvents, matchInfo, latestVideoChunkUrl, generateClipForEvent]);
+  }, [detectedEvents, matchInfo, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis]);
 
   // Edit event
   const editEvent = useCallback((eventId: string, updates: Partial<LiveEvent>) => {

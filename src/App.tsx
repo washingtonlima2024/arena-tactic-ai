@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { SidebarProvider } from "./contexts/SidebarContext";
 import { LiveBroadcastProvider } from "./contexts/LiveBroadcastContext";
+import { FloatingLivePlayer } from "./components/live/FloatingLivePlayer";
 import Landing from "./pages/Landing";
 import Index from "./pages/Index";
 import Matches from "./pages/Matches";
@@ -51,6 +52,7 @@ const App = () => (
               <Route path="*" element={<NotFound />} />
             </Routes>
             <ArenaChatbot />
+            <FloatingLivePlayer />
           </BrowserRouter>
         </SidebarProvider>
       </LiveBroadcastProvider>

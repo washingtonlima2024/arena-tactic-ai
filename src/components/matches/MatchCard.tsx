@@ -22,6 +22,7 @@ const statusLabels = {
   completed: 'Concluída',
   analyzing: 'Analisando',
   analyzed: 'Analisada',
+  pending: 'Pendente',
 };
 
 const statusColors = {
@@ -30,6 +31,7 @@ const statusColors = {
   completed: 'success',
   analyzing: 'arena',
   analyzed: 'success',
+  pending: 'secondary',
 } as const;
 
 export function MatchCard({ match }: MatchCardProps) {
@@ -136,6 +138,16 @@ export function MatchCard({ match }: MatchCardProps) {
   return (
     <>
       <Card variant="glow" className="overflow-hidden">
+        {/* Live Indicator */}
+        {match.status === 'live' && (
+          <div className="absolute left-2 top-2 z-10">
+            <Badge variant="destructive" className="animate-pulse gap-1">
+              <span className="h-2 w-2 rounded-full bg-white animate-ping" />
+              🔴 AO VIVO
+            </Badge>
+          </div>
+        )}
+        
         {/* Video Preview - Shows embedded player if video exists */}
         <div className="relative aspect-video w-full overflow-hidden bg-gradient-to-br from-arena/20 to-arena-dark/40">
           {matchVideo ? (
@@ -180,7 +192,7 @@ export function MatchCard({ match }: MatchCardProps) {
                       </Badge>
                     )}
                     <Badge variant="arena" className="text-[10px]">
-                      {match.status === 'completed' || match.status === 'analyzed' ? 'Finalizado' : 'Ao vivo'}
+                      {match.status === 'completed' || match.status === 'analyzed' ? 'Finalizado' : match.status === 'live' ? '🔴 Ao vivo' : 'Ao vivo'}
                     </Badge>
                   </div>
                 </div>
@@ -206,8 +218,11 @@ export function MatchCard({ match }: MatchCardProps) {
                     <span className="text-3xl font-bold text-foreground">
                       {match.score.home} - {match.score.away}
                     </span>
-                    <Badge variant="arena" className="mt-1 text-[10px]">
-                      {match.status === 'completed' || match.status === 'analyzed' ? 'Finalizado' : match.status === 'analyzing' ? 'Analisando' : 'Agendado'}
+                    <Badge 
+                      variant={match.status === 'live' ? 'destructive' : 'arena'} 
+                      className={`mt-1 text-[10px] ${match.status === 'live' ? 'animate-pulse' : ''}`}
+                    >
+                      {match.status === 'live' ? '🔴 AO VIVO' : match.status === 'completed' || match.status === 'analyzed' ? 'Finalizado' : match.status === 'analyzing' ? 'Analisando' : 'Agendado'}
                     </Badge>
                   </div>
                   <div className="flex flex-col items-center gap-1">
@@ -217,10 +232,12 @@ export function MatchCard({ match }: MatchCardProps) {
                 </div>
                 <p className="text-xs text-muted-foreground">{match.competition}</p>
               </div>
-              {/* No video indicator */}
-              <div className="absolute bottom-2 right-2 rounded bg-muted/80 px-2 py-0.5 text-xs font-medium text-muted-foreground">
-                Sem vídeo
-              </div>
+              {/* No video indicator - only show if not live */}
+              {match.status !== 'live' && (
+                <div className="absolute bottom-2 right-2 rounded bg-muted/80 px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                  Sem vídeo
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -290,6 +307,22 @@ export function MatchCard({ match }: MatchCardProps) {
 
           {/* Actions */}
           <div className="flex gap-2">
+            {match.status === 'live' && (
+              <>
+                <Button variant="arena" size="sm" className="flex-1 animate-pulse" asChild>
+                  <Link to={`/live`}>
+                    <Play className="mr-1 h-4 w-4" />
+                    Ver Ao Vivo
+                  </Link>
+                </Button>
+                <Button variant="arena-outline" size="sm" className="flex-1" asChild>
+                  <Link to={`/analysis?match=${match.id}`}>
+                    <BarChart3 className="mr-1 h-4 w-4" />
+                    Análise Parcial
+                  </Link>
+                </Button>
+              </>
+            )}
             {(match.status === 'completed' || match.status === 'analyzed') && (
               <>
                 <Button variant="arena-outline" size="sm" className="flex-1" asChild>
