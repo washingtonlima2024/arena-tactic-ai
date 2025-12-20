@@ -143,6 +143,10 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   // NEW: Latest video chunk URL for real-time clip generation
   const [latestVideoChunkUrl, setLatestVideoChunkUrl] = useState<string | null>(null);
   
+  // NEW: Current video ID - created at start of recording, updated at finish
+  const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
+  const currentVideoIdRef = useRef<string | null>(null);
+  
   // NEW: Segment buffer for 5-minute segment recording
   const segmentBufferRef = useRef<VideoSegmentBuffer | null>(null);
   const [segmentCount, setSegmentCount] = useState(0);
@@ -1045,6 +1049,44 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       clipVideoChunksRef.current = []; // Reset clip chunks on new recording
       allVideoChunksRef.current = []; // CRITICAL: Reset permanent chunks on NEW recording only
 
+      // NEW: Create video record IMMEDIATELY with status 'recording'
+      // This ensures all events will have a video_id from the start
+      if (!existingMatchId) {
+        try {
+          const { data: videoRecord, error: videoError } = await supabase.from('videos').insert({
+            match_id: matchId,
+            file_url: '', // Will be updated in finishMatch
+            file_name: 'Gravação em andamento',
+            video_type: 'full',
+            status: 'recording',  // Status indicating recording in progress
+            start_minute: 0,
+          }).select('id').single();
+
+          if (videoError) {
+            console.error('[startRecording] Error creating video record:', videoError);
+          } else if (videoRecord) {
+            setCurrentVideoId(videoRecord.id);
+            currentVideoIdRef.current = videoRecord.id;
+            console.log('[startRecording] ✅ Video record created at start:', videoRecord.id);
+          }
+        } catch (videoCreateError) {
+          console.error('[startRecording] Failed to create video record:', videoCreateError);
+        }
+      } else {
+        // For existing match, check if there's already a video
+        const { data: existingVideo } = await supabase
+          .from('videos')
+          .select('id')
+          .eq('match_id', matchId)
+          .maybeSingle();
+        
+        if (existingVideo) {
+          setCurrentVideoId(existingVideo.id);
+          currentVideoIdRef.current = existingVideo.id;
+          console.log('[startRecording] Using existing video record:', existingVideo.id);
+        }
+      }
+
       // CRITICAL FIX: Start video recording from videoElement OR cameraStream
       if (videoElement) {
         console.log('[startRecording] Using videoElement for video recording');
@@ -1423,11 +1465,14 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
 
     // Always save to database since we validated matchId
+    // CRITICAL: Include video_id so events are linked from the start
+    const videoId = currentVideoIdRef.current;
     {
         try {
           await supabase.from("match_events").insert({
             id: eventId,
             match_id: matchId,
+            video_id: videoId, // NEW: Link event to video from the start
             event_type: type,
             minute,
             second,
@@ -1441,7 +1486,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
               source: 'live-manual'
             }
           });
-          console.log(`Manual event saved at ${currentRecordingTime}s:`, type);
+          console.log(`Manual event saved at ${currentRecordingTime}s with video_id ${videoId}:`, type);
           
           // IMMEDIATE: Save video chunk and get URL directly (fixes race condition)
           let chunkUrl: string | null = null;
@@ -1509,11 +1554,14 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       setDetectedEvents((prev) => [...prev, newEvent]);
       
       // IMMEDIATELY save to database (pending approval)
+      // CRITICAL: Include video_id so events are linked from the start
+      const videoId = currentVideoIdRef.current;
       if (matchId) {
         try {
           await supabase.from("match_events").insert({
             id: eventId,
             match_id: matchId,
+            video_id: videoId, // NEW: Link event to video from the start
             event_type: eventData.type,
             minute: eventData.minute,
             second: eventData.second,
@@ -1528,7 +1576,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
               confidence: eventData.confidence
             }
           });
-          console.log(`✅ Detected event saved at ${currentRecordingTime}s:`, eventData.type);
+          console.log(`✅ Detected event saved at ${currentRecordingTime}s with video_id ${videoId}:`, eventData.type);
           
           // Save video chunk for potential clip generation later
           if (videoChunksRef.current.length > 0) {
@@ -1730,14 +1778,16 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       console.error('[finishMatch] Error syncing events from DB:', syncError);
     }
     
-    // STEP 1: Save video FIRST (most critical step)
+    // STEP 1: Save video - UPDATE existing record created at start (not INSERT)
     // CRITICAL FIX: Use allVideoChunksRef first (never cleared), fallback to videoChunksRef
+    const existingVideoId = currentVideoIdRef.current;
     try {
       const chunksToUse = allVideoChunksRef.current.length > 0 
         ? allVideoChunksRef.current 
         : videoChunksRef.current;
       
       console.log(`[finishMatch] Video sources - allVideoChunks: ${allVideoChunksRef.current.length}, videoChunks: ${videoChunksRef.current.length}, using: ${chunksToUse.length}`);
+      console.log(`[finishMatch] Existing video ID from startRecording: ${existingVideoId}`);
       
       if (matchId && chunksToUse.length > 0) {
         toast({ 
@@ -1780,51 +1830,58 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           videoUrl = urlData.publicUrl;
           console.log('[finishMatch] Video uploaded to:', videoUrl);
           
-          // Insert video record and get its ID - with robust retry logic
-          console.log('[finishMatch] Inserting video record into videos table...');
-          const { data: videoRecord, error: insertError } = await supabase.from('videos').insert({
-            match_id: matchId,
-            file_url: videoUrl,
-            file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
-            video_type: 'full',
-            start_minute: 0,
-            end_minute: Math.ceil(recordingTimeRef.current / 60),
-            duration_seconds: recordingTimeRef.current,
-            status: 'complete'
-          }).select('id').single();
+          // NEW ARCHITECTURE: UPDATE existing video record instead of INSERT
+          if (existingVideoId) {
+            console.log('[finishMatch] Updating existing video record:', existingVideoId);
+            const { error: updateError } = await supabase
+              .from('videos')
+              .update({
+                file_url: videoUrl,
+                file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
+                end_minute: Math.ceil(recordingTimeRef.current / 60),
+                duration_seconds: recordingTimeRef.current,
+                status: 'complete'
+              })
+              .eq('id', existingVideoId);
 
-          if (insertError) {
-            console.error('[finishMatch] CRITICAL: Failed to insert video record:', insertError);
-            // Retry with simpler insert
-            console.log('[finishMatch] Retrying video insert without select...');
-            const { error: retryError } = await supabase.from('videos').insert({
+            if (updateError) {
+              console.error('[finishMatch] Error updating video record:', updateError);
+              // Fallback: try insert
+              const { data: newVideo } = await supabase.from('videos').insert({
+                match_id: matchId,
+                file_url: videoUrl,
+                file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
+                video_type: 'full',
+                start_minute: 0,
+                end_minute: Math.ceil(recordingTimeRef.current / 60),
+                duration_seconds: recordingTimeRef.current,
+                status: 'complete'
+              }).select('id').single();
+              videoId = newVideo?.id || null;
+            } else {
+              videoId = existingVideoId;
+              console.log('[finishMatch] ✅ Video record updated successfully:', videoId);
+            }
+          } else {
+            // Fallback: No existing video, create new one
+            console.log('[finishMatch] No existing video ID, creating new record...');
+            const { data: videoRecord, error: insertError } = await supabase.from('videos').insert({
               match_id: matchId,
               file_url: videoUrl,
-              file_name: `Transmissão ao vivo`,
+              file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
               video_type: 'full',
               start_minute: 0,
               end_minute: Math.ceil(recordingTimeRef.current / 60),
               duration_seconds: recordingTimeRef.current,
               status: 'complete'
-            });
-            
-            if (retryError) {
-              console.error('[finishMatch] CRITICAL: Video insert retry also failed:', retryError);
+            }).select('id').single();
+
+            if (insertError) {
+              console.error('[finishMatch] Failed to insert video record:', insertError);
             } else {
-              console.log('[finishMatch] Video record inserted on retry');
-              // Fetch the video ID
-              const { data: fetchedVideo } = await supabase
-                .from('videos')
-                .select('id')
-                .eq('match_id', matchId)
-                .order('created_at', { ascending: false })
-                .limit(1)
-                .maybeSingle();
-              videoId = fetchedVideo?.id || null;
+              videoId = videoRecord?.id || null;
+              console.log('[finishMatch] Video record created:', videoId);
             }
-          } else {
-            videoId = videoRecord?.id || null;
-            console.log('[finishMatch] Video record created successfully with ID:', videoId);
           }
           
           setVideoUploadProgress(100);
@@ -1851,16 +1908,22 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           videoUrl = urlData.publicUrl;
           console.log('[finishMatch] Found existing video in storage:', videoUrl);
           
-          // Check if video record exists
-          const { data: existingVideo } = await supabase
-            .from('videos')
-            .select('id')
-            .eq('match_id', matchId)
-            .maybeSingle();
-          
-          if (!existingVideo) {
-            // Insert video record for the found file
-            const { data: newVideo, error: insertErr } = await supabase.from('videos').insert({
+          // Update existing video record with URL
+          if (existingVideoId) {
+            await supabase
+              .from('videos')
+              .update({
+                file_url: videoUrl,
+                status: 'complete',
+                end_minute: Math.ceil(recordingTimeRef.current / 60),
+                duration_seconds: recordingTimeRef.current,
+              })
+              .eq('id', existingVideoId);
+            videoId = existingVideoId;
+            console.log('[finishMatch] Updated existing video record from storage:', videoId);
+          } else {
+            // Create new video record
+            const { data: newVideo } = await supabase.from('videos').insert({
               match_id: matchId,
               file_url: videoUrl,
               file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
@@ -1870,14 +1933,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
               duration_seconds: recordingTimeRef.current,
               status: 'complete'
             }).select('id').maybeSingle();
-            
-            if (!insertErr && newVideo) {
-              videoId = newVideo.id;
-              console.log('[finishMatch] Video record created from storage file:', videoId);
-            }
-          } else {
-            videoId = existingVideo.id;
-            console.log('[finishMatch] Using existing video record:', videoId);
+            videoId = newVideo?.id || null;
           }
         } else {
           console.log('[finishMatch] No video found in storage either');
@@ -2049,6 +2105,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     setFinishResult(null);
     tempMatchIdRef.current = null;
     setCurrentMatchId(null);
+    setCurrentVideoId(null); // NEW: Reset video ID
+    currentVideoIdRef.current = null;
     setDetectedEvents([]);
     setApprovedEvents([]);
     setCurrentScore({ home: 0, away: 0 });
