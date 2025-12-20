@@ -89,39 +89,50 @@ export function LiveEventPlayer({
   const playerRef = useRef<HTMLVideoElement>(null);
   const clipVideoRef = useRef<HTMLVideoElement>(null);
 
-  // Sort events by time (most recent first)
-  const sortedEvents = [...events].sort(
-    (a, b) => (b.recordingTimestamp || 0) - (a.recordingTimestamp || 0)
-  );
+  // Sort events by time (most recent first) - handle undefined timestamps safely
+  const sortedEvents = [...events]
+    .filter(e => e && e.id) // Filter out invalid events
+    .sort((a, b) => {
+      const timestampA = a.recordingTimestamp ?? 0;
+      const timestampB = b.recordingTimestamp ?? 0;
+      return timestampB - timestampA;
+    });
 
   // Handle event click - seek video to that timestamp
   const handleEventClick = (event: LiveEvent) => {
-    setSelectedEvent(event);
-    
-    if (videoElement && event.recordingTimestamp !== undefined) {
-      // Calculate the offset - go back 5 seconds before the event
-      const seekTime = Math.max(0, event.recordingTimestamp - 5);
+    try {
+      setSelectedEvent(event);
       
-      // If the video is a live stream, we can't seek
-      // But if it's a recorded video element, we might be able to
-      if (videoElement.duration && !isNaN(videoElement.duration)) {
-        videoElement.currentTime = seekTime;
-        videoElement.play();
+      if (videoElement && event.recordingTimestamp !== undefined && event.recordingTimestamp !== null) {
+        // Calculate the offset - go back 5 seconds before the event
+        const seekTime = Math.max(0, event.recordingTimestamp - 5);
+        
+        // If the video is a live stream, we can't seek
+        // But if it's a recorded video element, we might be able to
+        if (videoElement.duration && !isNaN(videoElement.duration) && isFinite(videoElement.duration)) {
+          videoElement.currentTime = Math.min(seekTime, videoElement.duration);
+          videoElement.play().catch(err => console.warn('Não foi possível reproduzir:', err));
+        }
       }
+    } catch (error) {
+      console.warn('Erro ao selecionar evento:', error);
     }
   };
 
   // Format timestamp for display
-  const formatTimestamp = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
+  const formatTimestamp = (seconds: number | undefined | null) => {
+    if (seconds === undefined || seconds === null || isNaN(seconds)) return "0'00\"";
+    const safeSeconds = Math.floor(Math.max(0, seconds));
+    const mins = Math.floor(safeSeconds / 60);
+    const secs = safeSeconds % 60;
     return `${mins}'${secs.toString().padStart(2, '0')}"`;
   };
 
   // Calculate relative time from now
-  const getRelativeTime = (eventTimestamp: number) => {
-    const diff = recordingTime - eventTimestamp;
-    if (diff < 60) return `há ${diff}s`;
+  const getRelativeTime = (eventTimestamp: number | undefined | null) => {
+    if (eventTimestamp === undefined || eventTimestamp === null || isNaN(eventTimestamp)) return '';
+    const diff = Math.max(0, recordingTime - eventTimestamp);
+    if (diff < 60) return `há ${Math.floor(diff)}s`;
     if (diff < 3600) return `há ${Math.floor(diff / 60)}min`;
     return `há ${Math.floor(diff / 3600)}h`;
   };
