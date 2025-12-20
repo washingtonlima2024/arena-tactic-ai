@@ -13,6 +13,7 @@ import { LiveScoreDisplay } from "@/components/live/LiveScoreDisplay";
 import { LiveTranscriptRealtime } from "@/components/live/LiveTranscriptRealtime";
 import { LiveFinishDialog } from "@/components/live/LiveFinishDialog";
 import { LiveSummaryDialog } from "@/components/live/LiveSummaryDialog";
+import { LiveEventPlayer } from "@/components/live/LiveEventPlayer";
 import { useLiveBroadcast } from "@/hooks/useLiveBroadcast";
 import { useNavigate } from "react-router-dom";
 
@@ -262,6 +263,16 @@ const Live = () => {
               onEdit={editEvent}
               onRemove={removeEvent}
             />
+
+            {/* Event Player - Clips Timeline */}
+            {approvedEvents.length > 0 && (
+              <LiveEventPlayer
+                events={approvedEvents}
+                videoElement={videoElement}
+                recordingTime={recordingTime}
+                isRecording={isRecording}
+              />
+            )}
           </div>
         </div>
 
