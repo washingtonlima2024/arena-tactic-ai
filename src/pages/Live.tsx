@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -6,7 +6,7 @@ import { Badge } from "@/components/ui/badge";
 import { Link2, Camera, Radio, Settings, ExternalLink, Loader2, Video, BarChart3 } from "lucide-react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { LiveStreamInput } from "@/components/live/LiveStreamInput";
-import { LiveCameraInput } from "@/components/live/LiveCameraInput";
+import { LiveCameraInput, LiveCameraInputRef } from "@/components/live/LiveCameraInput";
 import { LiveMatchForm } from "@/components/live/LiveMatchForm";
 import { LiveRecordingPanel } from "@/components/live/LiveRecordingPanel";
 import { LiveEventsList } from "@/components/live/LiveEventsList";
@@ -20,16 +20,22 @@ import { LiveTacticalField } from "@/components/tactical/LiveTacticalField";
 import { useLiveBroadcastContext } from "@/contexts/LiveBroadcastContext";
 import { useEventBasedAnalysis } from "@/hooks/useEventBasedAnalysis";
 import { useNavigate } from "react-router-dom";
+import { useToast } from "@/hooks/use-toast";
 
 const Live = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [inputMode, setInputMode] = useState<"stream" | "camera">("stream");
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [showFinishDialog, setShowFinishDialog] = useState(false);
   const [showSummaryDialog, setShowSummaryDialog] = useState(false);
   
-  // Video element state
+  // Video element state - for stream mode
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
+  
+  // Camera video element ref - for camera mode
+  const cameraInputRef = useRef<LiveCameraInputRef>(null);
+  const [cameraVideoElement, setCameraVideoElement] = useState<HTMLVideoElement | null>(null);
   
   // Use global context instead of local hook
   const {
@@ -102,14 +108,48 @@ const Live = () => {
 
   // Callback to receive video element from LiveStreamInput
   const handleVideoElementReady = useCallback((element: HTMLVideoElement | null) => {
-    console.log('Video element ready:', element ? 'available' : 'null');
+    console.log('[Live] Stream video element ready:', element ? 'available' : 'null');
     setVideoElement(element);
   }, []);
 
-  // Modified start recording to pass video element AND selectedMatchId
+  // Callback to receive video element from LiveCameraInput
+  const handleCameraVideoElementReady = useCallback((element: HTMLVideoElement | null) => {
+    console.log('[Live] Camera video element ready:', element ? 'available' : 'null');
+    setCameraVideoElement(element);
+  }, []);
+
+  // Get the appropriate video element based on current mode
+  const getActiveVideoElement = useCallback((): HTMLVideoElement | null => {
+    if (inputMode === 'stream') {
+      return videoElement;
+    } else {
+      // Try to get from ref first, then from callback state
+      return cameraInputRef.current?.getVideoElement() || cameraVideoElement;
+    }
+  }, [inputMode, videoElement, cameraVideoElement]);
+
+  // Modified start recording to pass video element AND selectedMatchId with validation
   const handleStartRecording = useCallback(() => {
-    startRecording(videoElement, selectedMatchId);
-  }, [startRecording, videoElement, selectedMatchId]);
+    const activeVideoElement = getActiveVideoElement();
+    
+    // Validate that we have a video source
+    if (!activeVideoElement && !cameraStream) {
+      console.warn('[Live] No video source available');
+      toast({
+        title: "Fonte de vídeo não disponível",
+        description: inputMode === 'camera' 
+          ? "Ligue a câmera antes de iniciar a gravação"
+          : "Carregue um stream válido antes de iniciar a gravação",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    console.log('[Live] Starting recording with video element:', activeVideoElement ? 'available' : 'null');
+    console.log('[Live] Camera stream:', cameraStream ? 'available' : 'null');
+    
+    startRecording(activeVideoElement, selectedMatchId);
+  }, [startRecording, getActiveVideoElement, selectedMatchId, cameraStream, inputMode, toast]);
 
   // Handle finish button click - show confirmation dialog
   const handleFinishClick = useCallback(() => {
@@ -221,9 +261,11 @@ const Live = () => {
 
                     <TabsContent value="camera" className="mt-0">
                       <LiveCameraInput 
+                        ref={cameraInputRef}
                         cameraStream={cameraStream}
                         onCameraStreamChange={setCameraStream}
                         isRecording={isRecording}
+                        onVideoElementReady={handleCameraVideoElementReady}
                       />
                     </TabsContent>
                   </div>
