@@ -4,6 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { SidebarProvider } from "./contexts/SidebarContext";
+import { LiveBroadcastProvider } from "./contexts/LiveBroadcastContext";
 import Landing from "./pages/Landing";
 import Index from "./pages/Index";
 import Matches from "./pages/Matches";
@@ -27,30 +28,32 @@ const queryClient = new QueryClient();
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
-      <SidebarProvider>
-        <Toaster />
-        <Sonner />
-        <BrowserRouter>
-          <Routes>
-            <Route path="/welcome" element={<Landing />} />
-            <Route path="/auth" element={<Auth />} />
-            <Route path="/" element={<RequireAuth><Index /></RequireAuth>} />
-            <Route path="/matches" element={<RequireAuth><Matches /></RequireAuth>} />
-            <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
-            <Route path="/live" element={<RequireAuth><Live /></RequireAuth>} />
-            <Route path="/live/config" element={<RequireAuth><LiveConfig /></RequireAuth>} />
-            <Route path="/viewer" element={<RequireAuth><Viewer /></RequireAuth>} />
-            <Route path="/analysis" element={<RequireAuth><Analysis /></RequireAuth>} />
-            <Route path="/events" element={<RequireAuth><Events /></RequireAuth>} />
-            <Route path="/media" element={<RequireAuth><Media /></RequireAuth>} />
-            <Route path="/audio" element={<RequireAuth><Audio /></RequireAuth>} />
-            <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
-            <Route path="/field" element={<RequireAuth><Field /></RequireAuth>} />
-            <Route path="*" element={<NotFound />} />
-          </Routes>
-          <ArenaChatbot />
-        </BrowserRouter>
-      </SidebarProvider>
+      <LiveBroadcastProvider>
+        <SidebarProvider>
+          <Toaster />
+          <Sonner />
+          <BrowserRouter>
+            <Routes>
+              <Route path="/welcome" element={<Landing />} />
+              <Route path="/auth" element={<Auth />} />
+              <Route path="/" element={<RequireAuth><Index /></RequireAuth>} />
+              <Route path="/matches" element={<RequireAuth><Matches /></RequireAuth>} />
+              <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
+              <Route path="/live" element={<RequireAuth><Live /></RequireAuth>} />
+              <Route path="/live/config" element={<RequireAuth><LiveConfig /></RequireAuth>} />
+              <Route path="/viewer" element={<RequireAuth><Viewer /></RequireAuth>} />
+              <Route path="/analysis" element={<RequireAuth><Analysis /></RequireAuth>} />
+              <Route path="/events" element={<RequireAuth><Events /></RequireAuth>} />
+              <Route path="/media" element={<RequireAuth><Media /></RequireAuth>} />
+              <Route path="/audio" element={<RequireAuth><Audio /></RequireAuth>} />
+              <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
+              <Route path="/field" element={<RequireAuth><Field /></RequireAuth>} />
+              <Route path="*" element={<NotFound />} />
+            </Routes>
+            <ArenaChatbot />
+          </BrowserRouter>
+        </SidebarProvider>
+      </LiveBroadcastProvider>
     </TooltipProvider>
   </QueryClientProvider>
 );

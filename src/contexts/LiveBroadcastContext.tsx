@@ -1,0 +1,1209 @@
+import { createContext, useContext, useState, useRef, useCallback, useEffect, ReactNode } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
+
+export interface MatchInfo {
+  homeTeam: string;
+  awayTeam: string;
+  homeTeamId?: string;
+  awayTeamId?: string;
+  competition: string;
+  matchDate: string;
+}
+
+export interface LiveEvent {
+  id: string;
+  type: string;
+  minute: number;
+  second: number;
+  description: string;
+  confidence?: number;
+  status: "pending" | "approved" | "rejected";
+  recordingTimestamp?: number;
+  clipUrl?: string;
+}
+
+export interface Score {
+  home: number;
+  away: number;
+}
+
+export interface TranscriptChunk {
+  id: string;
+  text: string;
+  minute: number;
+  second: number;
+  timestamp: Date;
+}
+
+export interface FinishMatchResult {
+  matchId: string;
+  videoUrl: string | null;
+  eventsCount: number;
+  transcriptWords: number;
+  duration: number;
+}
+
+interface LiveBroadcastContextType {
+  // State
+  matchInfo: MatchInfo;
+  setMatchInfo: (info: MatchInfo) => void;
+  streamUrl: string;
+  setStreamUrl: (url: string) => void;
+  cameraStream: MediaStream | null;
+  setCameraStream: (stream: MediaStream | null) => void;
+  isRecording: boolean;
+  isPaused: boolean;
+  recordingTime: number;
+  detectedEvents: LiveEvent[];
+  approvedEvents: LiveEvent[];
+  currentScore: Score;
+  transcriptBuffer: string;
+  transcriptChunks: TranscriptChunk[];
+  isSavingTranscript: boolean;
+  lastSavedAt: Date | null;
+  isProcessingAudio: boolean;
+  lastProcessedAt: Date | null;
+  currentMatchId: string | null;
+  isRecordingVideo: boolean;
+  videoUploadProgress: number;
+  isUploadingVideo: boolean;
+  isFinishing: boolean;
+  finishResult: FinishMatchResult | null;
+  latestVideoChunkUrl: string | null;
+  
+  // Actions
+  startRecording: (videoElement?: HTMLVideoElement | null, existingMatchId?: string | null) => Promise<void>;
+  stopRecording: () => void;
+  pauseRecording: () => void;
+  resumeRecording: () => void;
+  addManualEvent: (type: string) => Promise<void>;
+  addDetectedEvent: (eventData: {
+    type: string;
+    minute: number;
+    second: number;
+    description: string;
+    confidence?: number;
+    source?: string;
+  }) => void;
+  approveEvent: (eventId: string) => Promise<void>;
+  editEvent: (eventId: string, updates: Partial<LiveEvent>) => void;
+  removeEvent: (eventId: string) => void;
+  updateScore: (team: "home" | "away", delta: number) => void;
+  finishMatch: () => Promise<FinishMatchResult | null>;
+  resetFinishResult: () => void;
+  setTranscriptBuffer: (buffer: string) => void;
+  setTranscriptChunks: (chunks: TranscriptChunk[]) => void;
+}
+
+const LiveBroadcastContext = createContext<LiveBroadcastContextType | null>(null);
+
+export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
+  const { toast } = useToast();
+  
+  const [matchInfo, setMatchInfo] = useState<MatchInfo>({
+    homeTeam: "",
+    awayTeam: "",
+    homeTeamId: undefined,
+    awayTeamId: undefined,
+    competition: "",
+    matchDate: new Date().toISOString().slice(0, 16),
+  });
+  
+  const [streamUrl, setStreamUrl] = useState("https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8");
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [recordingTime, setRecordingTime] = useState(0);
+  
+  const [detectedEvents, setDetectedEvents] = useState<LiveEvent[]>([]);
+  const [approvedEvents, setApprovedEvents] = useState<LiveEvent[]>([]);
+  const [currentScore, setCurrentScore] = useState<Score>({ home: 0, away: 0 });
+  
+  const [transcriptBuffer, setTranscriptBuffer] = useState("");
+  const [transcriptChunks, setTranscriptChunks] = useState<TranscriptChunk[]>([]);
+  const [isSavingTranscript, setIsSavingTranscript] = useState(false);
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
+  const [isProcessingAudio, setIsProcessingAudio] = useState(false);
+  const [lastProcessedAt, setLastProcessedAt] = useState<Date | null>(null);
+  
+  const [currentMatchId, setCurrentMatchId] = useState<string | null>(null);
+  
+  const [isRecordingVideo, setIsRecordingVideo] = useState(false);
+  const [videoUploadProgress, setVideoUploadProgress] = useState(0);
+  const [isUploadingVideo, setIsUploadingVideo] = useState(false);
+  
+  const [finishResult, setFinishResult] = useState<FinishMatchResult | null>(null);
+  const [isFinishing, setIsFinishing] = useState(false);
+  
+  // NEW: Latest video chunk URL for real-time clip generation
+  const [latestVideoChunkUrl, setLatestVideoChunkUrl] = useState<string | null>(null);
+
+  // Refs
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const transcriptionIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const autoSaveIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const tempMatchIdRef = useRef<string | null>(null);
+  const videoRecorderRef = useRef<MediaRecorder | null>(null);
+  const videoChunksRef = useRef<Blob[]>([]);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const videoElementRef = useRef<HTMLVideoElement | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const audioStreamRef = useRef<MediaStream | null>(null);
+  const chunkSaveIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Save transcript to database
+  const saveTranscriptToDatabase = useCallback(async (matchId?: string) => {
+    if (!transcriptBuffer.trim()) return;
+    
+    const targetMatchId = matchId || tempMatchIdRef.current;
+    if (!targetMatchId) return;
+    
+    setIsSavingTranscript(true);
+    
+    try {
+      const { data: existing } = await supabase
+        .from("generated_audio")
+        .select("id, script")
+        .eq("match_id", targetMatchId)
+        .eq("audio_type", "live_transcript")
+        .maybeSingle();
+
+      if (existing) {
+        await supabase
+          .from("generated_audio")
+          .update({
+            script: transcriptBuffer.trim(),
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", existing.id);
+      } else {
+        await supabase
+          .from("generated_audio")
+          .insert({
+            match_id: targetMatchId,
+            audio_type: "live_transcript",
+            script: transcriptBuffer.trim(),
+            voice: "whisper",
+          });
+      }
+
+      setLastSavedAt(new Date());
+      console.log("Transcript auto-saved at", new Date().toISOString());
+    } catch (error) {
+      console.error("Error saving transcript:", error);
+    } finally {
+      setIsSavingTranscript(false);
+    }
+  }, [transcriptBuffer]);
+
+  // Timer effect
+  useEffect(() => {
+    if (isRecording && !isPaused) {
+      timerRef.current = setInterval(() => {
+        setRecordingTime((prev) => prev + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+      }
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isRecording, isPaused]);
+
+  // Auto-save transcript every 60 seconds
+  useEffect(() => {
+    if (isRecording && !isPaused) {
+      autoSaveIntervalRef.current = setInterval(() => {
+        if (transcriptBuffer.trim()) {
+          saveTranscriptToDatabase();
+        }
+      }, 60000);
+    }
+    return () => {
+      if (autoSaveIntervalRef.current) clearInterval(autoSaveIntervalRef.current);
+    };
+  }, [isRecording, isPaused, saveTranscriptToDatabase, transcriptBuffer]);
+
+  // Save score to database when it changes during recording
+  useEffect(() => {
+    if (!isRecording || !tempMatchIdRef.current) return;
+    
+    const saveScoreToDatabase = async () => {
+      try {
+        await supabase
+          .from("matches")
+          .update({
+            home_score: currentScore.home,
+            away_score: currentScore.away,
+          })
+          .eq("id", tempMatchIdRef.current);
+        console.log("Score saved in real-time:", currentScore);
+      } catch (error) {
+        console.error("Error saving score:", error);
+      }
+    };
+    
+    saveScoreToDatabase();
+  }, [currentScore, isRecording]);
+
+  // NEW: Save video chunks periodically for real-time clip generation
+  const saveVideoChunk = useCallback(async () => {
+    if (videoChunksRef.current.length === 0 || !tempMatchIdRef.current) return;
+    
+    try {
+      const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
+      const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+      const videoBlob = new Blob(videoChunksRef.current, { type: mimeType });
+      
+      const filePath = `live-chunks/${tempMatchIdRef.current}/chunk-${Date.now()}.${extension}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from('match-videos')
+        .upload(filePath, videoBlob, {
+          contentType: mimeType,
+          upsert: true
+        });
+
+      if (!uploadError) {
+        const { data: urlData } = supabase.storage
+          .from('match-videos')
+          .getPublicUrl(filePath);
+        
+        setLatestVideoChunkUrl(urlData.publicUrl);
+        console.log('Video chunk saved:', filePath);
+      }
+    } catch (error) {
+      console.error('Error saving video chunk:', error);
+    }
+  }, []);
+
+  // Create temporary match
+  const createTempMatch = useCallback(async (): Promise<string | null> => {
+    console.log("Creating match with info:", matchInfo);
+    
+    try {
+      const { data: match, error } = await supabase
+        .from("matches")
+        .insert({
+          home_team_id: matchInfo.homeTeamId || null,
+          away_team_id: matchInfo.awayTeamId || null,
+          home_score: 0,
+          away_score: 0,
+          competition: matchInfo.competition || "Transmissão ao vivo",
+          match_date: matchInfo.matchDate,
+          status: "live",
+          venue: "Transmissão ao vivo",
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error("Error creating match:", error);
+        toast({
+          title: "Erro ao criar partida",
+          description: error.message,
+          variant: "destructive",
+        });
+        return null;
+      }
+
+      if (match) {
+        tempMatchIdRef.current = match.id;
+        setCurrentMatchId(match.id);
+        console.log("Match created successfully:", match.id);
+        toast({
+          title: "Partida registrada",
+          description: "A partida foi criada e está sendo composta em tempo real",
+        });
+        return match.id;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error("Unexpected error creating match:", error);
+      toast({
+        title: "Erro inesperado",
+        description: "Não foi possível criar a partida",
+        variant: "destructive",
+      });
+      return null;
+    }
+  }, [matchInfo, toast]);
+
+  // Start video recording
+  const startVideoRecording = useCallback((videoElement: HTMLVideoElement) => {
+    try {
+      const canvas = document.createElement('canvas');
+      canvas.width = videoElement.videoWidth || 1280;
+      canvas.height = videoElement.videoHeight || 720;
+      const ctx = canvas.getContext('2d');
+      canvasRef.current = canvas;
+      videoElementRef.current = videoElement;
+
+      console.log(`Starting video recording: ${canvas.width}x${canvas.height}`);
+
+      const drawFrame = () => {
+        if (ctx && videoElementRef.current && isRecording && !isPaused) {
+          ctx.drawImage(videoElementRef.current, 0, 0, canvas.width, canvas.height);
+        }
+        animationFrameRef.current = requestAnimationFrame(drawFrame);
+      };
+      drawFrame();
+
+      const canvasStream = canvas.captureStream(30);
+
+      let combinedStream: MediaStream;
+      if (audioStreamRef.current) {
+        const audioTracks = audioStreamRef.current.getAudioTracks();
+        combinedStream = new MediaStream([
+          ...canvasStream.getVideoTracks(),
+          ...audioTracks
+        ]);
+      } else {
+        combinedStream = canvasStream;
+      }
+
+      const mimeTypes = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+        'video/mp4',
+        ''
+      ];
+
+      let selectedMimeType = '';
+      for (const mimeType of mimeTypes) {
+        if (mimeType === '' || MediaRecorder.isTypeSupported(mimeType)) {
+          selectedMimeType = mimeType;
+          break;
+        }
+      }
+
+      const recorderOptions: MediaRecorderOptions = {};
+      if (selectedMimeType) {
+        recorderOptions.mimeType = selectedMimeType;
+      }
+
+      const videoRecorder = new MediaRecorder(combinedStream, recorderOptions);
+
+      videoRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          videoChunksRef.current.push(event.data);
+          console.log(`Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB`);
+        }
+      };
+
+      videoRecorder.onerror = (event) => {
+        console.error('Video recorder error:', event);
+      };
+
+      videoRecorderRef.current = videoRecorder;
+      videoRecorder.start(5000);
+      setIsRecordingVideo(true);
+
+      // NEW: Start periodic chunk saving for clip generation (every 30 seconds)
+      chunkSaveIntervalRef.current = setInterval(() => {
+        saveVideoChunk();
+      }, 30000);
+
+      console.log('Video recording started with mimeType:', selectedMimeType || 'default');
+
+    } catch (error) {
+      console.error('Error starting video recording:', error);
+      toast({
+        title: "Erro na gravação de vídeo",
+        description: "Não foi possível iniciar a gravação do vídeo",
+        variant: "destructive",
+      });
+    }
+  }, [isRecording, isPaused, toast, saveVideoChunk]);
+
+  // Save recorded video
+  const saveRecordedVideo = useCallback(async (matchId: string): Promise<string | null> => {
+    if (videoChunksRef.current.length === 0) {
+      console.log('No video chunks to save');
+      return null;
+    }
+
+    setIsUploadingVideo(true);
+    setVideoUploadProgress(0);
+
+    try {
+      const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
+      const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+      const videoBlob = new Blob(videoChunksRef.current, { type: mimeType });
+      
+      console.log(`Saving video: ${(videoBlob.size / (1024 * 1024)).toFixed(2)} MB`);
+
+      const filePath = `live-${matchId}-${Date.now()}.${extension}`;
+
+      setVideoUploadProgress(20);
+
+      const { error: uploadError } = await supabase.storage
+        .from('match-videos')
+        .upload(filePath, videoBlob, {
+          contentType: mimeType,
+          upsert: true
+        });
+
+      if (uploadError) {
+        console.error('Error uploading video:', uploadError);
+        throw uploadError;
+      }
+
+      setVideoUploadProgress(70);
+
+      const { data: urlData } = supabase.storage
+        .from('match-videos')
+        .getPublicUrl(filePath);
+
+      const videoUrl = urlData.publicUrl;
+
+      const { error: insertError } = await supabase.from('videos').insert({
+        match_id: matchId,
+        file_url: videoUrl,
+        file_name: `Transmissão ao vivo`,
+        video_type: 'full',
+        start_minute: 0,
+        end_minute: Math.ceil(recordingTime / 60),
+        duration_seconds: recordingTime,
+        status: 'complete'
+      });
+
+      if (insertError) {
+        console.error('Error inserting video record:', insertError);
+      }
+
+      setVideoUploadProgress(100);
+      console.log('Video saved successfully:', videoUrl);
+
+      return videoUrl;
+
+    } catch (error) {
+      console.error('Error saving video:', error);
+      toast({
+        title: "Erro ao salvar vídeo",
+        description: "O vídeo não pôde ser enviado",
+        variant: "destructive",
+      });
+      return null;
+    } finally {
+      setIsUploadingVideo(false);
+    }
+  }, [recordingTime, toast]);
+
+  // Stop video recording
+  const stopVideoRecording = useCallback(() => {
+    if (animationFrameRef.current) {
+      cancelAnimationFrame(animationFrameRef.current);
+      animationFrameRef.current = null;
+    }
+
+    if (videoRecorderRef.current && videoRecorderRef.current.state !== 'inactive') {
+      videoRecorderRef.current.stop();
+    }
+
+    if (chunkSaveIntervalRef.current) {
+      clearInterval(chunkSaveIntervalRef.current);
+      chunkSaveIntervalRef.current = null;
+    }
+
+    setIsRecordingVideo(false);
+    console.log('Video recording stopped');
+  }, []);
+
+  // Process audio chunk
+  const processAudioChunk = useCallback(async () => {
+    if (audioChunksRef.current.length === 0) {
+      console.log("No audio chunks to process");
+      return;
+    }
+    
+    if (isProcessingAudio) {
+      console.log("Already processing audio, skipping...");
+      return;
+    }
+
+    setIsProcessingAudio(true);
+    const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+    audioChunksRef.current = [];
+    const currentMinute = Math.floor(recordingTime / 60);
+    const currentSecond = recordingTime % 60;
+
+    console.log(`Processing audio chunk at ${currentMinute}:${currentSecond}, size: ${audioBlob.size} bytes`);
+
+    try {
+      const reader = new FileReader();
+      reader.readAsDataURL(audioBlob);
+      reader.onloadend = async () => {
+        const base64Audio = (reader.result as string).split(",")[1];
+        console.log("Sending audio to transcription service...");
+
+        const { data: transcriptData, error: transcriptError } = await supabase.functions.invoke(
+          "transcribe-audio",
+          { body: { audio: base64Audio } }
+        );
+
+        if (transcriptError) {
+          console.error("Transcription error:", transcriptError);
+          setIsProcessingAudio(false);
+          return;
+        }
+
+        console.log("Transcription result:", transcriptData);
+        setLastProcessedAt(new Date());
+
+        if (transcriptData?.text && transcriptData.text.trim()) {
+          const newChunk: TranscriptChunk = {
+            id: crypto.randomUUID(),
+            text: transcriptData.text,
+            minute: currentMinute,
+            second: currentSecond,
+            timestamp: new Date(),
+          };
+
+          setTranscriptChunks((prev) => [...prev, newChunk]);
+          setTranscriptBuffer((prev) => {
+            const updated = prev + " " + transcriptData.text;
+            return updated.trim();
+          });
+
+          console.log("Extracting events from transcript...");
+
+          const { data: eventsData, error: eventsError } = await supabase.functions.invoke(
+            "extract-live-events",
+            {
+              body: {
+                transcript: transcriptData.text,
+                homeTeam: matchInfo.homeTeam,
+                awayTeam: matchInfo.awayTeam,
+                currentScore,
+                currentMinute,
+              },
+            }
+          );
+
+          console.log("Events extraction result:", eventsData);
+
+          if (!eventsError && eventsData?.events && eventsData.events.length > 0) {
+            const currentRecordingTime = recordingTime;
+            const newEvents: LiveEvent[] = eventsData.events.map((e: any) => ({
+              id: crypto.randomUUID(),
+              type: e.type,
+              minute: e.minute || currentMinute,
+              second: e.second || 0,
+              description: e.description,
+              confidence: e.confidence || 0.8,
+              status: "pending" as const,
+              recordingTimestamp: currentRecordingTime,
+            }));
+
+            console.log(`Detected ${newEvents.length} new events`);
+            setDetectedEvents((prev) => [...prev, ...newEvents]);
+          }
+        } else {
+          console.log("No text in transcription result");
+        }
+        
+        setIsProcessingAudio(false);
+      };
+    } catch (error) {
+      console.error("Error processing audio chunk:", error);
+      setIsProcessingAudio(false);
+    }
+  }, [matchInfo, currentScore, recordingTime, isProcessingAudio]);
+
+  // Start recording - Now accepts existingMatchId to continue existing match
+  const startRecording = useCallback(async (videoElement?: HTMLVideoElement | null, existingMatchId?: string | null) => {
+    try {
+      let audioStream: MediaStream;
+      
+      if (cameraStream) {
+        const audioTracks = cameraStream.getAudioTracks();
+        if (audioTracks.length === 0) {
+          const audioOnly = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+            },
+          });
+          audioStream = audioOnly;
+        } else {
+          audioStream = new MediaStream(audioTracks);
+        }
+      } else {
+        audioStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+      }
+
+      audioStreamRef.current = audioStream;
+
+      let matchId: string | null;
+
+      // FIX: Use existing match if provided, don't create new one
+      if (existingMatchId) {
+        matchId = existingMatchId;
+        tempMatchIdRef.current = matchId;
+        setCurrentMatchId(matchId);
+        
+        // Update status to 'live'
+        await supabase
+          .from("matches")
+          .update({ status: "live" })
+          .eq("id", matchId);
+        
+        // Load existing events
+        const { data: existingEvents } = await supabase
+          .from("match_events")
+          .select("*")
+          .eq("match_id", matchId)
+          .order("minute", { ascending: true });
+        
+        if (existingEvents?.length) {
+          setApprovedEvents(existingEvents.map((e) => ({
+            id: e.id,
+            type: e.event_type,
+            minute: e.minute || 0,
+            second: e.second || 0,
+            description: e.description || "",
+            status: "approved" as const,
+            recordingTimestamp: e.metadata && typeof e.metadata === 'object' && 'videoSecond' in e.metadata 
+              ? (e.metadata as any).videoSecond 
+              : (e.minute || 0) * 60 + (e.second || 0),
+            clipUrl: e.clip_url || undefined
+          })));
+        }
+
+        // Load existing score
+        const { data: matchData } = await supabase
+          .from("matches")
+          .select("home_score, away_score")
+          .eq("id", matchId)
+          .single();
+        
+        if (matchData) {
+          setCurrentScore({
+            home: matchData.home_score || 0,
+            away: matchData.away_score || 0
+          });
+        }
+        
+        toast({
+          title: "Continuando partida",
+          description: "Retomando gravação da partida existente",
+        });
+      } else {
+        // Create new match
+        matchId = await createTempMatch();
+        if (!matchId) {
+          toast({
+            title: "Erro ao iniciar",
+            description: "Não foi possível criar a partida. Verifique os dados e tente novamente.",
+            variant: "destructive",
+          });
+          audioStream.getTracks().forEach(track => track.stop());
+          audioStreamRef.current = null;
+          return;
+        }
+      }
+
+      const mimeTypes = [
+        "audio/webm;codecs=opus",
+        "audio/webm",
+        "audio/ogg;codecs=opus",
+        "audio/mp4",
+        ""
+      ];
+      
+      let selectedMimeType = "";
+      for (const mimeType of mimeTypes) {
+        if (mimeType === "" || MediaRecorder.isTypeSupported(mimeType)) {
+          selectedMimeType = mimeType;
+          break;
+        }
+      }
+
+      const recorderOptions: MediaRecorderOptions = {};
+      if (selectedMimeType) {
+        recorderOptions.mimeType = selectedMimeType;
+      }
+
+      const mediaRecorder = new MediaRecorder(audioStream, recorderOptions);
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorderRef.current = mediaRecorder;
+      mediaRecorder.start(1000);
+
+      setIsRecording(true);
+      setIsPaused(false);
+      
+      // Only reset if new match
+      if (!existingMatchId) {
+        setRecordingTime(0);
+        setTranscriptBuffer("");
+        setTranscriptChunks([]);
+      }
+      
+      audioChunksRef.current = [];
+      videoChunksRef.current = [];
+
+      if (videoElement) {
+        if (videoElement.readyState >= 2) {
+          startVideoRecording(videoElement);
+        } else {
+          videoElement.addEventListener('loadeddata', () => {
+            startVideoRecording(videoElement);
+          }, { once: true });
+        }
+      }
+
+      transcriptionIntervalRef.current = setInterval(() => {
+        processAudioChunk();
+      }, 10000);
+      
+      setTimeout(() => {
+        processAudioChunk();
+      }, 5000);
+
+      toast({
+        title: "Transmissão iniciada",
+        description: videoElement 
+          ? "Gravando áudio e vídeo..." 
+          : "Gravando áudio e salvando transcrição automaticamente...",
+      });
+    } catch (error) {
+      console.error("Error starting recording:", error);
+      toast({
+        title: "Erro ao iniciar gravação",
+        description: "Verifique as permissões de áudio",
+        variant: "destructive",
+      });
+    }
+  }, [cameraStream, toast, createTempMatch, startVideoRecording, processAudioChunk]);
+
+  // Stop recording
+  const stopRecording = useCallback(() => {
+    if (mediaRecorderRef.current) {
+      mediaRecorderRef.current.stop();
+    }
+    if (transcriptionIntervalRef.current) {
+      clearInterval(transcriptionIntervalRef.current);
+    }
+    if (autoSaveIntervalRef.current) {
+      clearInterval(autoSaveIntervalRef.current);
+    }
+    
+    stopVideoRecording();
+    
+    if (transcriptBuffer.trim()) {
+      saveTranscriptToDatabase();
+    }
+    
+    setIsRecording(false);
+    setIsPaused(false);
+  }, [transcriptBuffer, saveTranscriptToDatabase, stopVideoRecording]);
+
+  // Pause recording
+  const pauseRecording = useCallback(() => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.pause();
+      
+      if (videoRecorderRef.current && videoRecorderRef.current.state === 'recording') {
+        videoRecorderRef.current.pause();
+      }
+      
+      setIsPaused(true);
+      
+      if (transcriptBuffer.trim()) {
+        saveTranscriptToDatabase();
+      }
+    }
+  }, [isRecording, transcriptBuffer, saveTranscriptToDatabase]);
+
+  // Resume recording
+  const resumeRecording = useCallback(() => {
+    if (mediaRecorderRef.current && isPaused) {
+      mediaRecorderRef.current.resume();
+      
+      if (videoRecorderRef.current && videoRecorderRef.current.state === 'paused') {
+        videoRecorderRef.current.resume();
+      }
+      
+      setIsPaused(false);
+    }
+  }, [isPaused]);
+
+  // NEW: Generate clip for event
+  const generateClipForEvent = useCallback(async (event: LiveEvent, videoUrl: string) => {
+    if (!tempMatchIdRef.current) return;
+    
+    try {
+      // Save clip request - will be processed by FFmpeg on client
+      console.log(`Clip generation queued for event ${event.id}`);
+      
+      // For now, store the video timestamp info in the event
+      // The clip will be generated when the user views the Events page
+      // or via batch processing after match finishes
+    } catch (error) {
+      console.error('Error generating clip:', error);
+    }
+  }, []);
+
+  // Add manual event
+  const addManualEvent = useCallback(async (type: string) => {
+    const matchId = tempMatchIdRef.current;
+    const minute = Math.floor(recordingTime / 60);
+    const second = recordingTime % 60;
+
+    const eventId = crypto.randomUUID();
+    const newEvent: LiveEvent = {
+      id: eventId,
+      type,
+      minute,
+      second,
+      description: `${type} aos ${minute}'${second}"`,
+      status: "approved",
+      recordingTimestamp: recordingTime,
+    };
+
+    setApprovedEvents((prev) => [...prev, newEvent]);
+
+    if (type === "goal_home") {
+      setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
+    } else if (type === "goal_away") {
+      setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
+    }
+
+    if (matchId) {
+      try {
+        await supabase.from("match_events").insert({
+          id: eventId,
+          match_id: matchId,
+          event_type: type,
+          minute,
+          second,
+          description: newEvent.description,
+          approval_status: "approved",
+          is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(type),
+          match_half: minute < 45 ? 'first' : 'second',
+          metadata: {
+            eventMs: recordingTime * 1000,
+            videoSecond: recordingTime,
+            source: 'live-manual'
+          }
+        });
+        console.log("Manual event saved in real-time:", type);
+        
+        // Generate clip if video chunk is available
+        if (latestVideoChunkUrl) {
+          await generateClipForEvent(newEvent, latestVideoChunkUrl);
+        }
+      } catch (error) {
+        console.error("Error saving manual event:", error);
+      }
+    }
+
+    toast({
+      title: "Evento adicionado",
+      description: newEvent.description,
+    });
+  }, [recordingTime, toast, latestVideoChunkUrl, generateClipForEvent]);
+
+  // Add detected event from AI
+  const addDetectedEvent = useCallback((eventData: {
+    type: string;
+    minute: number;
+    second: number;
+    description: string;
+    confidence?: number;
+    source?: string;
+  }) => {
+    const newEvent: LiveEvent = {
+      id: crypto.randomUUID(),
+      type: eventData.type,
+      minute: eventData.minute,
+      second: eventData.second,
+      description: eventData.description,
+      confidence: eventData.confidence,
+      status: "pending",
+      recordingTimestamp: recordingTime,
+    };
+
+    const isDuplicate = detectedEvents.some(
+      (e) =>
+        e.type === newEvent.type &&
+        Math.abs((e.recordingTimestamp || 0) - (newEvent.recordingTimestamp || 0)) < 30
+    );
+
+    if (!isDuplicate) {
+      setDetectedEvents((prev) => [...prev, newEvent]);
+      
+      if ((eventData.type === 'goal' || eventData.type === 'goal_home' || eventData.type === 'goal_away') 
+          && eventData.confidence && eventData.confidence >= 0.8) {
+        const desc = eventData.description.toLowerCase();
+        
+        if (eventData.type === 'goal_home' || (eventData.type === 'goal' && matchInfo.homeTeam && desc.includes(matchInfo.homeTeam.toLowerCase()))) {
+          setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
+          toast({
+            title: "⚽ GOL! " + matchInfo.homeTeam,
+            description: eventData.description,
+            duration: 5000,
+          });
+        } else if (eventData.type === 'goal_away' || (eventData.type === 'goal' && matchInfo.awayTeam && desc.includes(matchInfo.awayTeam.toLowerCase()))) {
+          setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
+          toast({
+            title: "⚽ GOL! " + matchInfo.awayTeam,
+            description: eventData.description,
+            duration: 5000,
+          });
+        } else {
+          toast({
+            title: "⚽ GOL Detectado!",
+            description: eventData.description + " (confirme qual time)",
+            duration: 5000,
+          });
+        }
+      } else {
+        toast({
+          title: "Evento detectado",
+          description: `${newEvent.type}: ${newEvent.description}`,
+          duration: 3000,
+        });
+      }
+    }
+  }, [detectedEvents, recordingTime, matchInfo, toast]);
+
+  // Approve event
+  const approveEvent = useCallback(async (eventId: string) => {
+    const event = detectedEvents.find((e) => e.id === eventId);
+    const matchId = tempMatchIdRef.current;
+    
+    if (event) {
+      setDetectedEvents((prev) => prev.filter((e) => e.id !== eventId));
+      setApprovedEvents((prev) => [...prev, { ...event, status: "approved" }]);
+
+      if (event.type === "goal") {
+        const desc = event.description.toLowerCase();
+        if (matchInfo.homeTeam && desc.includes(matchInfo.homeTeam.toLowerCase())) {
+          setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
+        } else if (matchInfo.awayTeam && desc.includes(matchInfo.awayTeam.toLowerCase())) {
+          setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
+        }
+      }
+
+      if (matchId) {
+        try {
+          await supabase.from("match_events").insert({
+            id: event.id,
+            match_id: matchId,
+            event_type: event.type,
+            minute: event.minute,
+            second: event.second,
+            description: event.description,
+            approval_status: "approved",
+            is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(event.type),
+            match_half: event.minute < 45 ? 'first' : 'second',
+            metadata: {
+              eventMs: (event.recordingTimestamp || (event.minute * 60 + event.second)) * 1000,
+              videoSecond: event.recordingTimestamp || (event.minute * 60 + event.second),
+              source: 'live-approved',
+              confidence: event.confidence
+            }
+          });
+          console.log("Approved event saved in real-time:", event.type);
+          
+          // Generate clip if video chunk is available
+          if (latestVideoChunkUrl) {
+            await generateClipForEvent(event, latestVideoChunkUrl);
+          }
+        } catch (error) {
+          console.error("Error saving approved event:", error);
+        }
+      }
+    }
+  }, [detectedEvents, matchInfo, latestVideoChunkUrl, generateClipForEvent]);
+
+  // Edit event
+  const editEvent = useCallback((eventId: string, updates: Partial<LiveEvent>) => {
+    setDetectedEvents((prev) =>
+      prev.map((e) => (e.id === eventId ? { ...e, ...updates } : e))
+    );
+    setApprovedEvents((prev) =>
+      prev.map((e) => (e.id === eventId ? { ...e, ...updates } : e))
+    );
+  }, []);
+
+  // Remove event
+  const removeEvent = useCallback((eventId: string) => {
+    setDetectedEvents((prev) => prev.filter((e) => e.id !== eventId));
+    setApprovedEvents((prev) => prev.filter((e) => e.id !== eventId));
+  }, []);
+
+  // Update score
+  const updateScore = useCallback((team: "home" | "away", delta: number) => {
+    setCurrentScore((prev) => ({
+      ...prev,
+      [team]: Math.max(0, prev[team] + delta),
+    }));
+  }, []);
+
+  // Finish match
+  const finishMatch = useCallback(async (): Promise<FinishMatchResult | null> => {
+    stopRecording();
+    setIsFinishing(true);
+
+    try {
+      const matchId = tempMatchIdRef.current;
+      
+      if (matchId) {
+        toast({ 
+          title: "Salvando vídeo...", 
+          description: "Aguarde o upload da gravação" 
+        });
+        
+        const videoUrl = await saveRecordedVideo(matchId);
+
+        await supabase
+          .from("matches")
+          .update({
+            home_team_id: matchInfo.homeTeamId || null,
+            away_team_id: matchInfo.awayTeamId || null,
+            home_score: currentScore.home,
+            away_score: currentScore.away,
+            competition: matchInfo.competition,
+            status: "analyzed",
+          })
+          .eq("id", matchId);
+
+        await saveTranscriptToDatabase(matchId);
+
+        console.log(`Finish match: ${approvedEvents.length} events already saved in real-time`);
+
+        await supabase.from("analysis_jobs").insert({
+          match_id: matchId,
+          status: 'completed',
+          progress: 100,
+          current_step: 'Análise ao vivo concluída',
+          completed_at: new Date().toISOString(),
+          result: {
+            eventsDetected: approvedEvents.length,
+            source: 'live',
+            duration: recordingTime,
+            transcriptWords: transcriptBuffer.split(" ").length
+          }
+        });
+
+        const result: FinishMatchResult = {
+          matchId,
+          videoUrl,
+          eventsCount: approvedEvents.length,
+          transcriptWords: transcriptBuffer.split(" ").length,
+          duration: recordingTime,
+        };
+
+        setFinishResult(result);
+        setIsFinishing(false);
+        return result;
+      }
+
+      setIsFinishing(false);
+      return null;
+    } catch (error) {
+      console.error("Error finishing match:", error);
+      toast({
+        title: "Erro ao salvar partida",
+        description: "Tente novamente",
+        variant: "destructive",
+      });
+      setIsFinishing(false);
+      return null;
+    }
+  }, [stopRecording, currentScore, matchInfo, approvedEvents, transcriptBuffer, recordingTime, saveTranscriptToDatabase, saveRecordedVideo, toast]);
+
+  // Reset finish result
+  const resetFinishResult = useCallback(() => {
+    setFinishResult(null);
+    tempMatchIdRef.current = null;
+    setCurrentMatchId(null);
+    setDetectedEvents([]);
+    setApprovedEvents([]);
+    setCurrentScore({ home: 0, away: 0 });
+    setTranscriptBuffer("");
+    setTranscriptChunks([]);
+    setRecordingTime(0);
+    setLatestVideoChunkUrl(null);
+  }, []);
+
+  const value: LiveBroadcastContextType = {
+    matchInfo,
+    setMatchInfo,
+    streamUrl,
+    setStreamUrl,
+    cameraStream,
+    setCameraStream,
+    isRecording,
+    isPaused,
+    recordingTime,
+    detectedEvents,
+    approvedEvents,
+    currentScore,
+    transcriptBuffer,
+    transcriptChunks,
+    isSavingTranscript,
+    lastSavedAt,
+    isProcessingAudio,
+    lastProcessedAt,
+    currentMatchId,
+    isRecordingVideo,
+    videoUploadProgress,
+    isUploadingVideo,
+    isFinishing,
+    finishResult,
+    latestVideoChunkUrl,
+    startRecording,
+    stopRecording,
+    pauseRecording,
+    resumeRecording,
+    addManualEvent,
+    addDetectedEvent,
+    approveEvent,
+    editEvent,
+    removeEvent,
+    updateScore,
+    finishMatch,
+    resetFinishResult,
+    setTranscriptBuffer,
+    setTranscriptChunks,
+  };
+
+  return (
+    <LiveBroadcastContext.Provider value={value}>
+      {children}
+    </LiveBroadcastContext.Provider>
+  );
+}
+
+export function useLiveBroadcastContext() {
+  const context = useContext(LiveBroadcastContext);
+  if (!context) {
+    throw new Error("useLiveBroadcastContext must be used within LiveBroadcastProvider");
+  }
+  return context;
+}

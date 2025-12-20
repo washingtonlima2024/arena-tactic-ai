@@ -1,10 +1,11 @@
 import { useNavigate } from 'react-router-dom';
-import { Bell, User, LogOut, Shield } from 'lucide-react';
+import { Bell, User, LogOut, Shield, Radio } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { GlobalSearch } from './GlobalSearch';
 import { ProjectSelector } from './ProjectSelector';
 import { useAuth } from '@/hooks/useAuth';
 import { Badge } from '@/components/ui/badge';
+import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -17,6 +18,7 @@ import { toast } from 'sonner';
 export function Header() {
   const navigate = useNavigate();
   const { user, isAdmin, role, signOut } = useAuth();
+  const { isRecording, recordingTime, matchInfo } = useLiveBroadcastContext();
 
   const handleSignOut = async () => {
     const { error } = await signOut();
@@ -26,6 +28,12 @@ export function Header() {
     }
     toast.success('Logout realizado');
     navigate('/auth');
+  };
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
   const displayName = user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'Usuário';
@@ -43,6 +51,31 @@ export function Header() {
 
       {/* Actions */}
       <div className="flex items-center gap-3">
+        {/* Live Recording Badge - Clickable to navigate to /live */}
+        {isRecording && (
+          <button
+            onClick={() => navigate("/live")}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-red-500/20 border border-red-500/50 hover:bg-red-500/30 transition-colors cursor-pointer group"
+          >
+            <span className="relative flex h-2.5 w-2.5">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-red-500"></span>
+            </span>
+            <Radio className="h-3.5 w-3.5 text-red-500" />
+            <span className="text-red-500 font-semibold text-sm">
+              AO VIVO
+            </span>
+            <span className="text-red-400 font-mono text-xs">
+              {formatTime(recordingTime)}
+            </span>
+            {matchInfo.homeTeam && matchInfo.awayTeam && (
+              <span className="text-red-400/70 text-xs hidden sm:inline">
+                • {matchInfo.homeTeam} x {matchInfo.awayTeam}
+              </span>
+            )}
+          </button>
+        )}
+
         {isAdmin && (
           <Badge variant="arena" className="gap-1">
             <Shield className="h-3 w-3" />
