@@ -8,6 +8,7 @@ import { FootballField } from '@/components/tactical/FootballField';
 import { AnimatedTacticalPlay } from '@/components/tactical/AnimatedTacticalPlay';
 import { Heatmap3D } from '@/components/tactical/Heatmap3D';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Progress } from '@/components/ui/progress';
 import { 
   Select, 
   SelectContent, 
@@ -15,6 +16,12 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { 
   BarChart3, 
   Users, 
@@ -34,12 +41,20 @@ import {
   Clock,
   User,
   Trash2,
-  Radio
+  Radio,
+  Scissors,
+  Film,
+  ExternalLink,
+  Share2,
+  StopCircle,
+  Copy,
+  Twitter
 } from 'lucide-react';
 import { useMatchAnalysis, useMatchEvents, ExtendedTacticalAnalysis } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
 import { useEventBasedAnalysis } from '@/hooks/useEventBasedAnalysis';
+import { useClipGeneration } from '@/hooks/useClipGeneration';
 import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { supabase } from '@/integrations/supabase/client';
@@ -66,6 +81,14 @@ export default function Analysis() {
   const { data: analysis, isLoading: analysisLoading } = useMatchAnalysis(currentMatchId);
   const { data: events = [], refetch: refetchEvents } = useMatchEvents(currentMatchId);
   const { thumbnails, getThumbnail } = useThumbnailGeneration(currentMatchId || undefined);
+  
+  // Clip generation
+  const { 
+    isGenerating: isGeneratingClips, 
+    progress: clipProgress, 
+    generateAllClips, 
+    cancel: cancelClipGeneration 
+  } = useClipGeneration();
 
   // Real-time subscription for live match analysis updates
   useEffect(() => {
@@ -194,6 +217,89 @@ export default function Analysis() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
+  // Clip generation helpers
+  const eventsWithClips = events.filter(e => e.clip_url).length;
+  const eventsWithoutClips = events.filter(e => !e.clip_url).length;
+  const canGenerateClips = matchVideo && !matchVideo.file_url.includes('embed') && eventsWithoutClips > 0;
+
+  const handleGenerateClips = async (mode: 'highlights' | 'all', limit: number = 20) => {
+    if (!currentMatchId || !matchVideo) {
+      toast({
+        title: "Erro",
+        description: "Nenhum vídeo disponível para esta partida",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    if (matchVideo.file_url.includes('embed') || matchVideo.file_url.includes('xtream.tech')) {
+      toast({
+        title: "Erro",
+        description: "Extração de clips só funciona com vídeos MP4 diretos, não com embeds",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    let eventsToProcess: typeof events;
+    
+    if (mode === 'highlights') {
+      const priorityTypes = ['goal', 'red_card', 'penalty', 'yellow_card'];
+      eventsToProcess = events
+        .filter(e => priorityTypes.includes(e.event_type) && !e.clip_url)
+        .sort((a, b) => {
+          const priorityA = priorityTypes.indexOf(a.event_type);
+          const priorityB = priorityTypes.indexOf(b.event_type);
+          return priorityA - priorityB;
+        });
+    } else {
+      eventsToProcess = events.filter(e => !e.clip_url);
+    }
+
+    if (eventsToProcess.length === 0) {
+      toast({
+        title: "Info",
+        description: "Todos os eventos já possuem clips extraídos"
+      });
+      return;
+    }
+
+    const clipsCount = Math.min(eventsToProcess.length, limit);
+    toast({
+      title: "Gerando clips",
+      description: `Iniciando extração de ${clipsCount} clips...`
+    });
+
+    const videoStartMinute = matchVideo.start_minute ?? 0;
+
+    await generateAllClips(
+      eventsToProcess.slice(0, limit),
+      matchVideo.file_url,
+      currentMatchId,
+      {
+        limit,
+        videoStartMinute,
+        videoDurationSeconds: matchVideo.duration_seconds ?? undefined
+      }
+    );
+
+    refetchEvents();
+    toast({
+      title: "Concluído",
+      description: "Extração de clips concluída!"
+    });
+  };
+
+  const handleCopyClipLink = (clipUrl: string) => {
+    navigator.clipboard.writeText(clipUrl);
+    toast({ title: "Link copiado!" });
+  };
+
+  const handleShareTwitter = (clipUrl: string, eventType: string) => {
+    const text = encodeURIComponent(`Confira este momento: ${eventType} 🎥`);
+    window.open(`https://twitter.com/intent/tweet?text=${text}&url=${encodeURIComponent(clipUrl)}`, '_blank');
+  };
+
   if (matchesLoading) {
     return (
       <AppLayout>
@@ -281,7 +387,47 @@ export default function Analysis() {
               <Trash2 className="mr-2 h-4 w-4" />
               Reimportar Vídeos
             </Button>
-            <Button variant="arena-outline">
+            
+            {/* Clip Generation Dropdown */}
+            {canGenerateClips && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button 
+                    variant="secondary" 
+                    size="sm"
+                    disabled={isGeneratingClips}
+                  >
+                    {isGeneratingClips ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Scissors className="mr-2 h-4 w-4" />
+                    )}
+                    Gerar Clips
+                    {eventsWithClips > 0 && (
+                      <Badge variant="outline" className="ml-2 text-xs">
+                        {eventsWithClips}/{events.length}
+                      </Badge>
+                    )}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => handleGenerateClips('highlights', 10)}>
+                    <Target className="mr-2 h-4 w-4" />
+                    Gerar Highlights (gols, cartões)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleGenerateClips('all', 20)}>
+                    <Film className="mr-2 h-4 w-4" />
+                    Gerar Todos (máx 20)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleGenerateClips('all', 50)}>
+                    <Video className="mr-2 h-4 w-4" />
+                    Gerar Todos (máx 50)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            
+            <Button variant="arena-outline" size="sm">
               <Download className="mr-2 h-4 w-4" />
               Exportar Relatório
             </Button>
@@ -296,6 +442,38 @@ export default function Analysis() {
             matchId={currentMatchId}
             matchName={`${selectedMatch.home_team?.short_name || 'Casa'} vs ${selectedMatch.away_team?.short_name || 'Visitante'}`}
           />
+        )}
+
+        {/* Clip Generation Progress */}
+        {isGeneratingClips && (
+          <Card variant="glass" className="border-primary/30">
+            <CardContent className="py-4">
+              <div className="flex items-center gap-4">
+                <div className="flex-1">
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-sm font-medium">{clipProgress.message}</span>
+                    <div className="flex items-center gap-2">
+                      {clipProgress.completedCount !== undefined && (
+                        <Badge variant="outline">
+                          {clipProgress.completedCount}/{clipProgress.totalCount} clips
+                        </Badge>
+                      )}
+                      <Button 
+                        variant="ghost" 
+                        size="sm" 
+                        onClick={cancelClipGeneration}
+                        className="h-7"
+                      >
+                        <StopCircle className="h-4 w-4 mr-1" />
+                        Cancelar
+                      </Button>
+                    </div>
+                  </div>
+                  <Progress value={clipProgress.progress} className="h-2" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         )}
 
         {analysisLoading ? (
@@ -819,6 +997,42 @@ export default function Analysis() {
                               }>
                                 {event.minute ? `${event.minute}'` : '—'}
                               </Badge>
+
+                              {/* Clip badge and actions */}
+                              {event.clip_url ? (
+                                <DropdownMenu>
+                                  <DropdownMenuTrigger asChild>
+                                    <Button variant="secondary" size="sm" className="gap-1.5">
+                                      <Film className="h-3.5 w-3.5" />
+                                      Clip
+                                    </Button>
+                                  </DropdownMenuTrigger>
+                                  <DropdownMenuContent align="end">
+                                    <DropdownMenuItem onClick={() => window.open(event.clip_url!, '_blank')}>
+                                      <ExternalLink className="mr-2 h-4 w-4" />
+                                      Abrir Clip
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleCopyClipLink(event.clip_url!)}>
+                                      <Copy className="mr-2 h-4 w-4" />
+                                      Copiar Link
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem onClick={() => handleShareTwitter(event.clip_url!, event.event_type)}>
+                                      <Twitter className="mr-2 h-4 w-4" />
+                                      Compartilhar no X
+                                    </DropdownMenuItem>
+                                    <DropdownMenuItem asChild>
+                                      <a href={event.clip_url} download target="_blank" rel="noopener noreferrer">
+                                        <Download className="mr-2 h-4 w-4" />
+                                        Download
+                                      </a>
+                                    </DropdownMenuItem>
+                                  </DropdownMenuContent>
+                                </DropdownMenu>
+                              ) : matchVideo && !matchVideo.file_url.includes('embed') ? (
+                                <Badge variant="outline" className="text-xs text-muted-foreground">
+                                  Sem clip
+                                </Badge>
+                              ) : null}
                             </div>
                           </CardContent>
                         </Card>
