@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
@@ -19,8 +19,8 @@ const Live = () => {
   const [inputMode, setInputMode] = useState<"stream" | "camera">("stream");
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   
-  // Ref for video element (for recording)
-  const videoElementRef = useRef<HTMLVideoElement | null>(null);
+  // Video element state (not ref, so it triggers re-render)
+  const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
   
   const {
     matchInfo,
@@ -56,15 +56,15 @@ const Live = () => {
   const hasVideoSource = streamUrl || cameraStream;
 
   // Callback to receive video element from LiveStreamInput
-  const handleVideoElementReady = useCallback((videoElement: HTMLVideoElement | null) => {
-    videoElementRef.current = videoElement;
-    console.log('Video element ready:', videoElement ? 'available' : 'null');
+  const handleVideoElementReady = useCallback((element: HTMLVideoElement | null) => {
+    console.log('Video element ready:', element ? 'available' : 'null');
+    setVideoElement(element);
   }, []);
 
   // Modified start recording to pass video element
   const handleStartRecording = useCallback(() => {
-    startRecording(videoElementRef.current);
-  }, [startRecording]);
+    startRecording(videoElement);
+  }, [startRecording, videoElement]);
 
   return (
     <AppLayout>
@@ -165,7 +165,7 @@ const Live = () => {
                       homeTeam={matchInfo.homeTeam}
                       awayTeam={matchInfo.awayTeam}
                       currentScore={currentScore}
-                      videoElement={videoElementRef.current}
+                      videoElement={videoElement}
                       onTranscriptUpdate={(buffer, chunks) => {
                         console.log('Transcript updated:', buffer.length, 'chars,', chunks.length, 'chunks');
                       }}
