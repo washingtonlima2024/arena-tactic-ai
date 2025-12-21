@@ -23,6 +23,44 @@ function base64ToUint8Array(base64String: string): Uint8Array {
   return bytes;
 }
 
+// Check if data has a valid audio file header
+function hasValidAudioHeader(binaryData: Uint8Array): boolean {
+  if (binaryData.length < 4) return false;
+  
+  // WebM/Matroska: 0x1A 0x45 0xDF 0xA3
+  if (binaryData[0] === 0x1A && binaryData[1] === 0x45 && binaryData[2] === 0xDF && binaryData[3] === 0xA3) {
+    return true;
+  }
+  
+  // OGG: OggS
+  if (binaryData[0] === 0x4F && binaryData[1] === 0x67 && binaryData[2] === 0x67 && binaryData[3] === 0x53) {
+    return true;
+  }
+  
+  // MP4/M4A: ftyp at offset 4
+  if (binaryData.length >= 8 && binaryData[4] === 0x66 && binaryData[5] === 0x74 && binaryData[6] === 0x79 && binaryData[7] === 0x70) {
+    return true;
+  }
+  
+  // WAV: RIFF
+  if (binaryData[0] === 0x52 && binaryData[1] === 0x49 && binaryData[2] === 0x46 && binaryData[3] === 0x46) {
+    return true;
+  }
+  
+  // MP3: ID3 or sync bytes
+  if ((binaryData[0] === 0x49 && binaryData[1] === 0x44 && binaryData[2] === 0x33) || 
+      (binaryData[0] === 0xFF && (binaryData[1] & 0xE0) === 0xE0)) {
+    return true;
+  }
+  
+  // FLAC
+  if (binaryData[0] === 0x66 && binaryData[1] === 0x4C && binaryData[2] === 0x61 && binaryData[3] === 0x43) {
+    return true;
+  }
+  
+  return false;
+}
+
 // Detect audio format from binary data
 function detectAudioFormat(binaryData: Uint8Array): { mimeType: string; extension: string } {
   // WebM/Matroska signature: 0x1A 0x45 0xDF 0xA3
@@ -57,12 +95,11 @@ function detectAudioFormat(binaryData: Uint8Array): { mimeType: string; extensio
   }
   
   // EBML/WebM variant - check for EBML header which can start differently
-  // EBML elements can have various headers, but 0x1A is common
   if (binaryData[0] === 0x1A) {
     return { mimeType: 'audio/webm', extension: 'webm' };
   }
   
-  // Default to webm for browser recordings - OpenAI accepts webm
+  // Default to webm for browser recordings
   return { mimeType: 'audio/webm', extension: 'webm' };
 }
 
@@ -112,6 +149,19 @@ serve(async (req) => {
     // Log first few bytes for debugging
     const headerBytes = Array.from(binaryAudio.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
     console.log('Audio header bytes:', headerBytes);
+
+    // Check if data has a valid audio header
+    const isValidHeader = hasValidAudioHeader(binaryAudio);
+    console.log('Has valid audio header:', isValidHeader);
+    
+    // If no valid header, the chunk is likely a continuation segment - skip it
+    if (!isValidHeader) {
+      console.log('Invalid audio header - skipping corrupted/continuation chunk');
+      return new Response(
+        JSON.stringify({ success: true, text: '', skipped: true, reason: 'invalid_header' }),
+        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      );
+    }
 
     // Detect the actual audio format from binary data
     const { mimeType, extension } = detectAudioFormat(binaryAudio);

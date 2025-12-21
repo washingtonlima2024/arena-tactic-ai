@@ -54,16 +54,19 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
     onPartialTranscript?.("Gravando...");
 
     try {
-      // Create a new MediaRecorder for each segment to get complete WebM files
-      const mediaRecorder = new MediaRecorder(streamRef.current, {
-        mimeType: MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
-          ? "audio/webm;codecs=opus"
-          : "audio/webm",
-      });
+      // Determine best mime type
+      const mimeType = MediaRecorder.isTypeSupported("audio/webm;codecs=opus")
+        ? "audio/webm;codecs=opus"
+        : MediaRecorder.isTypeSupported("audio/webm")
+        ? "audio/webm"
+        : "audio/ogg";
+      
+      // Create a new MediaRecorder for each segment to get complete files with headers
+      const mediaRecorder = new MediaRecorder(streamRef.current, { mimeType });
 
       const chunks: Blob[] = [];
 
-      const recordingPromise = new Promise<Blob>((resolve) => {
+      const recordingPromise = new Promise<Blob>((resolve, reject) => {
         mediaRecorder.ondataavailable = (event) => {
           if (event.data.size > 0) {
             chunks.push(event.data);
@@ -71,12 +74,17 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
         };
 
         mediaRecorder.onstop = () => {
-          const blob = new Blob(chunks, { type: "audio/webm;codecs=opus" });
+          const blob = new Blob(chunks, { type: mimeType });
           resolve(blob);
+        };
+        
+        mediaRecorder.onerror = (event) => {
+          console.error("MediaRecorder error:", event);
+          reject(new Error("MediaRecorder error"));
         };
       });
 
-      // Start recording
+      // Start recording - request data at the end for a complete file
       mediaRecorder.start();
 
       // Record for the chunk duration (minus some buffer time)
@@ -84,7 +92,7 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
       
       await new Promise(resolve => setTimeout(resolve, recordDuration));
 
-      // Stop recording
+      // Stop recording to get complete file with proper headers
       if (mediaRecorder.state !== "inactive") {
         mediaRecorder.stop();
       }
@@ -107,9 +115,22 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
       const arrayBuffer = await audioBlob.arrayBuffer();
       const uint8Array = new Uint8Array(arrayBuffer);
       
-      // Log first bytes to verify WebM header
+      // Log first bytes to verify audio header
       const headerBytes = Array.from(uint8Array.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
       console.log("Audio header bytes:", headerBytes);
+      
+      // Validate header before sending - check for WebM (0x1A 0x45 0xDF 0xA3) or OGG (OggS)
+      const hasValidHeader = 
+        (uint8Array[0] === 0x1A && uint8Array[1] === 0x45 && uint8Array[2] === 0xDF && uint8Array[3] === 0xA3) ||
+        (uint8Array[0] === 0x4F && uint8Array[1] === 0x67 && uint8Array[2] === 0x67 && uint8Array[3] === 0x53);
+      
+      if (!hasValidHeader) {
+        console.warn("Invalid audio header detected, skipping chunk. Header:", headerBytes);
+        setPartialTranscript("");
+        onPartialTranscript?.("");
+        isProcessingRef.current = false;
+        return;
+      }
       
       let binary = "";
       for (let i = 0; i < uint8Array.length; i++) {
@@ -125,7 +146,8 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
 
       if (fnError) {
         console.error("Transcription error:", fnError);
-        setError(fnError.message);
+        // Don't set error for recoverable transcription failures
+        console.log("Will retry on next cycle");
         return;
       }
 
