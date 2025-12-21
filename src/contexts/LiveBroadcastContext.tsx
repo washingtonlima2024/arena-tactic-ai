@@ -2229,7 +2229,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
                 file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
                 end_minute: Math.ceil(recordingTimeRef.current / 60),
                 duration_seconds: recordingTimeRef.current,
-                status: 'complete'
+                status: 'completed'
               })
               .eq('id', existingVideoId);
 
@@ -2244,7 +2244,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
                 start_minute: 0,
                 end_minute: Math.ceil(recordingTimeRef.current / 60),
                 duration_seconds: recordingTimeRef.current,
-                status: 'complete'
+                status: 'completed'
               }).select('id').single();
               videoId = newVideo?.id || null;
             } else {
@@ -2262,7 +2262,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
               start_minute: 0,
               end_minute: Math.ceil(recordingTimeRef.current / 60),
               duration_seconds: recordingTimeRef.current,
-              status: 'complete'
+              status: 'completed'
             }).select('id').single();
 
             if (insertError) {
@@ -2303,7 +2303,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
               .from('videos')
               .update({
                 file_url: videoUrl,
-                status: 'complete',
+                status: 'completed',
                 end_minute: Math.ceil(recordingTimeRef.current / 60),
                 duration_seconds: recordingTimeRef.current,
               })
@@ -2320,7 +2320,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
               start_minute: 0,
               end_minute: Math.ceil(recordingTimeRef.current / 60),
               duration_seconds: recordingTimeRef.current,
-              status: 'complete'
+              status: 'completed'
             }).select('id').maybeSingle();
             videoId = newVideo?.id || null;
           }
