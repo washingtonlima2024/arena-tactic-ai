@@ -141,15 +141,12 @@ export default function VideoUpload() {
     if (existingMatchId) {
       setSelectedExistingMatch(existingMatchId);
       setCurrentStep('videos');
-    }
-  }, [existingMatchId]);
-  
-  // Reset to 'choice' when navigating back (no match selected but still on videos step)
-  useEffect(() => {
-    if (!existingMatchId && !selectedExistingMatch && currentStep === 'videos') {
+    } else {
+      // When URL param is removed (user clicked "Voltar"), reset to choice
+      setSelectedExistingMatch(null);
       setCurrentStep('choice');
     }
-  }, [existingMatchId, selectedExistingMatch, currentStep]);
+  }, [existingMatchId]);
   
   const [isDragging, setIsDragging] = useState(false);
   const [uploadMode, setUploadMode] = useState<'file' | 'link'>('file');
