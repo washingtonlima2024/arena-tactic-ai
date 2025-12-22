@@ -144,6 +144,13 @@ export default function VideoUpload() {
     }
   }, [existingMatchId]);
   
+  // Reset to 'choice' when navigating back (no match selected but still on videos step)
+  useEffect(() => {
+    if (!existingMatchId && !selectedExistingMatch && currentStep === 'videos') {
+      setCurrentStep('choice');
+    }
+  }, [existingMatchId, selectedExistingMatch, currentStep]);
+  
   const [isDragging, setIsDragging] = useState(false);
   const [uploadMode, setUploadMode] = useState<'file' | 'link'>('file');
   
@@ -1378,9 +1385,10 @@ export default function VideoUpload() {
               )}
               {(existingMatchId || selectedExistingMatch) && (
                 <Button variant="ghost" onClick={() => {
+                  // Clear state first, then navigate
                   setSelectedExistingMatch(null);
-                  navigate('/upload');
                   setCurrentStep('choice');
+                  navigate('/upload', { replace: true });
                 }} className="gap-2">
                   <ArrowLeft className="h-4 w-4" />
                   Voltar
