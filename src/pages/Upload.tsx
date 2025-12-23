@@ -100,6 +100,9 @@ export default function VideoUpload() {
   // Selected match for adding videos
   const [selectedExistingMatch, setSelectedExistingMatch] = useState<string | null>(null);
   
+  // Ref to temporarily ignore URL sync when user clicks "Voltar"
+  const ignoreUrlSync = useRef(false);
+  
   // Fetch all matches for existing match selection
   const { data: allMatches = [], isLoading: isLoadingMatches } = useQuery({
     queryKey: ['all-matches-for-selection'],
@@ -136,13 +139,17 @@ export default function VideoUpload() {
     console.log('[Sync] segmentsRef atualizado:', segments.length, 'segmentos');
   }, [segments]);
   
-  // Sync state with URL param - this is the single source of truth
+  // Sync state with URL param - but skip if user just clicked "Voltar"
   useEffect(() => {
+    if (ignoreUrlSync.current) {
+      ignoreUrlSync.current = false;
+      return;
+    }
+    
     if (existingMatchId) {
       setSelectedExistingMatch(existingMatchId);
       setCurrentStep('videos');
     } else {
-      // URL has no match param - reset to choice
       setSelectedExistingMatch(null);
       setCurrentStep('choice');
     }
@@ -1382,14 +1389,13 @@ export default function VideoUpload() {
               )}
               {(existingMatchId || selectedExistingMatch) && (
                 <Button variant="ghost" onClick={() => {
-                  // Limpar estados
+                  // Marcar para ignorar a próxima sincronização com URL
+                  ignoreUrlSync.current = true;
+                  // Limpar estados ANTES de navegar
                   setSelectedExistingMatch(null);
+                  setCurrentStep('choice');
                   // Navegar para URL limpa
                   navigate('/upload', { replace: true });
-                  // Forçar step para 'choice' após navegação com delay
-                  setTimeout(() => {
-                    setCurrentStep('choice');
-                  }, 0);
                 }} className="gap-2">
                   <ArrowLeft className="h-4 w-4" />
                   Voltar
