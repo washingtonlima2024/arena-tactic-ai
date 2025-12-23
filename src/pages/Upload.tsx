@@ -141,11 +141,9 @@ export default function VideoUpload() {
     if (existingMatchId) {
       setSelectedExistingMatch(existingMatchId);
       setCurrentStep('videos');
-    } else {
-      // When URL param is removed (user clicked "Voltar"), reset to choice
-      setSelectedExistingMatch(null);
-      setCurrentStep('choice');
     }
+    // Não resetar aqui quando existingMatchId é null
+    // O botão "Voltar" cuida disso manualmente
   }, [existingMatchId]);
   
   const [isDragging, setIsDragging] = useState(false);
@@ -1382,10 +1380,14 @@ export default function VideoUpload() {
               )}
               {(existingMatchId || selectedExistingMatch) && (
                 <Button variant="ghost" onClick={() => {
-                  // Clear state first, then navigate
+                  // Limpar estados
                   setSelectedExistingMatch(null);
-                  setCurrentStep('choice');
+                  // Navegar para URL limpa
                   navigate('/upload', { replace: true });
+                  // Forçar step para 'choice' após navegação com delay
+                  setTimeout(() => {
+                    setCurrentStep('choice');
+                  }, 0);
                 }} className="gap-2">
                   <ArrowLeft className="h-4 w-4" />
                   Voltar
