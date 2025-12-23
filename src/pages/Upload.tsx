@@ -94,11 +94,11 @@ export default function VideoUpload() {
     enabled: !!existingMatchId
   });
   
-  // Wizard state - skip to 'videos' if reimporting existing match, else start with 'choice'
-  const [currentStep, setCurrentStep] = useState<WizardStep>(existingMatchId ? 'videos' : 'choice');
+  // Wizard state - always start at 'choice', useEffect will handle URL param
+  const [currentStep, setCurrentStep] = useState<WizardStep>('choice');
   
-  // Selected match for adding videos - initialize from URL param
-  const [selectedExistingMatch, setSelectedExistingMatch] = useState<string | null>(existingMatchId);
+  // Selected match for adding videos
+  const [selectedExistingMatch, setSelectedExistingMatch] = useState<string | null>(null);
   
   // Fetch all matches for existing match selection
   const { data: allMatches = [], isLoading: isLoadingMatches } = useQuery({
@@ -136,14 +136,16 @@ export default function VideoUpload() {
     console.log('[Sync] segmentsRef atualizado:', segments.length, 'segmentos');
   }, [segments]);
   
-  // Sync state when URL param changes (e.g., navigating from existing match selection)
+  // Sync state with URL param - this is the single source of truth
   useEffect(() => {
     if (existingMatchId) {
       setSelectedExistingMatch(existingMatchId);
       setCurrentStep('videos');
+    } else {
+      // URL has no match param - reset to choice
+      setSelectedExistingMatch(null);
+      setCurrentStep('choice');
     }
-    // Não resetar aqui quando existingMatchId é null
-    // O botão "Voltar" cuida disso manualmente
   }, [existingMatchId]);
   
   const [isDragging, setIsDragging] = useState(false);
