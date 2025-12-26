@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useMemo } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
@@ -9,7 +9,16 @@ interface Message {
   timestamp: Date;
 }
 
-export function useArenaChatbot() {
+interface MatchContext {
+  match: any;
+  events: any[];
+  homeTeam: string;
+  awayTeam: string;
+  homeScore: number;
+  awayScore: number;
+}
+
+export function useArenaChatbot(matchContext?: MatchContext | null) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -17,13 +26,51 @@ export function useArenaChatbot() {
 
   const generateId = () => Math.random().toString(36).substring(7);
 
+  // Build context string for the AI
+  const contextString = useMemo(() => {
+    if (!matchContext) return '';
+    
+    const { homeTeam, awayTeam, homeScore, awayScore, events, match } = matchContext;
+    
+    let ctx = `\n\n[CONTEXTO DA PARTIDA ATUAL]\n`;
+    ctx += `Partida: ${homeTeam} ${homeScore} x ${awayScore} ${awayTeam}\n`;
+    
+    if (match?.competition) {
+      ctx += `Competição: ${match.competition}\n`;
+    }
+    if (match?.match_date) {
+      ctx += `Data: ${new Date(match.match_date).toLocaleDateString('pt-BR')}\n`;
+    }
+    if (match?.status) {
+      ctx += `Status: ${match.status}\n`;
+    }
+    
+    if (events && events.length > 0) {
+      ctx += `\nEventos da partida (${events.length} total):\n`;
+      events.slice(0, 20).forEach(e => {
+        ctx += `- ${e.minute || 0}': ${e.event_type} - ${e.description || ''}\n`;
+      });
+      if (events.length > 20) {
+        ctx += `... e mais ${events.length - 20} eventos\n`;
+      }
+    }
+    
+    return ctx;
+  }, [matchContext]);
+
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return;
+
+    // Add context to first message or when asking about the match
+    let enrichedText = text;
+    if (contextString && (messages.length === 0 || text.toLowerCase().includes('partida') || text.toLowerCase().includes('jogo'))) {
+      enrichedText = text + contextString;
+    }
 
     const userMessage: Message = {
       id: generateId(),
       role: 'user',
-      content: text.trim(),
+      content: text.trim(), // Show original text to user
       timestamp: new Date(),
     };
 
@@ -40,7 +87,7 @@ export function useArenaChatbot() {
             Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
           },
           body: JSON.stringify({
-            messages: [...messages, userMessage].map(m => ({
+            messages: [...messages, { role: 'user', content: enrichedText }].map(m => ({
               role: m.role,
               content: m.content,
             })),
@@ -106,7 +153,7 @@ export function useArenaChatbot() {
     } finally {
       setIsLoading(false);
     }
-  }, [messages, isLoading]);
+  }, [messages, isLoading, contextString]);
 
   const speakText = useCallback(async (text: string) => {
     if (!text || isPlaying) return;
