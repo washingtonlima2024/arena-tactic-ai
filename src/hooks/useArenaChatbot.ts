@@ -160,8 +160,9 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
 
     setIsPlaying(true);
     try {
+      // Usando voz masculina 'onyx' - grave e forte, estilo locutor de futebol
       const { data, error } = await supabase.functions.invoke('arena-tts', {
-        body: { text, voice: 'nova' },
+        body: { text, voice: 'onyx' },
       });
 
       if (error) throw error;
