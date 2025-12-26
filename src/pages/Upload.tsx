@@ -94,14 +94,19 @@ export default function VideoUpload() {
     enabled: !!existingMatchId
   });
   
-  // Wizard state - always start at 'choice', useEffect will handle URL param
-  const [currentStep, setCurrentStep] = useState<WizardStep>('choice');
+  // Wizard state - driven by URL for reimport, otherwise by user actions
+  const [currentStep, setCurrentStep] = useState<WizardStep>(() => {
+    // Initial state based on URL - only once on mount
+    return existingMatchId ? 'videos' : 'choice';
+  });
   
-  // Selected match for adding videos
-  const [selectedExistingMatch, setSelectedExistingMatch] = useState<string | null>(null);
+  // Selected match for adding videos - also from URL initially
+  const [selectedExistingMatch, setSelectedExistingMatch] = useState<string | null>(() => {
+    return existingMatchId || null;
+  });
   
-  // Ref to temporarily ignore URL sync when user clicks "Voltar"
-  const ignoreUrlSync = useRef(false);
+  // Flag to indicate user wants to go back (overrides URL sync)
+  const [userWantsChoice, setUserWantsChoice] = useState(false);
   
   // Fetch all matches for existing match selection
   const { data: allMatches = [], isLoading: isLoadingMatches } = useQuery({
@@ -139,21 +144,19 @@ export default function VideoUpload() {
     console.log('[Sync] segmentsRef atualizado:', segments.length, 'segmentos');
   }, [segments]);
   
-  // Sync state with URL param - ONLY when first mounting or navigating TO a match
-  // Do NOT reset to 'choice' here - that's handled by the Voltar button directly
+  // Sync state with URL param - but respect user's explicit "go back" action
   useEffect(() => {
-    // Only sync FROM URL when there IS a match ID in URL
-    // When URL is clean (/upload), trust the current state
-    if (existingMatchId) {
-      // But only if we're not already showing 'choice' (user clicked Voltar)
-      if (!ignoreUrlSync.current) {
-        setSelectedExistingMatch(existingMatchId);
-        setCurrentStep('videos');
-      }
+    // If user clicked "Voltar", they want to go to choice - respect that
+    if (userWantsChoice) {
+      return; // Don't sync from URL, user is in control
     }
-    // Reset flag after check
-    ignoreUrlSync.current = false;
-  }, [existingMatchId]);
+    
+    // Only navigate TO videos when URL has match ID
+    if (existingMatchId) {
+      setSelectedExistingMatch(existingMatchId);
+      setCurrentStep('videos');
+    }
+  }, [existingMatchId, userWantsChoice]);
   
   const [isDragging, setIsDragging] = useState(false);
   const [uploadMode, setUploadMode] = useState<'file' | 'link'>('file');
@@ -1298,6 +1301,7 @@ export default function VideoUpload() {
                       <button
                         key={match.id}
                         onClick={() => {
+                          setUserWantsChoice(false); // Reset flag when selecting a match
                           setSelectedExistingMatch(match.id);
                           navigate(`/upload?match=${match.id}`);
                         }}
@@ -1389,9 +1393,9 @@ export default function VideoUpload() {
               )}
               {(existingMatchId || selectedExistingMatch) && (
                 <Button variant="ghost" onClick={() => {
-                  // Marcar para ignorar a próxima sincronização com URL
-                  ignoreUrlSync.current = true;
-                  // Limpar estados ANTES de navegar
+                  // Marcar que o usuário quer voltar - isso impede o useEffect de sobrescrever
+                  setUserWantsChoice(true);
+                  // Limpar estados
                   setSelectedExistingMatch(null);
                   setCurrentStep('choice');
                   // Navegar para URL limpa
