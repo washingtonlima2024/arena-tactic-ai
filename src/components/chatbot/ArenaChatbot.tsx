@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -6,6 +7,8 @@ import { Card } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { useArenaChatbot } from '@/hooks/useArenaChatbot';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
+import { useQuery } from '@tanstack/react-query';
+import { supabase } from '@/integrations/supabase/client';
 import { cn } from '@/lib/utils';
 import {
   MessageCircle,
@@ -26,6 +29,9 @@ import {
 } from 'lucide-react';
 
 export function ArenaChatbot() {
+  const [searchParams] = useSearchParams();
+  const matchId = searchParams.get('match');
+  
   const [isOpen, setIsOpen] = useState(false);
   const [isMinimized, setIsMinimized] = useState(false);
   const [inputValue, setInputValue] = useState('');
@@ -35,8 +41,44 @@ export function ArenaChatbot() {
   const [autoSpeak, setAutoSpeak] = useState(true);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const scrollViewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch match context if we have a matchId
+  const { data: matchContext } = useQuery({
+    queryKey: ['chatbot-match-context', matchId],
+    queryFn: async () => {
+      if (!matchId) return null;
+      
+      const { data: match } = await supabase
+        .from('matches')
+        .select(`
+          *,
+          home_team:teams!matches_home_team_id_fkey(name, short_name),
+          away_team:teams!matches_away_team_id_fkey(name, short_name)
+        `)
+        .eq('id', matchId)
+        .single();
+      
+      if (!match) return null;
+      
+      const { data: events } = await supabase
+        .from('match_events')
+        .select('*')
+        .eq('match_id', matchId)
+        .order('minute', { ascending: true });
+      
+      return {
+        match,
+        events: events || [],
+        homeTeam: match.home_team?.name || 'Time Casa',
+        awayTeam: match.away_team?.name || 'Time Visitante',
+        homeScore: match.home_score || 0,
+        awayScore: match.away_score || 0,
+      };
+    },
+    enabled: !!matchId,
+  });
 
   const {
     messages,
@@ -46,7 +88,7 @@ export function ArenaChatbot() {
     speakText,
     stopAudio,
     clearMessages,
-  } = useArenaChatbot();
+  } = useArenaChatbot(matchContext);
 
   const {
     isListening,
@@ -57,12 +99,12 @@ export function ArenaChatbot() {
     isSupported: voiceSupported,
   } = useSpeechRecognition();
 
-  // Scroll to bottom on new messages
+  // Scroll to bottom on new messages - using viewport ref
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (scrollViewportRef.current) {
+      scrollViewportRef.current.scrollTop = scrollViewportRef.current.scrollHeight;
     }
-  }, [messages]);
+  }, [messages, isLoading]);
 
   // Update input with transcript
   useEffect(() => {
@@ -255,7 +297,7 @@ export function ArenaChatbot() {
         {!isMinimized && (
           <>
             {/* Messages */}
-            <ScrollArea className="flex-1 p-4" ref={scrollRef}>
+            <ScrollArea className="flex-1 p-4" viewportRef={scrollViewportRef}>
               {messages.length === 0 ? (
                 <div className="flex flex-col items-center justify-center h-full text-center py-8">
                   <div className="relative mb-4">
