@@ -139,20 +139,20 @@ export default function VideoUpload() {
     console.log('[Sync] segmentsRef atualizado:', segments.length, 'segmentos');
   }, [segments]);
   
-  // Sync state with URL param - but skip if user just clicked "Voltar"
+  // Sync state with URL param - ONLY when first mounting or navigating TO a match
+  // Do NOT reset to 'choice' here - that's handled by the Voltar button directly
   useEffect(() => {
-    if (ignoreUrlSync.current) {
-      ignoreUrlSync.current = false;
-      return;
-    }
-    
+    // Only sync FROM URL when there IS a match ID in URL
+    // When URL is clean (/upload), trust the current state
     if (existingMatchId) {
-      setSelectedExistingMatch(existingMatchId);
-      setCurrentStep('videos');
-    } else {
-      setSelectedExistingMatch(null);
-      setCurrentStep('choice');
+      // But only if we're not already showing 'choice' (user clicked Voltar)
+      if (!ignoreUrlSync.current) {
+        setSelectedExistingMatch(existingMatchId);
+        setCurrentStep('videos');
+      }
     }
+    // Reset flag after check
+    ignoreUrlSync.current = false;
   }, [existingMatchId]);
   
   const [isDragging, setIsDragging] = useState(false);
