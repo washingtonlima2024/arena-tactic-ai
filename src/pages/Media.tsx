@@ -447,18 +447,18 @@ export default function Media() {
                 )}
 
                 {/* Extract frames from video button - generates thumbnails from actual video frames */}
-                {matchVideo && clips.length > 0 && clips.some(c => !getThumbnail(c.id)) && (
+                {matchVideo && clips.length > 0 && clips.some(c => !getThumbnail(c.id) && c.canExtract) && (
                   <Button 
                     variant="arena" 
                     size="sm"
                     onClick={() => {
                       const eventsToExtract = clips
-                        .filter(c => !getThumbnail(c.id))
+                        .filter(c => !getThumbnail(c.id) && c.canExtract && c.eventVideo)
                         .map(c => ({
                           eventId: c.id,
                           eventType: c.type,
-                          videoUrl: matchVideo.file_url,
-                          timestamp: c.totalSeconds,
+                          videoUrl: c.eventVideo!.file_url,
+                          timestamp: c.videoRelativeSeconds, // Use video-relative timestamp
                           matchId: matchId
                         }));
                       extractAllFrames(eventsToExtract);
@@ -470,7 +470,7 @@ export default function Media() {
                     ) : (
                       <Image className="mr-2 h-4 w-4" />
                     )}
-                    Extrair Capas ({clips.filter(c => !getThumbnail(c.id)).length})
+                    Extrair Capas ({clips.filter(c => !getThumbnail(c.id) && c.canExtract).length})
                   </Button>
                 )}
                 
