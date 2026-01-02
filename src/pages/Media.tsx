@@ -446,21 +446,35 @@ export default function Media() {
                   </Button>
                 )}
 
-                {/* Extract frames from video button - generates thumbnails from actual video frames */}
-                {matchVideo && clips.length > 0 && clips.some(c => !getThumbnail(c.id) && c.canExtract) && (
+                {/* Extract frames from clip/video - prioritize clip_url for accurate event frame */}
+                {matchVideo && clips.length > 0 && clips.some(c => !getThumbnail(c.id) && (c.clipUrl || c.canExtract)) && (
                   <Button 
                     variant="arena" 
                     size="sm"
                     onClick={() => {
                       const eventsToExtract = clips
-                        .filter(c => !getThumbnail(c.id) && c.canExtract && c.eventVideo)
-                        .map(c => ({
-                          eventId: c.id,
-                          eventType: c.type,
-                          videoUrl: c.eventVideo!.file_url,
-                          timestamp: c.videoRelativeSeconds, // Use video-relative timestamp
-                          matchId: matchId
-                        }));
+                        .filter(c => !getThumbnail(c.id) && (c.clipUrl || (c.canExtract && c.eventVideo)))
+                        .map(c => {
+                          // Prioritize clip_url - extract frame from the actual clip
+                          // Clip has 3 second buffer before event, so frame at ~3s is the event moment
+                          if (c.clipUrl) {
+                            return {
+                              eventId: c.id,
+                              eventType: c.type,
+                              videoUrl: c.clipUrl,
+                              timestamp: 3, // Event moment in clip (after 3s buffer)
+                              matchId: matchId
+                            };
+                          }
+                          // Fallback: use original video at event timestamp
+                          return {
+                            eventId: c.id,
+                            eventType: c.type,
+                            videoUrl: c.eventVideo!.file_url,
+                            timestamp: c.videoRelativeSeconds,
+                            matchId: matchId
+                          };
+                        });
                       extractAllFrames(eventsToExtract);
                     }}
                     disabled={extractingIds.size > 0 || generatingIds.size > 0 || isGeneratingClips}
@@ -470,7 +484,7 @@ export default function Media() {
                     ) : (
                       <Image className="mr-2 h-4 w-4" />
                     )}
-                    Extrair Capas ({clips.filter(c => !getThumbnail(c.id) && c.canExtract).length})
+                    Extrair Capas ({clips.filter(c => !getThumbnail(c.id) && (c.clipUrl || c.canExtract)).length})
                   </Button>
                 )}
                 
