@@ -6,6 +6,7 @@ interface WebGLWrapperProps {
   children: ReactNode;
   fallback?: ReactNode;
   className?: string;
+  style?: React.CSSProperties;
 }
 
 // Check if WebGL is available
@@ -31,7 +32,7 @@ function isWebGL2Available(): boolean {
   }
 }
 
-export function WebGLWrapper({ children, fallback, className }: WebGLWrapperProps) {
+export function WebGLWrapper({ children, fallback, className, style }: WebGLWrapperProps) {
   const [webglSupported, setWebglSupported] = useState<boolean | null>(null);
   const [error, setError] = useState<Error | null>(null);
 
@@ -43,7 +44,7 @@ export function WebGLWrapper({ children, fallback, className }: WebGLWrapperProp
   // Still checking
   if (webglSupported === null) {
     return (
-      <div className={className}>
+      <div className={className} style={style}>
         <div className="flex items-center justify-center h-full min-h-[300px] bg-muted/30 rounded-xl">
           <div className="text-muted-foreground text-sm">Verificando suporte WebGL...</div>
         </div>
@@ -58,7 +59,7 @@ export function WebGLWrapper({ children, fallback, className }: WebGLWrapperProp
     }
 
     return (
-      <div className={className}>
+      <div className={className} style={style}>
         <Alert variant="default" className="bg-muted/30 border-muted">
           <Box className="h-4 w-4" />
           <AlertTitle>Visualização 3D indisponível</AlertTitle>

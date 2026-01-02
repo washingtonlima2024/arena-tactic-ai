@@ -29,6 +29,8 @@ interface Heatmap3DProps {
   awayColor?: string;
   onPlayersChange?: (homePlayers: Player[], awayPlayers: Player[]) => void;
   editable?: boolean;
+  eventHeatZones?: HeatZone[];
+  height?: number;
 }
 
 // Volumetric 3D heat cloud - White for cold areas, Red for hot areas
@@ -1104,14 +1106,17 @@ export function Heatmap3D({
   homeColor = '#10b981',
   awayColor = '#3b82f6',
   onPlayersChange,
-  editable = true
+  editable = true,
+  eventHeatZones,
+  height = 700
 }: Heatmap3DProps) {
   const [autoRotate, setAutoRotate] = useState(true);
   const [isLocked, setIsLocked] = useState(false);
   const [homePlayers, setHomePlayers] = useState(initialHomePlayers);
   const [awayPlayers, setAwayPlayers] = useState(initialAwayPlayers);
 
-  const heatZones = useMemo(() => generateHeatZones(), []);
+  // Use event-based heat zones if provided, otherwise generate default
+  const heatZones = useMemo(() => eventHeatZones || generateHeatZones(), [eventHeatZones]);
 
   const convert3DTo2D = (pos: [number, number, number]): { x: number; y: number } => {
     return {
@@ -1153,7 +1158,7 @@ export function Heatmap3D({
   };
 
   const fallback = (
-    <div className="relative w-full h-[500px] rounded-xl overflow-hidden">
+    <div className="relative w-full rounded-xl overflow-hidden" style={{ height: `${height}px` }}>
       <OfficialFootballField theme="grass" className="w-full h-full" />
       <div className="absolute inset-0 flex items-center justify-center bg-black/50">
         <p className="text-white text-sm">Mapa de calor 3D indisponível (WebGL não suportado)</p>
@@ -1163,7 +1168,8 @@ export function Heatmap3D({
 
   return (
     <WebGLWrapper 
-      className="relative w-full h-[500px] rounded-xl overflow-hidden bg-gradient-to-b from-background/50 to-background border border-border"
+      className="relative w-full rounded-xl overflow-hidden bg-gradient-to-b from-background/50 to-background border border-border"
+      style={{ height: `${height}px` }}
       fallback={fallback}
     >
       {/* Team labels */}
