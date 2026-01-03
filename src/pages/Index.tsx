@@ -215,7 +215,7 @@ export default function Dashboard() {
                         id: match.home_team?.id || '',
                         name: match.home_team?.name || 'Time Casa',
                         shortName: match.home_team?.short_name || 'CAS',
-                        logo: '',
+                        logo: match.home_team?.logo_url || '',
                         primaryColor: match.home_team?.primary_color || '#10b981',
                         secondaryColor: match.home_team?.secondary_color || '#059669'
                       },
@@ -223,7 +223,7 @@ export default function Dashboard() {
                         id: match.away_team?.id || '',
                         name: match.away_team?.name || 'Time Visitante',
                         shortName: match.away_team?.short_name || 'VIS',
-                        logo: '',
+                        logo: match.away_team?.logo_url || '',
                         primaryColor: match.away_team?.primary_color || '#3b82f6',
                         secondaryColor: match.away_team?.secondary_color || '#2563eb'
                       },
