@@ -646,7 +646,7 @@ export default function Analysis() {
                   awayTeam={selectedMatch?.away_team?.name || 'Time Visitante'}
                   homeColor={selectedMatch?.home_team?.primary_color || '#10b981'}
                   awayColor={selectedMatch?.away_team?.primary_color || '#3b82f6'}
-                  height={700}
+                  height={800}
                   eventHeatZones={eventHeatZones}
                   homePlayers={[
                     { x: 5, y: 50, number: 1, team: 'home', intensity: 0.3 },
