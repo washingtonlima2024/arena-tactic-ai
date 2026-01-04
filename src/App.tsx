@@ -14,6 +14,7 @@ import Live from "./pages/Live";
 import LiveConfig from "./pages/LiveConfig";
 import Viewer from "./pages/Viewer";
 import Analysis from "./pages/Analysis";
+import MatchDashboard from "./pages/MatchDashboard";
 import Events from "./pages/Events";
 import Media from "./pages/Media";
 import Audio from "./pages/Audio";
@@ -46,6 +47,7 @@ const App = () => (
               <Route path="/live/config" element={<RequireAuth><LiveConfig /></RequireAuth>} />
               <Route path="/viewer" element={<RequireAuth><Viewer /></RequireAuth>} />
               <Route path="/analysis" element={<RequireAuth><Analysis /></RequireAuth>} />
+              <Route path="/dashboard" element={<RequireAuth><MatchDashboard /></RequireAuth>} />
               <Route path="/events" element={<RequireAuth><Events /></RequireAuth>} />
               <Route path="/media" element={<RequireAuth><Media /></RequireAuth>} />
               <Route path="/audio" element={<RequireAuth><Audio /></RequireAuth>} />
