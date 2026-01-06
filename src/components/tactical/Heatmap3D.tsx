@@ -1277,11 +1277,12 @@ export function Heatmap3D({
         <OrbitControls
           enablePan={false}
           enableRotate={!isLocked}
-          minDistance={5}
-          maxDistance={20}
-          minPolarAngle={Math.PI / 6}
-          maxPolarAngle={Math.PI / 2.5}
+          minDistance={4}
+          maxDistance={25}
+          minPolarAngle={0.1}
+          maxPolarAngle={Math.PI / 2.2}
           autoRotate={false}
+          target={[0, 0, 0]}
         />
       </Canvas>
     </WebGLWrapper>
