@@ -1247,13 +1247,13 @@ export function Heatmap3D({
       </div>
 
       <Canvas
-        camera={{ position: [0, 6, 6], fov: 55 }}
+        camera={{ position: [0, 12, 4], fov: 50 }}
         shadows
         dpr={[1, 2]}
         style={{ width: '100%', height: '100%' }}
       >
         <color attach="background" args={['#0a0a0a']} />
-        <fog attach="fog" args={['#0a0a0a', 12, 25]} />
+        <fog attach="fog" args={['#0a0a0a', 15, 30]} />
         
         <ambientLight intensity={0.4} />
         <directionalLight position={[10, 15, 5]} intensity={1.5} castShadow />
