@@ -11,7 +11,8 @@ import {
   ChevronRight,
   Radio,
   ShieldCheck,
-  Ruler
+  Ruler,
+  Layers
 } from 'lucide-react';
 import { NavLink, Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -28,6 +29,7 @@ const navItems = [
   { icon: Upload, label: 'Importar Vídeo', path: '/upload' },
   { icon: Radio, label: 'Ao Vivo', path: '/live' },
   { icon: BarChart3, label: 'Análise Tática', path: '/analysis' },
+  { icon: Layers, label: 'Dashboard Análise', path: '/dashboard' },
   { icon: Calendar, label: 'Eventos', path: '/events' },
   { icon: Scissors, label: 'Cortes & Mídia', path: '/media' },
   { icon: Mic, label: 'Podcast & Locução', path: '/audio' },
