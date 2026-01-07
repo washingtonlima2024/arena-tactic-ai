@@ -74,7 +74,7 @@ export function WebGLWrapper({ children, fallback, className, style }: WebGLWrap
 
   // WebGL supported - render children with error boundary
   return (
-    <WebGLErrorBoundary onError={setError} className={className}>
+    <WebGLErrorBoundary onError={setError} className={className} style={style}>
       {children}
     </WebGLErrorBoundary>
   );
@@ -85,6 +85,7 @@ interface ErrorBoundaryProps {
   children: ReactNode;
   onError: (error: Error) => void;
   className?: string;
+  style?: React.CSSProperties;
 }
 
 interface ErrorBoundaryState {
@@ -127,7 +128,11 @@ class WebGLErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryStat
       );
     }
 
-    return this.props.children;
+    return (
+      <div className={this.props.className} style={this.props.style}>
+        {this.props.children}
+      </div>
+    );
   }
 }
 
