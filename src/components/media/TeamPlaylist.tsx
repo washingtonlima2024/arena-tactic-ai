@@ -27,6 +27,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import JSZip from 'jszip';
+import { supabase } from '@/integrations/supabase/client';
 
 interface Clip {
   id: string;
@@ -192,27 +193,76 @@ export function TeamPlaylist({
     });
   };
 
-  // Baixar apenas clips que já têm URL extraída
+  // Extrair clips via edge function e baixar
   const handleExtractAndExport = async () => {
     setShowExtractionDialog(false);
     
-    const clipsComUrl = pendingExport.filter(item => item.clipUrl);
-    
-    if (clipsComUrl.length > 0) {
-      await exportClipsWithUrls(clipsComUrl);
+    if (!videoUrl || !matchId) {
       toast({
-        title: "Download parcial",
-        description: `${clipsComUrl.length} clips baixados. Os demais precisam ser extraídos primeiro.`
-      });
-    } else {
-      toast({
-        title: "Nenhum clip extraído",
-        description: "Extraia os clips primeiro na aba 'Cortes & Capas'",
+        title: "Vídeo não disponível",
+        description: "Link do vídeo não encontrado",
         variant: "destructive"
       });
+      return;
     }
     
-    setPendingExport([]);
+    setIsExporting(true);
+    
+    const clipsComUrl = pendingExport.filter(item => item.clipUrl);
+    const clipsSemUrl = pendingExport.filter(item => !item.clipUrl);
+    
+    try {
+      // Extrair clips que não têm URL via edge function
+      for (const clip of clipsSemUrl) {
+        const startSeconds = Math.max(0, clip.startTime - 3); // 3s antes
+        const durationSeconds = 8; // 8s total
+        
+        toast({
+          title: "Extraindo clip...",
+          description: `${clip.minute}' - ${clip.type}`
+        });
+        
+        const { data, error } = await supabase.functions.invoke('extract-clip', {
+          body: {
+            eventId: clip.id,
+            matchId,
+            videoUrl,
+            startSeconds,
+            durationSeconds
+          }
+        });
+        
+        if (error) {
+          console.error('Erro ao extrair clip:', error);
+          continue;
+        }
+        
+        if (data?.clipUrl) {
+          clipsComUrl.push({ ...clip, clipUrl: data.clipUrl });
+        }
+      }
+      
+      if (clipsComUrl.length > 0) {
+        await exportClipsWithUrls(clipsComUrl);
+        onClipsExtracted?.();
+      } else {
+        toast({
+          title: "Nenhum clip disponível",
+          description: "Não foi possível extrair os clips",
+          variant: "destructive"
+        });
+      }
+    } catch (error) {
+      console.error('Erro na extração:', error);
+      toast({
+        title: "Erro na extração",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+        variant: "destructive"
+      });
+    } finally {
+      setIsExporting(false);
+      setPendingExport([]);
+    }
   };
 
   // Exportar apenas clips que já têm URL
@@ -492,7 +542,7 @@ export function TeamPlaylist({
             <AlertDialogDescription>
               {pendingExport.filter(item => !item.clipUrl).length} dos {pendingExport.length} clips selecionados ainda não foram extraídos do vídeo.
               <br /><br />
-              Você pode baixar apenas os clips já extraídos ou voltar para "Cortes & Capas" para extrair os demais.
+              Clique em "Extrair e Baixar" para processar os clips automaticamente.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -501,12 +551,12 @@ export function TeamPlaylist({
               {isExporting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Baixando...
+                  Extraindo...
                 </>
               ) : (
                 <>
                   <Download className="mr-2 h-4 w-4" />
-                  Baixar Disponíveis ({pendingExport.filter(item => item.clipUrl).length})
+                  Extrair e Baixar ({pendingExport.length})
                 </>
               )}
             </AlertDialogAction>
