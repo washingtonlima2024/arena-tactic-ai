@@ -1101,8 +1101,8 @@ function FieldScene({
 export function Heatmap3D({ 
   homeTeam, 
   awayTeam, 
-  homePlayers: initialHomePlayers, 
-  awayPlayers: initialAwayPlayers,
+  homePlayers: initialHomePlayers = [], 
+  awayPlayers: initialAwayPlayers = [],
   homeColor = '#10b981',
   awayColor = '#3b82f6',
   onPlayersChange,
@@ -1112,8 +1112,8 @@ export function Heatmap3D({
 }: Heatmap3DProps) {
   const [autoRotate, setAutoRotate] = useState(true);
   const [isLocked, setIsLocked] = useState(false);
-  const [homePlayers, setHomePlayers] = useState(initialHomePlayers);
-  const [awayPlayers, setAwayPlayers] = useState(initialAwayPlayers);
+  const [homePlayers, setHomePlayers] = useState<Player[]>(initialHomePlayers);
+  const [awayPlayers, setAwayPlayers] = useState<Player[]>(initialAwayPlayers);
 
   // Use event-based heat zones if provided, otherwise generate default
   const heatZones = useMemo(() => eventHeatZones || generateHeatZones(), [eventHeatZones]);
