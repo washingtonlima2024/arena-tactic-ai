@@ -185,8 +185,8 @@ export default function Analysis() {
   // Use event-based analysis as primary, fallback to stored tactical analysis
   const tacticalAnalysis = analysis?.tacticalAnalysis as ExtendedTacticalAnalysis | null;
 
-  // Generate real heat zones based on events using the hook
-  const eventHeatZones = useEventHeatZones(
+  // Generate real heat zones and players based on events using the hook
+  const { heatZones: eventHeatZones, homePlayers: eventHomePlayers, awayPlayers: eventAwayPlayers } = useEventHeatZones(
     events,
     selectedMatch?.home_team?.name,
     selectedMatch?.away_team?.name
@@ -540,32 +540,8 @@ export default function Analysis() {
                   awayColor={selectedMatch?.away_team?.primary_color || '#3b82f6'}
                   height={900}
                   eventHeatZones={eventHeatZones}
-                  homePlayers={[
-                    { x: 5, y: 50, number: 1, team: 'home', intensity: 0.3 },
-                    { x: 20, y: 20, number: 4, team: 'home', intensity: 0.7 },
-                    { x: 20, y: 40, number: 3, team: 'home', intensity: 0.6 },
-                    { x: 20, y: 60, number: 15, team: 'home', intensity: 0.65 },
-                    { x: 20, y: 80, number: 2, team: 'home', intensity: 0.75 },
-                    { x: 45, y: 30, number: 8, team: 'home', intensity: 0.85 },
-                    { x: 45, y: 50, number: 5, team: 'home', intensity: 0.9 },
-                    { x: 45, y: 70, number: 17, team: 'home', intensity: 0.8 },
-                    { x: 70, y: 20, number: 19, team: 'home', intensity: 0.95 },
-                    { x: 75, y: 50, number: 9, team: 'home', intensity: 1 },
-                    { x: 70, y: 80, number: 11, team: 'home', intensity: 0.9 },
-                  ]}
-                  awayPlayers={[
-                    { x: 95, y: 50, number: 1, team: 'away', intensity: 0.3 },
-                    { x: 80, y: 20, number: 2, team: 'away', intensity: 0.7 },
-                    { x: 80, y: 40, number: 4, team: 'away', intensity: 0.65 },
-                    { x: 80, y: 60, number: 5, team: 'away', intensity: 0.6 },
-                    { x: 80, y: 80, number: 23, team: 'away', intensity: 0.75 },
-                    { x: 60, y: 25, number: 8, team: 'away', intensity: 0.8 },
-                    { x: 60, y: 50, number: 10, team: 'away', intensity: 0.95 },
-                    { x: 60, y: 75, number: 15, team: 'away', intensity: 0.85 },
-                    { x: 35, y: 30, number: 11, team: 'away', intensity: 0.9 },
-                    { x: 30, y: 50, number: 9, team: 'away', intensity: 1 },
-                    { x: 35, y: 70, number: 7, team: 'away', intensity: 0.88 },
-                  ]}
+                  homePlayers={eventHomePlayers}
+                  awayPlayers={eventAwayPlayers}
                 />
               </CardContent>
             </Card>
