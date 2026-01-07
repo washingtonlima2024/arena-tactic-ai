@@ -87,12 +87,24 @@ export function useClipGeneration() {
 
     try {
       // Usar versão UMD (single-threaded) que funciona sem SharedArrayBuffer
+      // Versão 0.12.6 UMD com configuração correta para ambientes sem COOP/COEP
       const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
       console.log('[ClipGeneration] Carregando core de:', baseURL);
       
+      // Fetch os arquivos primeiro e converter para Blob URLs
+      const coreResponse = await fetch(`${baseURL}/ffmpeg-core.js`);
+      const coreBlob = await coreResponse.blob();
+      const coreURL = URL.createObjectURL(new Blob([await coreBlob.text()], { type: 'text/javascript' }));
+      
+      const wasmResponse = await fetch(`${baseURL}/ffmpeg-core.wasm`);
+      const wasmBlob = await wasmResponse.blob();
+      const wasmURL = URL.createObjectURL(wasmBlob);
+      
+      console.log('[ClipGeneration] Arquivos baixados, carregando FFmpeg...');
+      
       await ffmpeg.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+        coreURL,
+        wasmURL,
       });
       
       console.log('[ClipGeneration] FFmpeg carregado com sucesso!');
