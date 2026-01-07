@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 
 interface Message {
@@ -70,7 +70,7 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
     const userMessage: Message = {
       id: generateId(),
       role: 'user',
-      content: text.trim(), // Show original text to user
+      content: text.trim(),
       timestamp: new Date(),
     };
 
@@ -78,73 +78,33 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
     setIsLoading(true);
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/arena-chatbot`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY}`,
-          },
-          body: JSON.stringify({
-            messages: [...messages, { role: 'user', content: enrichedText }].map(m => ({
-              role: m.role,
-              content: m.content,
-            })),
-          }),
-        }
-      );
+      const conversationHistory = messages.map(m => ({
+        role: m.role,
+        content: m.content,
+      }));
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.error || 'Erro na requisição');
-      }
+      const data = await apiClient.chatbot({
+        message: enrichedText,
+        matchContext: matchContext ? {
+          homeTeam: matchContext.homeTeam,
+          awayTeam: matchContext.awayTeam,
+          homeScore: matchContext.homeScore,
+          awayScore: matchContext.awayScore,
+          competition: matchContext.match?.competition,
+          status: matchContext.match?.status,
+        } : undefined,
+        conversationHistory,
+      });
 
-      // Handle streaming response
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('No response body');
+      const assistantMessage: Message = {
+        id: generateId(),
+        role: 'assistant',
+        content: data.text,
+        timestamp: new Date(),
+      };
 
-      const decoder = new TextDecoder();
-      let assistantContent = '';
-      const assistantId = generateId();
-
-      // Add empty assistant message
-      setMessages(prev => [
-        ...prev,
-        { id: assistantId, role: 'assistant', content: '', timestamp: new Date() },
-      ]);
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const jsonStr = line.slice(6).trim();
-            if (jsonStr === '[DONE]') continue;
-
-            try {
-              const parsed = JSON.parse(jsonStr);
-              const content = parsed.choices?.[0]?.delta?.content;
-              if (content) {
-                assistantContent += content;
-                setMessages(prev =>
-                  prev.map(m =>
-                    m.id === assistantId ? { ...m, content: assistantContent } : m
-                  )
-                );
-              }
-            } catch {
-              // Ignore parse errors for partial chunks
-            }
-          }
-        }
-      }
-
-      return assistantContent;
+      setMessages(prev => [...prev, assistantMessage]);
+      return data.text;
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
@@ -153,19 +113,14 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [messages, isLoading, contextString]);
+  }, [messages, isLoading, contextString, matchContext]);
 
   const speakText = useCallback(async (text: string) => {
     if (!text || isPlaying) return;
 
     setIsPlaying(true);
     try {
-      // Usando voz masculina 'onyx' - grave e forte, estilo locutor de futebol
-      const { data, error } = await supabase.functions.invoke('arena-tts', {
-        body: { text, voice: 'onyx' },
-      });
-
-      if (error) throw error;
+      const data = await apiClient.tts({ text, voice: 'onyx' });
 
       if (data?.audioContent) {
         const audioData = atob(data.audioContent);

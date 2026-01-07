@@ -1,6 +1,6 @@
 import { useState, useCallback, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 
 export interface SearchResult {
   id: string;
@@ -18,17 +18,7 @@ export function useGlobalSearch() {
   const { data: matches = [] } = useQuery({
     queryKey: ['search-matches'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('matches')
-        .select(`
-          id,
-          match_date,
-          competition,
-          venue,
-          home_team:teams!matches_home_team_id_fkey(id, name, short_name),
-          away_team:teams!matches_away_team_id_fkey(id, name, short_name)
-        `)
-        .order('match_date', { ascending: false });
+      const data = await apiClient.getMatches();
       return data || [];
     },
   });
@@ -36,28 +26,7 @@ export function useGlobalSearch() {
   const { data: teams = [] } = useQuery({
     queryKey: ['search-teams'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('teams')
-        .select('id, name, short_name')
-        .order('name');
-      return data || [];
-    },
-  });
-
-  const { data: events = [] } = useQuery({
-    queryKey: ['search-events'],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from('match_events')
-        .select(`
-          id,
-          event_type,
-          description,
-          minute,
-          match_id
-        `)
-        .order('created_at', { ascending: false })
-        .limit(100);
+      const data = await apiClient.getTeams();
       return data || [];
     },
   });
@@ -65,10 +34,7 @@ export function useGlobalSearch() {
   const { data: players = [] } = useQuery({
     queryKey: ['search-players'],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('players')
-        .select('id, name, number, position, team_id')
-        .order('name');
+      const data = await apiClient.getPlayers();
       return data || [];
     },
   });
@@ -112,21 +78,6 @@ export function useGlobalSearch() {
       }
     });
 
-    // Search events
-    events.forEach((event: any) => {
-      const eventText = `${event.event_type} ${event.description || ''}`.toLowerCase();
-      
-      if (eventText.includes(searchTerm)) {
-        results.push({
-          id: event.id,
-          type: 'event',
-          title: event.event_type.replace('_', ' ').replace(/\b\w/g, (l: string) => l.toUpperCase()),
-          subtitle: event.description || `Minuto ${event.minute}'`,
-          path: `/events`,
-        });
-      }
-    });
-
     // Search players
     players.forEach((player: any) => {
       const playerText = `${player.name} ${player.position || ''} ${player.number || ''}`.toLowerCase();
@@ -142,8 +93,8 @@ export function useGlobalSearch() {
       }
     });
 
-    return results.slice(0, 10); // Limit to 10 results
-  }, [query, matches, teams, events, players]);
+    return results.slice(0, 10);
+  }, [query, matches, teams, players]);
 
   const handleSearch = useCallback((value: string) => {
     setQuery(value);

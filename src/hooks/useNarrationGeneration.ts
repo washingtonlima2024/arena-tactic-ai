@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { useState } from 'react';
+import { apiClient } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 
 interface NarrationResult {
@@ -16,23 +16,16 @@ export function useNarrationGeneration() {
   // Load saved narration for a match
   const loadNarration = async (matchId: string, voice: string) => {
     try {
-      const { data, error } = await supabase
-        .from('generated_audio')
-        .select('*')
-        .eq('match_id', matchId)
-        .eq('audio_type', 'narration')
-        .eq('voice', voice)
-        .maybeSingle();
+      const audioData = await apiClient.getAudio(matchId, 'narration');
+      const match = audioData.find((a: any) => a.voice === voice);
 
-      if (error) throw error;
-
-      if (data?.audio_url) {
+      if (match?.audio_url) {
         setNarration({
-          script: data.script || '',
-          audioUrl: data.audio_url,
-          voice: data.voice || voice,
+          script: match.script || '',
+          audioUrl: match.audio_url,
+          voice: match.voice || voice,
         });
-        return data;
+        return match;
       }
       
       setNarration(null);
@@ -55,64 +48,23 @@ export function useNarrationGeneration() {
     setIsGenerating(true);
     
     try {
-      const { data, error } = await supabase.functions.invoke('generate-narration', {
-        body: {
-          matchId,
-          events,
-          homeTeam,
-          awayTeam,
-          homeScore,
-          awayScore,
-          voice,
-        },
+      const data = await apiClient.generateNarration({
+        matchId,
+        events,
+        homeTeam,
+        awayTeam,
+        homeScore,
+        awayScore,
+        voice,
       });
-
-      if (error) {
-        throw new Error(error.message || 'Falha ao gerar narração');
-      }
 
       if (data.error) {
         throw new Error(data.error);
       }
 
-      // Upload audio to storage
-      const audioBlob = base64ToBlob(data.audioContent, 'audio/mp3');
-      const fileName = `narration-${matchId}-${voice}-${Date.now()}.mp3`;
-      
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('generated-audio')
-        .upload(fileName, audioBlob, {
-          contentType: 'audio/mp3',
-          upsert: true,
-        });
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('generated-audio')
-        .getPublicUrl(fileName);
-
-      const audioUrl = urlData.publicUrl;
-
-      // Save to database (upsert)
-      const { error: dbError } = await supabase
-        .from('generated_audio')
-        .upsert({
-          match_id: matchId,
-          audio_type: 'narration',
-          voice: voice,
-          script: data.script,
-          audio_url: audioUrl,
-        }, {
-          onConflict: 'match_id,audio_type,voice',
-        });
-
-      if (dbError) throw dbError;
-
       const result = {
         script: data.script,
-        audioUrl: audioUrl,
+        audioUrl: data.audioUrl,
         voice: data.voice,
       };
 
@@ -154,16 +106,4 @@ export function useNarrationGeneration() {
     loadNarration,
     downloadAudio,
   };
-}
-
-function base64ToBlob(base64: string, mimeType: string): Blob {
-  const byteCharacters = atob(base64);
-  const byteNumbers = new Array(byteCharacters.length);
-  
-  for (let i = 0; i < byteCharacters.length; i++) {
-    byteNumbers[i] = byteCharacters.charCodeAt(i);
-  }
-  
-  const byteArray = new Uint8Array(byteNumbers);
-  return new Blob([byteArray], { type: mimeType });
 }

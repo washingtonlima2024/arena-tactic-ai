@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { toast } from '@/hooks/use-toast';
+import { apiClient } from '@/lib/apiClient';
 
 export interface Match {
   id: string;
@@ -22,16 +22,7 @@ export function useMatches() {
   return useQuery({
     queryKey: ['matches'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('matches')
-        .select(`
-          *,
-          home_team:teams!matches_home_team_id_fkey(id, name, short_name, primary_color, secondary_color, logo_url),
-          away_team:teams!matches_away_team_id_fkey(id, name, short_name, primary_color, secondary_color, logo_url)
-        `)
-        .order('match_date', { ascending: false });
-
-      if (error) throw error;
+      const data = await apiClient.getMatches();
       return data as Match[];
     },
   });
@@ -48,22 +39,16 @@ export function useCreateMatch() {
       match_date?: string;
       venue?: string;
     }) => {
-      const { data, error } = await supabase
-        .from('matches')
-        .insert({
-          ...matchData,
-          status: 'analyzing',
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
+      const data = await apiClient.createMatch({
+        ...matchData,
+        status: 'analyzing',
+      });
       return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['matches'] });
     },
-    onError: (error) => {
+    onError: (error: Error) => {
       toast({
         title: 'Erro ao criar partida',
         description: error.message,

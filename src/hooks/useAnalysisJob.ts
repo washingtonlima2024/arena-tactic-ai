@@ -1,6 +1,6 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { AnalysisJob } from '@/types/arena';
 import { toast } from '@/hooks/use-toast';
 
@@ -44,53 +44,26 @@ function mapDbJobToAnalysisJob(dbJob: DbAnalysisJob): AnalysisJob {
 }
 
 export function useAnalysisJob(jobId: string | null) {
-  const [realtimeJob, setRealtimeJob] = useState<AnalysisJob | null>(null);
-
-  // Initial fetch
-  const { data: initialJob } = useQuery({
+  // Fetch job with polling for updates (replaces realtime)
+  const { data: job } = useQuery({
     queryKey: ['analysis-job', jobId],
     queryFn: async () => {
       if (!jobId) return null;
-      
-      const { data, error } = await supabase
-        .from('analysis_jobs')
-        .select('*')
-        .eq('id', jobId)
-        .single();
-
-      if (error) throw error;
+      const data = await apiClient.getAnalysisJob(jobId);
       return mapDbJobToAnalysisJob(data as DbAnalysisJob);
     },
     enabled: !!jobId,
+    refetchInterval: (query) => {
+      // Poll every 2 seconds if job is not completed
+      const data = query.state.data;
+      if (data && ['completed', 'failed'].includes(data.status)) {
+        return false;
+      }
+      return 2000;
+    },
   });
 
-  // Real-time subscription
-  useEffect(() => {
-    if (!jobId) return;
-
-    const channel = supabase
-      .channel(`analysis-job-${jobId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'analysis_jobs',
-          filter: `id=eq.${jobId}`,
-        },
-        (payload) => {
-          console.log('Analysis job update:', payload);
-          setRealtimeJob(mapDbJobToAnalysisJob(payload.new as DbAnalysisJob));
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [jobId]);
-
-  return realtimeJob || initialJob;
+  return job;
 }
 
 export function useStartAnalysis() {
@@ -110,29 +83,20 @@ export function useStartAnalysis() {
     try {
       const halfType = params.halfType || (params.gameStartMinute && params.gameStartMinute >= 45 ? 'second' : 'first');
       
-      console.log('Starting analysis with new pipeline:', {
+      console.log('Starting analysis with local API:', {
         matchId: params.matchId,
         homeTeam: params.homeTeam,
         awayTeam: params.awayTeam,
-        gameStartMinute: params.gameStartMinute,
-        gameEndMinute: params.gameEndMinute,
         halfType,
         transcriptionLength: params.transcription?.length || 0,
       });
 
-      const { data, error } = await supabase.functions.invoke('analyze-match', {
-        body: {
-          matchId: params.matchId,
-          transcription: params.transcription,
-          homeTeam: params.homeTeam,
-          awayTeam: params.awayTeam,
-          gameStartMinute: params.gameStartMinute || 0,
-          gameEndMinute: params.gameEndMinute || 90,
-          halfType,
-        },
+      const data = await apiClient.analyzeMatch({
+        matchId: params.matchId,
+        transcription: params.transcription,
+        homeTeam: params.homeTeam,
+        awayTeam: params.awayTeam,
       });
-
-      if (error) throw error;
 
       if (!data?.success) {
         throw new Error(data?.error || 'Análise falhou');
@@ -140,14 +104,13 @@ export function useStartAnalysis() {
 
       toast({
         title: 'Análise completa!',
-        description: `${data.eventsDetected} eventos detectados. Placar: ${data.homeScore} x ${data.awayScore}`,
+        description: `${data.events?.length || 0} eventos detectados.`,
       });
 
       return {
         success: true,
-        eventsDetected: data.eventsDetected,
-        homeScore: data.homeScore,
-        awayScore: data.awayScore,
+        eventsDetected: data.events?.length || 0,
+        events: data.events,
       };
     } catch (error: any) {
       console.error('Error in analysis:', error);
@@ -169,14 +132,11 @@ export function useActiveAnalysisJobs() {
   return useQuery({
     queryKey: ['active-analysis-jobs'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('analysis_jobs')
-        .select('*')
-        .in('status', ['queued', 'processing'])
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      return (data as DbAnalysisJob[]).map(mapDbJobToAnalysisJob);
+      const data = await apiClient.getAnalysisJobs();
+      const activeJobs = data.filter((j: any) => 
+        ['queued', 'processing'].includes(j.status)
+      );
+      return (activeJobs as DbAnalysisJob[]).map(mapDbJobToAnalysisJob);
     },
     refetchInterval: 5000,
   });
