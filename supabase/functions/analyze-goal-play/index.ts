@@ -39,18 +39,17 @@ serve(async (req) => {
 
   try {
     const { goalDescription, homeTeamName, awayTeamName, minute, contextNarration } = await req.json();
-
-    const GEMINI_API_KEY = Deno.env.get('GEMINI_API_KEY');
     
-    if (!GEMINI_API_KEY) {
-      console.log('No Gemini API key, using intelligent parsing');
-      return new Response(
-        JSON.stringify(parseGoalPlayIntelligently(goalDescription, homeTeamName, awayTeamName)),
-        { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-      );
-    }
+    console.log('Analyzing goal:', { goalDescription, homeTeamName, awayTeamName, minute });
+    console.log('Context narration:', contextNarration?.substring(0, 200));
 
-    const prompt = `Você é um analista tático de futebol expert. Analise a descrição do gol e narração do contexto para gerar uma representação detalhada da jogada.
+    // Try Lovable AI Gateway first (uses LOVABLE_API_KEY)
+    const LOVABLE_API_KEY = Deno.env.get('LOVABLE_API_KEY');
+    
+    if (LOVABLE_API_KEY) {
+      console.log('Using Lovable AI Gateway for goal analysis');
+      
+      const prompt = `Você é um analista tático de futebol expert. Analise a descrição do gol e narração do contexto para gerar uma representação detalhada da jogada.
 
 DESCRIÇÃO DO GOL: "${goalDescription}"
 ${contextNarration ? `\nNARRAÇÃO DE CONTEXTO: "${contextNarration}"` : ''}
@@ -95,38 +94,64 @@ IMPORTANTE:
 
 Retorne APENAS o JSON, sem markdown.`;
 
-    const response = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
-          generationConfig: {
-            temperature: 0.3,
-            topP: 0.8,
-            maxOutputTokens: 2048,
+      try {
+        const response = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+            'Content-Type': 'application/json',
           },
-        }),
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-flash',
+            messages: [
+              { role: 'system', content: 'Você é um analista tático de futebol expert. Sempre responda em JSON válido sem markdown.' },
+              { role: 'user', content: prompt }
+            ],
+            temperature: 0.3,
+          }),
+        });
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          console.error('Lovable AI Gateway error:', response.status, errorText);
+          throw new Error(`AI Gateway error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        let analysisText = data.choices?.[0]?.message?.content || '';
+        
+        console.log('AI response:', analysisText.substring(0, 500));
+        
+        // Clean up markdown if present
+        analysisText = analysisText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
+        
+        let analysis: any;
+        try {
+          analysis = JSON.parse(analysisText);
+          console.log('Parsed analysis:', analysis.playType, analysis.scorer?.name);
+        } catch (e) {
+          console.error('Failed to parse AI response, using intelligent parsing');
+          analysis = parseGoalPlayIntelligently(goalDescription, homeTeamName, awayTeamName, contextNarration);
+        }
+
+        // Generate frames from analysis
+        const frames = generateFramesFromAnalysis(analysis);
+        console.log(`Generated ${frames.length} frames for animation`);
+
+        return new Response(
+          JSON.stringify({ analysis, frames }),
+          { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        );
+      } catch (aiError: any) {
+        console.error('AI Gateway failed, falling back to intelligent parsing:', aiError.message);
       }
-    );
-
-    const data = await response.json();
-    let analysisText = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
-    
-    // Clean up markdown if present
-    analysisText = analysisText.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim();
-    
-    let analysis: any;
-    try {
-      analysis = JSON.parse(analysisText);
-    } catch (e) {
-      console.error('Failed to parse Gemini response:', analysisText);
-      analysis = parseGoalPlayIntelligently(goalDescription, homeTeamName, awayTeamName);
     }
-
-    // Generate frames from analysis
+    
+    // Fallback to intelligent parsing with context
+    console.log('Using intelligent parsing fallback');
+    const analysis = parseGoalPlayIntelligently(goalDescription, homeTeamName, awayTeamName, contextNarration);
     const frames = generateFramesFromAnalysis(analysis);
+    console.log(`Fallback generated ${frames.length} frames`);
 
     return new Response(
       JSON.stringify({ analysis, frames }),
@@ -134,71 +159,108 @@ Retorne APENAS o JSON, sem markdown.`;
     );
   } catch (error: any) {
     console.error('Error analyzing goal play:', error);
+    
+    // Even on error, return fallback frames
+    const fallbackAnalysis = parseGoalPlayIntelligently('Gol', 'Time Casa', 'Time Visitante');
+    const fallbackFrames = generateFramesFromAnalysis(fallbackAnalysis);
+    
     return new Response(
-      JSON.stringify({ error: error?.message || 'Unknown error' }),
-      { status: 500, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      JSON.stringify({ 
+        analysis: fallbackAnalysis, 
+        frames: fallbackFrames,
+        error: error?.message 
+      }),
+      { headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
     );
   }
 });
 
-function parseGoalPlayIntelligently(description: string, homeTeamName?: string, awayTeamName?: string): any {
-  const desc = description.toLowerCase();
+function parseGoalPlayIntelligently(description: string, homeTeamName?: string, awayTeamName?: string, contextNarration?: string): any {
+  const desc = (description + ' ' + (contextNarration || '')).toLowerCase();
   
-  // Determine play type from keywords
+  // Determine play type from keywords - more comprehensive analysis
   let playType = 'tap_in';
-  if (desc.includes('pênalti') || desc.includes('penalty')) playType = 'penalty';
-  else if (desc.includes('falta') || desc.includes('livre')) playType = 'free_kick';
-  else if (desc.includes('escanteio') || desc.includes('corner')) playType = 'corner';
-  else if (desc.includes('cabeça') || desc.includes('cabeceio')) playType = 'header';
-  else if (desc.includes('cruzamento') || desc.includes('cruza')) playType = 'cross';
-  else if (desc.includes('contra-ataque') || desc.includes('velocidade')) playType = 'counter_attack';
-  else if (desc.includes('fora da área') || desc.includes('longe') || desc.includes('bomba') || desc.includes('golaço')) playType = 'long_shot';
-  else if (desc.includes('dribl') || desc.includes('jogada individual')) playType = 'dribble';
-  else if (desc.includes('assistência') || desc.includes('passe')) playType = 'team_play';
+  if (desc.includes('pênalti') || desc.includes('penalty') || desc.includes('marca de cal')) {
+    playType = 'penalty';
+  } else if (desc.includes('falta') || desc.includes('livre') || desc.includes('cobrança')) {
+    playType = 'free_kick';
+  } else if (desc.includes('escanteio') || desc.includes('corner')) {
+    playType = 'corner';
+  } else if (desc.includes('cabeça') || desc.includes('cabeceio') || desc.includes('cabeçada')) {
+    playType = 'header';
+  } else if (desc.includes('cruzamento') || desc.includes('cruza') || desc.includes('levantamento')) {
+    playType = 'cross';
+  } else if (desc.includes('contra-ataque') || desc.includes('velocidade') || desc.includes('transição')) {
+    playType = 'counter_attack';
+  } else if (desc.includes('fora da área') || desc.includes('longe') || desc.includes('bomba') || desc.includes('golaço') || desc.includes('chutaço')) {
+    playType = 'long_shot';
+  } else if (desc.includes('dribl') || desc.includes('jogada individual') || desc.includes('sozinho')) {
+    playType = 'dribble';
+  } else if (desc.includes('assistência') || desc.includes('passe') || desc.includes('toque') || desc.includes('tabela')) {
+    playType = 'team_play';
+  } else if (desc.includes('gol contra') || desc.includes('próprio gol')) {
+    playType = 'own_goal';
+  }
   
-  // Extract scorer name
+  // Extract scorer name - expanded patterns
   const scorerPatterns = [
-    /gol(?:aço)?\s+de\s+(\w+)/i,
-    /(\w+)\s+marca/i,
+    /gol(?:aço)?\s+(?:de|do)\s+(\w+)/i,
+    /(\w+)\s+marca(?:ndo)?/i,
     /(\w+)\s+finaliza/i,
     /(\w+)\s+chuta/i,
     /(\w+)\s+cabece/i,
-    /gol\s+do\s+(\w+)/i,
+    /(\w+)\s+empurra/i,
+    /(\w+)\s+completa/i,
+    /(\w+)\s+toca\s+para\s+o\s+gol/i,
+    /(\w+)\s+bate/i,
+    /(\w+)\s+faz\s+o\s+gol/i,
   ];
   
   let scorerName = 'Atacante';
+  const fullText = description + ' ' + (contextNarration || '');
   for (const pattern of scorerPatterns) {
-    const match = description.match(pattern);
-    if (match) {
-      scorerName = match[1];
+    const match = fullText.match(pattern);
+    if (match && match[1].length > 2) {
+      scorerName = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
       break;
     }
   }
   
-  // Extract assister
+  // Extract assister with more patterns
   const assisterPatterns = [
-    /assistência\s+de\s+(\w+)/i,
-    /(\w+)\s+dá\s+assistência/i,
-    /(\w+)\s+cruza/i,
-    /passe\s+de\s+(\w+)/i,
+    /assistência\s+(?:de|do)\s+(\w+)/i,
+    /(\w+)\s+(?:dá|deu)\s+assistência/i,
+    /(\w+)\s+cruza(?:ndo)?/i,
+    /passe\s+(?:de|do)\s+(\w+)/i,
+    /(\w+)\s+lança/i,
+    /(\w+)\s+encontra/i,
+    /(\w+)\s+aciona/i,
+    /(\w+)\s+serve/i,
   ];
   
   let assisterName = null;
   for (const pattern of assisterPatterns) {
-    const match = description.match(pattern);
-    if (match) {
-      assisterName = match[1];
+    const match = fullText.match(pattern);
+    if (match && match[1].length > 2 && match[1].toLowerCase() !== scorerName.toLowerCase()) {
+      assisterName = match[1].charAt(0).toUpperCase() + match[1].slice(1).toLowerCase();
       break;
     }
   }
 
-  // Determine team (default home)
-  const isAwayGoal = desc.includes(awayTeamName?.toLowerCase() || '___never___');
+  // Determine team - check if away team is mentioned
+  const isAwayGoal = awayTeamName && desc.includes(awayTeamName.toLowerCase());
   const team = isAwayGoal ? 'away' : 'home';
+
+  // Generate number based on position hints
+  let scorerNumber = 10;
+  if (desc.includes('centroavante') || desc.includes('atacante') || desc.includes('9')) scorerNumber = 9;
+  else if (desc.includes('ponta') || desc.includes('11') || desc.includes('extremo')) scorerNumber = 11;
+  else if (desc.includes('meia') || desc.includes('10')) scorerNumber = 10;
+  else if (desc.includes('volante') || desc.includes('5') || desc.includes('6')) scorerNumber = 6;
 
   return {
     playType,
-    scorer: { name: scorerName, number: 10, team },
+    scorer: { name: scorerName, number: scorerNumber, team },
     assister: assisterName ? { name: assisterName, number: 7 } : null,
     startPosition: getStartPositionByPlayType(playType, team),
     shotPosition: getShotPositionByPlayType(playType, team),
@@ -207,8 +269,9 @@ function parseGoalPlayIntelligently(description: string, homeTeamName?: string, 
     playSequence: generatePlaySequence(playType, scorerName, assisterName),
     keyMoments: [
       { phase: 0, description: 'Início da jogada' },
-      { phase: 0.5, description: 'Desenvolvimento' },
-      { phase: 0.9, description: 'Finalização' },
+      { phase: 0.3, description: playType === 'counter_attack' ? 'Bola recuperada' : 'Construção' },
+      { phase: 0.6, description: assisterName ? `${assisterName} encontra ${scorerName}` : 'Aproximação' },
+      { phase: 0.85, description: 'Finalização' },
       { phase: 1, description: 'GOL!' },
     ],
     estimatedDuration: getEstimatedDuration(playType),
