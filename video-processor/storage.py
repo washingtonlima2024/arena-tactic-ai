@@ -1,6 +1,6 @@
 """
-Local file storage management for Arena Play.
-Replaces Supabase Storage with local filesystem.
+Local file storage management - organized by match.
+All files for a match are grouped together in subfolders.
 """
 
 import os
@@ -12,206 +12,351 @@ from datetime import datetime
 # Base storage directory
 STORAGE_DIR = Path(os.path.dirname(__file__)) / 'storage'
 
-# Storage buckets (matching Supabase structure)
-BUCKETS = {
-    'match-videos': STORAGE_DIR / 'match-videos',
-    'event-clips': STORAGE_DIR / 'event-clips',
-    'generated-audio': STORAGE_DIR / 'generated-audio',
-    'thumbnails': STORAGE_DIR / 'thumbnails',
-    'smart-editor': STORAGE_DIR / 'smart-editor',
-    'vignettes': STORAGE_DIR / 'vignettes'
+# Subfolder types within each match folder
+MATCH_SUBFOLDERS = [
+    "videos",    # Main match videos (full game, halves)
+    "clips",     # Event clips extracted from videos
+    "images",    # Thumbnails, screenshots, tactical images
+    "audio",     # Narrations, podcasts, transcription audio
+    "texts",     # Transcriptions, analysis texts, summaries
+    "srt",       # Subtitle files
+    "json"       # Structured data exports, metadata
+]
+
+# Legacy bucket names mapped to new subfolder names
+BUCKET_TO_SUBFOLDER = {
+    'match-videos': 'videos',
+    'event-clips': 'clips',
+    'generated-audio': 'audio',
+    'thumbnails': 'images',
+    'smart-editor': 'videos',
+    'vignettes': 'videos'
 }
 
 
 def init_storage():
-    """Initialize storage directories."""
+    """Initialize the base storage directory."""
     STORAGE_DIR.mkdir(exist_ok=True)
-    for bucket_name, bucket_path in BUCKETS.items():
-        bucket_path.mkdir(exist_ok=True)
-        print(f"Storage bucket initialized: {bucket_name}")
+    print(f"Storage initialized at: {STORAGE_DIR.absolute()}")
 
 
-def get_bucket_path(bucket: str) -> Path:
-    """Get the path for a storage bucket."""
-    if bucket not in BUCKETS:
-        raise ValueError(f"Unknown bucket: {bucket}")
-    return BUCKETS[bucket]
-
-
-def save_file(bucket: str, file_data: bytes, filename: str = None, extension: str = None) -> dict:
-    """
-    Save a file to a storage bucket.
+def get_match_storage_path(match_id: str) -> Path:
+    """Get or create the storage path for a specific match."""
+    match_path = STORAGE_DIR / match_id
+    match_path.mkdir(exist_ok=True)
     
-    Args:
-        bucket: The bucket name
-        file_data: The file content as bytes
-        filename: Optional custom filename (without extension)
-        extension: File extension (e.g., 'mp4', 'mp3', 'png')
+    # Create all subfolders for the match
+    for subfolder in MATCH_SUBFOLDERS:
+        (match_path / subfolder).mkdir(exist_ok=True)
     
-    Returns:
-        dict with 'path', 'url', and 'filename'
+    return match_path
+
+
+def get_subfolder_path(match_id: str, subfolder: str) -> Path:
+    """Get the path for a specific subfolder within a match."""
+    # Map legacy bucket names to subfolders
+    if subfolder in BUCKET_TO_SUBFOLDER:
+        subfolder = BUCKET_TO_SUBFOLDER[subfolder]
+    
+    if subfolder not in MATCH_SUBFOLDERS:
+        raise ValueError(f"Invalid subfolder: {subfolder}. Must be one of {MATCH_SUBFOLDERS}")
+    
+    match_path = get_match_storage_path(match_id)
+    return match_path / subfolder
+
+
+def get_default_extension(subfolder: str) -> str:
+    """Get default file extension based on subfolder type."""
+    extensions = {
+        "videos": ".mp4",
+        "clips": ".mp4",
+        "images": ".jpg",
+        "audio": ".mp3",
+        "texts": ".txt",
+        "srt": ".srt",
+        "json": ".json"
+    }
+    return extensions.get(subfolder, ".bin")
+
+
+def save_file(match_id: str, subfolder: str, file_data: bytes, filename: str = None, extension: str = None) -> dict:
     """
-    bucket_path = get_bucket_path(bucket)
+    Save file data to a match's subfolder.
+    Returns metadata about the saved file.
+    """
+    # Map legacy bucket names
+    if subfolder in BUCKET_TO_SUBFOLDER:
+        subfolder = BUCKET_TO_SUBFOLDER[subfolder]
+    
+    folder_path = get_subfolder_path(match_id, subfolder)
     
     # Generate filename if not provided
     if not filename:
-        filename = f"{uuid.uuid4()}"
+        file_id = str(uuid.uuid4())[:8]
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ext = extension or get_default_extension(subfolder)
+        if not ext.startswith('.'):
+            ext = '.' + ext
+        filename = f"{timestamp}_{file_id}{ext}"
+    elif extension and not filename.endswith(extension):
+        if not extension.startswith('.'):
+            extension = '.' + extension
+        filename = f"{filename}{extension}"
     
-    # Add extension
-    if extension:
-        filename = f"{filename}.{extension}"
+    file_path = folder_path / filename
     
-    file_path = bucket_path / filename
-    
-    # Write file
     with open(file_path, 'wb') as f:
         f.write(file_data)
     
-    # Generate URL (relative to storage)
-    relative_path = f"{bucket}/{filename}"
-    
     return {
-        'path': str(file_path),
-        'url': f"/api/storage/{relative_path}",
-        'filename': filename,
-        'bucket': bucket,
-        'size': len(file_data),
-        'created_at': datetime.utcnow().isoformat()
+        "match_id": match_id,
+        "subfolder": subfolder,
+        "filename": filename,
+        "path": str(file_path),
+        "url": f"/api/storage/{match_id}/{subfolder}/{filename}",
+        "size": len(file_data),
+        "created_at": datetime.now().isoformat()
     }
 
 
-def save_uploaded_file(bucket: str, file_storage, filename: str = None) -> dict:
+def save_uploaded_file(match_id: str, subfolder: str, file_storage, filename: str = None) -> dict:
     """
-    Save an uploaded file (from Flask request.files).
-    
-    Args:
-        bucket: The bucket name
-        file_storage: Flask FileStorage object
-        filename: Optional custom filename
-    
-    Returns:
-        dict with file info
+    Save a file from Flask FileStorage object.
     """
-    bucket_path = get_bucket_path(bucket)
+    # Map legacy bucket names
+    if subfolder in BUCKET_TO_SUBFOLDER:
+        subfolder = BUCKET_TO_SUBFOLDER[subfolder]
     
-    # Get original filename and extension
-    original_filename = file_storage.filename or 'file'
-    extension = original_filename.rsplit('.', 1)[-1] if '.' in original_filename else ''
+    folder_path = get_subfolder_path(match_id, subfolder)
     
-    # Generate new filename if not provided
+    # Use original filename or generate one
     if not filename:
-        filename = f"{uuid.uuid4()}"
+        original_name = file_storage.filename or "file"
+        file_id = str(uuid.uuid4())[:8]
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        ext = Path(original_name).suffix or get_default_extension(subfolder)
+        filename = f"{timestamp}_{file_id}{ext}"
     
-    if extension:
-        filename = f"{filename}.{extension}"
-    
-    file_path = bucket_path / filename
-    
-    # Save file
+    file_path = folder_path / filename
     file_storage.save(str(file_path))
     
-    # Get file size
     file_size = file_path.stat().st_size
     
     return {
-        'path': str(file_path),
-        'url': f"/api/storage/{bucket}/{filename}",
-        'filename': filename,
-        'original_filename': original_filename,
-        'bucket': bucket,
-        'size': file_size,
-        'created_at': datetime.utcnow().isoformat()
+        "match_id": match_id,
+        "subfolder": subfolder,
+        "filename": filename,
+        "path": str(file_path),
+        "url": f"/api/storage/{match_id}/{subfolder}/{filename}",
+        "size": file_size,
+        "original_filename": file_storage.filename,
+        "created_at": datetime.now().isoformat()
     }
 
 
-def get_file_path(bucket: str, filename: str) -> Path:
-    """Get the full path for a file in a bucket."""
-    bucket_path = get_bucket_path(bucket)
-    return bucket_path / filename
+def get_file_path(match_id: str, subfolder: str, filename: str) -> Path:
+    """Get the full path for a specific file."""
+    # Map legacy bucket names
+    if subfolder in BUCKET_TO_SUBFOLDER:
+        subfolder = BUCKET_TO_SUBFOLDER[subfolder]
+    
+    return get_subfolder_path(match_id, subfolder) / filename
 
 
-def file_exists(bucket: str, filename: str) -> bool:
-    """Check if a file exists in a bucket."""
-    return get_file_path(bucket, filename).exists()
+def file_exists(match_id: str, subfolder: str, filename: str) -> bool:
+    """Check if a file exists."""
+    return get_file_path(match_id, subfolder, filename).exists()
 
 
-def delete_file(bucket: str, filename: str) -> bool:
-    """Delete a file from a bucket."""
-    file_path = get_file_path(bucket, filename)
+def read_file(match_id: str, subfolder: str, filename: str) -> bytes:
+    """Read file contents."""
+    file_path = get_file_path(match_id, subfolder, filename)
+    if not file_path.exists():
+        raise FileNotFoundError(f"File not found: {file_path}")
+    
+    with open(file_path, 'rb') as f:
+        return f.read()
+
+
+def delete_file(match_id: str, subfolder: str, filename: str) -> bool:
+    """Delete a file from storage."""
+    file_path = get_file_path(match_id, subfolder, filename)
     if file_path.exists():
         file_path.unlink()
         return True
     return False
 
 
-def list_files(bucket: str) -> list:
-    """List all files in a bucket."""
-    bucket_path = get_bucket_path(bucket)
+def list_match_files(match_id: str, subfolder: str = None) -> list:
+    """
+    List all files for a match, optionally filtered by subfolder.
+    """
+    match_path = STORAGE_DIR / match_id
+    if not match_path.exists():
+        return []
+    
     files = []
-    for file_path in bucket_path.iterdir():
-        if file_path.is_file():
-            stat = file_path.stat()
-            files.append({
-                'filename': file_path.name,
-                'url': f"/api/storage/{bucket}/{file_path.name}",
-                'size': stat.st_size,
-                'modified_at': datetime.fromtimestamp(stat.st_mtime).isoformat()
-            })
+    
+    subfolders_to_check = [subfolder] if subfolder else MATCH_SUBFOLDERS
+    
+    # Map legacy bucket names
+    subfolders_to_check = [
+        BUCKET_TO_SUBFOLDER.get(sf, sf) for sf in subfolders_to_check
+    ]
+    
+    for sf in subfolders_to_check:
+        sf_path = match_path / sf
+        if not sf_path.exists():
+            continue
+            
+        for file_path in sf_path.iterdir():
+            if file_path.is_file():
+                stat = file_path.stat()
+                files.append({
+                    "match_id": match_id,
+                    "subfolder": sf,
+                    "filename": file_path.name,
+                    "url": f"/api/storage/{match_id}/{sf}/{file_path.name}",
+                    "size": stat.st_size,
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat()
+                })
+    
     return files
 
 
-def get_storage_stats() -> dict:
-    """Get storage statistics."""
+def list_all_matches() -> list:
+    """List all match IDs that have storage folders."""
+    if not STORAGE_DIR.exists():
+        return []
+    
+    matches = []
+    for item in STORAGE_DIR.iterdir():
+        if item.is_dir():
+            matches.append({
+                "match_id": item.name,
+                "path": str(item),
+                "subfolders": [sf for sf in MATCH_SUBFOLDERS if (item / sf).exists()]
+            })
+    
+    return matches
+
+
+def get_match_storage_stats(match_id: str) -> dict:
+    """Get storage statistics for a specific match."""
+    match_path = STORAGE_DIR / match_id
+    if not match_path.exists():
+        return {"match_id": match_id, "exists": False}
+    
     stats = {
-        'total_size': 0,
-        'buckets': {}
+        "match_id": match_id,
+        "exists": True,
+        "subfolders": {},
+        "total_size": 0,
+        "total_files": 0
     }
     
-    for bucket_name, bucket_path in BUCKETS.items():
-        bucket_size = 0
-        file_count = 0
-        
-        if bucket_path.exists():
-            for file_path in bucket_path.iterdir():
-                if file_path.is_file():
-                    bucket_size += file_path.stat().st_size
-                    file_count += 1
-        
-        stats['buckets'][bucket_name] = {
-            'size': bucket_size,
-            'file_count': file_count
-        }
-        stats['total_size'] += bucket_size
+    for subfolder in MATCH_SUBFOLDERS:
+        sf_path = match_path / subfolder
+        if sf_path.exists():
+            files = list(sf_path.iterdir())
+            size = sum(f.stat().st_size for f in files if f.is_file())
+            count = len([f for f in files if f.is_file()])
+            
+            stats["subfolders"][subfolder] = {
+                "file_count": count,
+                "size": size,
+                "size_mb": round(size / (1024 * 1024), 2)
+            }
+            stats["total_size"] += size
+            stats["total_files"] += count
+    
+    stats["total_size_mb"] = round(stats["total_size"] / (1024 * 1024), 2)
     
     return stats
 
 
-def copy_file(source_bucket: str, source_filename: str, dest_bucket: str, dest_filename: str = None) -> dict:
-    """Copy a file from one bucket to another."""
-    source_path = get_file_path(source_bucket, source_filename)
+def get_storage_stats() -> dict:
+    """Get total storage statistics across all matches."""
+    if not STORAGE_DIR.exists():
+        return {"total_matches": 0, "total_size": 0, "total_files": 0}
     
-    if not source_path.exists():
-        raise FileNotFoundError(f"Source file not found: {source_bucket}/{source_filename}")
+    total_size = 0
+    total_files = 0
+    matches = []
     
-    dest_filename = dest_filename or source_filename
-    dest_path = get_file_path(dest_bucket, dest_filename)
-    
-    shutil.copy2(source_path, dest_path)
+    for match_dir in STORAGE_DIR.iterdir():
+        if match_dir.is_dir():
+            match_stats = get_match_storage_stats(match_dir.name)
+            if match_stats.get("exists"):
+                matches.append(match_stats)
+                total_size += match_stats["total_size"]
+                total_files += match_stats["total_files"]
     
     return {
-        'path': str(dest_path),
-        'url': f"/api/storage/{dest_bucket}/{dest_filename}",
-        'filename': dest_filename,
-        'bucket': dest_bucket
+        "total_matches": len(matches),
+        "total_size": total_size,
+        "total_size_mb": round(total_size / (1024 * 1024), 2),
+        "total_size_gb": round(total_size / (1024 * 1024 * 1024), 2),
+        "total_files": total_files,
+        "matches": matches
     }
 
 
-def move_file(source_bucket: str, source_filename: str, dest_bucket: str, dest_filename: str = None) -> dict:
-    """Move a file from one bucket to another."""
-    result = copy_file(source_bucket, source_filename, dest_bucket, dest_filename)
-    delete_file(source_bucket, source_filename)
+def copy_file(match_id: str, source_subfolder: str, source_filename: str, 
+              dest_subfolder: str, dest_filename: str = None) -> dict:
+    """Copy a file within the same match to a different subfolder."""
+    source_path = get_file_path(match_id, source_subfolder, source_filename)
+    if not source_path.exists():
+        raise FileNotFoundError(f"Source file not found: {source_path}")
+    
+    dest_filename = dest_filename or source_filename
+    dest_path = get_file_path(match_id, dest_subfolder, dest_filename)
+    
+    shutil.copy2(source_path, dest_path)
+    
+    # Map legacy bucket names for response
+    dest_sf = BUCKET_TO_SUBFOLDER.get(dest_subfolder, dest_subfolder)
+    
+    return {
+        "match_id": match_id,
+        "subfolder": dest_sf,
+        "filename": dest_filename,
+        "url": f"/api/storage/{match_id}/{dest_sf}/{dest_filename}",
+        "size": dest_path.stat().st_size,
+        "copied_from": f"{source_subfolder}/{source_filename}"
+    }
+
+
+def move_file(match_id: str, source_subfolder: str, source_filename: str,
+              dest_subfolder: str, dest_filename: str = None) -> dict:
+    """Move a file within the same match to a different subfolder."""
+    result = copy_file(match_id, source_subfolder, source_filename, dest_subfolder, dest_filename)
+    delete_file(match_id, source_subfolder, source_filename)
+    result["moved_from"] = result.pop("copied_from")
     return result
 
 
-# Initialize storage when module is imported
+def delete_match_storage(match_id: str) -> bool:
+    """Delete all storage for a match."""
+    match_path = STORAGE_DIR / match_id
+    if match_path.exists():
+        shutil.rmtree(match_path)
+        return True
+    return False
+
+
+def export_match_metadata(match_id: str) -> dict:
+    """Export all file metadata for a match as JSON."""
+    files = list_match_files(match_id)
+    stats = get_match_storage_stats(match_id)
+    
+    return {
+        "match_id": match_id,
+        "exported_at": datetime.now().isoformat(),
+        "stats": stats,
+        "files": files
+    }
+
+
+# Initialize storage on import
 init_storage()

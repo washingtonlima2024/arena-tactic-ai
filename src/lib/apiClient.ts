@@ -115,20 +115,38 @@ export const apiClient = {
   // ============== Search ==============
   search: (query: string) => apiRequest<any[]>(`/api/search?q=${encodeURIComponent(query)}`),
 
-  // ============== Storage ==============
-  getStorageUrl: (bucket: string, filename: string) => `${getApiBase()}/api/storage/${bucket}/${filename}`,
-  listStorageFiles: (bucket: string) => apiRequest<{ files: any[] }>(`/api/storage/${bucket}`),
+  // ============== Storage (organized by match) ==============
+  // Structure: storage/{match_id}/{subfolder}/{filename}
+  // Subfolders: videos, clips, images, audio, texts, srt, json
+  
+  getStorageUrl: (matchId: string, subfolder: string, filename: string) => 
+    `${getApiBase()}/api/storage/${matchId}/${subfolder}/${filename}`,
+  
+  getMatchStorage: (matchId: string, subfolder?: string) => 
+    apiRequest<{ files: any[]; stats: any }>(`/api/storage/${matchId}${subfolder ? `?subfolder=${subfolder}` : ''}`),
+  
+  listSubfolderFiles: (matchId: string, subfolder: string) => 
+    apiRequest<{ files: any[] }>(`/api/storage/${matchId}/${subfolder}`),
+  
+  getAllStorageStats: () => apiRequest<any>('/api/storage'),
 
-  uploadFile: async (bucket: string, file: File): Promise<{ url: string; filename: string }> => {
+  uploadFile: async (matchId: string, subfolder: string, file: File, filename?: string): Promise<{ url: string; filename: string; match_id: string; subfolder: string }> => {
     const formData = new FormData();
     formData.append('file', file);
-    const response = await fetch(`${getApiBase()}/api/storage/${bucket}`, {
+    if (filename) formData.append('filename', filename);
+    const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
       method: 'POST',
       body: formData,
     });
     if (!response.ok) throw new Error('Upload failed');
     return response.json();
   },
+
+  deleteMatchFile: (matchId: string, subfolder: string, filename: string) =>
+    apiRequest<{ success: boolean }>(`/api/storage/${matchId}/${subfolder}/${filename}`, { method: 'DELETE' }),
+  
+  deleteMatchStorage: (matchId: string) =>
+    apiRequest<{ success: boolean }>(`/api/storage/${matchId}`, { method: 'DELETE' }),
 
   // ============== Video Processing ==============
   extractClip: async (data: {
