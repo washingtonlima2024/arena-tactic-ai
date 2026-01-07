@@ -62,16 +62,22 @@ export function useClipGeneration() {
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const cancelRef = useRef(false);
 
-  // Load FFmpeg
+  // Load FFmpeg - usando versão UMD (single-threaded) que não requer SharedArrayBuffer
   const loadFFmpeg = async () => {
     if (ffmpegRef.current?.loaded) return ffmpegRef.current;
 
+    console.log('[ClipGeneration] Carregando FFmpeg.wasm...');
     setProgress({ stage: 'loading', progress: 5, message: 'Carregando processador de vídeo...' });
 
     const ffmpeg = new FFmpeg();
     ffmpegRef.current = ffmpeg;
 
+    ffmpeg.on('log', ({ message }) => {
+      console.log('[FFmpeg]', message);
+    });
+
     ffmpeg.on('progress', ({ progress: p }) => {
+      console.log('[FFmpeg] Progresso:', Math.round(p * 100), '%');
       setProgress(prev => ({
         ...prev,
         progress: Math.min(prev.progress + p * 10, 80),
@@ -79,11 +85,21 @@ export function useClipGeneration() {
       }));
     });
 
-    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-    await ffmpeg.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-    });
+    try {
+      // Usar versão UMD (single-threaded) que funciona sem SharedArrayBuffer
+      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
+      console.log('[ClipGeneration] Carregando core de:', baseURL);
+      
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+      });
+      
+      console.log('[ClipGeneration] FFmpeg carregado com sucesso!');
+    } catch (error) {
+      console.error('[ClipGeneration] Erro ao carregar FFmpeg:', error);
+      throw new Error('Falha ao carregar processador de vídeo');
+    }
 
     return ffmpeg;
   };
