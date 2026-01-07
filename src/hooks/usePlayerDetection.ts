@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 
 interface PlayerPosition {
@@ -44,24 +44,17 @@ export function usePlayerDetection(options: UsePlayerDetectionOptions = {}) {
     setError(null);
 
     try {
-      const { data, error: fnError } = await supabase.functions.invoke('detect-players', {
-        body: {
-          imageBase64,
-          frameTimestamp,
-          modelId: options.modelId,
-          confidence: options.confidence || 0.4,
-        },
+      const result = await apiClient.detectPlayers({
+        imageBase64,
+        frameTimestamp,
+        confidence: options.confidence || 0.4,
       });
 
-      if (fnError) throw fnError;
-
-      const result = data as DetectionResult;
-      setLastResult(result);
-      
       if (result.warning) {
         console.warn('Detection warning:', result.warning);
       }
 
+      setLastResult(result);
       options.onDetection?.(result);
       return result;
 
@@ -83,24 +76,17 @@ export function usePlayerDetection(options: UsePlayerDetectionOptions = {}) {
     setError(null);
 
     try {
-      const { data, error: fnError } = await supabase.functions.invoke('detect-players', {
-        body: {
-          imageUrl,
-          frameTimestamp,
-          modelId: options.modelId,
-          confidence: options.confidence || 0.4,
-        },
+      const result = await apiClient.detectPlayers({
+        imageUrl,
+        frameTimestamp,
+        confidence: options.confidence || 0.4,
       });
 
-      if (fnError) throw fnError;
-
-      const result = data as DetectionResult;
-      setLastResult(result);
-      
       if (result.warning) {
         console.warn('Detection warning:', result.warning);
       }
 
+      setLastResult(result);
       options.onDetection?.(result);
       return result;
 

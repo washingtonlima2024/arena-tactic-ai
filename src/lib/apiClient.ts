@@ -80,6 +80,7 @@ export const apiClient = {
     return apiRequest<any[]>(`/api/audio?${params}`);
   },
   createAudio: (audio: any) => apiRequest<any>('/api/audio', { method: 'POST', body: JSON.stringify(audio) }),
+  updateAudio: (id: string, data: any) => apiRequest<any>(`/api/audio/${id}`, { method: 'PUT', body: JSON.stringify(data) }),
 
   // ============== Thumbnails ==============
   getThumbnails: (matchId?: string) => apiRequest<any[]>(`/api/thumbnails${matchId ? `?match_id=${matchId}` : ''}`),
@@ -91,7 +92,7 @@ export const apiClient = {
     apiRequest<any>('/api/settings', { method: 'POST', body: JSON.stringify(setting) }),
 
   // ============== AI Services ==============
-  analyzeMatch: (data: { matchId: string; transcription: string; homeTeam: string; awayTeam: string }) =>
+  analyzeMatch: (data: { matchId: string; transcription: string; homeTeam: string; awayTeam: string; gameStartMinute?: number; gameEndMinute?: number; halfType?: string }) =>
     apiRequest<any>('/api/analyze-match', { method: 'POST', body: JSON.stringify(data) }),
 
   generateNarration: (data: any) =>
@@ -111,6 +112,23 @@ export const apiClient = {
 
   analyzeGoalPlay: (data: { description: string; scorer?: string; assister?: string; team?: string }) =>
     apiRequest<any>('/api/analyze-goal-play', { method: 'POST', body: JSON.stringify(data) }),
+
+  // ============== Transcription & Live Events ==============
+  transcribeAudio: (data: { audio: string; language?: string }) =>
+    apiRequest<{ text: string }>('/api/transcribe-audio', { method: 'POST', body: JSON.stringify(data) }),
+
+  transcribeLargeVideo: (data: { videoUrl: string; matchId?: string; language?: string }) =>
+    apiRequest<{ success: boolean; text: string; srtContent?: string }>('/api/transcribe-large-video', { method: 'POST', body: JSON.stringify(data) }),
+
+  extractLiveEvents: (data: { transcript: string; homeTeam: string; awayTeam: string; currentScore: { home: number; away: number }; currentMinute: number }) =>
+    apiRequest<{ events: any[] }>('/api/extract-live-events', { method: 'POST', body: JSON.stringify(data) }),
+
+  // ============== Detection & Thumbnails ==============
+  detectPlayers: (data: { imageBase64?: string; imageUrl?: string; frameTimestamp?: number; confidence?: number }) =>
+    apiRequest<any>('/api/detect-players', { method: 'POST', body: JSON.stringify(data) }),
+
+  generateThumbnailAI: (data: { prompt: string; eventId: string; matchId: string; eventType: string }) =>
+    apiRequest<{ imageUrl: string }>('/api/generate-thumbnail', { method: 'POST', body: JSON.stringify(data) }),
 
   // ============== Search ==============
   search: (query: string) => apiRequest<any[]>(`/api/search?q=${encodeURIComponent(query)}`),
@@ -134,6 +152,17 @@ export const apiClient = {
     const formData = new FormData();
     formData.append('file', file);
     if (filename) formData.append('filename', filename);
+    const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (!response.ok) throw new Error('Upload failed');
+    return response.json();
+  },
+
+  uploadBlob: async (matchId: string, subfolder: string, blob: Blob, filename: string): Promise<{ url: string; filename: string; match_id: string; subfolder: string }> => {
+    const formData = new FormData();
+    formData.append('file', blob, filename);
     const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
       method: 'POST',
       body: formData,
