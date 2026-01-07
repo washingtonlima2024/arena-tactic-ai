@@ -865,6 +865,9 @@ export default function Media() {
                   setPlayingClipId(clipId);
                 }}
                 hasVideo={!!matchVideo}
+                videoUrl={matchVideo?.file_url}
+                matchId={matchId || undefined}
+                onClipsExtracted={() => refetchEvents()}
               />
 
               {/* Away Team Playlist */}
@@ -884,6 +887,9 @@ export default function Media() {
                   setPlayingClipId(clipId);
                 }}
                 hasVideo={!!matchVideo}
+                videoUrl={matchVideo?.file_url}
+                matchId={matchId || undefined}
+                onClipsExtracted={() => refetchEvents()}
               />
             </div>
           </TabsContent>

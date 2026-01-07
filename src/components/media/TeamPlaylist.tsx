@@ -4,6 +4,16 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
 import { 
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import { 
   Play, 
   Download, 
   Share2, 
@@ -13,10 +23,12 @@ import {
   Youtube,
   Twitter,
   Send,
-  Loader2
+  Loader2,
+  Scissors
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import JSZip from 'jszip';
+import { useClipGeneration } from '@/hooks/useClipGeneration';
 
 interface Clip {
   id: string;
@@ -43,6 +55,9 @@ interface TeamPlaylistProps {
   getThumbnail: (id: string) => { imageUrl: string } | undefined;
   onPlayClip: (clipId: string) => void;
   hasVideo: boolean;
+  videoUrl?: string;
+  matchId?: string;
+  onClipsExtracted?: () => void;
 }
 
 interface PlaylistItem extends Clip {
@@ -56,11 +71,17 @@ export function TeamPlaylist({
   clips, 
   getThumbnail, 
   onPlayClip, 
-  hasVideo 
+  hasVideo,
+  videoUrl,
+  matchId,
+  onClipsExtracted
 }: TeamPlaylistProps) {
   const [playlistItems, setPlaylistItems] = useState<PlaylistItem[]>([]);
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
-
+  const [showExtractionDialog, setShowExtractionDialog] = useState(false);
+  const [pendingExport, setPendingExport] = useState<PlaylistItem[]>([]);
+  
+  const { generateAllClips, isGenerating, progress } = useClipGeneration();
   // Initialize playlist items from clips
   useEffect(() => {
     setPlaylistItems(
@@ -146,12 +167,21 @@ export function TeamPlaylist({
     }
 
     const clipsWithUrls = selectedItems.filter(item => item.clipUrl);
-    if (clipsWithUrls.length === 0) {
-      toast({
-        title: "Clips não extraídos",
-        description: "Extraia os clips primeiro na aba 'Cortes & Capas'",
-        variant: "destructive"
-      });
+    const clipsWithoutUrls = selectedItems.filter(item => !item.clipUrl);
+    
+    // Se há clips sem URL, oferecer extração on-demand
+    if (clipsWithoutUrls.length > 0) {
+      if (!videoUrl || !matchId) {
+        toast({
+          title: "Clips não extraídos",
+          description: "Extraia os clips primeiro na aba 'Cortes & Capas'",
+          variant: "destructive"
+        });
+        return;
+      }
+      // Abrir dialog perguntando se quer extrair
+      setPendingExport(selectedItems);
+      setShowExtractionDialog(true);
       return;
     }
 
@@ -210,6 +240,99 @@ export function TeamPlaylist({
       title: `Publicando no ${platform}`,
       description: `${selectedCount} clipes serão publicados na ordem definida`
     });
+  };
+
+  // Extrair clips on-demand e então exportar
+  const handleExtractAndExport = async () => {
+    setShowExtractionDialog(false);
+    
+    if (!videoUrl || !matchId || pendingExport.length === 0) return;
+    
+    const eventsToExtract = pendingExport
+      .filter(item => !item.clipUrl)
+      .map(item => ({
+        id: item.id,
+        event_type: item.type,
+        minute: item.minute,
+        second: 0,
+        description: item.description
+      }));
+    
+    if (eventsToExtract.length === 0) {
+      // Todos já têm URL, exportar direto
+      await exportClipsWithUrls(pendingExport.filter(item => item.clipUrl));
+      return;
+    }
+
+    toast({
+      title: "Extraindo clips...",
+      description: `${eventsToExtract.length} clips serão extraídos`
+    });
+
+    try {
+      await generateAllClips(eventsToExtract, videoUrl, matchId);
+      
+      toast({
+        title: "Extração concluída!",
+        description: "Recarregando clips para download..."
+      });
+      
+      // Notificar parent para recarregar os dados
+      onClipsExtracted?.();
+      
+    } catch (error) {
+      toast({
+        title: "Erro na extração",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+        variant: "destructive"
+      });
+    }
+    
+    setPendingExport([]);
+  };
+
+  // Exportar apenas clips que já têm URL
+  const exportClipsWithUrls = async (clipsToExport: PlaylistItem[]) => {
+    if (clipsToExport.length === 0) return;
+    
+    setIsExporting(true);
+    try {
+      if (clipsToExport.length === 1) {
+        const clip = clipsToExport[0];
+        const response = await fetch(clip.clipUrl!);
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${clip.minute}min-${clip.type}.mp4`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast({ title: "Download concluído!" });
+      } else {
+        const zip = new JSZip();
+        for (const clip of clipsToExport) {
+          const response = await fetch(clip.clipUrl!);
+          const blob = await response.blob();
+          zip.file(`${clip.order}-${clip.minute}min-${clip.type}.mp4`, blob);
+        }
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(zipBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${team.name}-clips.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast({ title: "ZIP baixado com sucesso!", description: `${clipsToExport.length} clips` });
+      }
+    } catch (error) {
+      toast({
+        title: "Erro no download",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+        variant: "destructive"
+      });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const clearSelection = () => {
@@ -433,6 +556,39 @@ export function TeamPlaylist({
           </div>
         </div>
       </CardContent>
+
+      {/* Dialog de Extração On-Demand */}
+      <AlertDialog open={showExtractionDialog} onOpenChange={setShowExtractionDialog}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle className="flex items-center gap-2">
+              <Scissors className="h-5 w-5" />
+              Clips não extraídos
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingExport.filter(item => !item.clipUrl).length} dos {pendingExport.length} clips selecionados ainda não foram extraídos do vídeo.
+              <br /><br />
+              Deseja extrair agora? Isso pode levar alguns minutos dependendo da quantidade.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleExtractAndExport} disabled={isGenerating}>
+              {isGenerating ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Extraindo ({progress.completedCount || 0}/{progress.totalCount || pendingExport.length})
+                </>
+              ) : (
+                <>
+                  <Scissors className="mr-2 h-4 w-4" />
+                  Extrair e Baixar
+                </>
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
