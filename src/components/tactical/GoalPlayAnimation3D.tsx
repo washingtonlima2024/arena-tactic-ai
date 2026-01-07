@@ -116,7 +116,7 @@ function AnimatedBall({
   );
 }
 
-// Animated 3D player figure
+// Animated 3D player figure - proportional to FIFA field (player ~1.8m tall)
 function AnimatedPlayer3D({
   position,
   team,
@@ -141,12 +141,12 @@ function AnimatedPlayer3D({
     
     if (groupRef.current) {
       // Gentle floating
-      groupRef.current.position.y = position[1] + Math.sin(time * 2 + position[0]) * 0.02;
+      groupRef.current.position.y = position[1] + Math.sin(time * 2 + position[0]) * 0.03;
     }
     
     // Running animation when moving
     const animSpeed = isMoving ? 8 : 2;
-    const animIntensity = isMoving ? 0.4 : 0.1;
+    const animIntensity = isMoving ? 0.5 : 0.15;
     
     if (leftLegRef.current && rightLegRef.current) {
       leftLegRef.current.rotation.x = Math.sin(time * animSpeed) * animIntensity;
@@ -159,101 +159,125 @@ function AnimatedPlayer3D({
     }
   });
   
-  const legLength = 0.25;
-  const torsoHeight = 0.18;
-  const headRadius = 0.07;
+  // Proportional player dimensions (~1.8m tall human on 105m field)
+  const scale = 2.5; // Scale factor for visibility
+  const legLength = 0.4 * scale;
+  const legRadius = 0.06 * scale;
+  const torsoHeight = 0.35 * scale;
+  const torsoRadius = 0.15 * scale;
+  const headRadius = 0.12 * scale;
+  const armRadius = 0.05 * scale;
+  const armLength = 0.25 * scale;
+  const shoulderWidth = 0.22 * scale;
   
   return (
     <group ref={groupRef} position={position}>
       {/* Player glow */}
       <pointLight 
-        intensity={0.3} 
-        distance={1.5} 
+        intensity={0.4} 
+        distance={3} 
         color={teamColor}
-        position={[0, 0.3, 0]}
+        position={[0, 0.5, 0]}
       />
       
       {/* Legs */}
-      <group ref={leftLegRef} position={[-0.04, 0, 0]}>
+      <group ref={leftLegRef} position={[-0.08 * scale, 0, 0]}>
         <mesh position={[0, legLength / 2, 0]}>
-          <capsuleGeometry args={[0.03, legLength, 4, 8]} />
+          <capsuleGeometry args={[legRadius, legLength, 8, 16]} />
           <meshStandardMaterial color="#1a1a2e" />
         </mesh>
-        <mesh position={[0, 0.02, 0.03]}>
-          <boxGeometry args={[0.05, 0.04, 0.08]} />
+        {/* Shoe */}
+        <mesh position={[0, 0.04 * scale, 0.05 * scale]}>
+          <boxGeometry args={[0.1 * scale, 0.08 * scale, 0.18 * scale]} />
           <meshStandardMaterial color="#111111" />
         </mesh>
       </group>
       
-      <group ref={rightLegRef} position={[0.04, 0, 0]}>
+      <group ref={rightLegRef} position={[0.08 * scale, 0, 0]}>
         <mesh position={[0, legLength / 2, 0]}>
-          <capsuleGeometry args={[0.03, legLength, 4, 8]} />
+          <capsuleGeometry args={[legRadius, legLength, 8, 16]} />
           <meshStandardMaterial color="#1a1a2e" />
         </mesh>
-        <mesh position={[0, 0.02, 0.03]}>
-          <boxGeometry args={[0.05, 0.04, 0.08]} />
+        {/* Shoe */}
+        <mesh position={[0, 0.04 * scale, 0.05 * scale]}>
+          <boxGeometry args={[0.1 * scale, 0.08 * scale, 0.18 * scale]} />
           <meshStandardMaterial color="#111111" />
         </mesh>
       </group>
       
       {/* Torso (jersey) */}
-      <mesh position={[0, legLength + torsoHeight / 2 + 0.05, 0]}>
-        <capsuleGeometry args={[0.07, torsoHeight, 4, 8]} />
+      <mesh position={[0, legLength + torsoHeight / 2 + 0.08 * scale, 0]}>
+        <capsuleGeometry args={[torsoRadius, torsoHeight, 8, 16]} />
         <meshStandardMaterial 
           color={teamColor}
           emissive={teamColor}
-          emissiveIntensity={0.2}
+          emissiveIntensity={0.15}
         />
       </mesh>
       
+      {/* Jersey number on back - 3D Text */}
+      {number && (
+        <Text
+          position={[0, legLength + torsoHeight / 2 + 0.1 * scale, -torsoRadius - 0.02]}
+          fontSize={0.3 * scale}
+          color="#ffffff"
+          anchorX="center"
+          anchorY="middle"
+          fontWeight="bold"
+          outlineWidth={0.015 * scale}
+          outlineColor="#000000"
+        >
+          {number}
+        </Text>
+      )}
+      
       {/* Arms */}
-      <group ref={leftArmRef} position={[-0.1, legLength + torsoHeight, 0]}>
-        <mesh position={[0, -0.06, 0]} rotation={[0, 0, 0.2]}>
-          <capsuleGeometry args={[0.025, 0.12, 4, 8]} />
+      <group ref={leftArmRef} position={[-shoulderWidth, legLength + torsoHeight + 0.05 * scale, 0]}>
+        <mesh position={[0, -armLength / 2, 0]} rotation={[0, 0, 0.25]}>
+          <capsuleGeometry args={[armRadius, armLength, 8, 16]} />
           <meshStandardMaterial color={teamColor} />
         </mesh>
       </group>
       
-      <group ref={rightArmRef} position={[0.1, legLength + torsoHeight, 0]}>
-        <mesh position={[0, -0.06, 0]} rotation={[0, 0, -0.2]}>
-          <capsuleGeometry args={[0.025, 0.12, 4, 8]} />
+      <group ref={rightArmRef} position={[shoulderWidth, legLength + torsoHeight + 0.05 * scale, 0]}>
+        <mesh position={[0, -armLength / 2, 0]} rotation={[0, 0, -0.25]}>
+          <capsuleGeometry args={[armRadius, armLength, 8, 16]} />
           <meshStandardMaterial color={teamColor} />
         </mesh>
       </group>
       
       {/* Neck */}
-      <mesh position={[0, legLength + torsoHeight + 0.1, 0]}>
-        <cylinderGeometry args={[0.025, 0.03, 0.03, 8]} />
+      <mesh position={[0, legLength + torsoHeight + 0.18 * scale, 0]}>
+        <cylinderGeometry args={[0.05 * scale, 0.06 * scale, 0.06 * scale, 12]} />
         <meshStandardMaterial color="#f5d0c5" />
       </mesh>
       
       {/* Head */}
-      <mesh position={[0, legLength + torsoHeight + headRadius + 0.12, 0]}>
-        <sphereGeometry args={[headRadius, 16, 16]} />
+      <mesh position={[0, legLength + torsoHeight + headRadius + 0.22 * scale, 0]}>
+        <sphereGeometry args={[headRadius, 24, 24]} />
         <meshStandardMaterial color="#f5d0c5" />
       </mesh>
       
       {/* Hair */}
-      <mesh position={[0, legLength + torsoHeight + headRadius * 1.4 + 0.12, -0.01]}>
-        <sphereGeometry args={[headRadius * 0.85, 12, 8, 0, Math.PI * 2, 0, Math.PI / 2]} />
+      <mesh position={[0, legLength + torsoHeight + headRadius * 1.5 + 0.22 * scale, -0.02 * scale]}>
+        <sphereGeometry args={[headRadius * 0.9, 16, 12, 0, Math.PI * 2, 0, Math.PI / 2]} />
         <meshStandardMaterial color="#2d1810" />
       </mesh>
       
-      {/* Number label */}
+      {/* Number above player head for visibility */}
       {number && (
-        <Html
-          position={[0, legLength + torsoHeight / 2 + 0.08, -0.08]}
-          center
-          style={{
-            color: '#ffffff',
-            fontSize: '10px',
-            fontWeight: 'bold',
-            textShadow: `0 0 4px ${teamColor}`,
-            pointerEvents: 'none',
-          }}
+        <Text
+          position={[0, legLength + torsoHeight + headRadius * 2 + 0.5 * scale, 0]}
+          fontSize={0.35 * scale}
+          color="#ffffff"
+          anchorX="center"
+          anchorY="middle"
+          fontWeight="bold"
+          outlineWidth={0.02 * scale}
+          outlineColor={teamColor}
         >
           {number}
-        </Html>
+        </Text>
       )}
     </group>
   );
