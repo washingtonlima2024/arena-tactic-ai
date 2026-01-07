@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo, useCallback } from 'react';
+import { useState, useRef, useMemo, useCallback, useEffect } from 'react';
 import { 
   Video, 
   BarChart3, 
@@ -8,7 +8,8 @@ import {
   Loader2,
   Play,
   Target,
-  Scan
+  Scan,
+  Sparkles
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { StatCard } from '@/components/dashboard/StatCard';
@@ -17,7 +18,7 @@ import { EventTimeline } from '@/components/events/EventTimeline';
 import { LiveTacticalField } from '@/components/tactical/LiveTacticalField';
 import { FootballField } from '@/components/tactical/FootballField';
 import { Heatmap3D } from '@/components/tactical/Heatmap3D';
-import { GoalPlayAnimation3D, generateGoalAnimationFromEvent } from '@/components/tactical/GoalPlayAnimation3D';
+import { GoalPlayAnimation3D } from '@/components/tactical/GoalPlayAnimation3D';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -30,6 +31,7 @@ import { Link } from 'react-router-dom';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
 import { useEventHeatZones } from '@/hooks/useEventHeatZones';
 import { useGoalDetection } from '@/hooks/useGoalDetection';
+import { useGoalPlayAnalysis } from '@/hooks/useGoalPlayAnalysis';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
@@ -111,6 +113,15 @@ export default function Dashboard() {
   // Selected goal for animation
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   
+  // AI-powered goal play analysis
+  const { 
+    analyzeGoal, 
+    isAnalyzing, 
+    frames: aiFrames, 
+    analysis: goalAnalysis,
+    error: analysisError 
+  } = useGoalPlayAnalysis();
+  
   // YOLO detection state
   const detectionVideoRef = useRef<HTMLVideoElement>(null);
   const [yoloFrames, setYoloFrames] = useState<any[]>([]);
@@ -134,6 +145,31 @@ export default function Dashboard() {
     }
     return goalEvents.find(g => g.id === selectedGoalId) || goalEvents[0];
   }, [selectedGoalId, goalEvents]);
+  
+  // Automatically analyze goal when selected
+  useEffect(() => {
+    if (selectedGoal && !useYoloDetection) {
+      // Build context narration from surrounding events
+      const goalMinute = selectedGoal.minute || 0;
+      const contextEvents = matchEvents.filter(e => 
+        e.minute !== null && 
+        e.minute >= goalMinute - 3 && 
+        e.minute <= goalMinute + 1
+      );
+      const contextNarration = contextEvents
+        .map(e => e.description)
+        .filter(Boolean)
+        .join('. ');
+      
+      analyzeGoal(
+        selectedGoal.description || '',
+        realMatches[0]?.home_team?.name,
+        realMatches[0]?.away_team?.name,
+        selectedGoal.minute || undefined,
+        contextNarration
+      );
+    }
+  }, [selectedGoal?.id, matchEvents, realMatches, useYoloDetection]);
   
   // Calculate video timestamp for goal
   const getGoalVideoTimestamp = useCallback((goalMinute: number) => {
@@ -169,47 +205,18 @@ export default function Dashboard() {
     }
   }, [selectedGoal, getGoalVideoTimestamp, processGoalAnimation]);
   
-  // Use YOLO frames if available, otherwise generate from description
+  // Use YOLO frames if available, then AI frames, otherwise empty
   const goalAnimationFrames = useMemo(() => {
     if (useYoloDetection && yoloFrames.length > 0) {
       return yoloFrames;
     }
     
-    if (!selectedGoal) return [];
+    if (aiFrames.length > 0) {
+      return aiFrames;
+    }
     
-    // Generate animation based on the goal's description and context
-    const goalMinute = selectedGoal.minute || 0;
-    const contextEvents = matchEvents.filter(e => 
-      e.minute !== null && 
-      e.minute >= goalMinute - 3 && 
-      e.minute <= goalMinute
-    );
-    
-    return generateGoalAnimationFromEvent(
-      {
-        id: selectedGoal.id,
-        event_type: selectedGoal.event_type,
-        minute: selectedGoal.minute,
-        second: selectedGoal.second,
-        description: selectedGoal.description,
-        position_x: selectedGoal.position_x,
-        position_y: selectedGoal.position_y,
-        metadata: selectedGoal.metadata
-      },
-      contextEvents.map(e => ({
-        id: e.id,
-        event_type: e.event_type,
-        minute: e.minute,
-        second: e.second,
-        description: e.description,
-        position_x: e.position_x,
-        position_y: e.position_y,
-        metadata: e.metadata
-      })),
-      realMatches[0]?.home_team?.name,
-      realMatches[0]?.away_team?.name
-    );
-  }, [selectedGoal, matchEvents, realMatches, useYoloDetection, yoloFrames]);
+    return [];
+  }, [useYoloDetection, yoloFrames, aiFrames]);
   
   // Reset YOLO frames when goal changes
   const handleGoalChange = useCallback((goalId: string) => {
