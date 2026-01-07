@@ -29,6 +29,7 @@ import {
 import { toast } from '@/hooks/use-toast';
 import JSZip from 'jszip';
 import { useClipGeneration } from '@/hooks/useClipGeneration';
+import { supabase } from '@/integrations/supabase/client';
 
 interface Clip {
   id: string;
@@ -257,9 +258,12 @@ export function TeamPlaylist({
         metadata: undefined
       }));
     
+    // Se já tem clips com URL, separar para download
+    const clipsJaExtraidos = pendingExport.filter(item => item.clipUrl);
+    
     if (eventsToExtract.length === 0) {
       // Todos já têm URL, exportar direto
-      await exportClipsWithUrls(pendingExport.filter(item => item.clipUrl));
+      await exportClipsWithUrls(clipsJaExtraidos);
       setPendingExport([]);
       return;
     }
@@ -269,13 +273,42 @@ export function TeamPlaylist({
       description: `${eventsToExtract.length} clips serão extraídos. Aguarde...`
     });
 
+    setIsExporting(true);
+    
     try {
       await generateAllClips(eventsToExtract, videoUrl, matchId);
       
       toast({
         title: "Extração concluída!",
-        description: "Recarregando clips para download..."
+        description: "Iniciando download..."
       });
+      
+      // Buscar as URLs dos clips recém-extraídos
+      const { data: updatedEvents } = await supabase
+        .from('match_events')
+        .select('id, clip_url')
+        .in('id', eventsToExtract.map(e => e.id));
+      
+      // Criar mapa id -> clip_url
+      const clipUrlMap = new Map<string, string | null>(updatedEvents?.map(e => [e.id, e.clip_url]) || []);
+      
+      // Combinar todos os clips (já extraídos + recém-extraídos)
+      const todosClips = pendingExport.map(item => ({
+        ...item,
+        clipUrl: item.clipUrl || clipUrlMap.get(item.id) || undefined
+      })).filter((item): item is PlaylistItem & { clipUrl: string } => !!item.clipUrl);
+      
+      console.log('[TeamPlaylist] Clips para download:', todosClips.length);
+      
+      if (todosClips.length > 0) {
+        await exportClipsWithUrls(todosClips);
+      } else {
+        toast({
+          title: "Nenhum clip disponível",
+          description: "Não foi possível obter os clips extraídos",
+          variant: "destructive"
+        });
+      }
       
       // Notificar parent para recarregar os dados
       onClipsExtracted?.();
@@ -287,6 +320,8 @@ export function TeamPlaylist({
         description: error instanceof Error ? error.message : "Erro desconhecido",
         variant: "destructive"
       });
+    } finally {
+      setIsExporting(false);
     }
     
     setPendingExport([]);
