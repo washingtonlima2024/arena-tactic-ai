@@ -788,94 +788,391 @@ export function GoalPlayAnimation3D({
   );
 }
 
-// Generate realistic goal play animation frames
-export function generateGoalPlayFrames(goalTeam: 'home' | 'away' = 'home'): PlayFrame[] {
+// Match event type for context
+interface MatchEvent {
+  id: string;
+  event_type: string;
+  minute: number | null;
+  second: number | null;
+  description: string | null;
+  position_x: number | null;
+  position_y: number | null;
+  metadata: any;
+}
+
+// Parse goal description to determine play type
+function parseGoalType(description: string): 'long_shot' | 'counter' | 'cross' | 'penalty' | 'free_kick' | 'header' | 'tap_in' | 'dribble' {
+  const desc = description.toLowerCase();
+  if (desc.includes('pênalti') || desc.includes('penalti') || desc.includes('penalty')) return 'penalty';
+  if (desc.includes('falta') || desc.includes('livre')) return 'free_kick';
+  if (desc.includes('cabeça') || desc.includes('cabeceio') || desc.includes('header')) return 'header';
+  if (desc.includes('cruzamento') || desc.includes('cross') || desc.includes('escanteio')) return 'cross';
+  if (desc.includes('contra-ataque') || desc.includes('contra ataque') || desc.includes('counter')) return 'counter';
+  if (desc.includes('longe') || desc.includes('fora da área') || desc.includes('bomba') || desc.includes('chute de longe')) return 'long_shot';
+  if (desc.includes('dribl') || desc.includes('jogada individual')) return 'dribble';
+  return 'tap_in';
+}
+
+// Extract player name from description
+function extractPlayerName(description: string): string | null {
+  // Common patterns: "GOL de Coutinho", "GOLAÇO de Neymar", "Messi marca"
+  const patterns = [
+    /gol(?:aço)?\s+de\s+(\w+)/i,
+    /(\w+)\s+marca/i,
+    /(\w+)\s+finaliza/i,
+    /(\w+)\s+chuta/i,
+    /(\w+)\s+cabece/i,
+  ];
+  
+  for (const pattern of patterns) {
+    const match = description.match(pattern);
+    if (match) return match[1];
+  }
+  return null;
+}
+
+// Generate frames based on play type
+function generatePlayTypeFrames(
+  playType: 'long_shot' | 'counter' | 'cross' | 'penalty' | 'free_kick' | 'header' | 'tap_in' | 'dribble',
+  scoringTeam: 'home' | 'away',
+  scorerName: string | null
+): PlayFrame[] {
   const frames: PlayFrame[] = [];
-  const numFrames = 60;
+  const isHomeAttacking = scoringTeam === 'home';
+  const goalX = isHomeAttacking ? 103 : 2;
+  const goalY = 34;
   
-  // Home team attacks from left to right (towards away goal at x=105)
-  // Away team attacks from right to left (towards home goal at x=0)
-  
-  const isHomeAttacking = goalTeam === 'home';
-  const attackDirection = isHomeAttacking ? 1 : -1;
-  
-  // Starting positions for home team (attacking towards x=105)
-  const homeBasePositions = [
-    { id: 'h1', number: 1, x: 5, y: 34 },     // GK
-    { id: 'h2', number: 4, x: 25, y: 15 },    // LB
-    { id: 'h3', number: 5, x: 25, y: 34 },    // CB
-    { id: 'h4', number: 6, x: 25, y: 53 },    // RB
-    { id: 'h5', number: 8, x: 45, y: 20 },    // LM
-    { id: 'h6', number: 10, x: 50, y: 34 },   // CAM
-    { id: 'h7', number: 7, x: 45, y: 48 },    // RM
-    { id: 'h8', number: 9, x: 70, y: 34 },    // ST
-    { id: 'h9', number: 11, x: 65, y: 20 },   // LW
-    { id: 'h10', number: 17, x: 65, y: 48 },  // RW
+  // Base formations with player names
+  const homeFormation = [
+    { id: 'h1', number: 1, name: 'Goleiro', x: 5, y: 34, role: 'gk' },
+    { id: 'h2', number: 2, name: 'Lateral D', x: 25, y: 15, role: 'rb' },
+    { id: 'h3', number: 3, name: 'Zagueiro', x: 22, y: 28, role: 'cb' },
+    { id: 'h4', number: 4, name: 'Zagueiro', x: 22, y: 40, role: 'cb' },
+    { id: 'h5', number: 6, name: 'Lateral E', x: 25, y: 53, role: 'lb' },
+    { id: 'h6', number: 5, name: 'Volante', x: 40, y: 34, role: 'cdm' },
+    { id: 'h7', number: 8, name: 'Meia', x: 50, y: 25, role: 'cm' },
+    { id: 'h8', number: 10, name: scorerName || 'Meia', x: 55, y: 34, role: 'cam' },
+    { id: 'h9', number: 7, name: 'Ponta D', x: 65, y: 18, role: 'rw' },
+    { id: 'h10', number: 11, name: 'Ponta E', x: 65, y: 50, role: 'lw' },
+    { id: 'h11', number: 9, name: 'Atacante', x: 75, y: 34, role: 'st' },
   ];
   
-  // Away team positions (defending at x=105)
-  const awayBasePositions = [
-    { id: 'a1', number: 1, x: 100, y: 34 },   // GK
-    { id: 'a2', number: 2, x: 88, y: 15 },    // LB
-    { id: 'a3', number: 3, x: 85, y: 28 },    // CB
-    { id: 'a4', number: 4, x: 85, y: 40 },    // CB
-    { id: 'a5', number: 5, x: 88, y: 53 },    // RB
-    { id: 'a6', number: 6, x: 75, y: 25 },    // LM
-    { id: 'a7', number: 8, x: 70, y: 34 },    // CM
-    { id: 'a8', number: 10, x: 75, y: 43 },   // RM
-    { id: 'a9', number: 9, x: 55, y: 34 },    // ST
+  const awayFormation = [
+    { id: 'a1', number: 1, name: 'Goleiro', x: 100, y: 34, role: 'gk' },
+    { id: 'a2', number: 2, name: 'Lateral', x: 82, y: 15, role: 'rb' },
+    { id: 'a3', number: 3, name: 'Zagueiro', x: 85, y: 28, role: 'cb' },
+    { id: 'a4', number: 4, name: 'Zagueiro', x: 85, y: 40, role: 'cb' },
+    { id: 'a5', number: 5, name: 'Lateral', x: 82, y: 53, role: 'lb' },
+    { id: 'a6', number: 6, name: 'Volante', x: 70, y: 34, role: 'cdm' },
+    { id: 'a7', number: 8, name: 'Meia', x: 60, y: 28, role: 'cm' },
+    { id: 'a8', number: 10, name: !isHomeAttacking && scorerName ? scorerName : 'Meia', x: 55, y: 40, role: 'cam' },
+    { id: 'a9', number: 7, name: 'Ponta', x: 45, y: 20, role: 'rw' },
+    { id: 'a10', number: 11, name: 'Ponta', x: 45, y: 48, role: 'lw' },
+    { id: 'a11', number: 9, name: 'Atacante', x: 35, y: 34, role: 'st' },
   ];
+
+  let numFrames = 60;
+  let ballPath: { x: number; y: number }[] = [];
+  let scorerIndex = isHomeAttacking ? 7 : 7; // CAM by default
   
-  for (let i = 0; i < numFrames; i++) {
-    const progress = i / numFrames;
+  // Generate ball path based on play type
+  switch (playType) {
+    case 'long_shot':
+      // Ball starts at edge of box, curves into top corner
+      for (let i = 0; i < numFrames; i++) {
+        const t = i / numFrames;
+        if (isHomeAttacking) {
+          ballPath.push({
+            x: 65 + t * 38,
+            y: 30 + Math.sin(t * Math.PI * 0.5) * 8 + (t > 0.7 ? (t - 0.7) * 10 : 0)
+          });
+        } else {
+          ballPath.push({
+            x: 40 - t * 38,
+            y: 30 + Math.sin(t * Math.PI * 0.5) * 8 + (t > 0.7 ? (t - 0.7) * 10 : 0)
+          });
+        }
+      }
+      scorerIndex = isHomeAttacking ? 7 : 7;
+      break;
+      
+    case 'counter':
+      // Fast break from midfield
+      for (let i = 0; i < numFrames; i++) {
+        const t = i / numFrames;
+        if (isHomeAttacking) {
+          ballPath.push({
+            x: 35 + t * 68,
+            y: 34 + Math.sin(t * Math.PI * 3) * 15
+          });
+        } else {
+          ballPath.push({
+            x: 70 - t * 68,
+            y: 34 + Math.sin(t * Math.PI * 3) * 15
+          });
+        }
+      }
+      scorerIndex = isHomeAttacking ? 10 : 10;
+      break;
+      
+    case 'cross':
+      // Wing cross to header/tap-in
+      for (let i = 0; i < numFrames; i++) {
+        const t = i / numFrames;
+        if (isHomeAttacking) {
+          if (t < 0.5) {
+            // Ball on wing
+            ballPath.push({ x: 70 + t * 30, y: 58 - t * 10 });
+          } else {
+            // Cross into box
+            const crossT = (t - 0.5) * 2;
+            ballPath.push({
+              x: 85 + crossT * 18,
+              y: 48 - crossT * 14
+            });
+          }
+        } else {
+          if (t < 0.5) {
+            ballPath.push({ x: 35 - t * 30, y: 58 - t * 10 });
+          } else {
+            const crossT = (t - 0.5) * 2;
+            ballPath.push({
+              x: 20 - crossT * 18,
+              y: 48 - crossT * 14
+            });
+          }
+        }
+      }
+      scorerIndex = isHomeAttacking ? 10 : 10;
+      break;
+      
+    case 'penalty':
+      // Penalty kick
+      numFrames = 30;
+      for (let i = 0; i < numFrames; i++) {
+        const t = i / numFrames;
+        if (isHomeAttacking) {
+          ballPath.push({
+            x: 94 + t * 9,
+            y: 34 + (t > 0.3 ? (t - 0.3) * 6 : 0)
+          });
+        } else {
+          ballPath.push({
+            x: 11 - t * 9,
+            y: 34 + (t > 0.3 ? (t - 0.3) * 6 : 0)
+          });
+        }
+      }
+      scorerIndex = isHomeAttacking ? 7 : 7;
+      break;
+      
+    case 'free_kick':
+      // Free kick from edge of box
+      for (let i = 0; i < numFrames; i++) {
+        const t = i / numFrames;
+        if (isHomeAttacking) {
+          ballPath.push({
+            x: 75 + t * 28,
+            y: 25 + Math.sin(t * Math.PI) * 12
+          });
+        } else {
+          ballPath.push({
+            x: 30 - t * 28,
+            y: 25 + Math.sin(t * Math.PI) * 12
+          });
+        }
+      }
+      scorerIndex = isHomeAttacking ? 7 : 7;
+      break;
+      
+    case 'header':
+      // Cross to header
+      for (let i = 0; i < numFrames; i++) {
+        const t = i / numFrames;
+        if (isHomeAttacking) {
+          if (t < 0.6) {
+            ballPath.push({ x: 60 + t * 40, y: 15 + t * 25 });
+          } else {
+            const headerT = (t - 0.6) * 2.5;
+            ballPath.push({
+              x: 84 + headerT * 19,
+              y: 40 - headerT * 6
+            });
+          }
+        } else {
+          if (t < 0.6) {
+            ballPath.push({ x: 45 - t * 40, y: 15 + t * 25 });
+          } else {
+            const headerT = (t - 0.6) * 2.5;
+            ballPath.push({
+              x: 21 - headerT * 19,
+              y: 40 - headerT * 6
+            });
+          }
+        }
+      }
+      scorerIndex = isHomeAttacking ? 10 : 10;
+      break;
+      
+    case 'dribble':
+      // Individual play with dribbling
+      for (let i = 0; i < numFrames; i++) {
+        const t = i / numFrames;
+        if (isHomeAttacking) {
+          ballPath.push({
+            x: 50 + t * 53,
+            y: 45 + Math.sin(t * Math.PI * 4) * 12 - t * 11
+          });
+        } else {
+          ballPath.push({
+            x: 55 - t * 53,
+            y: 45 + Math.sin(t * Math.PI * 4) * 12 - t * 11
+          });
+        }
+      }
+      scorerIndex = isHomeAttacking ? 8 : 8;
+      break;
+      
+    default: // tap_in
+      // Simple tap-in from close range
+      for (let i = 0; i < numFrames; i++) {
+        const t = i / numFrames;
+        if (isHomeAttacking) {
+          ballPath.push({
+            x: 75 + t * 28,
+            y: 38 + Math.sin(t * Math.PI * 2) * 8
+          });
+        } else {
+          ballPath.push({
+            x: 30 - t * 28,
+            y: 38 + Math.sin(t * Math.PI * 2) * 8
+          });
+        }
+      }
+      scorerIndex = isHomeAttacking ? 10 : 10;
+      break;
+  }
+  
+  // Ensure ball ends in goal
+  if (ballPath.length > 0) {
+    ballPath[ballPath.length - 1] = { x: goalX, y: goalY };
+  }
+  
+  // Generate frames with animated players
+  for (let i = 0; i < ballPath.length; i++) {
+    const t = i / ballPath.length;
+    const ballPos = ballPath[i];
     
-    // Ball trajectory - curved attack towards goal
-    let ballX: number, ballY: number;
+    const players: PlayerPosition[] = [];
     
-    if (isHomeAttacking) {
-      // Home attacking towards away goal (x=105)
-      ballX = 50 + progress * 52 + Math.sin(progress * Math.PI) * 8;
-      ballY = 34 + Math.sin(progress * Math.PI * 2) * 12;
-    } else {
-      // Away attacking towards home goal (x=0)
-      ballX = 55 - progress * 52 - Math.sin(progress * Math.PI) * 8;
-      ballY = 34 + Math.sin(progress * Math.PI * 2) * 12;
-    }
-    
-    // Clamp ball position
-    ballX = Math.max(2, Math.min(103, ballX));
-    ballY = Math.max(5, Math.min(63, ballY));
-    
-    // Animate players
-    const players: PlayerPosition[] = [
-      ...homeBasePositions.map(p => ({
+    // Animate home team
+    homeFormation.forEach((p, idx) => {
+      let x = p.x;
+      let y = p.y;
+      
+      if (isHomeAttacking) {
+        // Attacking movement
+        if (idx === scorerIndex) {
+          // Scorer follows ball closely
+          x = ballPos.x - 2 + Math.sin(i * 0.3) * 1;
+          y = ballPos.y + Math.cos(i * 0.2) * 2;
+        } else if (p.role === 'st' || p.role === 'cam' || p.role === 'lw' || p.role === 'rw') {
+          // Attackers push forward
+          x = p.x + t * 20 + Math.sin(i * 0.2 + idx) * 2;
+          y = p.y + Math.sin(i * 0.15 + idx) * 4;
+        } else if (p.role === 'cm' || p.role === 'cdm') {
+          // Midfielders support
+          x = p.x + t * 12 + Math.sin(i * 0.2 + idx) * 1.5;
+          y = p.y + Math.cos(i * 0.15 + idx) * 3;
+        } else {
+          // Defenders hold position with slight forward push
+          x = p.x + t * 5 + Math.sin(i * 0.1 + idx) * 1;
+          y = p.y + Math.cos(i * 0.1 + idx) * 2;
+        }
+      } else {
+        // Defending - slight retreat
+        x = p.x - t * 8 + Math.sin(i * 0.15 + idx) * 1.5;
+        y = p.y + Math.cos(i * 0.1 + idx) * 2;
+      }
+      
+      players.push({
         id: p.id,
-        x: Math.max(2, Math.min(103, p.x + (isHomeAttacking ? progress * 12 : -progress * 5) + Math.sin(i * 0.2 + parseInt(p.id.slice(1))) * 2)),
-        y: Math.max(5, Math.min(63, p.y + Math.cos(i * 0.15 + parseInt(p.id.slice(1))) * 2.5)),
-        team: 'home' as const,
+        x: Math.max(2, Math.min(103, x)),
+        y: Math.max(5, Math.min(63, y)),
+        team: 'home',
         number: p.number
-      })),
-      ...awayBasePositions.map(p => ({
+      });
+    });
+    
+    // Animate away team
+    awayFormation.forEach((p, idx) => {
+      let x = p.x;
+      let y = p.y;
+      
+      if (!isHomeAttacking) {
+        // Attacking movement
+        if (idx === scorerIndex) {
+          x = ballPos.x + 2 + Math.sin(i * 0.3) * 1;
+          y = ballPos.y + Math.cos(i * 0.2) * 2;
+        } else if (p.role === 'st' || p.role === 'cam' || p.role === 'lw' || p.role === 'rw') {
+          x = p.x - t * 20 + Math.sin(i * 0.2 + idx) * 2;
+          y = p.y + Math.sin(i * 0.15 + idx) * 4;
+        } else if (p.role === 'cm' || p.role === 'cdm') {
+          x = p.x - t * 12 + Math.sin(i * 0.2 + idx) * 1.5;
+          y = p.y + Math.cos(i * 0.15 + idx) * 3;
+        } else {
+          x = p.x - t * 5 + Math.sin(i * 0.1 + idx) * 1;
+          y = p.y + Math.cos(i * 0.1 + idx) * 2;
+        }
+      } else {
+        // Defending - track back
+        x = p.x + t * 8 + Math.sin(i * 0.15 + idx) * 1.5;
+        y = p.y + Math.cos(i * 0.1 + idx) * 2;
+      }
+      
+      players.push({
         id: p.id,
-        x: Math.max(2, Math.min(103, p.x + (!isHomeAttacking ? -progress * 12 : progress * 5) + Math.sin(i * 0.2 + parseInt(p.id.slice(1))) * 2)),
-        y: Math.max(5, Math.min(63, p.y + Math.cos(i * 0.15 + parseInt(p.id.slice(1))) * 2.5)),
-        team: 'away' as const,
+        x: Math.max(2, Math.min(103, x)),
+        y: Math.max(5, Math.min(63, y)),
+        team: 'away',
         number: p.number
-      }))
-    ];
+      });
+    });
     
     frames.push({
       timestamp: i * 0.1,
       players,
-      ball: { x: ballX, y: ballY }
+      ball: ballPos
     });
   }
   
-  // Final frame - ball in goal
-  const lastFrame = frames[frames.length - 1];
-  lastFrame.ball = isHomeAttacking 
-    ? { x: 104, y: 34 }   // In away goal
-    : { x: 1, y: 34 };     // In home goal
-  
   return frames;
+}
+
+// Generate animation frames from real match event data
+export function generateGoalAnimationFromEvent(
+  goalEvent: MatchEvent,
+  contextEvents: MatchEvent[] = [],
+  homeTeamName?: string,
+  awayTeamName?: string
+): PlayFrame[] {
+  const description = goalEvent.description || '';
+  const metadata = goalEvent.metadata || {};
+  
+  // Determine scoring team
+  const scoringTeam: 'home' | 'away' = metadata?.team === 'away' ? 'away' : 'home';
+  
+  // Parse the goal type from description
+  const playType = parseGoalType(description);
+  
+  // Extract scorer name
+  const scorerName = extractPlayerName(description);
+  
+  // Generate frames based on analyzed play type
+  return generatePlayTypeFrames(playType, scoringTeam, scorerName);
+}
+
+// Legacy function - now calls the new intelligent generator
+export function generateGoalPlayFrames(goalTeam: 'home' | 'away' = 'home'): PlayFrame[] {
+  return generatePlayTypeFrames('tap_in', goalTeam, null);
 }
