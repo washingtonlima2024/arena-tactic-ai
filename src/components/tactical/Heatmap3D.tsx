@@ -23,8 +23,8 @@ interface HeatZone {
 interface Heatmap3DProps {
   homeTeam: string;
   awayTeam: string;
-  homePlayers: Player[];
-  awayPlayers: Player[];
+  homePlayers?: Player[];
+  awayPlayers?: Player[];
   homeColor?: string;
   awayColor?: string;
   onPlayersChange?: (homePlayers: Player[], awayPlayers: Player[]) => void;

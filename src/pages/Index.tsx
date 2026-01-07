@@ -1,13 +1,10 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { 
   Video, 
   BarChart3, 
-  Calendar, 
   Zap, 
   TrendingUp,
-  Users,
   Activity,
-  RotateCcw,
   Loader2,
   Play
 } from 'lucide-react';
@@ -26,6 +23,7 @@ import heroBg from '@/assets/hero-bg.jpg';
 import arenaWordmark from '@/assets/arena-play-wordmark.png';
 import { Link } from 'react-router-dom';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
+import { useEventHeatZones } from '@/hooks/useEventHeatZones';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
@@ -89,6 +87,13 @@ export default function Dashboard() {
       };
     }
   });
+  
+  // Generate heat zones from real events
+  const eventHeatZones = useEventHeatZones(
+    matchEvents,
+    realMatches[0]?.home_team?.name,
+    realMatches[0]?.away_team?.name
+  );
   
   const recentEvents = matchEvents.slice(0, 5);
   
@@ -275,32 +280,8 @@ export default function Dashboard() {
                     awayTeam={realMatches[0]?.away_team?.name || 'Time Visitante'}
                     homeColor={realMatches[0]?.home_team?.primary_color || '#10b981'}
                     awayColor={realMatches[0]?.away_team?.primary_color || '#3b82f6'}
-                    homePlayers={[
-                      { x: 5, y: 50, number: 1, team: 'home', intensity: 0.3 },
-                      { x: 20, y: 20, number: 4, team: 'home', intensity: 0.7 },
-                      { x: 20, y: 40, number: 3, team: 'home', intensity: 0.6 },
-                      { x: 20, y: 60, number: 15, team: 'home', intensity: 0.65 },
-                      { x: 20, y: 80, number: 2, team: 'home', intensity: 0.75 },
-                      { x: 45, y: 30, number: 8, team: 'home', intensity: 0.85 },
-                      { x: 45, y: 50, number: 5, team: 'home', intensity: 0.9 },
-                      { x: 45, y: 70, number: 17, team: 'home', intensity: 0.8 },
-                      { x: 70, y: 20, number: 19, team: 'home', intensity: 0.95 },
-                      { x: 75, y: 50, number: 9, team: 'home', intensity: 1 },
-                      { x: 70, y: 80, number: 11, team: 'home', intensity: 0.9 },
-                    ]}
-                    awayPlayers={[
-                      { x: 95, y: 50, number: 1, team: 'away', intensity: 0.3 },
-                      { x: 80, y: 20, number: 2, team: 'away', intensity: 0.7 },
-                      { x: 80, y: 40, number: 4, team: 'away', intensity: 0.65 },
-                      { x: 80, y: 60, number: 5, team: 'away', intensity: 0.6 },
-                      { x: 80, y: 80, number: 23, team: 'away', intensity: 0.75 },
-                      { x: 60, y: 25, number: 8, team: 'away', intensity: 0.8 },
-                      { x: 60, y: 50, number: 10, team: 'away', intensity: 0.95 },
-                      { x: 60, y: 75, number: 15, team: 'away', intensity: 0.85 },
-                      { x: 35, y: 30, number: 11, team: 'away', intensity: 0.9 },
-                      { x: 30, y: 50, number: 9, team: 'away', intensity: 1 },
-                      { x: 35, y: 70, number: 7, team: 'away', intensity: 0.88 },
-                    ]}
+                    height={900}
+                    eventHeatZones={eventHeatZones}
                   />
                   <p className="mt-3 text-center text-sm text-muted-foreground">
                     Arraste para rotacionar • Scroll para zoom
