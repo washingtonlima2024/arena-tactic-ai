@@ -16,7 +16,7 @@ import { EventTimeline } from '@/components/events/EventTimeline';
 import { LiveTacticalField } from '@/components/tactical/LiveTacticalField';
 import { FootballField } from '@/components/tactical/FootballField';
 import { Heatmap3D } from '@/components/tactical/Heatmap3D';
-import { GoalPlayAnimation3D, generateGoalPlayFrames } from '@/components/tactical/GoalPlayAnimation3D';
+import { GoalPlayAnimation3D, generateGoalAnimationFromEvent } from '@/components/tactical/GoalPlayAnimation3D';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -118,11 +118,40 @@ export default function Dashboard() {
   
   const goalAnimationFrames = useMemo(() => {
     if (!selectedGoal) return [];
-    // Determine which team scored based on metadata
-    const metadata = selectedGoal.metadata as any;
-    const scoringTeam = metadata?.team === 'away' ? 'away' : 'home';
-    return generateGoalPlayFrames(scoringTeam);
-  }, [selectedGoal]);
+    // Generate animation based on the goal's description and context
+    // Get events around the goal time for context
+    const goalMinute = selectedGoal.minute || 0;
+    const contextEvents = matchEvents.filter(e => 
+      e.minute !== null && 
+      e.minute >= goalMinute - 3 && 
+      e.minute <= goalMinute
+    );
+    
+    return generateGoalAnimationFromEvent(
+      {
+        id: selectedGoal.id,
+        event_type: selectedGoal.event_type,
+        minute: selectedGoal.minute,
+        second: selectedGoal.second,
+        description: selectedGoal.description,
+        position_x: selectedGoal.position_x,
+        position_y: selectedGoal.position_y,
+        metadata: selectedGoal.metadata
+      },
+      contextEvents.map(e => ({
+        id: e.id,
+        event_type: e.event_type,
+        minute: e.minute,
+        second: e.second,
+        description: e.description,
+        position_x: e.position_x,
+        position_y: e.position_y,
+        metadata: e.metadata
+      })),
+      realMatches[0]?.home_team?.name,
+      realMatches[0]?.away_team?.name
+    );
+  }, [selectedGoal, matchEvents, realMatches]);
   
   const handlePlayVideo = (eventId: string, eventMinute: number) => {
     if (!matchVideo) {
