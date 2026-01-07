@@ -12,9 +12,11 @@ import {
   Instagram,
   Youtube,
   Twitter,
-  Send
+  Send,
+  Loader2
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
+import JSZip from 'jszip';
 
 interface Clip {
   id: string;
@@ -24,6 +26,7 @@ interface Clip {
   endTime: number;
   description: string;
   minute: number;
+  clipUrl?: string | null;
 }
 
 interface Team {
@@ -130,7 +133,9 @@ export function TeamPlaylist({
     setDraggedItem(null);
   };
 
-  const handleExportPlaylist = () => {
+  const [isExporting, setIsExporting] = useState(false);
+
+  const handleExportPlaylist = async () => {
     if (selectedCount === 0) {
       toast({
         title: "Nenhum clipe selecionado",
@@ -139,10 +144,57 @@ export function TeamPlaylist({
       });
       return;
     }
-    toast({
-      title: "Exportando playlist",
-      description: `${selectedCount} clipes serão exportados na sequência definida`
-    });
+
+    const clipsWithUrls = selectedItems.filter(item => item.clipUrl);
+    if (clipsWithUrls.length === 0) {
+      toast({
+        title: "Clips não extraídos",
+        description: "Extraia os clips primeiro na aba 'Cortes & Capas'",
+        variant: "destructive"
+      });
+      return;
+    }
+
+    setIsExporting(true);
+    try {
+      if (clipsWithUrls.length === 1) {
+        // Single clip - direct download
+        const clip = clipsWithUrls[0];
+        const response = await fetch(clip.clipUrl!);
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${clip.minute}min-${clip.type}.mp4`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast({ title: "Download concluído!" });
+      } else {
+        // Multiple clips - download as ZIP
+        const zip = new JSZip();
+        for (const clip of clipsWithUrls) {
+          const response = await fetch(clip.clipUrl!);
+          const blob = await response.blob();
+          zip.file(`${clip.order}-${clip.minute}min-${clip.type}.mp4`, blob);
+        }
+        const zipBlob = await zip.generateAsync({ type: 'blob' });
+        const url = URL.createObjectURL(zipBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${team.name}-clips.zip`;
+        a.click();
+        URL.revokeObjectURL(url);
+        toast({ title: "ZIP baixado com sucesso!", description: `${clipsWithUrls.length} clips` });
+      }
+    } catch (error) {
+      toast({
+        title: "Erro no download",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+        variant: "destructive"
+      });
+    } finally {
+      setIsExporting(false);
+    }
   };
 
   const handleShareToSocial = (platform: string) => {
@@ -335,10 +387,14 @@ export function TeamPlaylist({
               className="flex-1" 
               size="sm"
               onClick={handleExportPlaylist}
-              disabled={selectedCount === 0}
+              disabled={selectedCount === 0 || isExporting}
             >
-              <Download className="mr-2 h-4 w-4" />
-              Exportar ({selectedCount})
+              {isExporting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              {isExporting ? 'Exportando...' : `Exportar (${selectedCount})`}
             </Button>
           </div>
           

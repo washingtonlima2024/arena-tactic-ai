@@ -28,16 +28,21 @@ import {
   Share2,
   ChevronLeft,
   Settings2,
-  Download
+  Download,
+  Loader2,
+  Film,
+  FileVideo
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { TransitionVignette } from './TransitionVignette';
 import { ClipVignette } from './ClipVignette';
 import { SocialSharePanel } from './SocialSharePanel';
+import { CompilationProgress } from './CompilationProgress';
 import arenaPlayLogo from '@/assets/arena-play-icon.png';
 import { toast } from 'sonner';
 import { CLIP_BUFFER_BEFORE_MS, CLIP_BUFFER_AFTER_MS } from '@/hooks/useClipGeneration';
+import { useVideoCompilation } from '@/hooks/useVideoCompilation';
 
 // Video formats
 const VIDEO_FORMATS = [
@@ -125,6 +130,7 @@ export function ExportPreviewDialog({
   const [selectedDevice, setSelectedDevice] = useState(DEVICES[0]);
   const [selectedClipIds, setSelectedClipIds] = useState<Set<string>>(new Set());
   const [includeVignettes, setIncludeVignettes] = useState(true);
+  const [includeSubtitles, setIncludeSubtitles] = useState(true);
   const [showSettings, setShowSettings] = useState(false);
   const [showSharePanel, setShowSharePanel] = useState(false);
   const [orientation, setOrientation] = useState<'portrait' | 'landscape'>('portrait');
@@ -138,6 +144,16 @@ export function ExportPreviewDialog({
   // Clip vignette state - separate from video progress
   const [showClipVignette, setShowClipVignette] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
+
+  // Video compilation hook
+  const { 
+    isCompiling, 
+    progress: compilationProgress, 
+    downloadSingleClip, 
+    downloadCompilation, 
+    cancel: cancelCompilation,
+    reset: resetCompilation 
+  } = useVideoCompilation();
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -333,6 +349,49 @@ export function ExportPreviewDialog({
     }
   };
 
+  // Handle download - single clip or compilation
+  const handleDownload = useCallback(async () => {
+    if (selectedClips.length === 0) {
+      toast.error('Nenhum clip selecionado');
+      return;
+    }
+
+    // Single clip with existing clipUrl - direct download
+    if (selectedClips.length === 1 && selectedClips[0].clipUrl) {
+      const clip = selectedClips[0];
+      const filename = `${clip.minute}min-${clip.type.replace(/_/g, '-')}.mp4`;
+      await downloadSingleClip(clip.clipUrl, filename);
+      return;
+    }
+
+    // Multiple clips or need compilation
+    const clipsWithUrls = selectedClips.filter(c => c.clipUrl);
+    if (clipsWithUrls.length === 0) {
+      toast.error('Nenhum clip extraído. Extraia os clips primeiro na aba "Cortes & Capas".');
+      return;
+    }
+
+    await downloadCompilation({
+      clips: clipsWithUrls.map(c => ({
+        id: c.id,
+        clipUrl: c.clipUrl!,
+        eventType: c.type,
+        minute: c.minute,
+        description: c.description,
+        thumbnailUrl: c.thumbnail
+      })),
+      includeVignettes,
+      includeSubtitles,
+      format: selectedFormat.id as '9:16' | '16:9' | '1:1' | '4:5',
+      matchInfo: {
+        homeTeam,
+        awayTeam,
+        homeScore,
+        awayScore
+      }
+    });
+  }, [selectedClips, includeVignettes, includeSubtitles, selectedFormat, homeTeam, awayTeam, homeScore, awayScore, downloadSingleClip, downloadCompilation]);
+
   // Share functionality
   const handleShare = async () => {
     const shareData = {
@@ -527,15 +586,27 @@ export function ExportPreviewDialog({
                 </div>
 
                 {/* Options */}
-                <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
-                  <Checkbox
-                    id="vignettes"
-                    checked={includeVignettes}
-                    onCheckedChange={(checked) => setIncludeVignettes(!!checked)}
-                  />
-                  <label htmlFor="vignettes" className="text-sm cursor-pointer">
-                    Incluir vinhetas animadas (abertura, transições, encerramento)
-                  </label>
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                    <Checkbox
+                      id="vignettes"
+                      checked={includeVignettes}
+                      onCheckedChange={(checked) => setIncludeVignettes(!!checked)}
+                    />
+                    <label htmlFor="vignettes" className="text-sm cursor-pointer">
+                      Incluir vinhetas (abertura, transições, encerramento)
+                    </label>
+                  </div>
+                  <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                    <Checkbox
+                      id="subtitles"
+                      checked={includeSubtitles}
+                      onCheckedChange={(checked) => setIncludeSubtitles(!!checked)}
+                    />
+                    <label htmlFor="subtitles" className="text-sm cursor-pointer">
+                      Incluir legendas nos clips
+                    </label>
+                  </div>
                 </div>
               </div>
 
@@ -1057,10 +1128,17 @@ export function ExportPreviewDialog({
                   variant="default"
                   size="sm"
                   className="bg-primary hover:bg-primary/90 text-primary-foreground gap-1.5 h-8 sm:h-10 px-3 sm:px-4"
-                  onClick={() => toast.info('Funcionalidade de download em desenvolvimento')}
+                  onClick={handleDownload}
+                  disabled={isCompiling}
                 >
-                  <Download className="h-4 w-4" />
-                  <span className="hidden sm:inline">Download</span>
+                  {isCompiling ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="h-4 w-4" />
+                  )}
+                  <span className="hidden sm:inline">
+                    {selectedClips.length === 1 ? 'Download' : 'Gerar Vídeo'}
+                  </span>
                 </Button>
 
                 <Button
@@ -1076,6 +1154,15 @@ export function ExportPreviewDialog({
             </div>
           )}
         </div>
+
+        {/* Compilation Progress */}
+        <CompilationProgress 
+          progress={compilationProgress}
+          onCancel={() => {
+            cancelCompilation();
+            resetCompilation();
+          }}
+        />
 
         {/* Social Share Panel */}
         <SocialSharePanel
