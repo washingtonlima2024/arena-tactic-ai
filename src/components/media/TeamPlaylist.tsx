@@ -16,18 +16,19 @@ import {
 import { 
   Play, 
   Download, 
-  Share2, 
   Video,
   GripVertical,
   Instagram,
   Youtube,
   Twitter,
   Send,
-  Loader2
+  Loader2,
+  Server
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import JSZip from 'jszip';
 import { supabase } from '@/integrations/supabase/client';
+import { LocalServerConfig } from './LocalServerConfig';
 
 interface Clip {
   id: string;
@@ -80,6 +81,32 @@ export function TeamPlaylist({
   const [showExtractionDialog, setShowExtractionDialog] = useState(false);
   const [pendingExport, setPendingExport] = useState<PlaylistItem[]>([]);
   const [isExporting, setIsExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState<string>('');
+  
+  // Local server config
+  const [serverUrl, setServerUrl] = useState(() => 
+    localStorage.getItem('pythonServerUrl') || 'http://localhost:5000'
+  );
+  const [includeVignettes, setIncludeVignettes] = useState(false);
+  const [openingVignette, setOpeningVignette] = useState('');
+  const [closingVignette, setClosingVignette] = useState('');
+  const [useLocalServer, setUseLocalServer] = useState(false);
+  const [serverOnline, setServerOnline] = useState(false);
+  
+  // Check server status on mount
+  useEffect(() => {
+    const checkServer = async () => {
+      try {
+        const response = await fetch(`${serverUrl}/health`, { 
+          signal: AbortSignal.timeout(2000) 
+        });
+        setServerOnline(response.ok);
+      } catch {
+        setServerOnline(false);
+      }
+    };
+    checkServer();
+  }, [serverUrl]);
   
   // Initialize playlist items from clips
   useEffect(() => {
@@ -193,8 +220,87 @@ export function TeamPlaylist({
     });
   };
 
-  // Extrair clips via edge function e baixar
+  // Extrair clips via servidor Python local
+  const handleExtractWithLocalServer = async () => {
+    setShowExtractionDialog(false);
+    
+    if (!videoUrl) {
+      toast({
+        title: "Vídeo não disponível",
+        description: "Link do vídeo não encontrado",
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    setIsExporting(true);
+    
+    try {
+      // Preparar clips para extração
+      const clipsToExtract = pendingExport.map((clip, index) => ({
+        eventId: clip.id,
+        startSeconds: Math.max(0, clip.startTime - 3),
+        durationSeconds: 8,
+        title: `${clip.minute}min-${clip.type}`
+      }));
+      
+      setExportProgress('Enviando para servidor local...');
+      
+      const response = await fetch(`${serverUrl}/extract-batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoUrl,
+          clips: clipsToExtract,
+          includeVignettes,
+          openingVignette: includeVignettes ? openingVignette : undefined,
+          closingVignette: includeVignettes ? closingVignette : undefined
+        })
+      });
+      
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Erro no servidor');
+      }
+      
+      setExportProgress('Baixando clips...');
+      
+      // Baixar o ZIP retornado
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${team.name}-clips.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      
+      toast({
+        title: "Download concluído!",
+        description: `${pendingExport.length} clips extraídos com sucesso`
+      });
+      
+      onClipsExtracted?.();
+    } catch (error) {
+      console.error('Erro na extração local:', error);
+      toast({
+        title: "Erro na extração",
+        description: error instanceof Error ? error.message : "Erro desconhecido",
+        variant: "destructive"
+      });
+    } finally {
+      setIsExporting(false);
+      setPendingExport([]);
+      setExportProgress('');
+    }
+  };
+
+  // Extrair clips via edge function (fallback)
   const handleExtractAndExport = async () => {
+    // Se servidor local está online e configurado para usar, usar ele
+    if (useLocalServer && serverOnline) {
+      return handleExtractWithLocalServer();
+    }
+    
     setShowExtractionDialog(false);
     
     if (!videoUrl || !matchId) {
@@ -217,10 +323,7 @@ export function TeamPlaylist({
         const startSeconds = Math.max(0, clip.startTime - 3); // 3s antes
         const durationSeconds = 8; // 8s total
         
-        toast({
-          title: "Extraindo clip...",
-          description: `${clip.minute}' - ${clip.type}`
-        });
+        setExportProgress(`Extraindo: ${clip.minute}' - ${clip.type}`);
         
         const { data, error } = await supabase.functions.invoke('extract-clip', {
           body: {
@@ -262,6 +365,7 @@ export function TeamPlaylist({
     } finally {
       setIsExporting(false);
       setPendingExport([]);
+      setExportProgress('');
     }
   };
 
@@ -369,10 +473,38 @@ export function TeamPlaylist({
               Limpar
             </Button>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Arraste para reordenar a sequência
-          </p>
+          <div className="flex items-center gap-2">
+            <LocalServerConfig
+              serverUrl={serverUrl}
+              onServerUrlChange={setServerUrl}
+              includeVignettes={includeVignettes}
+              onIncludeVignettesChange={setIncludeVignettes}
+              openingVignette={openingVignette}
+              onOpeningVignetteChange={setOpeningVignette}
+              closingVignette={closingVignette}
+              onClosingVignetteChange={setClosingVignette}
+            />
+          </div>
         </div>
+        
+        {/* Server Toggle */}
+        {serverOnline && (
+          <div className="flex items-center justify-between rounded-lg border border-green-500/30 bg-green-500/10 p-2">
+            <div className="flex items-center gap-2">
+              <Server className="h-4 w-4 text-green-500" />
+              <span className="text-sm text-green-600 dark:text-green-400">
+                Servidor local online
+              </span>
+            </div>
+            <Button
+              variant={useLocalServer ? "default" : "outline"}
+              size="sm"
+              onClick={() => setUseLocalServer(!useLocalServer)}
+            >
+              {useLocalServer ? "Usando Local" : "Usar Local"}
+            </Button>
+          </div>
+        )}
 
         {/* Selected Clips Queue - Sequência de Publicação */}
         {selectedCount > 0 && (
@@ -542,16 +674,39 @@ export function TeamPlaylist({
             <AlertDialogDescription>
               {pendingExport.filter(item => !item.clipUrl).length} dos {pendingExport.length} clips selecionados ainda não foram extraídos do vídeo.
               <br /><br />
-              Clique em "Extrair e Baixar" para processar os clips automaticamente.
+              {serverOnline ? (
+                <>
+                  <strong>Servidor local detectado!</strong> Os clips serão cortados com precisão usando FFmpeg.
+                  {includeVignettes && (
+                    <span className="block mt-1 text-green-600 dark:text-green-400">
+                      ✓ Vinhetas serão adicionadas automaticamente
+                    </span>
+                  )}
+                </>
+              ) : (
+                "Clique em \"Extrair e Baixar\" para processar os clips automaticamente."
+              )}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            {serverOnline && !useLocalServer && (
+              <Button 
+                variant="outline" 
+                onClick={() => {
+                  setUseLocalServer(true);
+                  handleExtractWithLocalServer();
+                }}
+              >
+                <Server className="mr-2 h-4 w-4" />
+                Usar Servidor Local
+              </Button>
+            )}
             <AlertDialogAction onClick={handleExtractAndExport} disabled={isExporting}>
               {isExporting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Extraindo...
+                  {exportProgress || 'Extraindo...'}
                 </>
               ) : (
                 <>
