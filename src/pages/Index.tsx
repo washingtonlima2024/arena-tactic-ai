@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useCallback } from 'react';
 import { 
   Video, 
   BarChart3, 
@@ -7,7 +7,8 @@ import {
   Activity,
   Loader2,
   Play,
-  Target
+  Target,
+  Scan
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { StatCard } from '@/components/dashboard/StatCard';
@@ -20,6 +21,7 @@ import { GoalPlayAnimation3D, generateGoalAnimationFromEvent } from '@/component
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import heroBg from '@/assets/hero-bg.jpg';
@@ -27,6 +29,7 @@ import arenaWordmark from '@/assets/arena-play-wordmark.png';
 import { Link } from 'react-router-dom';
 import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
 import { useEventHeatZones } from '@/hooks/useEventHeatZones';
+import { useGoalDetection } from '@/hooks/useGoalDetection';
 import { supabase } from '@/integrations/supabase/client';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
@@ -108,6 +111,22 @@ export default function Dashboard() {
   // Selected goal for animation
   const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
   
+  // YOLO detection state
+  const detectionVideoRef = useRef<HTMLVideoElement>(null);
+  const [yoloFrames, setYoloFrames] = useState<any[]>([]);
+  const [useYoloDetection, setUseYoloDetection] = useState(false);
+  
+  const { 
+    processGoalAnimation, 
+    isProcessing: isDetecting, 
+    progress: detectionProgress 
+  } = useGoalDetection({
+    framesPerSecond: 5,
+    durationSeconds: 6,
+    homeColor: realMatches[0]?.home_team?.primary_color,
+    awayColor: realMatches[0]?.away_team?.primary_color
+  });
+  
   // Generate animation frames for selected goal
   const selectedGoal = useMemo(() => {
     if (!selectedGoalId && goalEvents.length > 0) {
@@ -116,10 +135,49 @@ export default function Dashboard() {
     return goalEvents.find(g => g.id === selectedGoalId) || goalEvents[0];
   }, [selectedGoalId, goalEvents]);
   
+  // Calculate video timestamp for goal
+  const getGoalVideoTimestamp = useCallback((goalMinute: number) => {
+    if (!matchVideo) return 0;
+    const videoStartMinute = matchVideo.start_minute || 0;
+    const videoEndMinute = matchVideo.end_minute || (videoStartMinute + 45);
+    const videoDuration = matchVideo.duration_seconds || ((videoEndMinute - videoStartMinute) * 60);
+    const matchMinutesSpan = videoEndMinute - videoStartMinute;
+    const relativePosition = (goalMinute - videoStartMinute) / matchMinutesSpan;
+    return relativePosition * videoDuration;
+  }, [matchVideo]);
+  
+  // Run YOLO detection on goal video
+  const handleRunYoloDetection = useCallback(async () => {
+    if (!detectionVideoRef.current || !selectedGoal) return;
+    
+    const goalTimeSeconds = getGoalVideoTimestamp(selectedGoal.minute || 0);
+    
+    toast({
+      title: "Iniciando detecção YOLO",
+      description: `Analisando frames do gol aos ${selectedGoal.minute}'...`
+    });
+    
+    const frames = await processGoalAnimation(detectionVideoRef.current, goalTimeSeconds);
+    
+    if (frames.length > 0) {
+      setYoloFrames(frames);
+      setUseYoloDetection(true);
+      toast({
+        title: "Detecção concluída!",
+        description: `${frames.length} frames processados com posições reais dos jogadores.`
+      });
+    }
+  }, [selectedGoal, getGoalVideoTimestamp, processGoalAnimation]);
+  
+  // Use YOLO frames if available, otherwise generate from description
   const goalAnimationFrames = useMemo(() => {
+    if (useYoloDetection && yoloFrames.length > 0) {
+      return yoloFrames;
+    }
+    
     if (!selectedGoal) return [];
+    
     // Generate animation based on the goal's description and context
-    // Get events around the goal time for context
     const goalMinute = selectedGoal.minute || 0;
     const contextEvents = matchEvents.filter(e => 
       e.minute !== null && 
@@ -151,7 +209,14 @@ export default function Dashboard() {
       realMatches[0]?.home_team?.name,
       realMatches[0]?.away_team?.name
     );
-  }, [selectedGoal, matchEvents, realMatches]);
+  }, [selectedGoal, matchEvents, realMatches, useYoloDetection, yoloFrames]);
+  
+  // Reset YOLO frames when goal changes
+  const handleGoalChange = useCallback((goalId: string) => {
+    setSelectedGoalId(goalId);
+    setYoloFrames([]);
+    setUseYoloDetection(false);
+  }, []);
   
   const handlePlayVideo = (eventId: string, eventMinute: number) => {
     if (!matchVideo) {
@@ -352,15 +417,21 @@ export default function Dashboard() {
             {goalEvents.length > 0 && realMatches.length > 0 && (
               <Card variant="glow" className="mt-6">
                 <CardHeader>
-                  <div className="flex items-center justify-between">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
                     <CardTitle className="flex items-center gap-2">
                       <Target className="h-5 w-5 text-primary" />
                       Animação de Gol 3D
+                      {useYoloDetection && (
+                        <Badge variant="outline" className="ml-2 text-xs border-green-500 text-green-500">
+                          <Scan className="h-3 w-3 mr-1" />
+                          YOLO
+                        </Badge>
+                      )}
                     </CardTitle>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                       <Select 
                         value={selectedGoalId || goalEvents[0]?.id} 
-                        onValueChange={setSelectedGoalId}
+                        onValueChange={handleGoalChange}
                       >
                         <SelectTrigger className="w-[180px]">
                           <SelectValue placeholder="Selecione o gol" />
@@ -373,11 +444,52 @@ export default function Dashboard() {
                           ))}
                         </SelectContent>
                       </Select>
+                      
+                      {/* YOLO Detection Button */}
+                      {matchVideo && !matchVideo.file_url.includes('/embed/') && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleRunYoloDetection}
+                          disabled={isDetecting}
+                          className="gap-1"
+                        >
+                          {isDetecting ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <Scan className="h-4 w-4" />
+                          )}
+                          {isDetecting ? 'Detectando...' : 'Detectar Jogadores'}
+                        </Button>
+                      )}
+                      
                       <Badge variant="arena">Campo FIFA 105m × 68m</Badge>
                     </div>
                   </div>
+                  
+                  {/* Detection Progress */}
+                  {isDetecting && (
+                    <div className="mt-3 space-y-2">
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Analisando frames com visão computacional...</span>
+                        <span className="text-primary font-medium">{Math.round(detectionProgress)}%</span>
+                      </div>
+                      <Progress value={detectionProgress} className="h-2" />
+                    </div>
+                  )}
                 </CardHeader>
                 <CardContent>
+                  {/* Hidden video element for frame extraction */}
+                  {matchVideo && !matchVideo.file_url.includes('/embed/') && (
+                    <video
+                      ref={detectionVideoRef}
+                      src={matchVideo.file_url}
+                      className="hidden"
+                      crossOrigin="anonymous"
+                      preload="auto"
+                    />
+                  )}
+                  
                   <GoalPlayAnimation3D
                     frames={goalAnimationFrames}
                     homeTeamColor={realMatches[0]?.home_team?.primary_color || '#10b981'}
@@ -389,6 +501,29 @@ export default function Dashboard() {
                     description={selectedGoal?.description || ''}
                     height={550}
                   />
+                  
+                  {/* Detection info */}
+                  {useYoloDetection && yoloFrames.length > 0 && (
+                    <div className="mt-3 flex items-center justify-center gap-4 text-sm">
+                      <Badge variant="secondary" className="gap-1">
+                        <Scan className="h-3 w-3" />
+                        {yoloFrames.length} frames detectados
+                      </Badge>
+                      <span className="text-muted-foreground">
+                        Posições reais dos jogadores via análise de vídeo
+                      </span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setUseYoloDetection(false);
+                          setYoloFrames([]);
+                        }}
+                      >
+                        Usar animação simulada
+                      </Button>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             )}
