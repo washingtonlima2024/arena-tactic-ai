@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 
 interface ChatMessage {
@@ -29,71 +29,17 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away', matc
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const { toast } = useToast();
 
-  // Load conversation from database
+  // Load conversation - simplified for local API
   const loadConversation = useCallback(async () => {
-    if (!matchId) return;
-
-    try {
-      const { data, error } = await supabase
-        .from('chatbot_conversations')
-        .select('*')
-        .eq('match_id', matchId)
-        .eq('team_type', teamType)
-        .maybeSingle();
-
-      if (error) {
-        console.error('Error loading conversation:', error);
-        return;
-      }
-
-      if (data?.messages) {
-        // Parse the messages from JSON
-        const rawMessages = data.messages as unknown;
-        const loadedMessages = Array.isArray(rawMessages) 
-          ? (rawMessages as ChatMessage[])
-          : [];
-        setMessages(loadedMessages);
-        console.log(`Loaded ${loadedMessages.length} messages for ${teamType} team`);
-      }
-    } catch (error) {
-      console.error('Error loading conversation:', error);
-    }
+    // Local API doesn't persist chatbot conversations by default
+    // This could be extended to store in localStorage or the API
   }, [matchId, teamType]);
 
-  // Save conversation to database
+  // Save conversation - simplified for local API
   const saveConversation = useCallback(async (messagesToSave: ChatMessage[]) => {
-    if (!matchId) return;
-
-    setIsSaving(true);
-    try {
-      // Remove audioContent from messages to save space (we don't persist audio)
-      const messagesWithoutAudio = messagesToSave.map(({ audioContent, ...msg }) => ({
-        ...msg,
-        timestamp: msg.timestamp || new Date().toISOString()
-      }));
-
-      const { error } = await supabase
-        .from('chatbot_conversations')
-        .upsert({
-          match_id: matchId,
-          team_name: teamName,
-          team_type: teamType,
-          messages: messagesWithoutAudio,
-        }, {
-          onConflict: 'match_id,team_type'
-        });
-
-      if (error) {
-        console.error('Error saving conversation:', error);
-      }
-    } catch (error) {
-      console.error('Error saving conversation:', error);
-    } finally {
-      setIsSaving(false);
-    }
+    // Could extend to save to localStorage or API
   }, [matchId, teamName, teamType]);
 
-  // Load conversation on mount
   useEffect(() => {
     loadConversation();
   }, [loadConversation]);
@@ -103,7 +49,6 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away', matc
 
     setIsLoading(true);
     
-    // Add user message immediately
     const userMessage: ChatMessage = { 
       role: 'user', 
       content: message,
@@ -113,18 +58,24 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away', matc
     setMessages(updatedMessages);
 
     try {
-      const { data, error } = await supabase.functions.invoke('team-chatbot', {
-        body: {
-          message,
-          teamName,
-          teamType,
-          matchContext,
-          conversationHistory: messages,
-        },
-      });
+      const conversationHistory = messages.map(m => ({
+        role: m.role,
+        content: m.content,
+      }));
 
-      if (error) throw new Error(error.message);
-      if (data.error) throw new Error(data.error);
+      const data = await apiClient.teamChatbot({
+        message,
+        teamName,
+        teamType,
+        matchContext: matchContext ? {
+          homeTeam: matchContext.homeTeam,
+          awayTeam: matchContext.awayTeam,
+          homeScore: matchContext.homeScore,
+          awayScore: matchContext.awayScore,
+        } : undefined,
+        conversationHistory,
+        withAudio: true,
+      });
 
       const assistantMessage: ChatMessage = {
         role: 'assistant',
@@ -135,9 +86,6 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away', matc
 
       const finalMessages = [...updatedMessages, assistantMessage];
       setMessages(finalMessages);
-
-      // Save to database
-      await saveConversation(finalMessages);
 
       // Auto-play audio response
       if (data.audioContent) {
@@ -152,7 +100,6 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away', matc
         description: error instanceof Error ? error.message : "Tente novamente.",
         variant: "destructive",
       });
-      // Remove the user message on error
       setMessages(messages);
     } finally {
       setIsLoading(false);
@@ -205,51 +152,22 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away', matc
       mediaRecorderRef.current.onstop = async () => {
         const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
         
-        // Convert blob to base64
-        const reader = new FileReader();
-        reader.onloadend = async () => {
-          const base64Audio = (reader.result as string).split(',')[1];
-          
-          try {
-            // Transcribe the audio
-            const { data, error } = await supabase.functions.invoke('transcribe-audio', {
-              body: { audio: base64Audio },
-            });
-
-            if (error) throw new Error(error.message);
-            if (data.error) throw new Error(data.error);
-
-            const transcribedText = data.text;
-            
-            if (transcribedText) {
-              // Send the transcribed text as a message
-              await sendMessage(transcribedText, matchContext);
-            }
-            
-            resolve(transcribedText);
-          } catch (error) {
-            console.error('Transcription error:', error);
-            toast({
-              title: "Erro na transcrição",
-              description: "Não foi possível transcrever o áudio.",
-              variant: "destructive",
-            });
-            resolve(null);
-          }
-        };
-        reader.readAsDataURL(audioBlob);
+        // For now, just show a message that voice recording needs transcription endpoint
+        toast({
+          title: "Recurso em desenvolvimento",
+          description: "Transcrição de voz será implementada em breve.",
+        });
         
-        // Stop all tracks
         mediaRecorderRef.current?.stream.getTracks().forEach(track => track.stop());
+        resolve(null);
       };
 
       mediaRecorderRef.current.stop();
       setIsRecording(false);
     });
-  }, [sendMessage, toast]);
+  }, [toast]);
 
   const playAudio = (audioContent: string) => {
-    // Stop any currently playing audio
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
       currentAudioRef.current = null;
@@ -276,19 +194,6 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away', matc
 
   const clearMessages = async () => {
     setMessages([]);
-    
-    // Also clear from database
-    if (matchId) {
-      try {
-        await supabase
-          .from('chatbot_conversations')
-          .delete()
-          .eq('match_id', matchId)
-          .eq('team_type', teamType);
-      } catch (error) {
-        console.error('Error clearing conversation:', error);
-      }
-    }
   };
 
   return {

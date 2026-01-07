@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 
 interface PodcastResult {
@@ -24,29 +24,25 @@ export function usePodcastGeneration() {
   // Load saved podcasts for a match
   const loadPodcasts = async (matchId: string) => {
     try {
-      const { data, error } = await supabase
-        .from('generated_audio')
-        .select('*')
-        .eq('match_id', matchId)
-        .like('audio_type', 'podcast_%');
-
-      if (error) throw error;
-
+      const audioData = await apiClient.getAudio(matchId);
+      
       const loadedPodcasts: Record<PodcastType, PodcastResult | null> = {
         tactical: null,
         summary: null,
         debate: null,
       };
 
-      data?.forEach((item) => {
-        const type = item.audio_type.replace('podcast_', '') as PodcastType;
-        if (type in loadedPodcasts) {
-          loadedPodcasts[type] = {
-            script: item.script || '',
-            audioUrl: item.audio_url || '',
-            podcastType: type,
-            voice: item.voice || '',
-          };
+      audioData?.forEach((item: any) => {
+        if (item.audio_type?.startsWith('podcast_')) {
+          const type = item.audio_type.replace('podcast_', '') as PodcastType;
+          if (type in loadedPodcasts) {
+            loadedPodcasts[type] = {
+              script: item.script || '',
+              audioUrl: item.audio_url || '',
+              podcastType: type,
+              voice: item.voice || '',
+            };
+          }
         }
       });
 
@@ -72,66 +68,24 @@ export function usePodcastGeneration() {
     setGeneratingType(podcastType);
     
     try {
-      const { data, error } = await supabase.functions.invoke('generate-podcast', {
-        body: {
-          matchId,
-          events,
-          homeTeam,
-          awayTeam,
-          homeScore,
-          awayScore,
-          podcastType,
-          tacticalAnalysis,
-        },
+      const data = await apiClient.generatePodcast({
+        matchId,
+        events,
+        homeTeam,
+        awayTeam,
+        homeScore,
+        awayScore,
+        podcastType,
+        tacticalAnalysis,
       });
-
-      if (error) {
-        throw new Error(error.message || 'Falha ao gerar podcast');
-      }
 
       if (data.error) {
         throw new Error(data.error);
       }
 
-      // Upload audio to storage
-      const audioBlob = base64ToBlob(data.audioContent, 'audio/mp3');
-      const fileName = `podcast-${podcastType}-${matchId}-${Date.now()}.mp3`;
-      
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('generated-audio')
-        .upload(fileName, audioBlob, {
-          contentType: 'audio/mp3',
-          upsert: true,
-        });
-
-      if (uploadError) throw uploadError;
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('generated-audio')
-        .getPublicUrl(fileName);
-
-      const audioUrl = urlData.publicUrl;
-
-      // Save to database (upsert)
-      const audioType = `podcast_${podcastType}`;
-      const { error: dbError } = await supabase
-        .from('generated_audio')
-        .upsert({
-          match_id: matchId,
-          audio_type: audioType,
-          voice: data.voice,
-          script: data.script,
-          audio_url: audioUrl,
-        }, {
-          onConflict: 'match_id,audio_type,voice',
-        });
-
-      if (dbError) throw dbError;
-
       const result: PodcastResult = {
         script: data.script,
-        audioUrl: audioUrl,
+        audioUrl: data.audioUrl,
         podcastType: podcastType,
         voice: data.voice,
       };
@@ -191,16 +145,4 @@ function getPodcastTitle(type: PodcastType): string {
     debate: 'Debate de Torcedores',
   };
   return titles[type];
-}
-
-function base64ToBlob(base64: string, mimeType: string): Blob {
-  const byteCharacters = atob(base64);
-  const byteNumbers = new Array(byteCharacters.length);
-  
-  for (let i = 0; i < byteCharacters.length; i++) {
-    byteNumbers[i] = byteCharacters.charCodeAt(i);
-  }
-  
-  const byteArray = new Uint8Array(byteNumbers);
-  return new Blob([byteArray], { type: mimeType });
 }
