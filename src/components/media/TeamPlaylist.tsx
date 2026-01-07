@@ -23,13 +23,10 @@ import {
   Youtube,
   Twitter,
   Send,
-  Loader2,
-  Scissors
+  Loader2
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import JSZip from 'jszip';
-import { useClipGeneration } from '@/hooks/useClipGeneration';
-import { supabase } from '@/integrations/supabase/client';
 
 interface Clip {
   id: string;
@@ -81,8 +78,8 @@ export function TeamPlaylist({
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const [showExtractionDialog, setShowExtractionDialog] = useState(false);
   const [pendingExport, setPendingExport] = useState<PlaylistItem[]>([]);
+  const [isExporting, setIsExporting] = useState(false);
   
-  const { generateAllClips, isGenerating, progress } = useClipGeneration();
   // Initialize playlist items from clips
   useEffect(() => {
     setPlaylistItems(
@@ -155,7 +152,6 @@ export function TeamPlaylist({
     setDraggedItem(null);
   };
 
-  const [isExporting, setIsExporting] = useState(false);
 
   const handleExportPlaylist = async () => {
     if (selectedCount === 0) {
@@ -170,62 +166,15 @@ export function TeamPlaylist({
     const clipsWithUrls = selectedItems.filter(item => item.clipUrl);
     const clipsWithoutUrls = selectedItems.filter(item => !item.clipUrl);
     
-    // Se há clips sem URL, oferecer extração on-demand
+    // Se há clips sem URL, mostrar dialog
     if (clipsWithoutUrls.length > 0) {
-      if (!videoUrl || !matchId) {
-        toast({
-          title: "Clips não extraídos",
-          description: "Extraia os clips primeiro na aba 'Cortes & Capas'",
-          variant: "destructive"
-        });
-        return;
-      }
-      // Abrir dialog perguntando se quer extrair
       setPendingExport(selectedItems);
       setShowExtractionDialog(true);
       return;
     }
 
-    setIsExporting(true);
-    try {
-      if (clipsWithUrls.length === 1) {
-        // Single clip - direct download
-        const clip = clipsWithUrls[0];
-        const response = await fetch(clip.clipUrl!);
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${clip.minute}min-${clip.type}.mp4`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast({ title: "Download concluído!" });
-      } else {
-        // Multiple clips - download as ZIP
-        const zip = new JSZip();
-        for (const clip of clipsWithUrls) {
-          const response = await fetch(clip.clipUrl!);
-          const blob = await response.blob();
-          zip.file(`${clip.order}-${clip.minute}min-${clip.type}.mp4`, blob);
-        }
-        const zipBlob = await zip.generateAsync({ type: 'blob' });
-        const url = URL.createObjectURL(zipBlob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${team.name}-clips.zip`;
-        a.click();
-        URL.revokeObjectURL(url);
-        toast({ title: "ZIP baixado com sucesso!", description: `${clipsWithUrls.length} clips` });
-      }
-    } catch (error) {
-      toast({
-        title: "Erro no download",
-        description: error instanceof Error ? error.message : "Erro desconhecido",
-        variant: "destructive"
-      });
-    } finally {
-      setIsExporting(false);
-    }
+    // Download direto dos clips com URL
+    await exportClipsWithUrls(clipsWithUrls);
   };
 
   const handleShareToSocial = (platform: string) => {
@@ -243,85 +192,24 @@ export function TeamPlaylist({
     });
   };
 
-  // Extrair clips on-demand e então exportar
+  // Baixar apenas clips que já têm URL extraída
   const handleExtractAndExport = async () => {
     setShowExtractionDialog(false);
     
-    if (!videoUrl || !matchId || pendingExport.length === 0) return;
+    const clipsComUrl = pendingExport.filter(item => item.clipUrl);
     
-    const eventsToExtract = pendingExport
-      .filter(item => !item.clipUrl)
-      .map(item => ({
-        id: item.id,
-        minute: item.minute,
-        second: item.startTime ? Math.floor(item.startTime % 60) : 0,
-        metadata: undefined
-      }));
-    
-    // Se já tem clips com URL, separar para download
-    const clipsJaExtraidos = pendingExport.filter(item => item.clipUrl);
-    
-    if (eventsToExtract.length === 0) {
-      // Todos já têm URL, exportar direto
-      await exportClipsWithUrls(clipsJaExtraidos);
-      setPendingExport([]);
-      return;
-    }
-
-    toast({
-      title: "Extraindo clips...",
-      description: `${eventsToExtract.length} clips serão extraídos. Aguarde...`
-    });
-
-    setIsExporting(true);
-    
-    try {
-      await generateAllClips(eventsToExtract, videoUrl, matchId);
-      
+    if (clipsComUrl.length > 0) {
+      await exportClipsWithUrls(clipsComUrl);
       toast({
-        title: "Extração concluída!",
-        description: "Iniciando download..."
+        title: "Download parcial",
+        description: `${clipsComUrl.length} clips baixados. Os demais precisam ser extraídos primeiro.`
       });
-      
-      // Buscar as URLs dos clips recém-extraídos
-      const { data: updatedEvents } = await supabase
-        .from('match_events')
-        .select('id, clip_url')
-        .in('id', eventsToExtract.map(e => e.id));
-      
-      // Criar mapa id -> clip_url
-      const clipUrlMap = new Map<string, string | null>(updatedEvents?.map(e => [e.id, e.clip_url]) || []);
-      
-      // Combinar todos os clips (já extraídos + recém-extraídos)
-      const todosClips = pendingExport.map(item => ({
-        ...item,
-        clipUrl: item.clipUrl || clipUrlMap.get(item.id) || undefined
-      })).filter((item): item is PlaylistItem & { clipUrl: string } => !!item.clipUrl);
-      
-      console.log('[TeamPlaylist] Clips para download:', todosClips.length);
-      
-      if (todosClips.length > 0) {
-        await exportClipsWithUrls(todosClips);
-      } else {
-        toast({
-          title: "Nenhum clip disponível",
-          description: "Não foi possível obter os clips extraídos",
-          variant: "destructive"
-        });
-      }
-      
-      // Notificar parent para recarregar os dados
-      onClipsExtracted?.();
-      
-    } catch (error) {
-      console.error('Erro na extração:', error);
+    } else {
       toast({
-        title: "Erro na extração",
-        description: error instanceof Error ? error.message : "Erro desconhecido",
+        title: "Nenhum clip extraído",
+        description: "Extraia os clips primeiro na aba 'Cortes & Capas'",
         variant: "destructive"
       });
-    } finally {
-      setIsExporting(false);
     }
     
     setPendingExport([]);
@@ -598,27 +486,27 @@ export function TeamPlaylist({
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle className="flex items-center gap-2">
-              <Scissors className="h-5 w-5" />
+              <Video className="h-5 w-5" />
               Clips não extraídos
             </AlertDialogTitle>
             <AlertDialogDescription>
               {pendingExport.filter(item => !item.clipUrl).length} dos {pendingExport.length} clips selecionados ainda não foram extraídos do vídeo.
               <br /><br />
-              Deseja extrair agora? Isso pode levar alguns minutos dependendo da quantidade.
+              Você pode baixar apenas os clips já extraídos ou voltar para "Cortes & Capas" para extrair os demais.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleExtractAndExport} disabled={isGenerating}>
-              {isGenerating ? (
+            <AlertDialogAction onClick={handleExtractAndExport} disabled={isExporting}>
+              {isExporting ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Extraindo ({progress.completedCount || 0}/{progress.totalCount || pendingExport.length})
+                  Baixando...
                 </>
               ) : (
                 <>
-                  <Scissors className="mr-2 h-4 w-4" />
-                  Extrair e Baixar
+                  <Download className="mr-2 h-4 w-4" />
+                  Baixar Disponíveis ({pendingExport.filter(item => item.clipUrl).length})
                 </>
               )}
             </AlertDialogAction>
