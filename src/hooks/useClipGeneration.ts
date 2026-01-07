@@ -86,21 +86,18 @@ export function useClipGeneration() {
     });
 
     try {
-      // Usar versão UMD (single-threaded) que funciona sem SharedArrayBuffer
-      // Versão 0.12.6 UMD com configuração correta para ambientes sem COOP/COEP
+      // Usar versão UMD (single-threaded) diretamente do CDN
+      // A versão 0.12.6 UMD funciona sem SharedArrayBuffer
       const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
       console.log('[ClipGeneration] Carregando core de:', baseURL);
       
-      // Fetch os arquivos primeiro e converter para Blob URLs
-      const coreResponse = await fetch(`${baseURL}/ffmpeg-core.js`);
-      const coreBlob = await coreResponse.blob();
-      const coreURL = URL.createObjectURL(new Blob([await coreBlob.text()], { type: 'text/javascript' }));
+      // Usar toBlobURL do @ffmpeg/util para carregar corretamente
+      const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
+      const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
       
-      const wasmResponse = await fetch(`${baseURL}/ffmpeg-core.wasm`);
-      const wasmBlob = await wasmResponse.blob();
-      const wasmURL = URL.createObjectURL(wasmBlob);
-      
-      console.log('[ClipGeneration] Arquivos baixados, carregando FFmpeg...');
+      console.log('[ClipGeneration] URLs criadas, carregando FFmpeg...');
+      console.log('[ClipGeneration] coreURL:', coreURL.substring(0, 50) + '...');
+      console.log('[ClipGeneration] wasmURL:', wasmURL.substring(0, 50) + '...');
       
       await ffmpeg.load({
         coreURL,
@@ -110,7 +107,25 @@ export function useClipGeneration() {
       console.log('[ClipGeneration] FFmpeg carregado com sucesso!');
     } catch (error) {
       console.error('[ClipGeneration] Erro ao carregar FFmpeg:', error);
-      throw new Error('Falha ao carregar processador de vídeo');
+      
+      // Tentar fallback com jsDelivr
+      try {
+        console.log('[ClipGeneration] Tentando fallback com jsDelivr...');
+        const fallbackURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
+        
+        const coreURL = await toBlobURL(`${fallbackURL}/ffmpeg-core.js`, 'text/javascript');
+        const wasmURL = await toBlobURL(`${fallbackURL}/ffmpeg-core.wasm`, 'application/wasm');
+        
+        await ffmpeg.load({
+          coreURL,
+          wasmURL,
+        });
+        
+        console.log('[ClipGeneration] FFmpeg carregado via fallback!');
+      } catch (fallbackError) {
+        console.error('[ClipGeneration] Fallback também falhou:', fallbackError);
+        throw new Error('Falha ao carregar processador de vídeo. Tente recarregar a página.');
+      }
     }
 
     return ffmpeg;
