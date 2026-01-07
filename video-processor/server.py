@@ -25,7 +25,8 @@ from models import (
 )
 from storage import (
     save_file, save_uploaded_file, get_file_path, file_exists,
-    delete_file, list_files, get_storage_stats, STORAGE_DIR, BUCKETS
+    delete_file, list_match_files, get_storage_stats, get_match_storage_stats,
+    delete_match_storage, STORAGE_DIR, MATCH_SUBFOLDERS, get_subfolder_path
 )
 import ai_services
 
@@ -153,54 +154,78 @@ def health_check():
 
 
 # ============================================================================
-# STORAGE API
+# STORAGE API - Organized by Match
 # ============================================================================
+# Structure: storage/{match_id}/{subfolder}/{filename}
+# Subfolders: videos, clips, images, audio, texts, srt, json
 
-@app.route('/api/storage/<bucket>/<path:filename>', methods=['GET'])
-def serve_storage_file(bucket: str, filename: str):
-    """Serve arquivo do storage local."""
-    if bucket not in BUCKETS:
-        return jsonify({'error': 'Bucket não encontrado'}), 404
-    
-    file_path = get_file_path(bucket, filename)
-    if not file_path.exists():
-        return jsonify({'error': 'Arquivo não encontrado'}), 404
-    
-    return send_from_directory(BUCKETS[bucket], filename)
-
-
-@app.route('/api/storage/<bucket>', methods=['GET'])
-def list_storage_files(bucket: str):
-    """Lista arquivos em um bucket."""
-    if bucket not in BUCKETS:
-        return jsonify({'error': 'Bucket não encontrado'}), 404
-    
-    return jsonify({'files': list_files(bucket)})
+@app.route('/api/storage/<match_id>/<subfolder>/<path:filename>', methods=['GET'])
+def serve_storage_file(match_id: str, subfolder: str, filename: str):
+    """Serve arquivo do storage local organizado por partida."""
+    try:
+        folder_path = get_subfolder_path(match_id, subfolder)
+        file_path = folder_path / filename
+        if not file_path.exists():
+            return jsonify({'error': 'Arquivo não encontrado'}), 404
+        return send_from_directory(folder_path, filename)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
 
-@app.route('/api/storage/<bucket>', methods=['POST'])
-def upload_storage_file(bucket: str):
-    """Upload de arquivo para bucket."""
-    if bucket not in BUCKETS:
-        return jsonify({'error': 'Bucket não encontrado'}), 404
-    
+@app.route('/api/storage/<match_id>', methods=['GET'])
+def list_match_storage(match_id: str):
+    """Lista todos os arquivos de uma partida."""
+    subfolder = request.args.get('subfolder')
+    files = list_match_files(match_id, subfolder)
+    stats = get_match_storage_stats(match_id)
+    return jsonify({'files': files, 'stats': stats})
+
+
+@app.route('/api/storage/<match_id>/<subfolder>', methods=['GET'])
+def list_subfolder_files(match_id: str, subfolder: str):
+    """Lista arquivos de um subfolder específico."""
+    files = list_match_files(match_id, subfolder)
+    return jsonify({'files': files})
+
+
+@app.route('/api/storage/<match_id>/<subfolder>', methods=['POST'])
+def upload_to_match(match_id: str, subfolder: str):
+    """Upload de arquivo para subfolder da partida."""
     if 'file' not in request.files:
         return jsonify({'error': 'Nenhum arquivo enviado'}), 400
     
-    file = request.files['file']
-    result = save_uploaded_file(bucket, file)
-    return jsonify(result)
+    try:
+        file = request.files['file']
+        filename = request.form.get('filename')
+        result = save_uploaded_file(match_id, subfolder, file, filename)
+        return jsonify(result)
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
 
 
-@app.route('/api/storage/<bucket>/<filename>', methods=['DELETE'])
-def delete_storage_file(bucket: str, filename: str):
-    """Remove arquivo do storage."""
-    if bucket not in BUCKETS:
-        return jsonify({'error': 'Bucket não encontrado'}), 404
-    
-    if delete_file(bucket, filename):
+@app.route('/api/storage/<match_id>/<subfolder>/<filename>', methods=['DELETE'])
+def delete_match_file(match_id: str, subfolder: str, filename: str):
+    """Remove arquivo do storage da partida."""
+    try:
+        if delete_file(match_id, subfolder, filename):
+            return jsonify({'success': True})
+        return jsonify({'error': 'Arquivo não encontrado'}), 404
+    except ValueError as e:
+        return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/storage/<match_id>', methods=['DELETE'])
+def delete_all_match_storage(match_id: str):
+    """Remove todo o storage de uma partida."""
+    if delete_match_storage(match_id):
         return jsonify({'success': True})
-    return jsonify({'error': 'Arquivo não encontrado'}), 404
+    return jsonify({'error': 'Storage da partida não encontrado'}), 404
+
+
+@app.route('/api/storage', methods=['GET'])
+def get_all_storage_stats():
+    """Retorna estatísticas de todo o storage."""
+    return jsonify(get_storage_stats())
 
 
 # ============================================================================
