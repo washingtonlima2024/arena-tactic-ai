@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { 
   Video, 
   BarChart3, 
@@ -6,7 +6,8 @@ import {
   TrendingUp,
   Activity,
   Loader2,
-  Play
+  Play,
+  Target
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { StatCard } from '@/components/dashboard/StatCard';
@@ -15,9 +16,11 @@ import { EventTimeline } from '@/components/events/EventTimeline';
 import { LiveTacticalField } from '@/components/tactical/LiveTacticalField';
 import { FootballField } from '@/components/tactical/FootballField';
 import { Heatmap3D } from '@/components/tactical/Heatmap3D';
+import { GoalPlayAnimation3D, generateGoalPlayFrames } from '@/components/tactical/GoalPlayAnimation3D';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import heroBg from '@/assets/hero-bg.jpg';
 import arenaWordmark from '@/assets/arena-play-wordmark.png';
@@ -96,6 +99,30 @@ export default function Dashboard() {
   );
   
   const recentEvents = matchEvents.slice(0, 5);
+  
+  // Filter goal events for animation
+  const goalEvents = useMemo(() => {
+    return matchEvents.filter(e => e.event_type === 'goal');
+  }, [matchEvents]);
+  
+  // Selected goal for animation
+  const [selectedGoalId, setSelectedGoalId] = useState<string | null>(null);
+  
+  // Generate animation frames for selected goal
+  const selectedGoal = useMemo(() => {
+    if (!selectedGoalId && goalEvents.length > 0) {
+      return goalEvents[0];
+    }
+    return goalEvents.find(g => g.id === selectedGoalId) || goalEvents[0];
+  }, [selectedGoalId, goalEvents]);
+  
+  const goalAnimationFrames = useMemo(() => {
+    if (!selectedGoal) return [];
+    // Determine which team scored based on metadata
+    const metadata = selectedGoal.metadata as any;
+    const scoringTeam = metadata?.team === 'away' ? 'away' : 'home';
+    return generateGoalPlayFrames(scoringTeam);
+  }, [selectedGoal]);
   
   const handlePlayVideo = (eventId: string, eventMinute: number) => {
     if (!matchVideo) {
@@ -280,7 +307,7 @@ export default function Dashboard() {
                     awayTeam={realMatches[0]?.away_team?.name || 'Time Visitante'}
                     homeColor={realMatches[0]?.home_team?.primary_color || '#10b981'}
                     awayColor={realMatches[0]?.away_team?.primary_color || '#3b82f6'}
-                    height={900}
+                    height={700}
                     eventHeatZones={heatZones}
                     homePlayers={homePlayers}
                     awayPlayers={awayPlayers}
@@ -288,6 +315,51 @@ export default function Dashboard() {
                   <p className="mt-3 text-center text-sm text-muted-foreground">
                     Arraste para rotacionar • Scroll para zoom
                   </p>
+                </CardContent>
+              </Card>
+            )}
+
+            {/* Goal Animation 3D */}
+            {goalEvents.length > 0 && realMatches.length > 0 && (
+              <Card variant="glow" className="mt-6">
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="flex items-center gap-2">
+                      <Target className="h-5 w-5 text-primary" />
+                      Animação de Gol 3D
+                    </CardTitle>
+                    <div className="flex items-center gap-2">
+                      <Select 
+                        value={selectedGoalId || goalEvents[0]?.id} 
+                        onValueChange={setSelectedGoalId}
+                      >
+                        <SelectTrigger className="w-[180px]">
+                          <SelectValue placeholder="Selecione o gol" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {goalEvents.map((goal) => (
+                            <SelectItem key={goal.id} value={goal.id}>
+                              ⚽ {goal.minute}' - {goal.description?.slice(0, 20) || 'Gol'}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Badge variant="arena">Campo FIFA 105m × 68m</Badge>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <GoalPlayAnimation3D
+                    frames={goalAnimationFrames}
+                    homeTeamColor={realMatches[0]?.home_team?.primary_color || '#10b981'}
+                    awayTeamColor={realMatches[0]?.away_team?.primary_color || '#3b82f6'}
+                    homeTeamName={realMatches[0]?.home_team?.name || 'Time Casa'}
+                    awayTeamName={realMatches[0]?.away_team?.name || 'Time Visitante'}
+                    goalMinute={selectedGoal?.minute || 0}
+                    goalTeam={(selectedGoal?.metadata as any)?.team === 'away' ? 'away' : 'home'}
+                    description={selectedGoal?.description || ''}
+                    height={550}
+                  />
                 </CardContent>
               </Card>
             )}
