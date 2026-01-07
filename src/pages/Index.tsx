@@ -88,8 +88,8 @@ export default function Dashboard() {
     }
   });
   
-  // Generate heat zones from real events
-  const eventHeatZones = useEventHeatZones(
+  // Generate heat zones and players from real events
+  const { heatZones, homePlayers, awayPlayers } = useEventHeatZones(
     matchEvents,
     realMatches[0]?.home_team?.name,
     realMatches[0]?.away_team?.name
@@ -281,7 +281,9 @@ export default function Dashboard() {
                     homeColor={realMatches[0]?.home_team?.primary_color || '#10b981'}
                     awayColor={realMatches[0]?.away_team?.primary_color || '#3b82f6'}
                     height={900}
-                    eventHeatZones={eventHeatZones}
+                    eventHeatZones={heatZones}
+                    homePlayers={homePlayers}
+                    awayPlayers={awayPlayers}
                   />
                   <p className="mt-3 text-center text-sm text-muted-foreground">
                     Arraste para rotacionar • Scroll para zoom
