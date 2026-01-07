@@ -252,21 +252,21 @@ export function TeamPlaylist({
       .filter(item => !item.clipUrl)
       .map(item => ({
         id: item.id,
-        event_type: item.type,
         minute: item.minute,
-        second: 0,
-        description: item.description
+        second: item.startTime ? Math.floor(item.startTime % 60) : 0,
+        metadata: undefined
       }));
     
     if (eventsToExtract.length === 0) {
       // Todos já têm URL, exportar direto
       await exportClipsWithUrls(pendingExport.filter(item => item.clipUrl));
+      setPendingExport([]);
       return;
     }
 
     toast({
       title: "Extraindo clips...",
-      description: `${eventsToExtract.length} clips serão extraídos`
+      description: `${eventsToExtract.length} clips serão extraídos. Aguarde...`
     });
 
     try {
@@ -281,6 +281,7 @@ export function TeamPlaylist({
       onClipsExtracted?.();
       
     } catch (error) {
+      console.error('Erro na extração:', error);
       toast({
         title: "Erro na extração",
         description: error instanceof Error ? error.message : "Erro desconhecido",
