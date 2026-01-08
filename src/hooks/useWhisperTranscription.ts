@@ -295,29 +295,59 @@ export function useWhisperTranscription() {
     console.log('[Server Fallback] Usando transcrição server-side...');
     if (videoSizeMB) console.log('[Server Fallback] Tamanho do vídeo:', videoSizeMB, 'MB');
     
-    // Para vídeos muito grandes (>300MB), usar divisão automática
+    // Determinar número de partes baseado no tamanho
     const useSplitTranscription = videoSizeMB && videoSizeMB > 300;
+    const numParts = videoSizeMB && videoSizeMB > 800 ? 4 : videoSizeMB && videoSizeMB > 300 ? 2 : 1;
     
     if (useSplitTranscription) {
-      console.log('[Server Fallback] Vídeo grande detectado, usando transcrição com divisão (2 partes)...');
+      console.log(`[Server Fallback] Vídeo grande detectado, usando transcrição com divisão (${numParts} partes)...`);
       setTranscriptionProgress({ 
-        stage: 'transcribing', 
-        progress: 20, 
-        message: 'Dividindo vídeo em partes para transcrição...' 
+        stage: 'splitting', 
+        progress: 10, 
+        message: `Dividindo vídeo em ${numParts} partes...`,
+        currentPart: 0,
+        totalParts: numParts
       });
       
       try {
+        // Simular progresso durante transcrição dividida
+        let progressInterval: NodeJS.Timeout | undefined;
+        let currentEstimatedPart = 1;
+        
+        progressInterval = setInterval(() => {
+          currentEstimatedPart = Math.min(currentEstimatedPart + 0.1, numParts);
+          const progressPercent = 10 + (currentEstimatedPart / numParts) * 80;
+          
+          setTranscriptionProgress({
+            stage: 'transcribing',
+            progress: progressPercent,
+            message: `Transcrevendo parte ${Math.ceil(currentEstimatedPart)}/${numParts}...`,
+            currentPart: Math.ceil(currentEstimatedPart),
+            totalParts: numParts
+          });
+        }, 15000); // Atualizar a cada 15 segundos
+        
         const splitData = await apiClient.transcribeSplitVideo({ 
           videoUrl, 
           matchId, 
-          numParts: 2,
+          numParts,
           halfType: halfType || 'first',
           halfDuration: 45
         });
         
+        clearInterval(progressInterval);
+        
         if (splitData?.success && splitData?.text) {
           console.log('[Server Fallback] ✓ Transcrição com divisão completa:', splitData.text.length, 'caracteres');
           console.log('[Server Fallback] Partes transcritas:', splitData.partsTranscribed, '/', splitData.totalParts);
+          
+          setTranscriptionProgress({
+            stage: 'complete',
+            progress: 100,
+            message: `✓ Transcrição completa (${numParts} partes)`,
+            currentPart: numParts,
+            totalParts: numParts
+          });
           
           return {
             srtContent: splitData.srtContent || '',

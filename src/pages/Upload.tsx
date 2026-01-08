@@ -35,8 +35,10 @@ import { useTeams } from '@/hooks/useTeams';
 import { useCreateMatch } from '@/hooks/useMatches';
 import { useStartAnalysis, useAnalysisJob } from '@/hooks/useAnalysisJob';
 import { useWhisperTranscription } from '@/hooks/useWhisperTranscription';
+import { useTranscriptionQueue } from '@/hooks/useTranscriptionQueue';
 import { AnalysisProgress } from '@/components/analysis/AnalysisProgress';
 import { ProcessingProgress, ProcessingStage } from '@/components/upload/ProcessingProgress';
+import { TranscriptionQueue } from '@/components/upload/TranscriptionQueue';
 import { toast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/apiClient';
 import { useQuery } from '@tanstack/react-query';
@@ -193,6 +195,7 @@ export default function VideoUpload() {
   const { startAnalysis, isLoading: isStartingAnalysis } = useStartAnalysis();
   const analysisJob = useAnalysisJob(currentJobId);
   const { transcribeVideo, transcriptionProgress: whisperProgress, isTranscribing: isWhisperTranscribing } = useWhisperTranscription();
+  const transcriptionQueue = useTranscriptionQueue();
 
   // Detect video duration using HTML5 video element
   const detectVideoDuration = (file: File): Promise<number> => {
@@ -965,69 +968,66 @@ export default function VideoUpload() {
       console.log('1º Tempo / Full:', firstHalfTranscription ? `${firstHalfTranscription.length} chars` : 'Nenhuma');
       console.log('2º Tempo:', secondHalfTranscription ? `${secondHalfTranscription.length} chars` : 'Nenhuma');
 
-      // AUTO-TRANSCRIBE: Se não tem SRT, extrair áudio e transcrever automaticamente
+      // AUTO-TRANSCRIBE: Se não tem SRT, usar fila de transcrição
       setIsTranscribing(true);
       
-      // Transcrever primeiro tempo OU vídeo full
+      // Preparar itens para fila de transcrição
+      const transcriptionItems: { segment: VideoSegment; halfType: 'first' | 'second' }[] = [];
+      
+      // Adicionar primeiro tempo / full à fila
       if (!firstHalfTranscription && firstHalfSegments.length > 0) {
         const segment = firstHalfSegments[0];
-        const isFullMatch = segment.videoType === 'full';
-        
-        // Update to extracting audio stage
-        setProcessingStage('extracting_audio');
-        setProcessingProgress(10);
-        setProcessingMessage(`Extraindo áudio de ${segment.name}...`);
-        
-        console.log(`Sem SRT para ${isFullMatch ? 'partida completa' : '1º tempo'} - tentando transcrição automática Whisper...`);
-        console.log('Segmento selecionado:', segment.name, 'URL:', segment.url, 'isLink:', segment.isLink);
-        
-        // Update to transcribing stage
-        setProcessingStage('transcribing');
-        setProcessingProgress(30);
-        setProcessingMessage(isFullMatch ? 'Transcrevendo partida completa...' : 'Transcrevendo 1º tempo...');
-        
-        const transcription = await transcribeWithWhisper(segment, matchId);
-        if (transcription) {
-          firstHalfTranscription = transcription;
-          setProcessingProgress(70);
-          setProcessingMessage(`✓ ${transcription.length} caracteres transcritos`);
-          toast({
-            title: isFullMatch ? "✓ Partida transcrita" : "✓ 1º Tempo transcrito",
-            description: `${transcription.length} caracteres extraídos do áudio`,
-          });
-        } else {
-          console.error('Transcrição Whisper falhou para:', segment.name);
-          toast({
-            title: isFullMatch ? "⚠️ Transcrição da partida falhou" : "⚠️ Transcrição do 1º Tempo falhou",
-            description: "Verifique se o vídeo é um arquivo MP4 válido.",
-            variant: "destructive",
-          });
-        }
+        transcriptionItems.push({ segment, halfType: 'first' });
       }
       
-      // Transcrever segundo tempo (apenas se não tiver vídeo full)
+      // Adicionar segundo tempo à fila (se não tiver vídeo full)
       if (!secondHalfTranscription && secondHalfSegments.length > 0 && !hasFullVideo) {
         const segment = secondHalfSegments[0];
+        transcriptionItems.push({ segment, halfType: 'second' });
+      }
+      
+      // Processar transcrições em fila (sequencialmente para evitar gargalo)
+      for (const { segment, halfType } of transcriptionItems) {
+        const isFullMatch = segment.videoType === 'full';
+        const halfLabel = isFullMatch ? 'partida completa' : (halfType === 'first' ? '1º tempo' : '2º tempo');
         
-        console.log('Sem SRT para 2º tempo - tentando transcrição automática Whisper...');
-        console.log('Segmento selecionado:', segment.name, 'URL:', segment.url, 'isLink:', segment.isLink);
+        console.log(`=== TRANSCREVENDO: ${halfLabel.toUpperCase()} ===`);
+        console.log('Segmento:', segment.name, 'URL:', segment.url, 'Size:', segment.size);
         
-        toast({
-          title: "🎙️ Transcrevendo 2º Tempo",
-          description: "Extraindo áudio e enviando para Whisper API...",
-        });
+        // Update UI stage
+        setProcessingStage('transcribing');
+        setProcessingProgress(halfType === 'first' ? 30 : 60);
+        setProcessingMessage(`Transcrevendo ${halfLabel}...`);
+        
+        // Calcular tamanho em MB
+        const sizeMB = (segment.size || 0) / (1024 * 1024);
+        const numParts = sizeMB > 800 ? 4 : sizeMB > 300 ? 2 : 1;
+        
+        if (numParts > 1) {
+          setProcessingMessage(`Dividindo ${halfLabel} em ${numParts} partes...`);
+          setTranscriptionProgress(`Parte 1/${numParts}...`);
+        }
         
         const transcription = await transcribeWithWhisper(segment, matchId);
+        
         if (transcription) {
-          secondHalfTranscription = transcription;
+          if (halfType === 'first') {
+            firstHalfTranscription = transcription;
+          } else {
+            secondHalfTranscription = transcription;
+          }
+          
+          setProcessingProgress(halfType === 'first' ? 50 : 80);
+          setProcessingMessage(`✓ ${halfLabel}: ${transcription.length} caracteres`);
+          
           toast({
-            title: "✓ 2º Tempo transcrito",
-            description: `${transcription.length} caracteres extraídos do áudio`,
+            title: `✓ ${halfLabel.charAt(0).toUpperCase() + halfLabel.slice(1)} transcrito`,
+            description: `${transcription.length} caracteres (${numParts > 1 ? numParts + ' partes' : 'completo'})`,
           });
         } else {
-          console.error('Transcrição Whisper falhou para:', segment.name);
+          console.error('Transcrição falhou para:', segment.name);
           toast({
-            title: "⚠️ Transcrição do 2º Tempo falhou",
+            title: `⚠️ Transcrição do ${halfLabel} falhou`,
             description: "Verifique se o vídeo é um arquivo MP4 válido.",
             variant: "destructive",
           });
@@ -1910,6 +1910,19 @@ export default function VideoUpload() {
                       <CoverageTimeline segments={segments} />
                     </CardContent>
                   </Card>
+                  
+                  {/* Transcription Queue - show when queue has items */}
+                  {transcriptionQueue.queue.length > 0 && (
+                    <TranscriptionQueue
+                      queue={transcriptionQueue.queue}
+                      isProcessing={transcriptionQueue.isProcessing}
+                      currentItemId={transcriptionQueue.currentItemId}
+                      onStart={transcriptionQueue.startProcessing}
+                      onRemove={transcriptionQueue.removeFromQueue}
+                      onClear={transcriptionQueue.clearQueue}
+                      overallProgress={transcriptionQueue.getQueueProgress()}
+                    />
+                  )}
                 </div>
               )}
 
