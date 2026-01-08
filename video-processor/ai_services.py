@@ -484,7 +484,124 @@ O podcast deve ser em português brasileiro, com linguagem natural e envolvente.
     return response or ''
 
 
-def analyze_goal_play(
+def generate_tactical_summary(
+    events: List[Dict],
+    home_team: str,
+    away_team: str,
+    home_score: int,
+    away_score: int
+) -> Dict[str, Any]:
+    """
+    Generate comprehensive tactical analysis summary from match events.
+    
+    Args:
+        events: List of match events
+        home_team: Home team name
+        away_team: Away team name
+        home_score: Final home score
+        away_score: Final away score
+    
+    Returns:
+        Dict with tactical analysis data for dashboard
+    """
+    # Aggregate event statistics
+    event_counts = {}
+    for event in events:
+        event_type = event.get('event_type', 'unknown')
+        event_counts[event_type] = event_counts.get(event_type, 0) + 1
+    
+    # Create events summary text
+    events_text = '\n'.join([
+        f"- {e.get('minute', '?')}': {e.get('event_type', 'evento')}: {e.get('description', '')}"
+        for e in events[:50]  # Limit to 50 events for prompt
+    ])
+    
+    system_prompt = f"""Você é um analista tático de futebol profissional.
+Analise a partida e gere um relatório tático completo.
+
+Partida: {home_team} {home_score} x {away_score} {away_team}
+
+Estatísticas de eventos detectados:
+{json.dumps(event_counts, indent=2)}
+
+Retorne APENAS um JSON válido com a seguinte estrutura:
+{{
+  "matchSummary": "Resumo geral da partida em 2-3 frases",
+  "possession": {{"home": 50, "away": 50}},
+  "keyMoments": [
+    {{"minute": 0, "description": "Momento chave", "impact": "high/medium/low"}}
+  ],
+  "tacticalPatterns": [
+    "Padrão tático 1",
+    "Padrão tático 2"
+  ],
+  "homeTeamAnalysis": {{
+    "strengths": ["Ponto forte 1"],
+    "weaknesses": ["Ponto fraco 1"],
+    "style": "Estilo de jogo"
+  }},
+  "awayTeamAnalysis": {{
+    "strengths": ["Ponto forte 1"],
+    "weaknesses": ["Ponto fraco 1"],
+    "style": "Estilo de jogo"
+  }},
+  "intensityByPeriod": [
+    {{"period": "0-15", "intensity": 70}},
+    {{"period": "16-30", "intensity": 65}},
+    {{"period": "31-45", "intensity": 80}},
+    {{"period": "46-60", "intensity": 75}},
+    {{"period": "61-75", "intensity": 85}},
+    {{"period": "76-90", "intensity": 90}}
+  ],
+  "statistics": {{
+    "goals": {home_score + away_score},
+    "shots": 0,
+    "fouls": 0,
+    "cards": 0,
+    "corners": 0
+  }}
+}}"""
+
+    response = call_ai([
+        {'role': 'system', 'content': system_prompt},
+        {'role': 'user', 'content': f"Eventos da partida:\n{events_text}"}
+    ], max_tokens=4096)
+    
+    if not response:
+        return {
+            'matchSummary': f'{home_team} {home_score} x {away_score} {away_team}',
+            'possession': {'home': 50, 'away': 50},
+            'keyMoments': [],
+            'tacticalPatterns': [],
+            'homeTeamAnalysis': {'strengths': [], 'weaknesses': [], 'style': 'Não analisado'},
+            'awayTeamAnalysis': {'strengths': [], 'weaknesses': [], 'style': 'Não analisado'},
+            'intensityByPeriod': [],
+            'statistics': event_counts
+        }
+    
+    try:
+        start = response.find('{')
+        end = response.rfind('}') + 1
+        if start >= 0 and end > start:
+            result = json.loads(response[start:end])
+            # Merge event counts into statistics
+            result['statistics'] = {**event_counts, **result.get('statistics', {})}
+            result['homeTeam'] = home_team
+            result['awayTeam'] = away_team
+            result['homeScore'] = home_score
+            result['awayScore'] = away_score
+            return result
+    except json.JSONDecodeError:
+        print(f"Failed to parse tactical summary: {response}")
+    
+    return {
+        'matchSummary': f'{home_team} {home_score} x {away_score} {away_team}',
+        'possession': {'home': 50, 'away': 50},
+        'statistics': event_counts
+    }
+
+
+
     description: str,
     scorer: str = None,
     assister: str = None,

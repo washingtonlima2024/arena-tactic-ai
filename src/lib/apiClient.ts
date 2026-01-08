@@ -462,6 +462,37 @@ export const apiClient = {
   // ============== Search ==============
   search: (query: string) => apiRequest<any[]>(`/api/search?q=${encodeURIComponent(query)}`),
 
+  // ============== Process Match Pipeline ==============
+  processMatch: async (data: {
+    matchId: string;
+    videos: Array<{ url: string; videoType: string; startMinute: number; endMinute: number }>;
+    homeTeam: string;
+    awayTeam: string;
+    autoClip?: boolean;
+    autoTactical?: boolean;
+  }) => {
+    return apiRequest<{
+      success: boolean;
+      matchId: string;
+      videos: any[];
+      totalEvents: number;
+      totalClips: number;
+      homeScore: number;
+      awayScore: number;
+      tacticalAnalysis?: any;
+      errors: string[];
+    }>('/api/process-match', { method: 'POST', body: JSON.stringify(data) });
+  },
+
+  // ============== Clips by Half ==============
+  getClipsByHalf: (matchId: string) => 
+    apiRequest<{
+      first_half: Array<{ filename: string; url: string; size: number }>;
+      second_half: Array<{ filename: string; url: string; size: number }>;
+      full: Array<{ filename: string; url: string; size: number }>;
+      extra: Array<{ filename: string; url: string; size: number }>;
+    }>(`/api/clips/${matchId}`),
+
   // ============== Storage (organized by match) ==============
   // Structure: storage/{match_id}/{subfolder}/{filename}
   // Subfolders: videos, clips, images, audio, texts, srt, json
