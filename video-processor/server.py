@@ -27,9 +27,15 @@ from storage import (
     save_file, save_uploaded_file, get_file_path, file_exists,
     delete_file, list_match_files, get_storage_stats, get_match_storage_stats,
     delete_match_storage, STORAGE_DIR, MATCH_SUBFOLDERS, get_subfolder_path,
-    get_clip_subfolder_path, save_clip_file, CLIP_SUBFOLDERS
+    get_clip_subfolder_path, save_clip_file, CLIP_SUBFOLDERS,
+    get_video_subfolder_path, save_optimized_video, get_match_storage_path
 )
 import ai_services
+import threading
+import json as json_module
+
+# Global conversion jobs tracker
+conversion_jobs = {}
 
 app = Flask(__name__)
 CORS(app)
@@ -313,8 +319,102 @@ def get_video_info(file_path: str) -> dict:
         
     except subprocess.TimeoutExpired:
         raise Exception("Timeout ao analisar vídeo")
-    except json_lib.JSONDecodeError:
+    except json_module.JSONDecodeError:
         raise Exception("Falha ao parsear saída do ffprobe")
+
+
+def convert_to_480p(input_path: str, output_path: str, job_id: str = None, crf: int = 28, preset: str = "medium") -> bool:
+    """
+    Converte vídeo para 480p otimizado.
+    CRF 28 oferece boa qualidade com tamanho reduzido.
+    """
+    global conversion_jobs
+    
+    try:
+        if job_id:
+            conversion_jobs[job_id] = {
+                'status': 'converting',
+                'progress': 0,
+                'input_path': input_path,
+                'output_path': output_path
+            }
+        
+        # Get video duration for progress calculation
+        duration_cmd = [
+            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+            '-show_format', input_path
+        ]
+        duration_result = subprocess.run(duration_cmd, capture_output=True, text=True, timeout=30)
+        total_duration = 0
+        if duration_result.returncode == 0:
+            probe_data = json_module.loads(duration_result.stdout)
+            total_duration = float(probe_data.get('format', {}).get('duration', 0))
+        
+        # FFmpeg command for 480p conversion
+        cmd = [
+            'ffmpeg', '-y', '-i', input_path,
+            '-vf', 'scale=-2:480',  # Mantém aspect ratio
+            '-c:v', 'libx264', '-crf', str(crf),
+            '-preset', preset,
+            '-c:a', 'aac', '-b:a', '128k',
+            '-movflags', '+faststart',
+            '-progress', 'pipe:1',  # Progress output
+            output_path
+        ]
+        
+        print(f"[convert_480p] Starting conversion: {input_path} -> {output_path}")
+        
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            universal_newlines=True
+        )
+        
+        # Parse progress from stdout
+        for line in process.stdout:
+            if line.startswith('out_time_ms='):
+                try:
+                    time_ms = int(line.split('=')[1])
+                    time_sec = time_ms / 1000000
+                    if total_duration > 0 and job_id:
+                        progress = min(int((time_sec / total_duration) * 100), 99)
+                        conversion_jobs[job_id]['progress'] = progress
+                except:
+                    pass
+        
+        process.wait()
+        
+        if process.returncode == 0 and os.path.exists(output_path):
+            if job_id:
+                conversion_jobs[job_id]['status'] = 'completed'
+                conversion_jobs[job_id]['progress'] = 100
+            
+            # Get output file info
+            output_size = os.path.getsize(output_path)
+            input_size = os.path.getsize(input_path)
+            savings = round((1 - output_size / input_size) * 100, 1)
+            
+            if job_id:
+                conversion_jobs[job_id]['output_size'] = output_size
+                conversion_jobs[job_id]['savings_percent'] = savings
+            
+            print(f"[convert_480p] Completed! Savings: {savings}%")
+            return True
+        else:
+            stderr = process.stderr.read()
+            print(f"[convert_480p] Failed: {stderr}")
+            if job_id:
+                conversion_jobs[job_id]['status'] = 'error'
+                conversion_jobs[job_id]['error'] = stderr[:500]
+            return False
+            
+    except Exception as e:
+        print(f"[convert_480p] Error: {e}")
+        if job_id:
+            conversion_jobs[job_id]['status'] = 'error'
+            conversion_jobs[job_id]['error'] = str(e)
+        return False
 
 
 @app.route('/api/video/info', methods=['POST'])
@@ -336,6 +436,100 @@ def video_info_endpoint():
     except Exception as e:
         print(f"[video/info] Error: {e}")
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/video/convert', methods=['POST'])
+def start_video_conversion():
+    """
+    Inicia conversão de vídeo para 480p em background.
+    Retorna um job_id para acompanhar o progresso.
+    """
+    data = request.json
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+    
+    input_path = data.get('input_path')
+    match_id = data.get('match_id')
+    video_type = data.get('video_type', 'full')
+    
+    if not input_path:
+        return jsonify({'error': 'input_path is required'}), 400
+    if not match_id:
+        return jsonify({'error': 'match_id is required'}), 400
+    
+    # Validate input file
+    if not os.path.exists(input_path):
+        return jsonify({'error': f'File not found: {input_path}'}), 404
+    
+    # Generate job ID
+    job_id = str(uuid.uuid4())[:8]
+    
+    # Create output path
+    optimized_folder = get_video_subfolder_path(match_id, 'optimized')
+    original_filename = os.path.basename(input_path)
+    name_parts = original_filename.rsplit('.', 1)
+    if len(name_parts) == 2:
+        output_filename = f"{name_parts[0]}_480p.{name_parts[1]}"
+    else:
+        output_filename = f"{original_filename}_480p.mp4"
+    
+    output_path = str(optimized_folder / output_filename)
+    
+    # Initialize job
+    conversion_jobs[job_id] = {
+        'status': 'pending',
+        'progress': 0,
+        'match_id': match_id,
+        'video_type': video_type,
+        'input_path': input_path,
+        'output_path': output_path,
+        'output_filename': output_filename,
+        'started_at': datetime.now().isoformat()
+    }
+    
+    # Start conversion in background thread
+    def run_conversion():
+        convert_to_480p(input_path, output_path, job_id)
+    
+    thread = threading.Thread(target=run_conversion, daemon=True)
+    thread.start()
+    
+    return jsonify({
+        'job_id': job_id,
+        'status': 'pending',
+        'message': 'Conversion started in background'
+    })
+
+
+@app.route('/api/video/convert/status/<job_id>', methods=['GET'])
+def get_conversion_status(job_id: str):
+    """Retorna status de um job de conversão."""
+    if job_id not in conversion_jobs:
+        return jsonify({'error': 'Job not found'}), 404
+    
+    job = conversion_jobs[job_id]
+    
+    response = {
+        'job_id': job_id,
+        'status': job.get('status', 'unknown'),
+        'progress': job.get('progress', 0)
+    }
+    
+    if job.get('status') == 'completed':
+        response['output_path'] = job.get('output_path')
+        response['output_filename'] = job.get('output_filename')
+        response['output_size'] = job.get('output_size')
+        response['savings_percent'] = job.get('savings_percent')
+        
+        # Build URL for the converted video
+        match_id = job.get('match_id')
+        if match_id and job.get('output_filename'):
+            response['output_url'] = f"http://localhost:5000/api/storage/{match_id}/videos/optimized/{job.get('output_filename')}"
+    
+    if job.get('status') == 'error':
+        response['error'] = job.get('error', 'Unknown error')
+    
+    return jsonify(response)
 
 
 # ============================================================================

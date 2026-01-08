@@ -23,6 +23,12 @@ MATCH_SUBFOLDERS = [
     "json"       # Structured data exports, metadata
 ]
 
+# Video sub-subfolders for original and optimized versions
+VIDEO_SUBFOLDERS = [
+    "original",   # Original or symlinked files
+    "optimized"   # Converted 480p versions
+]
+
 # Clip sub-subfolders for organization by half
 CLIP_SUBFOLDERS = [
     "first_half",    # Clips from 1st half
@@ -61,6 +67,11 @@ def get_match_storage_path(match_id: str) -> Path:
     clips_path = match_path / "clips"
     for clip_subfolder in CLIP_SUBFOLDERS:
         (clips_path / clip_subfolder).mkdir(exist_ok=True)
+    
+    # Create video sub-subfolders for original/optimized
+    videos_path = match_path / "videos"
+    for video_subfolder in VIDEO_SUBFOLDERS:
+        (videos_path / video_subfolder).mkdir(exist_ok=True)
     
     return match_path
 
@@ -457,16 +468,80 @@ def delete_match_storage(match_id: str) -> bool:
     return False
 
 
-def export_match_metadata(match_id: str) -> dict:
-    """Export all file metadata for a match as JSON."""
-    files = list_match_files(match_id)
-    stats = get_match_storage_stats(match_id)
+def get_video_subfolder_path(match_id: str, video_type: str) -> Path:
+    """
+    Get the path for videos organized by type (original or optimized).
+    
+    Args:
+        match_id: The match ID
+        video_type: 'original' or 'optimized'
+    
+    Returns:
+        Path to the video subfolder
+    """
+    if video_type not in VIDEO_SUBFOLDERS:
+        video_type = 'original'  # Default to original
+    
+    match_path = get_match_storage_path(match_id)
+    video_path = match_path / "videos" / video_type
+    video_path.mkdir(parents=True, exist_ok=True)
+    
+    return video_path
+
+
+def save_optimized_video(
+    match_id: str,
+    file_data: bytes,
+    original_filename: str,
+    video_type: str = 'full'
+) -> dict:
+    """
+    Save an optimized (480p) video file.
+    
+    Args:
+        match_id: The match ID
+        file_data: Raw bytes of the video
+        original_filename: Original filename (will be modified for optimized)
+        video_type: 'full', 'first_half', 'second_half'
+    
+    Returns:
+        Dict with file metadata
+    """
+    optimized_folder = get_video_subfolder_path(match_id, 'optimized')
+    
+    # Generate filename based on original with _480p suffix
+    name_parts = original_filename.rsplit('.', 1)
+    if len(name_parts) == 2:
+        filename = f"{name_parts[0]}_480p.{name_parts[1]}"
+    else:
+        filename = f"{original_filename}_480p.mp4"
+    
+    file_path = optimized_folder / filename
+    
+    # Ensure unique filename
+    counter = 1
+    while file_path.exists():
+        if len(name_parts) == 2:
+            filename = f"{name_parts[0]}_480p_{counter}.{name_parts[1]}"
+        else:
+            filename = f"{original_filename}_480p_{counter}.mp4"
+        file_path = optimized_folder / filename
+        counter += 1
+    
+    # Write the file
+    with open(file_path, 'wb') as f:
+        f.write(file_data)
     
     return {
         "match_id": match_id,
-        "exported_at": datetime.now().isoformat(),
-        "stats": stats,
-        "files": files
+        "subfolder": "videos/optimized",
+        "filename": filename,
+        "path": str(file_path),
+        "url": f"http://localhost:5000/api/storage/{match_id}/videos/optimized/{filename}",
+        "size": len(file_data),
+        "video_type": video_type,
+        "original_filename": original_filename,
+        "created_at": datetime.now().isoformat()
     }
 
 

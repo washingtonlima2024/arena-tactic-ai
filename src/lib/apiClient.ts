@@ -747,6 +747,96 @@ export const apiClient = {
       method: 'POST',
       body: JSON.stringify({ path })
     }),
+
+  // ============== Video Conversion ==============
+  startVideoConversion: (data: {
+    input_path: string;
+    match_id: string;
+    video_type?: 'full' | 'first_half' | 'second_half';
+  }) => apiRequest<{
+    job_id: string;
+    status: string;
+    message: string;
+  }>('/api/video/convert', {
+    method: 'POST',
+    body: JSON.stringify(data)
+  }),
+
+  getConversionStatus: (jobId: string) => apiRequest<{
+    job_id: string;
+    status: 'pending' | 'converting' | 'completed' | 'error';
+    progress: number;
+    output_path?: string;
+    output_filename?: string;
+    output_url?: string;
+    output_size?: number;
+    savings_percent?: number;
+    error?: string;
+  }>(`/api/video/convert/status/${jobId}`),
+
+  // Link local file with optional 480p conversion
+  linkLocalFileWithConversion: async (data: { 
+    local_path: string; 
+    match_id: string; 
+    subfolder?: string;
+    video_type?: 'full' | 'first_half' | 'second_half' | 'clip';
+    convert_to_480p?: boolean;
+  }): Promise<{
+    success: boolean;
+    video: any;
+    local_path: string;
+    file_size: number;
+    file_size_mb: number;
+    duration_seconds: number | null;
+    symlink_created: boolean;
+    conversion_job_id?: string;
+  }> => {
+    // First link the file
+    const linkResult = await apiRequest<{
+      success: boolean;
+      video: any;
+      local_path: string;
+      file_size: number;
+      file_size_mb: number;
+      duration_seconds: number | null;
+      symlink_created: boolean;
+    }>('/api/storage/link-local', {
+      method: 'POST',
+      body: JSON.stringify({
+        local_path: data.local_path,
+        match_id: data.match_id,
+        subfolder: data.subfolder,
+        video_type: data.video_type
+      })
+    });
+
+    // If conversion requested, start it
+    if (data.convert_to_480p && linkResult.success) {
+      try {
+        const conversionResult = await apiRequest<{
+          job_id: string;
+          status: string;
+        }>('/api/video/convert', {
+          method: 'POST',
+          body: JSON.stringify({
+            input_path: data.local_path,
+            match_id: data.match_id,
+            video_type: data.video_type || 'full'
+          })
+        });
+        return {
+          ...linkResult,
+          conversion_job_id: conversionResult.job_id
+        };
+      } catch (err) {
+        console.error('[linkLocalFileWithConversion] Conversion start failed:', err);
+        // Still return success for linking, conversion can be retried
+        return linkResult;
+      }
+    }
+
+    return linkResult;
+  },
 };
 
 export default apiClient;
