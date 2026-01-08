@@ -159,117 +159,167 @@ IMPORTANTE:
 - Gols contra de ${awayTeam} aumentam homeScore (isOwnGoal=true, team="away")
 ═══════════════════════════════════════════════════════════════`;
 
-    console.log('Chamando Gemini 2.5 Pro com tool calling...');
+    // Retry logic for API calls
+    const MAX_RETRIES = 3;
+    let analysisResult: AnalysisResult | null = null;
+    let lastError: Error | null = null;
 
-    // IMPROVED: Use gemini-2.5-pro for better accuracy
-    const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${LOVABLE_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: 'google/gemini-2.5-pro', // UPGRADED from flash to pro
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt }
-        ],
-        tools: [
-          {
-            type: "function",
-            function: {
-              name: "extract_match_events",
-              description: "Extrair eventos da partida a partir da transcrição da narração",
-              parameters: {
-                type: "object",
-                properties: {
-                  events: {
-                    type: "array",
-                    items: {
-                      type: "object",
-                      properties: {
-                        minute: { type: "number", description: "Minuto do evento no jogo" },
-                        second: { type: "number", description: "Segundo do evento (0-59)" },
-                        event_type: { 
-                          type: "string", 
-                          enum: ["goal", "shot", "save", "foul", "yellow_card", "red_card", "corner", "offside", "substitution", "chance", "penalty"],
-                          description: "Tipo do evento"
-                        },
-                        description: { type: "string", description: "Descrição curta em português (max 60 chars)" },
-                        team: { type: "string", enum: ["home", "away"], description: "Time que fez o evento" },
-                        isOwnGoal: { type: "boolean", description: "Se é gol contra (true se jogador marca em seu próprio gol)" }
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      console.log(`Chamando Gemini 2.5 Pro (tentativa ${attempt}/${MAX_RETRIES})...`);
+
+      try {
+        const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${LOVABLE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            model: 'google/gemini-2.5-pro',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            tools: [
+              {
+                type: "function",
+                function: {
+                  name: "extract_match_events",
+                  description: "Extrair eventos da partida a partir da transcrição da narração",
+                  parameters: {
+                    type: "object",
+                    properties: {
+                      events: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: {
+                            minute: { type: "number", description: "Minuto do evento no jogo" },
+                            second: { type: "number", description: "Segundo do evento (0-59)" },
+                            event_type: { 
+                              type: "string", 
+                              enum: ["goal", "shot", "save", "foul", "yellow_card", "red_card", "corner", "offside", "substitution", "chance", "penalty"],
+                              description: "Tipo do evento"
+                            },
+                            description: { type: "string", description: "Descrição curta em português (max 60 chars)" },
+                            team: { type: "string", enum: ["home", "away"], description: "Time que fez o evento" },
+                            isOwnGoal: { type: "boolean", description: "Se é gol contra (true se jogador marca em seu próprio gol)" }
+                          },
+                          required: ["minute", "event_type", "description", "team"],
+                          additionalProperties: false
+                        }
                       },
-                      required: ["minute", "event_type", "description", "team"],
-                      additionalProperties: false
-                    }
-                  },
-                  homeScore: { type: "number", description: "Placar final do time da casa" },
-                  awayScore: { type: "number", description: "Placar final do time visitante" }
-                },
-                required: ["events", "homeScore", "awayScore"],
-                additionalProperties: false
+                      homeScore: { type: "number", description: "Placar final do time da casa" },
+                      awayScore: { type: "number", description: "Placar final do time visitante" }
+                    },
+                    required: ["events", "homeScore", "awayScore"],
+                    additionalProperties: false
+                  }
+                }
               }
-            }
-          }
-        ],
-        tool_choice: { type: "function", function: { name: "extract_match_events" } }
-      }),
-    });
+            ],
+            tool_choice: { type: "function", function: { name: "extract_match_events" } }
+          }),
+        });
 
-    if (!aiResponse.ok) {
-      const errorText = await aiResponse.text();
-      console.error('AI API error:', aiResponse.status, errorText);
-      
-      if (aiResponse.status === 429) {
-        throw new Error('Rate limit exceeded. Tente novamente em alguns segundos.');
+        if (!aiResponse.ok) {
+          const errorText = await aiResponse.text();
+          console.error(`AI API error (tentativa ${attempt}):`, aiResponse.status, errorText);
+          
+          if (aiResponse.status === 429) {
+            // Rate limit - wait and retry
+            console.log('Rate limit - aguardando 5s antes de retry...');
+            await new Promise(resolve => setTimeout(resolve, 5000));
+            continue;
+          }
+          if (aiResponse.status === 402) {
+            throw new Error('Créditos insuficientes. Adicione créditos ao workspace.');
+          }
+          lastError = new Error(`AI analysis failed: ${errorText}`);
+          continue;
+        }
+
+        const aiData = await aiResponse.json();
+        console.log('AI response received from Gemini Pro');
+
+        // Extract structured data from tool call
+        const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
+        if (toolCall && toolCall.function?.arguments) {
+          try {
+            const parsed = JSON.parse(toolCall.function.arguments);
+            if (parsed.events && Array.isArray(parsed.events)) {
+              analysisResult = parsed;
+              console.log('✓ Tool call parsed successfully');
+              break; // Success - exit retry loop
+            } else {
+              console.warn('Tool call returned invalid structure, retrying...');
+              lastError = new Error('Invalid tool call structure');
+              continue;
+            }
+          } catch (parseError) {
+            console.error('Tool call parse error:', parseError);
+            lastError = new Error('Failed to parse tool call arguments');
+            continue;
+          }
+        } else {
+          // Fallback: try to extract from content if tool call not used
+          const content = aiData.choices?.[0]?.message?.content || '';
+          console.log('No tool call, trying content parse. Content length:', content.length);
+          
+          if (content.length === 0) {
+            console.warn(`Empty response from AI (tentativa ${attempt}), retrying...`);
+            lastError = new Error('Empty AI response');
+            // Wait before retry
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            continue;
+          }
+          
+          try {
+            // Remove markdown code blocks if present
+            let jsonStr = content;
+            const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
+            if (codeBlockMatch) {
+              jsonStr = codeBlockMatch[1];
+            }
+            
+            // Try to find JSON object
+            const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+            if (!jsonMatch) {
+              console.warn('No JSON found in response, retrying...');
+              lastError = new Error('No JSON found in response');
+              continue;
+            }
+            
+            const parsed = JSON.parse(jsonMatch[0]);
+            if (parsed.events && Array.isArray(parsed.events)) {
+              analysisResult = parsed;
+              console.log('✓ Content parsed successfully');
+              break;
+            } else {
+              console.warn('Content JSON has invalid structure, retrying...');
+              lastError = new Error('Invalid JSON structure');
+              continue;
+            }
+          } catch (fallbackError) {
+            console.error('Fallback parse error:', fallbackError);
+            console.error('Content preview:', content.substring(0, 500));
+            lastError = new Error('Failed to parse AI response');
+            continue;
+          }
+        }
+      } catch (fetchError) {
+        console.error(`Fetch error (tentativa ${attempt}):`, fetchError);
+        lastError = fetchError as Error;
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, 2000));
+        continue;
       }
-      if (aiResponse.status === 402) {
-        throw new Error('Créditos insuficientes. Adicione créditos ao workspace.');
-      }
-      throw new Error(`AI analysis failed: ${errorText}`);
     }
 
-    const aiData = await aiResponse.json();
-    console.log('AI response received from Gemini Pro');
-
-    // Extract structured data from tool call
-    let analysisResult: AnalysisResult;
-    
-    const toolCall = aiData.choices?.[0]?.message?.tool_calls?.[0];
-    if (toolCall && toolCall.function?.arguments) {
-      try {
-        analysisResult = JSON.parse(toolCall.function.arguments);
-        console.log('Tool call parsed successfully');
-      } catch (parseError) {
-        console.error('Tool call parse error:', parseError);
-        console.error('Raw arguments:', toolCall.function.arguments);
-        throw new Error('Failed to parse tool call arguments');
-      }
-    } else {
-      // Fallback: try to extract from content if tool call not used
-      const content = aiData.choices?.[0]?.message?.content || '';
-      console.log('No tool call, trying content parse. Content length:', content.length);
-      
-      try {
-        // Remove markdown code blocks if present
-        let jsonStr = content;
-        const codeBlockMatch = content.match(/```(?:json)?\s*([\s\S]*?)\s*```/);
-        if (codeBlockMatch) {
-          jsonStr = codeBlockMatch[1];
-        }
-        
-        // Try to find JSON object
-        const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
-          throw new Error('No JSON found in response');
-        }
-        
-        analysisResult = JSON.parse(jsonMatch[0]);
-      } catch (fallbackError) {
-        console.error('Fallback parse error:', fallbackError);
-        console.error('Content preview:', content.substring(0, 500));
-        throw new Error('Failed to parse AI response');
-      }
+    // If all retries failed, throw the last error
+    if (!analysisResult) {
+      console.error('All retry attempts failed');
+      throw lastError || new Error('Failed to get valid AI response after retries');
     }
 
     console.log('Eventos detectados (antes da validação):', analysisResult.events?.length || 0);
