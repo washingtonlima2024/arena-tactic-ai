@@ -236,9 +236,63 @@ export const apiClient = {
     );
   },
   getEvent: (id: string) => apiRequest<any>(`/api/events/${id}`),
-  createEvent: (matchId: string, event: any) => apiRequest<any>(`/api/matches/${matchId}/events`, { method: 'POST', body: JSON.stringify(event) }),
-  updateEvent: (id: string, event: any) => apiRequest<any>(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(event) }),
-  deleteEvent: (id: string) => apiRequest<any>(`/api/events/${id}`, { method: 'DELETE' }),
+  
+  createEvent: async (matchId: string, event: any) => {
+    return apiRequestWithFallback<any>(
+      `/api/matches/${matchId}/events`,
+      'match_events',
+      { method: 'POST', body: JSON.stringify(event) },
+      async () => {
+        const { data, error } = await supabase
+          .from('match_events')
+          .insert({ ...event, match_id: matchId, clip_pending: true })
+          .select()
+          .single();
+        if (error) throw new Error(error.message);
+        return data;
+      }
+    );
+  },
+  
+  updateEvent: async (id: string, event: any) => {
+    return apiRequestWithFallback<any>(
+      `/api/events/${id}`,
+      'match_events',
+      { method: 'PUT', body: JSON.stringify(event) },
+      async () => {
+        // If time or type changed, mark clip as pending
+        const updateData = { ...event };
+        if (event.minute !== undefined || event.second !== undefined || event.event_type !== undefined || event.description !== undefined) {
+          updateData.clip_pending = true;
+        }
+        
+        const { data, error } = await supabase
+          .from('match_events')
+          .update(updateData)
+          .eq('id', id)
+          .select()
+          .single();
+        if (error) throw new Error(error.message);
+        return data;
+      }
+    );
+  },
+  
+  deleteEvent: async (id: string) => {
+    return apiRequestWithFallback<any>(
+      `/api/events/${id}`,
+      'match_events',
+      { method: 'DELETE' },
+      async () => {
+        const { error } = await supabase
+          .from('match_events')
+          .delete()
+          .eq('id', id);
+        if (error) throw new Error(error.message);
+        return { success: true };
+      }
+    );
+  },
 
   // ============== Players ==============
   getPlayers: (teamId?: string) => apiRequest<any[]>(`/api/players${teamId ? `?team_id=${teamId}` : ''}`),

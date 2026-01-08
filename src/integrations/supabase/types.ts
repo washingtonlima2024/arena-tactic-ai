@@ -177,6 +177,7 @@ export type Database = {
           approval_status: string | null
           approved_at: string | null
           approved_by: string | null
+          clip_pending: boolean | null
           clip_url: string | null
           created_at: string
           description: string | null
@@ -197,6 +198,7 @@ export type Database = {
           approval_status?: string | null
           approved_at?: string | null
           approved_by?: string | null
+          clip_pending?: boolean | null
           clip_url?: string | null
           created_at?: string
           description?: string | null
@@ -217,6 +219,7 @@ export type Database = {
           approval_status?: string | null
           approved_at?: string | null
           approved_by?: string | null
+          clip_pending?: boolean | null
           clip_url?: string | null
           created_at?: string
           description?: string | null
