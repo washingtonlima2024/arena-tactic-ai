@@ -265,9 +265,28 @@ export const apiClient = {
     );
   },
 
-  // ============== AI Services ==============
-  analyzeMatch: (data: { matchId: string; transcription: string; homeTeam: string; awayTeam: string; gameStartMinute?: number; gameEndMinute?: number; halfType?: string }) =>
-    apiRequest<any>('/api/analyze-match', { method: 'POST', body: JSON.stringify(data) }),
+  // ============== AI Services (with Supabase fallback) ==============
+  analyzeMatch: async (data: { matchId: string; transcription: string; homeTeam: string; awayTeam: string; gameStartMinute?: number; gameEndMinute?: number; halfType?: string }) => {
+    return apiRequestWithFallback<any>(
+      '/api/analyze-match',
+      'analysis',
+      { method: 'POST', body: JSON.stringify(data) },
+      async () => {
+        // Fallback to Supabase Edge Function
+        console.log('[apiClient] Using Supabase Edge Function for match analysis');
+        const { data: result, error } = await supabase.functions.invoke('analyze-match', {
+          body: data
+        });
+        
+        if (error) {
+          console.error('[apiClient] Edge Function error:', error);
+          throw new Error(error.message || 'Falha na análise via cloud');
+        }
+        
+        return result;
+      }
+    );
+  },
 
   generateNarration: (data: any) =>
     apiRequest<any>('/api/generate-narration', { method: 'POST', body: JSON.stringify(data) }),
@@ -287,12 +306,43 @@ export const apiClient = {
   analyzeGoalPlay: (data: { description: string; scorer?: string; assister?: string; team?: string }) =>
     apiRequest<any>('/api/analyze-goal-play', { method: 'POST', body: JSON.stringify(data) }),
 
-  // ============== Transcription & Live Events ==============
+  // ============== Transcription & Live Events (with Supabase fallback) ==============
   transcribeAudio: (data: { audio: string; language?: string }) =>
     apiRequest<{ text: string }>('/api/transcribe-audio', { method: 'POST', body: JSON.stringify(data) }),
 
-  transcribeLargeVideo: (data: { videoUrl: string; matchId?: string; language?: string }) =>
-    apiRequest<{ success: boolean; text: string; srtContent?: string }>('/api/transcribe-large-video', { method: 'POST', body: JSON.stringify(data) }),
+  transcribeLargeVideo: async (data: { videoUrl: string; matchId?: string; language?: string }) => {
+    return apiRequestWithFallback<{ success: boolean; text: string; srtContent?: string }>(
+      '/api/transcribe-large-video',
+      'transcription',
+      { method: 'POST', body: JSON.stringify(data) },
+      async () => {
+        // Fallback to Supabase Edge Function
+        console.log('[apiClient] Using Supabase Edge Function for transcription');
+        const { data: result, error } = await supabase.functions.invoke('transcribe-large-video', {
+          body: { 
+            videoUrl: data.videoUrl, 
+            matchId: data.matchId,
+            language: data.language || 'pt'
+          }
+        });
+        
+        if (error) {
+          console.error('[apiClient] Edge Function error:', error);
+          throw new Error(error.message || 'Falha na transcrição via cloud');
+        }
+        
+        if (!result?.success || !result?.text) {
+          throw new Error(result?.error || 'Resposta inválida da transcrição');
+        }
+        
+        return {
+          success: true,
+          text: result.text,
+          srtContent: result.srtContent || ''
+        };
+      }
+    );
+  },
 
   extractLiveEvents: (data: { transcript: string; homeTeam: string; awayTeam: string; currentScore: { home: number; away: number }; currentMinute: number }) =>
     apiRequest<{ events: any[] }>('/api/extract-live-events', { method: 'POST', body: JSON.stringify(data) }),
