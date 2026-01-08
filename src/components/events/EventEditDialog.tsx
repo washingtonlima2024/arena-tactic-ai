@@ -145,9 +145,9 @@ export function EventEditDialog({
           approved_at: new Date().toISOString(),
         });
 
-        toast.success('Evento criado com sucesso!');
+        toast.success('Evento criado! Clip será gerado automaticamente.');
       } else {
-        // Update existing event
+        // Update existing event - mark clip as pending for regeneration
         await apiClient.updateEvent(event!.id!, {
           event_type: eventType,
           minute: minute ? parseInt(minute) : null,
@@ -164,9 +164,10 @@ export function EventEditDialog({
           approval_status: 'pending',
           approved_by: null,
           approved_at: null,
+          clip_pending: true, // Mark for clip regeneration
         });
 
-        toast.success('Evento atualizado! Aguardando aprovação.');
+        toast.success('Evento atualizado! Clip será regenerado automaticamente.');
       }
       
       onSave();

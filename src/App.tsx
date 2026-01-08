@@ -2,9 +2,11 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, useSearchParams } from "react-router-dom";
 import { SidebarProvider } from "./contexts/SidebarContext";
 import { LiveBroadcastProvider } from "./contexts/LiveBroadcastContext";
+import { ClipSyncProvider } from "./contexts/ClipSyncContext";
+import { ClipSyncIndicator } from "./components/media/ClipSyncIndicator";
 import { FloatingLivePlayer } from "./components/live/FloatingLivePlayer";
 import Landing from "./pages/Landing";
 import Index from "./pages/Index";
@@ -25,6 +27,18 @@ import NotFound from "./pages/NotFound";
 import { ArenaChatbot } from "./components/chatbot/ArenaChatbot";
 import { RequireAuth } from "./components/auth/RequireAuth";
 
+// Wrapper component to extract matchId from URL
+function ClipSyncWrapper({ children }: { children: React.ReactNode }) {
+  const [searchParams] = useSearchParams();
+  const matchId = searchParams.get('match');
+  
+  return (
+    <ClipSyncProvider matchId={matchId}>
+      {children}
+    </ClipSyncProvider>
+  );
+}
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -37,25 +51,28 @@ const App = () => (
           <BrowserRouter>
             {/* FloatingLivePlayer inside BrowserRouter but outside Routes to persist */}
             <FloatingLivePlayer />
-            <Routes>
-              <Route path="/welcome" element={<Landing />} />
-              <Route path="/auth" element={<Auth />} />
-              <Route path="/" element={<RequireAuth><Index /></RequireAuth>} />
-              <Route path="/matches" element={<RequireAuth><Matches /></RequireAuth>} />
-              <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
-              <Route path="/live" element={<RequireAuth><Live /></RequireAuth>} />
-              <Route path="/live/config" element={<RequireAuth><LiveConfig /></RequireAuth>} />
-              <Route path="/viewer" element={<RequireAuth><Viewer /></RequireAuth>} />
-              <Route path="/analysis" element={<RequireAuth><Analysis /></RequireAuth>} />
-              <Route path="/dashboard" element={<RequireAuth><MatchDashboard /></RequireAuth>} />
-              <Route path="/events" element={<RequireAuth><Events /></RequireAuth>} />
-              <Route path="/media" element={<RequireAuth><Media /></RequireAuth>} />
-              <Route path="/audio" element={<RequireAuth><Audio /></RequireAuth>} />
-              <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
-              <Route path="/field" element={<RequireAuth><Field /></RequireAuth>} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-            <ArenaChatbot />
+            <ClipSyncWrapper>
+              <Routes>
+                <Route path="/welcome" element={<Landing />} />
+                <Route path="/auth" element={<Auth />} />
+                <Route path="/" element={<RequireAuth><Index /></RequireAuth>} />
+                <Route path="/matches" element={<RequireAuth><Matches /></RequireAuth>} />
+                <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
+                <Route path="/live" element={<RequireAuth><Live /></RequireAuth>} />
+                <Route path="/live/config" element={<RequireAuth><LiveConfig /></RequireAuth>} />
+                <Route path="/viewer" element={<RequireAuth><Viewer /></RequireAuth>} />
+                <Route path="/analysis" element={<RequireAuth><Analysis /></RequireAuth>} />
+                <Route path="/dashboard" element={<RequireAuth><MatchDashboard /></RequireAuth>} />
+                <Route path="/events" element={<RequireAuth><Events /></RequireAuth>} />
+                <Route path="/media" element={<RequireAuth><Media /></RequireAuth>} />
+                <Route path="/audio" element={<RequireAuth><Audio /></RequireAuth>} />
+                <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
+                <Route path="/field" element={<RequireAuth><Field /></RequireAuth>} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+              <ArenaChatbot />
+              <ClipSyncIndicator />
+            </ClipSyncWrapper>
           </BrowserRouter>
         </SidebarProvider>
       </LiveBroadcastProvider>
