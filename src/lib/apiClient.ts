@@ -130,10 +130,73 @@ export const apiClient = {
   deleteTeam: (id: string) => apiRequest<any>(`/api/teams/${id}`, { method: 'DELETE' }),
 
   // ============== Matches (with Supabase fallback) ==============
-  getMatches: () => apiRequest<any[]>('/api/matches'),
-  getMatch: (id: string) => apiRequest<any>(`/api/matches/${id}`),
-  createMatch: (match: any) => apiRequest<any>('/api/matches', { method: 'POST', body: JSON.stringify(match) }),
-  updateMatch: (id: string, match: any) => apiRequest<any>(`/api/matches/${id}`, { method: 'PUT', body: JSON.stringify(match) }),
+  getMatches: async () => {
+    return apiRequestWithFallback<any[]>(
+      '/api/matches',
+      'matches',
+      {},
+      async () => {
+        const { data, error } = await supabase
+          .from('matches')
+          .select('*, home_team:teams!matches_home_team_id_fkey(*), away_team:teams!matches_away_team_id_fkey(*)')
+          .order('match_date', { ascending: false });
+        if (error) throw new Error(error.message);
+        return data || [];
+      }
+    );
+  },
+  
+  getMatch: async (id: string) => {
+    return apiRequestWithFallback<any>(
+      `/api/matches/${id}`,
+      'matches',
+      {},
+      async () => {
+        const { data, error } = await supabase
+          .from('matches')
+          .select('*, home_team:teams!matches_home_team_id_fkey(*), away_team:teams!matches_away_team_id_fkey(*)')
+          .eq('id', id)
+          .maybeSingle();
+        if (error) throw new Error(error.message);
+        return data;
+      }
+    );
+  },
+  
+  createMatch: async (match: any) => {
+    return apiRequestWithFallback<any>(
+      '/api/matches',
+      'matches',
+      { method: 'POST', body: JSON.stringify(match) },
+      async () => {
+        const { data, error } = await supabase
+          .from('matches')
+          .insert(match)
+          .select()
+          .single();
+        if (error) throw new Error(error.message);
+        return data;
+      }
+    );
+  },
+  
+  updateMatch: async (id: string, match: any) => {
+    return apiRequestWithFallback<any>(
+      `/api/matches/${id}`,
+      'matches',
+      { method: 'PUT', body: JSON.stringify(match) },
+      async () => {
+        const { data, error } = await supabase
+          .from('matches')
+          .update({ ...match, updated_at: new Date().toISOString() })
+          .eq('id', id)
+          .select()
+          .single();
+        if (error) throw new Error(error.message);
+        return data;
+      }
+    );
+  },
   deleteMatch: async (id: string) => {
     return apiRequestWithFallback<any>(
       `/api/matches/${id}`,
@@ -169,7 +232,22 @@ export const apiClient = {
   deletePlayer: (id: string) => apiRequest<any>(`/api/players/${id}`, { method: 'DELETE' }),
 
   // ============== Videos (with Supabase fallback) ==============
-  getVideos: (matchId?: string) => apiRequest<any[]>(`/api/videos${matchId ? `?match_id=${matchId}` : ''}`),
+  getVideos: async (matchId?: string) => {
+    return apiRequestWithFallback<any[]>(
+      `/api/videos${matchId ? `?match_id=${matchId}` : ''}`,
+      'videos',
+      {},
+      async () => {
+        let query = supabase.from('videos').select('*');
+        if (matchId) {
+          query = query.eq('match_id', matchId);
+        }
+        const { data, error } = await query.order('created_at', { ascending: false });
+        if (error) throw new Error(error.message);
+        return data || [];
+      }
+    );
+  },
   createVideo: async (video: any) => {
     return apiRequestWithFallback<any>(
       '/api/videos',
