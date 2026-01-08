@@ -500,8 +500,8 @@ export const apiClient = {
   transcribeAudio: (data: { audio: string; language?: string }) =>
     apiRequest<{ text: string }>('/api/transcribe-audio', { method: 'POST', body: JSON.stringify(data) }),
 
-  transcribeLargeVideo: async (data: { videoUrl: string; matchId?: string; language?: string }) => {
-    return apiRequestWithFallback<{ success: boolean; text: string; srtContent?: string }>(
+  transcribeLargeVideo: async (data: { videoUrl: string; matchId?: string; language?: string }): Promise<{ success: boolean; text: string; srtContent?: string; requiresLocalServer?: boolean; suggestion?: string }> => {
+    return apiRequestWithFallback<{ success: boolean; text: string; srtContent?: string; requiresLocalServer?: boolean; suggestion?: string }>(
       '/api/transcribe-large-video',
       'transcription',
       { method: 'POST', body: JSON.stringify(data) },
@@ -519,6 +519,17 @@ export const apiClient = {
         if (error) {
           console.error('[apiClient] Edge Function error:', error);
           throw new Error(error.message || 'Falha na transcrição via cloud');
+        }
+        
+        // Check if video is too large and requires local server
+        if (result?.requiresLocalServer) {
+          console.warn('[apiClient] Video requires local server:', result.suggestion);
+          return {
+            success: false,
+            text: '',
+            requiresLocalServer: true,
+            suggestion: result.suggestion || 'Use o servidor Python local para processar este vídeo.'
+          };
         }
         
         if (!result?.success || !result?.text) {

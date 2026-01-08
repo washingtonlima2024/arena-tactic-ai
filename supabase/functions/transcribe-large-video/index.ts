@@ -31,26 +31,29 @@ serve(async (req) => {
     
     console.log(`[TranscribeLarge] Tamanho: ${videoSizeMB.toFixed(1)} MB`);
 
-    // Reject videos that are too large
-    if (videoSizeBytes > MAX_VIDEO_SIZE) {
-      console.log(`[TranscribeLarge] Vídeo muito grande (${videoSizeMB.toFixed(0)}MB > 2GB)`);
+    // For videos larger than 500MB, cloud transcription won't work reliably
+    // The Whisper API can't decode partial video chunks - it needs proper audio files
+    // FFmpeg is required to extract audio, which only works on local server
+    if (videoSizeBytes > 500 * 1024 * 1024) {
+      console.log(`[TranscribeLarge] Vídeo muito grande (${videoSizeMB.toFixed(0)}MB) - requer servidor local`);
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: `Vídeo de ${videoSizeMB.toFixed(0)}MB é muito grande. Use o servidor local com FFmpeg para extrair áudio.`,
+          error: `Vídeo de ${videoSizeMB.toFixed(0)}MB é muito grande para transcrição na nuvem. Use o servidor Python local com FFmpeg para extrair o áudio, ou forneça um arquivo SRT.`,
           videoSizeMB: videoSizeMB.toFixed(1),
-          requiresLocalServer: true
+          requiresLocalServer: true,
+          suggestion: 'Inicie o servidor local (python server.py) ou faça upload de um arquivo SRT.'
         }),
         { 
-          status: 400,
+          status: 200, // Return 200 so the frontend can handle this gracefully
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         }
       );
     }
 
-    // For videos larger than 200MB, recommend local server but try cloud transcription
+    // For videos 200-500MB, warn but try
     if (videoSizeBytes > 200 * 1024 * 1024) {
-      console.log(`[TranscribeLarge] Vídeo grande (${videoSizeMB.toFixed(0)}MB), usando estratégia de chunks...`);
+      console.log(`[TranscribeLarge] Vídeo grande (${videoSizeMB.toFixed(0)}MB), tentando transcrição parcial...`);
     }
 
     // For small videos (≤20MB), use Whisper directly
@@ -59,19 +62,7 @@ serve(async (req) => {
       return await transcribeWithWhisper(videoUrl, videoSizeBytes, videoSizeMB);
     }
 
-    // For very large videos (>500MB), skip ElevenLabs (memory issues) and go straight to multi-chunk
-    if (videoSizeBytes > 500 * 1024 * 1024) {
-      console.log(`[TranscribeLarge] Vídeo muito grande (${videoSizeMB.toFixed(0)}MB), usando multi-chunk direto...`);
-      const multiChunkResult = await transcribeWithWhisperMultiChunk(videoUrl, videoSizeBytes, videoSizeMB);
-      if (multiChunkResult) {
-        return multiChunkResult;
-      }
-      // Final fallback: partial Whisper
-      console.log('[TranscribeLarge] Multi-chunk falhou, usando Whisper parcial...');
-      return await transcribeWithWhisper(videoUrl, videoSizeBytes, videoSizeMB, true);
-    }
-
-    // For medium videos (20-500MB), try ElevenLabs first
+    // For medium videos (20-200MB), try ElevenLabs first (it can handle video files)
     console.log('[TranscribeLarge] Vídeo médio, tentando ElevenLabs Scribe...');
     
     const elevenLabsResult = await transcribeWithElevenLabs(videoUrl, videoSizeBytes, videoSizeMB);
@@ -79,15 +70,8 @@ serve(async (req) => {
       return elevenLabsResult;
     }
 
-    // Fallback: Use multi-chunk Whisper transcription
-    console.log('[TranscribeLarge] ElevenLabs falhou, tentando Whisper multi-chunk...');
-    const multiChunkResult = await transcribeWithWhisperMultiChunk(videoUrl, videoSizeBytes, videoSizeMB);
-    if (multiChunkResult) {
-      return multiChunkResult;
-    }
-
-    // Final fallback: partial Whisper (first 20MB only)
-    console.log('[TranscribeLarge] Multi-chunk falhou, usando Whisper parcial...');
+    // Fallback: partial Whisper (first 20MB only)
+    console.log('[TranscribeLarge] ElevenLabs falhou, usando Whisper parcial (início do vídeo)...');
     return await transcribeWithWhisper(videoUrl, videoSizeBytes, videoSizeMB, true);
 
   } catch (error) {
