@@ -32,7 +32,7 @@ import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails'
 import { useEventHeatZones } from '@/hooks/useEventHeatZones';
 import { useGoalDetection } from '@/hooks/useGoalDetection';
 import { useGoalPlayAnalysis } from '@/hooks/useGoalPlayAnalysis';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
 
@@ -54,13 +54,8 @@ export default function Dashboard() {
     queryKey: ['match-video', firstMatchId],
     queryFn: async () => {
       if (!firstMatchId) return null;
-      const { data, error } = await supabase
-        .from('videos')
-        .select('*')
-        .eq('match_id', firstMatchId)
-        .maybeSingle();
-      if (error) return null;
-      return data;
+      const videos = await apiClient.getVideos(firstMatchId);
+      return videos?.[0] || null;
     },
     enabled: !!firstMatchId
   });
@@ -69,17 +64,17 @@ export default function Dashboard() {
   const { data: stats } = useQuery({
     queryKey: ['dashboard-stats'],
     queryFn: async () => {
-      const [matchesRes, eventsRes, analysisRes] = await Promise.all([
-        supabase.from('matches').select('id, status'),
-        supabase.from('match_events').select('id, event_type'),
-        supabase.from('analysis_jobs').select('id').eq('status', 'completed')
+      const [matches, events, jobs] = await Promise.all([
+        apiClient.getMatches(),
+        firstMatchId ? apiClient.getMatchEvents(firstMatchId) : Promise.resolve([]),
+        apiClient.getAnalysisJobs()
       ]);
       
-      const totalMatches = matchesRes.data?.length || 0;
-      const analyzedMatches = analysisRes.data?.length || 0;
-      const totalEvents = eventsRes.data?.length || 0;
-      const totalGoals = eventsRes.data?.filter(e => e.event_type === 'goal').length || 0;
-      const totalShots = eventsRes.data?.filter(e => 
+      const totalMatches = matches?.length || 0;
+      const analyzedMatches = jobs?.filter((j: any) => j.status === 'completed').length || 0;
+      const totalEvents = events?.length || 0;
+      const totalGoals = events?.filter((e: any) => e.event_type === 'goal').length || 0;
+      const totalShots = events?.filter((e: any) => 
         e.event_type === 'shot' || 
         e.event_type === 'shot_on_target' || 
         e.event_type === 'Finalização'
