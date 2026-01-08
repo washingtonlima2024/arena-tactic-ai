@@ -1,16 +1,18 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Progress } from '@/components/ui/progress';
 import { apiClient, isLocalServerAvailable, VideoInfo } from '@/lib/apiClient';
-import { Folder, FileVideo, ArrowLeft, HardDrive, Loader2, CheckCircle2, Monitor, Film, Clock, HardDrive as StorageIcon, Gauge, AlertTriangle } from 'lucide-react';
+import { Folder, FileVideo, ArrowLeft, HardDrive, Loader2, CheckCircle2, Monitor, Film, Clock, HardDrive as StorageIcon, Gauge, AlertTriangle, Zap, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface LocalFileBrowserProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSelectFile: (file: { path: string; name: string; size_mb: number }) => void;
+  onSelectFile: (file: { path: string; name: string; size_mb: number; conversion_job_id?: string }) => void;
   matchId: string;
 }
 
@@ -20,6 +22,15 @@ interface DirectoryEntry {
   type: 'directory' | 'video';
   size?: number;
   size_mb?: number;
+}
+
+interface ConversionStatus {
+  job_id: string;
+  status: 'pending' | 'converting' | 'completed' | 'error';
+  progress: number;
+  output_url?: string;
+  savings_percent?: number;
+  error?: string;
 }
 
 export function LocalFileBrowser({ open, onOpenChange, onSelectFile, matchId }: LocalFileBrowserProps) {
@@ -37,6 +48,11 @@ export function LocalFileBrowser({ open, onOpenChange, onSelectFile, matchId }: 
   // Video info state
   const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
   const [isLoadingInfo, setIsLoadingInfo] = useState(false);
+  
+  // Conversion state
+  const [convertTo480p, setConvertTo480p] = useState(false);
+  const [conversionStatus, setConversionStatus] = useState<ConversionStatus | null>(null);
+  const [isPollingConversion, setIsPollingConversion] = useState(false);
 
   // Check server availability
   useEffect(() => {
@@ -56,16 +72,47 @@ export function LocalFileBrowser({ open, onOpenChange, onSelectFile, matchId }: 
   useEffect(() => {
     if (selectedFile) {
       loadVideoInfo(selectedFile.path);
+      setConvertTo480p(false); // Reset conversion checkbox
+      setConversionStatus(null);
     } else {
       setVideoInfo(null);
+      setConvertTo480p(false);
+      setConversionStatus(null);
     }
   }, [selectedFile]);
+
+  // Auto-enable conversion for high-res videos
+  useEffect(() => {
+    if (videoInfo?.needs_conversion) {
+      setConvertTo480p(true);
+    }
+  }, [videoInfo]);
+
+  // Poll conversion status
+  const pollConversionStatus = useCallback(async (jobId: string) => {
+    setIsPollingConversion(true);
+    try {
+      const status = await apiClient.getConversionStatus(jobId);
+      setConversionStatus(status);
+      
+      if (status.status === 'pending' || status.status === 'converting') {
+        // Continue polling
+        setTimeout(() => pollConversionStatus(jobId), 1000);
+      } else {
+        setIsPollingConversion(false);
+      }
+    } catch (err) {
+      console.error('Failed to get conversion status:', err);
+      setIsPollingConversion(false);
+    }
+  }, []);
 
   const loadDirectory = async (path?: string) => {
     setIsLoading(true);
     setError(null);
     setSelectedFile(null);
     setVideoInfo(null);
+    setConversionStatus(null);
     
     try {
       const result = await apiClient.browseLocalDirectory(path);
@@ -110,11 +157,35 @@ export function LocalFileBrowser({ open, onOpenChange, onSelectFile, matchId }: 
     
     setIsLinking(true);
     try {
-      onSelectFile({
-        path: selectedFile.path,
-        name: selectedFile.name,
-        size_mb: videoInfo?.size_mb || selectedFile.size_mb || 0
-      });
+      if (convertTo480p) {
+        // Use the new method with conversion
+        const result = await apiClient.linkLocalFileWithConversion({
+          local_path: selectedFile.path,
+          match_id: matchId,
+          subfolder: 'videos',
+          video_type: 'full',
+          convert_to_480p: true
+        });
+        
+        if (result.conversion_job_id) {
+          // Start polling for conversion status
+          pollConversionStatus(result.conversion_job_id);
+        }
+        
+        onSelectFile({
+          path: selectedFile.path,
+          name: selectedFile.name,
+          size_mb: videoInfo?.size_mb || selectedFile.size_mb || 0,
+          conversion_job_id: result.conversion_job_id
+        });
+      } else {
+        // Regular linking without conversion
+        onSelectFile({
+          path: selectedFile.path,
+          name: selectedFile.name,
+          size_mb: videoInfo?.size_mb || selectedFile.size_mb || 0
+        });
+      }
       onOpenChange(false);
     } finally {
       setIsLinking(false);
@@ -301,23 +372,68 @@ export function LocalFileBrowser({ open, onOpenChange, onSelectFile, matchId }: 
                   </div>
                 </div>
 
-                {/* Conversion warning */}
+                {/* Conversion option */}
                 {videoInfo.needs_conversion && (
-                  <div className="flex items-start gap-2 p-2 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 text-sm">
-                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
-                    <div>
-                      <p className="font-medium">Resolução alta detectada</p>
-                      <p className="text-xs opacity-80">
-                        Conversão para 480p será implementada em breve (~{videoInfo.estimated_size_480p_mb} MB estimado)
-                      </p>
+                  <div className="space-y-2">
+                    <div 
+                      className={cn(
+                        "flex items-center gap-3 p-2.5 rounded-md border transition-colors cursor-pointer",
+                        convertTo480p 
+                          ? "bg-primary/10 border-primary" 
+                          : "bg-muted/50 border-transparent hover:border-muted-foreground/20"
+                      )}
+                      onClick={() => setConvertTo480p(!convertTo480p)}
+                    >
+                      <Checkbox 
+                        id="convert480p" 
+                        checked={convertTo480p} 
+                        onCheckedChange={(checked) => setConvertTo480p(!!checked)}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <Zap className="h-4 w-4 text-primary" />
+                          <span className="text-sm font-medium">Converter para 480p</span>
+                        </div>
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          Economiza ~{Math.round((1 - (videoInfo.estimated_size_480p_mb / videoInfo.size_mb)) * 100)}% de espaço 
+                          ({videoInfo.size_formatted} → ~{videoInfo.estimated_size_480p_mb} MB)
+                        </p>
+                      </div>
                     </div>
+                    
+                    {/* Conversion progress */}
+                    {conversionStatus && (
+                      <div className="p-2 rounded-md bg-muted/50 space-y-1.5">
+                        <div className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-1.5">
+                            {conversionStatus.status === 'converting' && (
+                              <RefreshCw className="h-3 w-3 animate-spin text-primary" />
+                            )}
+                            {conversionStatus.status === 'completed' && (
+                              <CheckCircle2 className="h-3 w-3 text-green-500" />
+                            )}
+                            {conversionStatus.status === 'error' && (
+                              <AlertTriangle className="h-3 w-3 text-destructive" />
+                            )}
+                            <span className="font-medium">
+                              {conversionStatus.status === 'pending' && 'Aguardando...'}
+                              {conversionStatus.status === 'converting' && 'Convertendo...'}
+                              {conversionStatus.status === 'completed' && `Concluído! Economia: ${conversionStatus.savings_percent}%`}
+                              {conversionStatus.status === 'error' && 'Erro na conversão'}
+                            </span>
+                          </div>
+                          <span className="text-muted-foreground">{conversionStatus.progress}%</span>
+                        </div>
+                        <Progress value={conversionStatus.progress} className="h-1.5" />
+                      </div>
+                    )}
                   </div>
                 )}
 
                 {/* Local link badge */}
                 <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
                   <HardDrive className="h-3 w-3" />
-                  <span>Link local (sem upload)</span>
+                  <span>Link local (sem upload){convertTo480p ? ' + conversão 480p' : ''}</span>
                 </div>
               </div>
             ) : (
