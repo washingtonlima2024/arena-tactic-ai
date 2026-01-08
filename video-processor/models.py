@@ -218,6 +218,14 @@ class AnalysisJob(Base):
     completed_at = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
     
+    # Campos adicionais para processamento paralelo
+    stage = Column(String(50), default='queued')  # queued, preparing, splitting, transcribing, analyzing, clipping, complete, error
+    progress_message = Column(Text)
+    parts_completed = Column(Integer, default=0)
+    total_parts = Column(Integer, default=0)
+    parts_status = Column(JSON, default=list)  # [{part: 1, status: 'done', progress: 100}, ...]
+    estimated_time_remaining = Column(Integer)  # seconds
+    
     # Relationships
     match = relationship('Match', back_populates='analysis_jobs')
     video = relationship('Video', back_populates='analysis_jobs')
@@ -234,7 +242,13 @@ class AnalysisJob(Base):
             'error_message': self.error_message,
             'started_at': self.started_at.isoformat() if self.started_at else None,
             'completed_at': self.completed_at.isoformat() if self.completed_at else None,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'stage': self.stage,
+            'progress_message': self.progress_message,
+            'parts_completed': self.parts_completed,
+            'total_parts': self.total_parts,
+            'parts_status': self.parts_status,
+            'estimated_time_remaining': self.estimated_time_remaining
         }
 
 
