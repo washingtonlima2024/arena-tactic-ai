@@ -298,10 +298,18 @@ export function useWhisperTranscription() {
       message: 'Transcrevendo no servidor...' 
     });
 
-    const data = await apiClient.transcribeLargeVideo({ videoUrl, matchId, language: 'pt' });
+    const data = await apiClient.transcribeLargeVideo({ videoUrl, matchId, language: 'pt' }) as any;
 
     if (!data?.success) {
-      throw new Error(data?.text || 'Erro desconhecido na transcrição');
+      // Check if this is a size limit error requiring local server
+      if (data?.requiresLocalServer) {
+        const sizeMB = data.videoSizeMB ? Math.round(parseFloat(data.videoSizeMB)) : '500+';
+        throw new Error(
+          `Vídeo de ${sizeMB}MB é muito grande para a nuvem. ` +
+          `Inicie o servidor Python local (cd video-processor && python server.py) e use o modo "Arquivo Local".`
+        );
+      }
+      throw new Error(data?.error || data?.text || 'Erro desconhecido na transcrição');
     }
 
     console.log('[Server Fallback] ✓ Transcrição completa:', data.text?.length, 'caracteres');
