@@ -326,16 +326,20 @@ export function TeamPlaylist({
         setExportProgress(`Extraindo: ${clip.minute}' - ${clip.type}`);
         
         try {
-          const clipBlob = await apiClient.extractClip({
+          const result = await apiClient.extractClip({
             videoUrl,
             startSeconds,
             durationSeconds,
             filename: `${clip.minute}min-${clip.type}.mp4`
           });
           
-          // Criar URL do blob para download
-          const clipUrl = URL.createObjectURL(clipBlob);
-          clipsComUrl.push({ ...clip, clipUrl });
+          // Verificar se retornou Blob (servidor local) ou objeto (Edge Function)
+          if (result instanceof Blob) {
+            const clipUrl = URL.createObjectURL(result);
+            clipsComUrl.push({ ...clip, clipUrl });
+          } else if (result && 'clipUrl' in result) {
+            clipsComUrl.push({ ...clip, clipUrl: result.clipUrl });
+          }
         } catch (error) {
           console.error('Erro ao extrair clip:', error);
           continue;

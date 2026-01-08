@@ -264,9 +264,64 @@ export default function Media() {
                 ))}
               </SelectContent>
             </Select>
-            <Button variant="arena">
-              <Sparkles className="mr-2 h-4 w-4" />
-              Gerar Cortes
+            <Button 
+              variant="arena"
+              onClick={async () => {
+                const eventsWithoutClips = clips.filter(c => !c.clipUrl && c.canExtract && c.eventVideo);
+                if (eventsWithoutClips.length === 0) {
+                  toast({ title: "Todos os clips já foram gerados", variant: "default" });
+                  return;
+                }
+                
+                toast({ title: `Gerando ${eventsWithoutClips.length} clips...`, description: "Isso pode levar alguns minutos" });
+                
+                let successCount = 0;
+                for (const clip of eventsWithoutClips) {
+                  try {
+                    const startSeconds = Math.max(0, clip.videoRelativeSeconds - 3);
+                    const result = await apiClient.extractClip({
+                      eventId: clip.id,
+                      matchId: matchId,
+                      videoUrl: clip.eventVideo!.file_url,
+                      startSeconds,
+                      durationSeconds: 10
+                    });
+                    
+                    // Se retornou objeto (Edge Function), atualizar DB
+                    if (result && typeof result === 'object' && 'clipUrl' in result) {
+                      // Clip URL já foi salvo pela Edge Function
+                      successCount++;
+                    } else if (result instanceof Blob) {
+                      // Servidor local retornou Blob - fazer upload
+                      const uploadResult = await apiClient.uploadBlob(
+                        matchId, 
+                        'clips', 
+                        result, 
+                        `${clip.id}.mp4`
+                      );
+                      // Atualizar evento com clip URL
+                      await supabase.from('match_events').update({ clip_url: uploadResult.url }).eq('id', clip.id);
+                      successCount++;
+                    }
+                  } catch (error) {
+                    console.error(`Erro ao gerar clip ${clip.id}:`, error);
+                  }
+                }
+                
+                toast({ 
+                  title: `${successCount}/${eventsWithoutClips.length} clips gerados`, 
+                  variant: successCount > 0 ? "default" : "destructive" 
+                });
+                refetchEvents();
+              }}
+              disabled={isGeneratingClips}
+            >
+              {isGeneratingClips ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Sparkles className="mr-2 h-4 w-4" />
+              )}
+              Gerar Clips ({clips.filter(c => !c.clipUrl && c.canExtract).length})
             </Button>
           </div>
         </div>
