@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { toast } from '@/hooks/use-toast';
 import { Loader2, Link, Upload, Video, FolderOpen } from 'lucide-react';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -42,62 +42,38 @@ export function LinkVideoDialog({ open, onOpenChange, matchId, onVideoLinked }: 
   const loadStorageFiles = async () => {
     setIsLoadingFiles(true);
     try {
+      // Load files from local storage
+      const storageData = await apiClient.getMatchStorage(matchId, 'videos');
       const allFiles: StorageFile[] = [];
-
-      // 1. List files at root level (including those matching the matchId pattern)
-      const { data: rootData, error: rootError } = await supabase.storage
-        .from('match-videos')
-        .list('', {
-          limit: 200,
-          sortBy: { column: 'created_at', order: 'desc' }
-        });
-
-      if (rootError) {
-        console.error('Error loading root files:', rootError);
-      } else if (rootData) {
-        // Filter video files at root - prioritize those containing the matchId
-        const rootVideos = rootData.filter(f => 
-          (f.name.endsWith('.mp4') || f.name.endsWith('.webm') || f.name.endsWith('.mov')) &&
-          !f.name.startsWith('.') // Skip hidden files
-        );
-        
-        // Sort to show matchId-related files first
-        rootVideos.sort((a, b) => {
-          const aHasMatchId = a.name.includes(matchId);
-          const bHasMatchId = b.name.includes(matchId);
-          if (aHasMatchId && !bHasMatchId) return -1;
-          if (!aHasMatchId && bHasMatchId) return 1;
-          return 0;
-        });
-        
-        allFiles.push(...(rootVideos as StorageFile[]));
-      }
-
-      // 2. Also try to list files in a folder named with the matchId
-      const { data: matchFolderData, error: matchFolderError } = await supabase.storage
-        .from('match-videos')
-        .list(matchId, {
-          limit: 100,
-          sortBy: { column: 'created_at', order: 'desc' }
-        });
-
-      if (!matchFolderError && matchFolderData) {
-        const matchFolderVideos = matchFolderData.filter(f => 
-          (f.name.endsWith('.mp4') || f.name.endsWith('.webm') || f.name.endsWith('.mov')) &&
-          !f.name.startsWith('.')
-        ).map(f => ({
-          ...f,
-          name: `${matchId}/${f.name}` // Include folder path
-        }));
-        allFiles.push(...(matchFolderVideos as StorageFile[]));
-      }
-
-      // 3. Also check for "live-{matchId}" prefix pattern (used by live recordings)
-      const livePrefix = `live-${matchId}`;
-      const matchingLiveFiles = allFiles.filter(f => f.name.includes(matchId));
       
-      console.log(`Found ${allFiles.length} video files, ${matchingLiveFiles.length} matching this match`);
+      if (storageData?.files) {
+        const videoFiles = storageData.files.filter((f: any) => 
+          f.name.endsWith('.mp4') || f.name.endsWith('.webm') || f.name.endsWith('.mov')
+        ).map((f: any) => ({
+          name: f.name,
+          created_at: f.modified || new Date().toISOString(),
+          updated_at: f.modified || new Date().toISOString(),
+          metadata: { size: f.size }
+        }));
+        allFiles.push(...videoFiles);
+      }
+      
+      // Also try to get all videos from API
+      try {
+        const videos = await apiClient.getVideos(matchId);
+        videos?.forEach((v: any) => {
+          if (v.file_url && !allFiles.some(f => f.name === v.file_name)) {
+            allFiles.push({
+              name: v.file_name || v.file_url.split('/').pop() || 'video.mp4',
+              created_at: v.created_at,
+              updated_at: v.created_at,
+              metadata: null
+            });
+          }
+        });
+      } catch {}
 
+      console.log(`Found ${allFiles.length} video files`);
       setStorageFiles(allFiles);
     } catch (error) {
       console.error('Error:', error);
@@ -115,10 +91,7 @@ export function LinkVideoDialog({ open, onOpenChange, matchId, onVideoLinked }: 
     let videoUrl = '';
 
     if (mode === 'storage' && selectedFile) {
-      const { data } = supabase.storage
-        .from('match-videos')
-        .getPublicUrl(selectedFile);
-      videoUrl = data.publicUrl;
+      videoUrl = apiClient.getStorageUrl(matchId, 'videos', selectedFile);
     } else if (mode === 'url' && manualUrl) {
       videoUrl = manualUrl;
     }
@@ -135,41 +108,26 @@ export function LinkVideoDialog({ open, onOpenChange, matchId, onVideoLinked }: 
     setIsLoading(true);
 
     try {
-      // Check if there's an existing video record with empty file_url
-      const { data: existingVideos, error: fetchError } = await supabase
-        .from('videos')
-        .select('id')
-        .eq('match_id', matchId)
-        .or('file_url.is.null,file_url.eq.')
-        .limit(1);
+      // Check if there's an existing video record
+      const videos = await apiClient.getVideos(matchId);
+      const emptyVideo = videos?.find((v: any) => !v.file_url);
 
-      if (fetchError) throw fetchError;
-
-      if (existingVideos && existingVideos.length > 0) {
+      if (emptyVideo) {
         // Update existing record
-        const { error: updateError } = await supabase
-          .from('videos')
-          .update({
-            file_url: videoUrl,
-            status: 'complete'
-          })
-          .eq('id', existingVideos[0].id);
-
-        if (updateError) throw updateError;
-        console.log('Updated existing video record:', existingVideos[0].id);
+        await apiClient.updateVideo(emptyVideo.id, {
+          file_url: videoUrl,
+          status: 'completed'
+        });
+        console.log('Updated existing video record:', emptyVideo.id);
       } else {
         // Insert new record
-        const { error: insertError } = await supabase
-          .from('videos')
-          .insert({
-            match_id: matchId,
-            file_url: videoUrl,
-            file_name: mode === 'storage' ? selectedFile : 'Vídeo vinculado manualmente',
-            video_type: 'full',
-            status: 'complete'
-          });
-
-        if (insertError) throw insertError;
+        await apiClient.createVideo({
+          match_id: matchId,
+          file_url: videoUrl,
+          file_name: mode === 'storage' ? selectedFile : 'Vídeo vinculado manualmente',
+          video_type: 'full',
+          status: 'completed'
+        });
         console.log('Inserted new video record');
       }
 

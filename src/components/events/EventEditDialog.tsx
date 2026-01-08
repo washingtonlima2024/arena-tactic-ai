@@ -19,7 +19,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Loader2, Save, Trash2, CheckCircle, XCircle, Clock, Play, Plus } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 
@@ -127,54 +127,44 @@ export function EventEditDialog({
           return;
         }
 
-        const { error } = await supabase
-          .from('match_events')
-          .insert({
-            match_id: targetMatchId,
-            event_type: eventType,
-            minute: minute ? parseInt(minute) : null,
-            second: second ? parseInt(second) : null,
-            description: description || null,
-            metadata: { 
-              team, 
-              player: playerName || undefined,
-              aiGenerated: false, 
-              manual: true 
-            },
-            position_x: positionX ? parseFloat(positionX) : null,
-            position_y: positionY ? parseFloat(positionY) : null,
-            approval_status: 'approved',
-            approved_by: user?.id,
-            approved_at: new Date().toISOString(),
-          });
-
-        if (error) throw error;
+        await apiClient.createEvent(targetMatchId, {
+          event_type: eventType,
+          minute: minute ? parseInt(minute) : null,
+          second: second ? parseInt(second) : null,
+          description: description || null,
+          metadata: { 
+            team, 
+            player: playerName || undefined,
+            aiGenerated: false, 
+            manual: true 
+          },
+          position_x: positionX ? parseFloat(positionX) : null,
+          position_y: positionY ? parseFloat(positionY) : null,
+          approval_status: 'approved',
+          approved_by: user?.id,
+          approved_at: new Date().toISOString(),
+        });
 
         toast.success('Evento criado com sucesso!');
       } else {
         // Update existing event
-        const { error } = await supabase
-          .from('match_events')
-          .update({
-            event_type: eventType,
-            minute: minute ? parseInt(minute) : null,
-            second: second ? parseInt(second) : null,
-            description: description || null,
-            metadata: { 
-              team, 
-              player: playerName || undefined,
-              aiGenerated: false, 
-              edited: true 
-            },
-            position_x: positionX ? parseFloat(positionX) : null,
-            position_y: positionY ? parseFloat(positionY) : null,
-            approval_status: 'pending',
-            approved_by: null,
-            approved_at: null,
-          })
-          .eq('id', event!.id);
-
-        if (error) throw error;
+        await apiClient.updateEvent(event!.id!, {
+          event_type: eventType,
+          minute: minute ? parseInt(minute) : null,
+          second: second ? parseInt(second) : null,
+          description: description || null,
+          metadata: { 
+            team, 
+            player: playerName || undefined,
+            aiGenerated: false, 
+            edited: true 
+          },
+          position_x: positionX ? parseFloat(positionX) : null,
+          position_y: positionY ? parseFloat(positionY) : null,
+          approval_status: 'pending',
+          approved_by: null,
+          approved_at: null,
+        });
 
         toast.success('Evento atualizado! Aguardando aprovação.');
       }
@@ -194,16 +184,11 @@ export function EventEditDialog({
     
     setIsApproving(true);
     try {
-      const { error } = await supabase
-        .from('match_events')
-        .update({
-          approval_status: approved ? 'approved' : 'rejected',
-          approved_by: user?.id,
-          approved_at: new Date().toISOString(),
-        })
-        .eq('id', event.id);
-
-      if (error) throw error;
+      await apiClient.updateEvent(event.id, {
+        approval_status: approved ? 'approved' : 'rejected',
+        approved_by: user?.id,
+        approved_at: new Date().toISOString(),
+      });
 
       toast.success(approved ? 'Evento aprovado!' : 'Evento rejeitado');
       onSave();
@@ -223,12 +208,7 @@ export function EventEditDialog({
     
     setIsDeleting(true);
     try {
-      const { error } = await supabase
-        .from('match_events')
-        .delete()
-        .eq('id', event.id);
-
-      if (error) throw error;
+      await apiClient.deleteEvent(event.id);
 
       toast.success('Evento excluído!');
       onSave();
