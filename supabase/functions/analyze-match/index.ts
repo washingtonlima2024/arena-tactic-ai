@@ -165,7 +165,7 @@ IMPORTANTE:
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      console.log(`Chamando Gemini 2.5 Pro (tentativa ${attempt}/${MAX_RETRIES})...`);
+      console.log(`Chamando Gemini 2.5 Flash (tentativa ${attempt}/${MAX_RETRIES})...`);
 
       try {
         const aiResponse = await fetch('https://ai.gateway.lovable.dev/v1/chat/completions', {
@@ -175,7 +175,7 @@ IMPORTANTE:
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            model: 'google/gemini-2.5-pro',
+            model: 'google/gemini-2.5-flash',
             messages: [
               { role: 'system', content: systemPrompt },
               { role: 'user', content: userPrompt }
