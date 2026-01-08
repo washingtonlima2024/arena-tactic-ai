@@ -36,7 +36,7 @@ import { useStartAnalysis, useAnalysisJob } from '@/hooks/useAnalysisJob';
 import { useWhisperTranscription } from '@/hooks/useWhisperTranscription';
 import { AnalysisProgress } from '@/components/analysis/AnalysisProgress';
 import { toast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import arenaPlayWordmark from '@/assets/arena-play-wordmark.png';
@@ -83,13 +83,12 @@ export default function VideoUpload() {
     queryKey: ['match-for-reimport', existingMatchId],
     queryFn: async () => {
       if (!existingMatchId) return null;
-      const { data, error } = await supabase
-        .from('matches')
-        .select('*, home_team:teams!matches_home_team_id_fkey(*), away_team:teams!matches_away_team_id_fkey(*)')
-        .eq('id', existingMatchId)
-        .maybeSingle();
-      if (error || !data) return null;
-      return data;
+      try {
+        const data = await apiClient.getMatch(existingMatchId);
+        return data;
+      } catch {
+        return null;
+      }
     },
     enabled: !!existingMatchId
   });
@@ -112,12 +111,12 @@ export default function VideoUpload() {
   const { data: allMatches = [], isLoading: isLoadingMatches } = useQuery({
     queryKey: ['all-matches-for-selection'],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from('matches')
-        .select('*, home_team:teams!matches_home_team_id_fkey(*), away_team:teams!matches_away_team_id_fkey(*)')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      return data || [];
+      try {
+        const data = await apiClient.getMatches();
+        return data || [];
+      } catch {
+        return [];
+      }
     }
   });
   
@@ -295,22 +294,16 @@ export default function VideoUpload() {
         );
       }, 1000);
 
-      const { data, error } = await supabase.storage
-        .from('match-videos')
-        .upload(fileName, file);
+      // Upload para storage local - matchId temporário se ainda não existir
+      const tempMatchId = selectedExistingMatch || 'temp-' + Date.now();
+      const result = await apiClient.uploadFile(tempMatchId, 'videos', file, fileName);
 
       clearInterval(progressInterval);
-
-      if (error) throw error;
-
-      const { data: urlData } = supabase.storage
-        .from('match-videos')
-        .getPublicUrl(fileName);
 
       setSegments(prev => 
         prev.map(s => 
           s.id === segmentId 
-            ? { ...s, progress: 100, status: 'complete', url: urlData.publicUrl, elapsedSeconds: undefined }
+            ? { ...s, progress: 100, status: 'complete', url: result.url, elapsedSeconds: undefined }
             : s
         )
       );
@@ -656,14 +649,13 @@ export default function VideoUpload() {
           return null;
         }
         
-        console.log('[Fallback] Invocando edge function transcribe-large-video...');
-        const { data, error } = await supabase.functions.invoke('transcribe-large-video', {
-          body: { videoUrl: requestBody.videoUrl || requestBody.embedUrl }
-        });
-        
-        console.log('[Fallback] Resposta:', { success: data?.success, hasText: !!data?.text, error: error?.message || data?.error });
-        
-        if (error) {
+        console.log('[Fallback] Invocando transcribe-large-video via apiClient...');
+        let data: { success?: boolean; text?: string; srtContent?: string; requiresSrt?: boolean; error?: string };
+        try {
+          data = await apiClient.transcribeLargeVideo({ 
+            videoUrl: requestBody.videoUrl || requestBody.embedUrl 
+          });
+        } catch (error: any) {
           console.error(`[Tentativa ${attempt}] Erro na transcrição Whisper:`, error);
           if (attempt < MAX_RETRIES) {
             console.log('Tentando novamente...');
@@ -671,6 +663,8 @@ export default function VideoUpload() {
           }
           throw error;
         }
+        
+        console.log('[Fallback] Resposta:', { success: data?.success, hasText: !!data?.text, error: data?.error });
         
         // Check if embed requires SRT
         if (data?.requiresSrt) {
@@ -796,7 +790,7 @@ export default function VideoUpload() {
       // Register all video segments - USANDO currentSegments
       for (const segment of currentSegments) {
         if (segment.status === 'complete' || segment.status === 'ready') {
-          await supabase.from('videos').insert({
+          await apiClient.createVideo({
             match_id: matchId,
             file_url: segment.url || '',
             file_name: segment.title || segment.name,

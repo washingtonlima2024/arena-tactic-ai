@@ -13,7 +13,7 @@ import { OfficialField3D } from '@/components/tactical/OfficialField3D';
 import { FieldMeasurementsOverlay } from '@/components/tactical/FieldMeasurementsOverlay';
 import { GoalPlayAnimation, generateMockGoalPlay } from '@/components/tactical/GoalPlayAnimation';
 import { FIFA_FIELD, metersToSvg } from '@/constants/fieldDimensions';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { usePlayerDetection } from '@/hooks/usePlayerDetection';
 import { AppLayout } from '@/components/layout/AppLayout';
@@ -48,41 +48,37 @@ const Field = () => {
   const { data: goalEvents = [], isLoading } = useQuery({
     queryKey: ['goal-events'],
     queryFn: async () => {
-      const { data: events, error } = await supabase
-        .from('match_events')
-        .select(`
-          id,
-          minute,
-          second,
-          description,
-          metadata,
-          match_id,
-          matches!inner(
-            id,
-            home_team_id,
-            away_team_id,
-            home_team:teams!matches_home_team_id_fkey(name, primary_color),
-            away_team:teams!matches_away_team_id_fkey(name, primary_color)
-          )
-        `)
-        .eq('event_type', 'goal')
-        .order('created_at', { ascending: false })
-        .limit(10);
-
-      if (error) throw error;
-
-      return (events || []).map((e: any) => ({
-        id: e.id,
-        minute: e.minute || 0,
-        second: e.second || 0,
-        description: e.description || 'Gol',
-        team: (e.metadata?.team === 'away' ? 'away' : 'home') as 'home' | 'away',
-        matchId: e.match_id,
-        homeTeam: e.matches?.home_team?.name || 'Time Casa',
-        awayTeam: e.matches?.away_team?.name || 'Time Fora',
-        homeColor: e.matches?.home_team?.primary_color || '#10b981',
-        awayColor: e.matches?.away_team?.primary_color || '#ef4444',
-      })) as GoalEvent[];
+      try {
+        // Buscar partidas primeiro
+        const matches = await apiClient.getMatches();
+        const goalEventsResult: GoalEvent[] = [];
+        
+        // Para cada partida, buscar eventos de gol
+        for (const match of matches.slice(0, 5)) {
+          const events = await apiClient.getMatchEvents(match.id);
+          const goals = events.filter((e: any) => e.event_type === 'goal');
+          
+          goals.forEach((e: any) => {
+            goalEventsResult.push({
+              id: e.id,
+              minute: e.minute || 0,
+              second: e.second || 0,
+              description: e.description || 'Gol',
+              team: (e.metadata?.team === 'away' ? 'away' : 'home') as 'home' | 'away',
+              matchId: match.id,
+              homeTeam: match.home_team?.name || 'Time Casa',
+              awayTeam: match.away_team?.name || 'Time Fora',
+              homeColor: match.home_team?.primary_color || '#10b981',
+              awayColor: match.away_team?.primary_color || '#ef4444',
+            });
+          });
+        }
+        
+        return goalEventsResult.slice(0, 10);
+      } catch (error) {
+        console.error('Erro ao buscar gols:', error);
+        return [];
+      }
     }
   });
 
