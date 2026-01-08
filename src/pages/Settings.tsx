@@ -27,8 +27,13 @@ import {
   AlertCircle,
   Loader2,
   Server,
-  Cloud
+  Cloud,
+  Eye,
+  EyeOff,
+  Sparkles,
+  Brain
 } from 'lucide-react';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getApiMode, setApiMode, type ApiMode } from '@/lib/apiMode';
 
 export default function Settings() {
@@ -50,6 +55,18 @@ export default function Settings() {
   const [notifyInsights, setNotifyInsights] = useState(true);
   const [notifyErrors, setNotifyErrors] = useState(true);
   const [notifyUpdates, setNotifyUpdates] = useState(false);
+
+  // AI Provider settings
+  const [geminiApiKey, setGeminiApiKey] = useState('');
+  const [geminiModel, setGeminiModel] = useState('gemini-2.5-flash');
+  const [geminiEnabled, setGeminiEnabled] = useState(true);
+  
+  const [openaiApiKey, setOpenaiApiKey] = useState('');
+  const [openaiModel, setOpenaiModel] = useState('gpt-4o-mini');
+  const [openaiEnabled, setOpenaiEnabled] = useState(false);
+
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
+  const [showOpenaiKey, setShowOpenaiKey] = useState(false);
 
   // API Mode
   const [apiMode, setApiModeState] = useState<ApiMode>(getApiMode());
@@ -85,6 +102,15 @@ export default function Settings() {
       setNotifyInsights(apiSettings.find(s => s.setting_key === 'notify_insights')?.setting_value !== 'false');
       setNotifyErrors(apiSettings.find(s => s.setting_key === 'notify_errors')?.setting_value !== 'false');
       setNotifyUpdates(apiSettings.find(s => s.setting_key === 'notify_updates')?.setting_value === 'true');
+      
+      // AI Provider settings
+      setGeminiApiKey(apiSettings.find(s => s.setting_key === 'gemini_api_key')?.setting_value || '');
+      setGeminiModel(apiSettings.find(s => s.setting_key === 'gemini_model')?.setting_value || 'gemini-2.5-flash');
+      setGeminiEnabled(apiSettings.find(s => s.setting_key === 'gemini_enabled')?.setting_value !== 'false');
+      
+      setOpenaiApiKey(apiSettings.find(s => s.setting_key === 'openai_api_key')?.setting_value || '');
+      setOpenaiModel(apiSettings.find(s => s.setting_key === 'openai_model')?.setting_value || 'gpt-4o-mini');
+      setOpenaiEnabled(apiSettings.find(s => s.setting_key === 'openai_enabled')?.setting_value === 'true');
     }
   }, [apiSettings]);
 
@@ -100,6 +126,13 @@ export default function Settings() {
         upsertApiSetting.mutateAsync({ key: 'notify_insights', value: String(notifyInsights) }),
         upsertApiSetting.mutateAsync({ key: 'notify_errors', value: String(notifyErrors) }),
         upsertApiSetting.mutateAsync({ key: 'notify_updates', value: String(notifyUpdates) }),
+        // AI Provider settings
+        upsertApiSetting.mutateAsync({ key: 'gemini_api_key', value: geminiApiKey }),
+        upsertApiSetting.mutateAsync({ key: 'gemini_model', value: geminiModel }),
+        upsertApiSetting.mutateAsync({ key: 'gemini_enabled', value: String(geminiEnabled) }),
+        upsertApiSetting.mutateAsync({ key: 'openai_api_key', value: openaiApiKey }),
+        upsertApiSetting.mutateAsync({ key: 'openai_model', value: openaiModel }),
+        upsertApiSetting.mutateAsync({ key: 'openai_enabled', value: String(openaiEnabled) }),
       ]);
       toast.success('Todas as configurações foram salvas!');
     } catch (error) {
@@ -362,50 +395,188 @@ export default function Settings() {
 
           {/* API Tab */}
           <TabsContent value="api" className="space-y-6">
+            {/* Google Gemini Configuration */}
             <Card variant="glow">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Sparkles className="h-5 w-5 text-blue-500" />
+                      Google Gemini
+                    </CardTitle>
+                    <CardDescription>
+                      Modelos avançados para análise de vídeo e texto
+                    </CardDescription>
+                  </div>
+                  <Switch 
+                    checked={geminiEnabled} 
+                    onCheckedChange={setGeminiEnabled}
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Chave de API</Label>
+                    <div className="relative">
+                      <Input 
+                        type={showGeminiKey ? 'text' : 'password'}
+                        value={geminiApiKey}
+                        onChange={(e) => setGeminiApiKey(e.target.value)}
+                        placeholder="AIza..."
+                        className="pr-10"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-0 h-full px-3"
+                        onClick={() => setShowGeminiKey(!showGeminiKey)}
+                      >
+                        {showGeminiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Modelo</Label>
+                    <Select value={geminiModel} onValueChange={setGeminiModel}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro (Mais preciso)</SelectItem>
+                        <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash (Balanceado)</SelectItem>
+                        <SelectItem value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Rápido)</SelectItem>
+                        <SelectItem value="gemini-3-pro-preview">Gemini 3 Pro Preview</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className={`rounded-lg border p-3 ${geminiEnabled && geminiApiKey ? 'border-green-500/30 bg-green-500/5' : 'border-muted bg-muted/30'}`}>
+                  <div className="flex items-center gap-2">
+                    {geminiEnabled && geminiApiKey ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        <span className="text-sm text-green-500">Configurado e ativo</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">
+                          {!geminiEnabled ? 'Desativado' : 'Aguardando chave de API'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* OpenAI GPT Configuration */}
+            <Card variant="glow">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Brain className="h-5 w-5 text-green-500" />
+                      OpenAI GPT
+                    </CardTitle>
+                    <CardDescription>
+                      Modelos de linguagem para análise e geração de texto
+                    </CardDescription>
+                  </div>
+                  <Switch 
+                    checked={openaiEnabled} 
+                    onCheckedChange={setOpenaiEnabled}
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>Chave de API</Label>
+                    <div className="relative">
+                      <Input 
+                        type={showOpenaiKey ? 'text' : 'password'}
+                        value={openaiApiKey}
+                        onChange={(e) => setOpenaiApiKey(e.target.value)}
+                        placeholder="sk-..."
+                        className="pr-10"
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="absolute right-0 top-0 h-full px-3"
+                        onClick={() => setShowOpenaiKey(!showOpenaiKey)}
+                      >
+                        {showOpenaiKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Modelo</Label>
+                    <Select value={openaiModel} onValueChange={setOpenaiModel}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="gpt-5">GPT-5 (Mais avançado)</SelectItem>
+                        <SelectItem value="gpt-5-mini">GPT-5 Mini (Balanceado)</SelectItem>
+                        <SelectItem value="gpt-5-nano">GPT-5 Nano (Rápido)</SelectItem>
+                        <SelectItem value="gpt-4o">GPT-4o (Multimodal)</SelectItem>
+                        <SelectItem value="gpt-4o-mini">GPT-4o Mini (Custo-benefício)</SelectItem>
+                        <SelectItem value="o3">O3 (Raciocínio avançado)</SelectItem>
+                        <SelectItem value="o4-mini">O4 Mini (Raciocínio rápido)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <div className={`rounded-lg border p-3 ${openaiEnabled && openaiApiKey ? 'border-green-500/30 bg-green-500/5' : 'border-muted bg-muted/30'}`}>
+                  <div className="flex items-center gap-2">
+                    {openaiEnabled && openaiApiKey ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        <span className="text-sm text-green-500">Configurado e ativo</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">
+                          {!openaiEnabled ? 'Desativado' : 'Aguardando chave de API'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Features Overview */}
+            <Card variant="glass">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Zap className="h-5 w-5 text-primary" />
-                  Integrações de IA
+                  Funcionalidades de IA
                 </CardTitle>
-                <CardDescription>
-                  A análise de vídeo e áudio utiliza IA integrada do Lovable Cloud
-                </CardDescription>
               </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
-                  <div className="flex items-center gap-3 mb-2">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <p className="font-medium text-primary">Lovable AI Ativo</p>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    O sistema utiliza modelos avançados (Gemini 2.5 Flash) para análise de vídeo 
-                    e transcrição de áudio, sem necessidade de configuração adicional.
-                  </p>
-                </div>
-
-                <Separator />
-
-                <div className="space-y-4">
-                  <p className="text-sm text-muted-foreground">
-                    Funcionalidades disponíveis:
-                  </p>
-                  <div className="grid gap-3 md:grid-cols-2">
-                    {[
-                      { name: 'Análise de Vídeo', desc: 'Detecção de jogadores, bola e jogadas' },
-                      { name: 'Transcrição de Áudio', desc: 'Conversão de narração em texto' },
-                      { name: 'Geração de Insights', desc: 'Análise tática automatizada' },
-                      { name: 'Extração de Eventos', desc: 'Identificação automática de gols, faltas, etc.' },
-                    ].map((feature) => (
-                      <div key={feature.name} className="flex items-start gap-2 p-3 rounded-lg bg-muted/30">
-                        <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 shrink-0" />
-                        <div>
-                          <p className="text-sm font-medium">{feature.name}</p>
-                          <p className="text-xs text-muted-foreground">{feature.desc}</p>
-                        </div>
+              <CardContent>
+                <div className="grid gap-3 md:grid-cols-2">
+                  {[
+                    { name: 'Análise de Vídeo', desc: 'Detecção de jogadores, bola e jogadas', provider: 'Gemini' },
+                    { name: 'Transcrição de Áudio', desc: 'Conversão de narração em texto', provider: 'Whisper/GPT' },
+                    { name: 'Geração de Insights', desc: 'Análise tática automatizada', provider: 'Gemini/GPT' },
+                    { name: 'Extração de Eventos', desc: 'Identificação de gols, faltas, etc.', provider: 'Gemini' },
+                  ].map((feature) => (
+                    <div key={feature.name} className="flex items-start gap-2 p-3 rounded-lg bg-muted/30">
+                      <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 shrink-0" />
+                      <div>
+                        <p className="text-sm font-medium">{feature.name}</p>
+                        <p className="text-xs text-muted-foreground">{feature.desc}</p>
+                        <p className="text-xs text-primary/70 mt-1">Provedor: {feature.provider}</p>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
               </CardContent>
             </Card>
