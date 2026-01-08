@@ -184,10 +184,10 @@ export function VideoSegmentCard({ segment, onChange, onRemove, onFallbackClick,
           <div className="space-y-3 p-3 rounded-lg bg-amber-500/10 border border-amber-500/30">
             <div className="flex items-center gap-2 text-amber-400">
               <AlertTriangle className="h-4 w-4" />
-              <span className="text-sm font-medium">Upload expirou após 60 segundos</span>
+              <span className="text-sm font-medium">Upload expirou após 5 minutos</span>
             </div>
             <p className="text-xs text-muted-foreground">
-              Arquivos grandes (&gt;50MB) podem falhar no upload direto. Recomendamos usar link externo.
+              Arquivos grandes podem demorar. Use o modo "Arquivos Locais" ou link externo.
             </p>
             <div className="flex gap-2">
               {onFallbackClick && (
