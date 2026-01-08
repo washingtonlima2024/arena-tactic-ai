@@ -2,9 +2,9 @@
 // Automatically regenerates clips when events are created or modified
 
 import { useCallback, useRef } from 'react';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { fetchFile } from '@ffmpeg/util';
 import { supabase } from '@/integrations/supabase/client';
+import { getFFmpeg } from '@/lib/ffmpegSingleton';
 import { CLIP_BUFFER_BEFORE_MS, CLIP_BUFFER_AFTER_MS, toMs } from './useClipGeneration';
 
 // Event type translations for subtitles
@@ -122,39 +122,7 @@ function msToFFmpegTimestamp(ms: number): string {
 }
 
 export function useEventClipSync() {
-  const ffmpegRef = useRef<FFmpeg | null>(null);
   const processingRef = useRef<Set<string>>(new Set());
-
-  // Load FFmpeg (same logic as useClipGeneration)
-  const loadFFmpeg = async (): Promise<FFmpeg> => {
-    if (ffmpegRef.current?.loaded) return ffmpegRef.current;
-
-    console.log('[EventClipSync] Loading FFmpeg.wasm...');
-    const ffmpeg = new FFmpeg();
-    ffmpegRef.current = ffmpeg;
-
-    ffmpeg.on('log', ({ message }) => {
-      console.log('[FFmpeg]', message);
-    });
-
-    try {
-      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-      const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
-      const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
-      
-      await ffmpeg.load({ coreURL, wasmURL });
-      console.log('[EventClipSync] FFmpeg loaded successfully');
-    } catch (error) {
-      console.error('[EventClipSync] Failed to load FFmpeg:', error);
-      // Try fallback
-      const fallbackURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
-      const coreURL = await toBlobURL(`${fallbackURL}/ffmpeg-core.js`, 'text/javascript');
-      const wasmURL = await toBlobURL(`${fallbackURL}/ffmpeg-core.wasm`, 'application/wasm');
-      await ffmpeg.load({ coreURL, wasmURL });
-    }
-
-    return ffmpeg;
-  };
 
   // Generate clip for a single event
   const generateEventClip = useCallback(async (
@@ -182,7 +150,7 @@ export function useEventClipSync() {
     try {
       updateProgress(5, 'Carregando processador de vídeo...');
       
-      const ffmpeg = await loadFFmpeg();
+      const ffmpeg = await getFFmpeg();
       
       // Calculate timestamps
       const videoStartMinute = video.start_minute || 0;

@@ -1,33 +1,5 @@
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
-
-let ffmpeg: FFmpeg | null = null;
-let ffmpegLoading: Promise<FFmpeg> | null = null;
-
-async function loadFFmpeg(): Promise<FFmpeg> {
-  if (ffmpeg?.loaded) return ffmpeg;
-  if (ffmpegLoading) return ffmpegLoading;
-  
-  ffmpegLoading = (async () => {
-    const ff = new FFmpeg();
-    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-    
-    try {
-      await ff.load({
-        coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-        wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-      });
-      ffmpeg = ff;
-      return ff;
-    } catch (error) {
-      console.error('[FFmpeg] Failed to load:', error);
-      ffmpegLoading = null;
-      throw error;
-    }
-  })();
-  
-  return ffmpegLoading;
-}
+import { fetchFile } from '@ffmpeg/util';
+import { getFFmpeg } from './ffmpegSingleton';
 
 export interface ClipExtractionResult {
   blob: Blob;
@@ -41,7 +13,7 @@ export async function extractVideoClip(
   onProgress?: (progress: number, message: string) => void
 ): Promise<Blob> {
   onProgress?.(5, 'Carregando FFmpeg...');
-  const ff = await loadFFmpeg();
+  const ff = await getFFmpeg();
   
   onProgress?.(10, 'Baixando vídeo...');
   
@@ -102,7 +74,7 @@ export async function extractMultipleClips(
   
   // Load FFmpeg once for all clips
   onClipProgress?.(0, clips.length, '', 0, 'Carregando FFmpeg...');
-  const ff = await loadFFmpeg();
+  const ff = await getFFmpeg();
   
   for (let i = 0; i < clips.length; i++) {
     if (abortSignal?.aborted) {
