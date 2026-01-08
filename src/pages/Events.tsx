@@ -40,7 +40,8 @@ import {
   Film,
   StopCircle,
   Radio,
-  Upload
+  Upload,
+  Cog
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -60,6 +61,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getEventTeam, getEventTimeMs as getEventTimeMsHelper, formatEventTime } from '@/lib/eventHelpers';
 import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
 import { VideoUploadCard } from '@/components/events/VideoUploadCard';
+import { apiClient } from '@/lib/apiClient';
 
 // EventRow component for rendering individual events
 interface EventRowProps {
@@ -218,6 +220,8 @@ export default function Events() {
   const [isCreatingEvent, setIsCreatingEvent] = useState(false);
   const [reanalyzeHalf, setReanalyzeHalf] = useState<'first' | 'second' | null>(null);
   const [showResetDialog, setShowResetDialog] = useState(false);
+  const [isProcessingMatch, setIsProcessingMatch] = useState(false);
+  const [processingStep, setProcessingStep] = useState<string>('');
   
   const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useMatchEvents(currentMatchId);
 
@@ -553,7 +557,76 @@ export default function Events() {
     });
   };
 
-  // Get thumbnail for event
+  // Handle full match processing (transcription + analysis)
+  const handleProcessMatch = async () => {
+    if (!currentMatchId || !selectedMatch || !matchVideos || matchVideos.length === 0) {
+      toast.error('Nenhum vídeo disponível para processar');
+      return;
+    }
+
+    setIsProcessingMatch(true);
+    
+    try {
+      const homeTeam = selectedMatch.home_team?.name || 'Casa';
+      const awayTeam = selectedMatch.away_team?.name || 'Visitante';
+      
+      for (const video of matchVideos) {
+        const videoType = video.video_type || 'full';
+        const halfLabel = videoType === 'first_half' ? '1º tempo' : 
+                          videoType === 'second_half' ? '2º tempo' : 'vídeo';
+        
+        // Step 1: Transcribe
+        setProcessingStep(`Transcrevendo ${halfLabel}...`);
+        console.log(`[ProcessMatch] Transcribing ${videoType}:`, video.file_url);
+        
+        const transcription = await apiClient.transcribeLargeVideo({
+          videoUrl: video.file_url,
+          matchId: currentMatchId,
+          language: 'pt'
+        });
+        
+        if (!transcription?.text) {
+          console.warn(`[ProcessMatch] No transcription for ${videoType}`);
+          continue;
+        }
+        
+        console.log(`[ProcessMatch] Transcription received, length: ${transcription.text.length}`);
+        
+        // Step 2: Analyze
+        setProcessingStep(`Analisando ${halfLabel}...`);
+        
+        const halfType = videoType === 'first_half' ? 'first' : 
+                         videoType === 'second_half' ? 'second' : 'first';
+        const startMinute = video.start_minute ?? (halfType === 'second' ? 45 : 0);
+        const endMinute = video.end_minute ?? (halfType === 'second' ? 90 : 45);
+        
+        await apiClient.analyzeMatch({
+          matchId: currentMatchId,
+          transcription: transcription.text,
+          homeTeam,
+          awayTeam,
+          gameStartMinute: startMinute,
+          gameEndMinute: endMinute,
+          halfType: halfType as 'first' | 'second',
+          autoClip: false,
+          includeSubtitles: true
+        });
+        
+        console.log(`[ProcessMatch] Analysis complete for ${videoType}`);
+      }
+      
+      toast.success('Partida processada com sucesso!');
+      refetchEvents();
+      queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
+      
+    } catch (error: any) {
+      console.error('[ProcessMatch] Error:', error);
+      toast.error(`Erro no processamento: ${error.message || 'Erro desconhecido'}`);
+    } finally {
+      setIsProcessingMatch(false);
+      setProcessingStep('');
+    }
+  };
   const getEventThumbnail = (eventId: string) => {
     const thumb = thumbnails.find(t => t.event_id === eventId);
     return thumb ? { imageUrl: thumb.image_url } : undefined;
@@ -734,11 +807,32 @@ export default function Events() {
             </Select>
             {isAdmin && currentMatchId && (
               <>
+                {/* Process Match Button - show when no events detected */}
+                {events.length === 0 && matchVideos && matchVideos.length > 0 && (
+                  <Button 
+                    variant="arena" 
+                    onClick={handleProcessMatch}
+                    disabled={isProcessingMatch}
+                    className="gap-2"
+                  >
+                    {isProcessingMatch ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                        {processingStep || 'Processando...'}
+                      </>
+                    ) : (
+                      <>
+                        <Cog className="h-4 w-4" />
+                        Processar Partida
+                      </>
+                    )}
+                  </Button>
+                )}
+                
                 <Button variant="arena" onClick={handleCreateEvent}>
                   <Plus className="mr-2 h-4 w-4" />
                   Novo Evento
                 </Button>
-                
                 {/* Regenerate Missing Clips Button */}
                 {matchVideo && !matchVideo.file_url.includes('embed') && eventsWithoutClips > 0 && (
                   <Button 
