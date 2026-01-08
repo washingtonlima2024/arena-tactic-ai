@@ -398,34 +398,45 @@ export default function Events() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  // Group events by half - use match_half field or metadata.half, fallback to minute-based
+  // Group events by half - use minute as PRIMARY criteria, match_half as secondary
+  // This ensures events are correctly grouped even if match_half field is wrong
   const firstHalfEvents = filteredEvents.filter(e => {
+    const minute = e.minute || 0;
     const matchHalf = (e as any).match_half;
     const metadataHalf = e.metadata?.half;
     
-    // Para vídeos 'full', usar minuto para decidir o tempo
-    if (matchHalf === 'full' || metadataHalf === 'full') {
-      return (e.minute || 0) < 45;
+    // PRIMARY: use minute (most reliable)
+    // Events before 45 minutes are first half
+    if (minute < 45) return true;
+    
+    // For minute 45+, check if explicitly marked as first half (stoppage time)
+    if (matchHalf === 'first' || metadataHalf === 'first') {
+      // Only trust this if minute is close to 45 (stoppage time scenario)
+      if (minute >= 45 && minute <= 50) return true;
     }
     
-    // Prefer explicit half markers, fallback to minute-based
-    if (matchHalf) return matchHalf === 'first';
-    if (metadataHalf) return metadataHalf === 'first';
-    return (e.minute || 0) < 45;
+    return false;
   });
+  
   const secondHalfEvents = filteredEvents.filter(e => {
+    const minute = e.minute || 0;
     const matchHalf = (e as any).match_half;
     const metadataHalf = e.metadata?.half;
     
-    // Para vídeos 'full', usar minuto para decidir o tempo
-    if (matchHalf === 'full' || metadataHalf === 'full') {
-      return (e.minute || 0) >= 45;
+    // PRIMARY: use minute (most reliable)
+    // Events at/after 45 minutes are second half (unless stoppage time)
+    if (minute >= 45) {
+      // Check if this might be first half stoppage time
+      if ((matchHalf === 'first' || metadataHalf === 'first') && minute <= 50) {
+        return false; // Stoppage time, keep in first half
+      }
+      return true;
     }
     
-    // Prefer explicit half markers, fallback to minute-based
-    if (matchHalf) return matchHalf === 'second';
-    if (metadataHalf) return metadataHalf === 'second';
-    return (e.minute || 0) >= 45;
+    // Explicitly marked as second half
+    if (matchHalf === 'second' || metadataHalf === 'second') return true;
+    
+    return false;
   });
 
   const getApprovalIcon = (status: string | null) => {
