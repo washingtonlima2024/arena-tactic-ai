@@ -873,6 +873,56 @@ export const apiClient = {
 
     return linkResult;
   },
+
+  // ============== Async Processing Pipeline ==============
+  startAsyncProcessing: async (data: {
+    matchId: string;
+    videos: Array<{ url: string; halfType: 'first' | 'second'; videoType: string; startMinute: number; endMinute: number; sizeMB?: number }>;
+    homeTeam: string;
+    awayTeam: string;
+    autoClip?: boolean;
+    autoAnalysis?: boolean;
+  }) => {
+    const serverUp = await isLocalServerAvailable();
+    
+    if (!serverUp) {
+      throw new Error('Processamento assíncrono só está disponível com o servidor Python local. Inicie com: cd video-processor && python server.py');
+    }
+    
+    return apiRequest<{ jobId: string; status: string }>('/api/process-match-async', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  },
+
+  getAsyncProcessingStatus: async (jobId: string) => {
+    return apiRequest<{
+      jobId: string;
+      status: 'queued' | 'preparing' | 'splitting' | 'transcribing' | 'analyzing' | 'clipping' | 'complete' | 'error';
+      stage: string;
+      progress: number;
+      progressMessage: string;
+      partsCompleted: number;
+      totalParts: number;
+      partsStatus: Array<{
+        part: number;
+        halfType: 'first' | 'second';
+        status: 'pending' | 'splitting' | 'transcribing' | 'done' | 'error';
+        progress: number;
+        message?: string;
+      }>;
+      estimatedTimeRemaining?: number;
+      error?: string;
+      eventsDetected?: number;
+      clipsGenerated?: number;
+    }>(`/api/process-match-async/status/${jobId}`);
+  },
+
+  cancelAsyncProcessing: async (jobId: string) => {
+    return apiRequest<{ success: boolean }>(`/api/process-match-async/${jobId}`, {
+      method: 'DELETE'
+    });
+  },
 };
 
 export default apiClient;

@@ -3145,6 +3145,538 @@ def global_search():
 
 
 # ============================================================================
+# ASYNC PROCESSING PIPELINE
+# ============================================================================
+
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import time as time_module
+
+# Global job tracker for async processing
+async_processing_jobs = {}
+
+def _update_async_job(job_id: str, status: str, progress: int, message: str = '', 
+                      stage: str = None, parts_completed: int = None, 
+                      total_parts: int = None, parts_status: list = None,
+                      error: str = None, events_detected: int = None, clips_generated: int = None):
+    """Update async job status in database and memory."""
+    session = get_session()
+    try:
+        job = session.query(AnalysisJob).filter_by(id=job_id).first()
+        if job:
+            job.status = status
+            job.progress = progress
+            job.progress_message = message
+            if stage:
+                job.stage = stage
+            if parts_completed is not None:
+                job.parts_completed = parts_completed
+            if total_parts is not None:
+                job.total_parts = total_parts
+            if parts_status is not None:
+                job.parts_status = parts_status
+            if error:
+                job.error_message = error
+            if status == 'complete':
+                job.completed_at = datetime.utcnow()
+            session.commit()
+            
+        # Also update in-memory tracker
+        if job_id in async_processing_jobs:
+            async_processing_jobs[job_id].update({
+                'status': status,
+                'progress': progress,
+                'progressMessage': message,
+                'stage': stage or async_processing_jobs[job_id].get('stage'),
+                'partsCompleted': parts_completed if parts_completed is not None else async_processing_jobs[job_id].get('partsCompleted', 0),
+                'totalParts': total_parts if total_parts is not None else async_processing_jobs[job_id].get('totalParts', 0),
+                'partsStatus': parts_status if parts_status is not None else async_processing_jobs[job_id].get('partsStatus', []),
+                'error': error,
+                'eventsDetected': events_detected if events_detected is not None else async_processing_jobs[job_id].get('eventsDetected'),
+                'clipsGenerated': clips_generated if clips_generated is not None else async_processing_jobs[job_id].get('clipsGenerated'),
+            })
+    except Exception as e:
+        print(f"[ASYNC-UPDATE] Error updating job {job_id}: {e}")
+    finally:
+        session.close()
+
+
+def _split_video_parallel(video_path: str, num_parts: int, output_dir: str, half_type: str):
+    """Split a video into parts - used by ThreadPoolExecutor."""
+    try:
+        parts = split_video(video_path, num_parts, output_dir)
+        return {
+            'success': True,
+            'halfType': half_type,
+            'parts': parts
+        }
+    except Exception as e:
+        return {
+            'success': False,
+            'halfType': half_type,
+            'error': str(e)
+        }
+
+
+def _transcribe_part_parallel(part_info: dict, half_type: str, match_id: str, minute_offset: float):
+    """Transcribe a single video part - used by ThreadPoolExecutor."""
+    try:
+        part_path = part_info['path']
+        part_num = part_info['part']
+        part_start = part_info['start']
+        part_duration = part_info['duration']
+        
+        # Calculate game minute
+        part_start_minute = minute_offset + (part_start / 60)
+        
+        print(f"[ASYNC-TRANSCRIBE] Part {part_num} (half={half_type}): transcribing...")
+        
+        # Use direct transcription for local files
+        result = _transcribe_video_part_direct(part_path, part_start, minute_offset)
+        
+        if result.get('success') and result.get('text'):
+            return {
+                'success': True,
+                'part': part_num,
+                'halfType': half_type,
+                'text': result.get('text', ''),
+                'srtContent': result.get('srtContent', ''),
+                'startMinute': part_start_minute,
+                'duration': part_duration
+            }
+        else:
+            return {
+                'success': False,
+                'part': part_num,
+                'halfType': half_type,
+                'error': result.get('error', 'Unknown error')
+            }
+    except Exception as e:
+        return {
+            'success': False,
+            'part': part_info.get('part', 0),
+            'halfType': half_type,
+            'error': str(e)
+        }
+
+
+def _process_match_pipeline(job_id: str, data: dict):
+    """
+    Main async processing pipeline.
+    Runs in a background thread to process an entire match.
+    """
+    match_id = data.get('matchId')
+    videos = data.get('videos', [])
+    home_team = data.get('homeTeam', 'Time A')
+    away_team = data.get('awayTeam', 'Time B')
+    auto_clip = data.get('autoClip', True)
+    
+    start_time = time_module.time()
+    
+    print(f"\n{'='*60}")
+    print(f"[ASYNC-PIPELINE] Starting job {job_id}")
+    print(f"[ASYNC-PIPELINE] Match: {match_id}")
+    print(f"[ASYNC-PIPELINE] Videos: {len(videos)}")
+    print(f"{'='*60}")
+    
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            # ========== PHASE 1: PREPARATION (5%) ==========
+            _update_async_job(job_id, 'preparing', 5, 'Preparando arquivos...', 'preparing')
+            
+            # Organize videos by half
+            first_half_videos = [v for v in videos if v.get('halfType') == 'first']
+            second_half_videos = [v for v in videos if v.get('halfType') == 'second']
+            
+            # Calculate parts needed based on size
+            def calc_parts(videos_list):
+                if not videos_list:
+                    return 0, []
+                total_mb = sum(v.get('sizeMB', 500) for v in videos_list)
+                parts = 4 if total_mb > 800 else 2 if total_mb > 300 else 1
+                return parts, videos_list
+            
+            first_parts_count, _ = calc_parts(first_half_videos)
+            second_parts_count, _ = calc_parts(second_half_videos)
+            total_parts = first_parts_count + second_parts_count
+            
+            # Initialize parts status
+            parts_status = []
+            for i in range(first_parts_count):
+                parts_status.append({'part': i + 1, 'halfType': 'first', 'status': 'pending', 'progress': 0})
+            for i in range(second_parts_count):
+                parts_status.append({'part': i + 1, 'halfType': 'second', 'status': 'pending', 'progress': 0})
+            
+            _update_async_job(job_id, 'preparing', 10, f'Preparando {total_parts} partes...', 
+                            'preparing', 0, total_parts, parts_status)
+            
+            # Download/copy videos
+            video_paths = {}
+            for i, video in enumerate(videos):
+                half_type = video.get('halfType', 'first')
+                video_url = video.get('url', '')
+                video_path = os.path.join(tmpdir, f'video_{half_type}_{i}.mp4')
+                
+                # Resolve local path or download
+                if video_url.startswith('/api/storage/') or 'localhost' in video_url:
+                    clean_url = video_url.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '')
+                    parts = clean_url.strip('/').split('/')
+                    if len(parts) >= 5 and parts[0] == 'api' and parts[1] == 'storage':
+                        local_match_id = parts[2]
+                        subfolder = parts[3]
+                        filename = '/'.join(parts[4:])
+                        local_path = get_file_path(local_match_id, subfolder, filename)
+                        if local_path and os.path.exists(local_path):
+                            # Create symlink instead of copy for speed
+                            os.symlink(local_path, video_path)
+                            print(f"[ASYNC-PIPELINE] Linked local file: {local_path}")
+                            video_paths[half_type] = video_path
+                        else:
+                            raise Exception(f"Arquivo local não encontrado: {local_path}")
+                else:
+                    if download_video(video_url, video_path):
+                        video_paths[half_type] = video_path
+                    else:
+                        raise Exception(f"Falha ao baixar vídeo: {video_url[:50]}")
+            
+            if not video_paths:
+                raise Exception("Nenhum vídeo válido encontrado")
+            
+            # ========== PHASE 2: PARALLEL SPLITTING (15%) ==========
+            _update_async_job(job_id, 'splitting', 15, 'Dividindo vídeos...', 'splitting')
+            
+            all_video_parts = []
+            
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                split_futures = {}
+                
+                for half_type, video_path in video_paths.items():
+                    num_parts = first_parts_count if half_type == 'first' else second_parts_count
+                    if num_parts > 1:
+                        output_dir = os.path.join(tmpdir, f'parts_{half_type}')
+                        os.makedirs(output_dir, exist_ok=True)
+                        
+                        future = executor.submit(_split_video_parallel, video_path, num_parts, output_dir, half_type)
+                        split_futures[future] = half_type
+                    else:
+                        # No splitting needed - use original
+                        all_video_parts.append({
+                            'halfType': half_type,
+                            'parts': [{'path': video_path, 'part': 1, 'start': 0, 'duration': 2700}]
+                        })
+                
+                for future in as_completed(split_futures):
+                    half_type = split_futures[future]
+                    result = future.result()
+                    if result['success']:
+                        all_video_parts.append({
+                            'halfType': half_type,
+                            'parts': result['parts']
+                        })
+                        print(f"[ASYNC-PIPELINE] ✓ Split {half_type}: {len(result['parts'])} parts")
+                    else:
+                        raise Exception(f"Falha ao dividir {half_type}: {result.get('error')}")
+            
+            _update_async_job(job_id, 'splitting', 20, 'Divisão concluída', 'splitting')
+            
+            # ========== PHASE 3: PARALLEL TRANSCRIPTION (60%) ==========
+            _update_async_job(job_id, 'transcribing', 20, 'Transcrevendo...', 'transcribing')
+            
+            transcription_results = {'first': [], 'second': []}
+            completed_parts = 0
+            
+            # Flatten all parts for parallel processing
+            all_parts_flat = []
+            for video_group in all_video_parts:
+                half_type = video_group['halfType']
+                minute_offset = 0 if half_type == 'first' else 45
+                for part_info in video_group['parts']:
+                    all_parts_flat.append({
+                        'partInfo': part_info,
+                        'halfType': half_type,
+                        'minuteOffset': minute_offset
+                    })
+            
+            # Process in parallel (limit to 4 workers to not overload Whisper)
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                transcribe_futures = {}
+                
+                for item in all_parts_flat:
+                    future = executor.submit(
+                        _transcribe_part_parallel,
+                        item['partInfo'],
+                        item['halfType'],
+                        match_id,
+                        item['minuteOffset']
+                    )
+                    transcribe_futures[future] = item
+                
+                for future in as_completed(transcribe_futures):
+                    item = transcribe_futures[future]
+                    result = future.result()
+                    completed_parts += 1
+                    
+                    # Update part status
+                    part_key = (item['halfType'], item['partInfo']['part'])
+                    for ps in parts_status:
+                        if ps['halfType'] == item['halfType'] and ps['part'] == item['partInfo']['part']:
+                            ps['status'] = 'done' if result['success'] else 'error'
+                            ps['progress'] = 100
+                            break
+                    
+                    # Calculate progress (20% to 80%)
+                    progress = 20 + int((completed_parts / len(all_parts_flat)) * 60)
+                    
+                    if result['success']:
+                        transcription_results[item['halfType']].append(result)
+                        print(f"[ASYNC-PIPELINE] ✓ Transcribed {item['halfType']} part {result['part']}: {len(result['text'])} chars")
+                        _update_async_job(job_id, 'transcribing', progress, 
+                                        f'Parte {completed_parts}/{len(all_parts_flat)} transcrita',
+                                        'transcribing', completed_parts, total_parts, parts_status)
+                    else:
+                        print(f"[ASYNC-PIPELINE] ✗ Failed {item['halfType']} part: {result.get('error')}")
+            
+            # Combine transcriptions
+            first_half_text = '\n\n'.join([r['text'] for r in sorted(transcription_results['first'], key=lambda x: x['part'])])
+            second_half_text = '\n\n'.join([r['text'] for r in sorted(transcription_results['second'], key=lambda x: x['part'])])
+            
+            if not first_half_text and not second_half_text:
+                raise Exception("Nenhuma transcrição foi gerada")
+            
+            # ========== PHASE 4: AI ANALYSIS (10%) ==========
+            _update_async_job(job_id, 'analyzing', 80, 'Analisando com IA...', 'analyzing')
+            
+            total_events = 0
+            
+            # Analyze first half
+            if first_half_text:
+                print(f"[ASYNC-PIPELINE] Analyzing first half...")
+                events = ai_services.analyze_match_events(first_half_text, home_team, away_team, 0, 45)
+                if events:
+                    # Save events
+                    session = get_session()
+                    try:
+                        for event_data in events:
+                            event = MatchEvent(
+                                match_id=match_id,
+                                event_type=event_data.get('event_type', 'unknown'),
+                                description=event_data.get('description'),
+                                minute=event_data.get('minute', 0),
+                                match_half='first_half',
+                                is_highlight=event_data.get('is_highlight', False),
+                                metadata={'ai_generated': True, 'pipeline': 'async', **event_data}
+                            )
+                            session.add(event)
+                        session.commit()
+                        total_events += len(events)
+                        print(f"[ASYNC-PIPELINE] ✓ First half: {len(events)} events saved")
+                    finally:
+                        session.close()
+            
+            # Analyze second half
+            if second_half_text:
+                print(f"[ASYNC-PIPELINE] Analyzing second half...")
+                events = ai_services.analyze_match_events(second_half_text, home_team, away_team, 45, 90)
+                if events:
+                    session = get_session()
+                    try:
+                        for event_data in events:
+                            raw_minute = event_data.get('minute', 45)
+                            if raw_minute < 45:
+                                raw_minute += 45
+                            event = MatchEvent(
+                                match_id=match_id,
+                                event_type=event_data.get('event_type', 'unknown'),
+                                description=event_data.get('description'),
+                                minute=raw_minute,
+                                match_half='second_half',
+                                is_highlight=event_data.get('is_highlight', False),
+                                metadata={'ai_generated': True, 'pipeline': 'async', **event_data}
+                            )
+                            session.add(event)
+                        session.commit()
+                        total_events += len(events)
+                        print(f"[ASYNC-PIPELINE] ✓ Second half: {len(events)} events saved")
+                    finally:
+                        session.close()
+            
+            _update_async_job(job_id, 'analyzing', 90, f'{total_events} eventos detectados', 
+                            'analyzing', events_detected=total_events)
+            
+            # ========== PHASE 5: AUTO CLIPS (10%) ==========
+            total_clips = 0
+            if auto_clip and total_events > 0:
+                _update_async_job(job_id, 'clipping', 90, 'Gerando clips...', 'clipping')
+                
+                # Get all events for clipping
+                session = get_session()
+                try:
+                    all_events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+                    events_data = [e.to_dict() for e in all_events]
+                    
+                    # Extract clips for each half
+                    for half_type, video_path in video_paths.items():
+                        half_events = [e for e in events_data if e['match_half'] == f'{half_type}_half']
+                        if half_events and os.path.exists(video_path):
+                            try:
+                                clips = extract_event_clips_auto(
+                                    match_id=match_id,
+                                    video_path=video_path if not os.path.islink(video_path) else os.readlink(video_path),
+                                    events=half_events,
+                                    half_type=half_type,
+                                    home_team=home_team,
+                                    away_team=away_team
+                                )
+                                total_clips += len(clips)
+                                print(f"[ASYNC-PIPELINE] ✓ Clips {half_type}: {len(clips)}")
+                            except Exception as e:
+                                print(f"[ASYNC-PIPELINE] ⚠ Clip extraction error: {e}")
+                finally:
+                    session.close()
+            
+            # ========== COMPLETE ==========
+            elapsed = time_module.time() - start_time
+            print(f"\n{'='*60}")
+            print(f"[ASYNC-PIPELINE] ✓ COMPLETE in {elapsed:.1f}s")
+            print(f"[ASYNC-PIPELINE] Events: {total_events}, Clips: {total_clips}")
+            print(f"{'='*60}")
+            
+            _update_async_job(job_id, 'complete', 100, 
+                            f'Concluído: {total_events} eventos, {total_clips} clips',
+                            'complete', total_parts, total_parts, parts_status,
+                            events_detected=total_events, clips_generated=total_clips)
+            
+            # Update match status
+            session = get_session()
+            try:
+                match = session.query(Match).filter_by(id=match_id).first()
+                if match:
+                    match.status = 'completed'
+                    session.commit()
+            finally:
+                session.close()
+            
+    except Exception as e:
+        print(f"[ASYNC-PIPELINE] ✗ ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        _update_async_job(job_id, 'error', 0, str(e), 'error', error=str(e))
+
+
+@app.route('/api/process-match-async', methods=['POST'])
+def process_match_async():
+    """
+    Start async processing of a full match.
+    Returns immediately with job_id for status polling.
+    """
+    data = request.json
+    match_id = data.get('matchId')
+    videos = data.get('videos', [])
+    
+    if not match_id:
+        return jsonify({'error': 'matchId é obrigatório'}), 400
+    
+    if not videos:
+        return jsonify({'error': 'Pelo menos um vídeo é obrigatório'}), 400
+    
+    # Create job in database
+    job_id = str(uuid.uuid4())
+    session = get_session()
+    try:
+        job = AnalysisJob(
+            id=job_id,
+            match_id=match_id,
+            status='queued',
+            stage='queued',
+            progress=0,
+            progress_message='Na fila de processamento...',
+            started_at=datetime.utcnow()
+        )
+        session.add(job)
+        session.commit()
+    finally:
+        session.close()
+    
+    # Initialize in-memory tracker
+    async_processing_jobs[job_id] = {
+        'jobId': job_id,
+        'status': 'queued',
+        'stage': 'queued',
+        'progress': 0,
+        'progressMessage': 'Iniciando...',
+        'partsCompleted': 0,
+        'totalParts': 0,
+        'partsStatus': []
+    }
+    
+    # Start background processing thread
+    thread = threading.Thread(
+        target=_process_match_pipeline,
+        args=(job_id, data),
+        daemon=True
+    )
+    thread.start()
+    
+    print(f"[ASYNC] Started job {job_id} for match {match_id}")
+    
+    return jsonify({
+        'jobId': job_id,
+        'status': 'queued',
+        'message': 'Processamento iniciado em background'
+    })
+
+
+@app.route('/api/process-match-async/status/<job_id>', methods=['GET'])
+def get_async_job_status(job_id):
+    """Get detailed status of an async processing job."""
+    # Check in-memory cache first (faster)
+    if job_id in async_processing_jobs:
+        return jsonify(async_processing_jobs[job_id])
+    
+    # Fallback to database
+    session = get_session()
+    try:
+        job = session.query(AnalysisJob).filter_by(id=job_id).first()
+        if not job:
+            return jsonify({'error': 'Job não encontrado'}), 404
+        
+        return jsonify({
+            'jobId': job.id,
+            'status': job.status,
+            'stage': job.stage or job.status,
+            'progress': job.progress or 0,
+            'progressMessage': job.progress_message or '',
+            'partsCompleted': job.parts_completed or 0,
+            'totalParts': job.total_parts or 0,
+            'partsStatus': job.parts_status or [],
+            'error': job.error_message
+        })
+    finally:
+        session.close()
+
+
+@app.route('/api/process-match-async/<job_id>', methods=['DELETE'])
+def cancel_async_job(job_id):
+    """Cancel an async processing job."""
+    # Update status to cancelled
+    session = get_session()
+    try:
+        job = session.query(AnalysisJob).filter_by(id=job_id).first()
+        if job:
+            job.status = 'error'
+            job.error_message = 'Cancelado pelo usuário'
+            session.commit()
+        
+        # Remove from in-memory tracker
+        if job_id in async_processing_jobs:
+            async_processing_jobs[job_id]['status'] = 'error'
+            async_processing_jobs[job_id]['error'] = 'Cancelado pelo usuário'
+        
+        return jsonify({'success': True, 'message': 'Job cancelado'})
+    finally:
+        session.close()
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -3157,13 +3689,14 @@ if __name__ == '__main__':
     print(f"Vinhetas: {VIGNETTES_DIR}")
     print("=" * 60)
     print("Endpoints principais:")
-    print("  GET  /health              - Status do servidor")
-    print("  GET  /api/teams           - Listar times")
-    print("  GET  /api/matches         - Listar partidas")
-    print("  GET  /api/matches/<id>    - Detalhes da partida")
-    print("  POST /api/analyze-match   - Analisar partida")
-    print("  POST /api/chatbot         - Chatbot Arena")
-    print("  POST /extract-clip        - Extrair clip")
-    print("  POST /extract-batch       - Extrair múltiplos clips")
+    print("  GET  /health                          - Status do servidor")
+    print("  GET  /api/teams                       - Listar times")
+    print("  GET  /api/matches                     - Listar partidas")
+    print("  GET  /api/matches/<id>                - Detalhes da partida")
+    print("  POST /api/analyze-match               - Analisar partida")
+    print("  POST /api/process-match-async         - Pipeline assíncrono")
+    print("  GET  /api/process-match-async/status  - Status do pipeline")
+    print("  POST /api/chatbot                     - Chatbot Arena")
+    print("  POST /extract-clip                    - Extrair clip")
     print("=" * 60)
     app.run(host='0.0.0.0', port=5000, debug=True)
