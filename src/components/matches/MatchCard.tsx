@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
 import { MatchEditDialog } from '@/components/matches/MatchEditDialog';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { useAuth } from '@/hooks/useAuth';
 import { TeamBadge } from '@/components/teams/TeamBadge';
 
@@ -45,26 +45,19 @@ export function MatchCard({ match }: MatchCardProps) {
   const { data: matchVideo } = useQuery({
     queryKey: ['match-video', match.id],
     queryFn: async () => {
-      // First try to get 'full' video
-      const { data: fullVideo } = await supabase
-        .from('videos')
-        .select('*')
-        .eq('match_id', match.id)
-        .eq('video_type', 'full')
-        .maybeSingle();
-      
-      if (fullVideo) return fullVideo;
-      
-      // Fallback to any video associated with this match
-      const { data: anyVideo } = await supabase
-        .from('videos')
-        .select('*')
-        .eq('match_id', match.id)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      
-      return anyVideo;
+      try {
+        const videos = await apiClient.getVideos(match.id);
+        if (!videos || videos.length === 0) return null;
+        
+        // First try to get 'full' video
+        const fullVideo = videos.find((v: any) => v.video_type === 'full');
+        if (fullVideo) return fullVideo;
+        
+        // Fallback to any video
+        return videos[0];
+      } catch {
+        return null;
+      }
     },
     enabled: match.status === 'completed' || match.status === 'analyzing' || match.status === 'analyzed',
   });
@@ -73,14 +66,14 @@ export function MatchCard({ match }: MatchCardProps) {
   const { data: isFromLive } = useQuery({
     queryKey: ['match-from-live', match.id],
     queryFn: async () => {
-      const { data } = await supabase
-        .from('analysis_jobs')
-        .select('result')
-        .eq('match_id', match.id)
-        .maybeSingle();
-      
-      const result = data?.result as { source?: string } | null;
-      return result?.source === 'live';
+      try {
+        const jobs = await apiClient.getAnalysisJobs(match.id);
+        const job = jobs?.[0];
+        const result = job?.result as { source?: string } | null;
+        return result?.source === 'live';
+      } catch {
+        return false;
+      }
     },
     enabled: match.status === 'completed' || match.status === 'analyzed',
   });

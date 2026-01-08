@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import JSZip from 'jszip';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { LocalServerConfig } from './LocalServerConfig';
 
 interface Clip {
@@ -318,30 +318,27 @@ export function TeamPlaylist({
     const clipsSemUrl = pendingExport.filter(item => !item.clipUrl);
     
     try {
-      // Extrair clips que não têm URL via edge function
+      // Extrair clips que não têm URL via servidor local
       for (const clip of clipsSemUrl) {
         const startSeconds = Math.max(0, clip.startTime - 3); // 3s antes
         const durationSeconds = 8; // 8s total
         
         setExportProgress(`Extraindo: ${clip.minute}' - ${clip.type}`);
         
-        const { data, error } = await supabase.functions.invoke('extract-clip', {
-          body: {
-            eventId: clip.id,
-            matchId,
+        try {
+          const clipBlob = await apiClient.extractClip({
             videoUrl,
             startSeconds,
-            durationSeconds
-          }
-        });
-        
-        if (error) {
+            durationSeconds,
+            filename: `${clip.minute}min-${clip.type}.mp4`
+          });
+          
+          // Criar URL do blob para download
+          const clipUrl = URL.createObjectURL(clipBlob);
+          clipsComUrl.push({ ...clip, clipUrl });
+        } catch (error) {
           console.error('Erro ao extrair clip:', error);
           continue;
-        }
-        
-        if (data?.clipUrl) {
-          clipsComUrl.push({ ...clip, clipUrl: data.clipUrl });
         }
       }
       
