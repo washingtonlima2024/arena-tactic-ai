@@ -850,17 +850,19 @@ export default function VideoUpload() {
         (s.status === 'complete' || s.status === 'ready')
       );
       
-      // Segundo tempo: só incluir se NÃO tiver vídeo 'full' (evita duplicação) - USANDO currentSegments
+      // Segundo tempo: processar se existir, independente de 'full' - USANDO currentSegments
       const hasFullVideo = currentSegments.some(s => 
         s.videoType === 'full' && (s.status === 'complete' || s.status === 'ready')
       );
       
-      const secondHalfSegments = hasFullVideo 
-        ? [] // Se tem vídeo full, não precisa transcrever segundo tempo separado
-        : currentSegments.filter(s => 
-            (s.half === 'second' || s.videoType === 'second_half') && 
-            (s.status === 'complete' || s.status === 'ready')
-          );
+      // CORREÇÃO: Sempre buscar segmentos do 2º tempo se existirem
+      const secondHalfSegments = currentSegments.filter(s => 
+        (s.half === 'second' || s.videoType === 'second_half') && 
+        (s.status === 'complete' || s.status === 'ready')
+      );
+      
+      // Se tem vídeo full E segmentos do 2º tempo separados, priorizar os separados
+      const shouldProcessSecondHalf = secondHalfSegments.length > 0;
 
       console.log('=== SEGMENTOS FILTRADOS ===');
       console.log('1º Tempo / Full:', firstHalfSegments.length, 'segmentos');

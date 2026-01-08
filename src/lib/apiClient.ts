@@ -358,27 +358,30 @@ export const apiClient = {
     );
   },
 
-  // ============== AI Services (with Supabase fallback) ==============
-  analyzeMatch: async (data: { matchId: string; transcription: string; homeTeam: string; awayTeam: string; gameStartMinute?: number; gameEndMinute?: number; halfType?: string }) => {
-    return apiRequestWithFallback<any>(
-      '/api/analyze-match',
-      'analysis',
-      { method: 'POST', body: JSON.stringify(data) },
-      async () => {
-        // Fallback to Supabase Edge Function
-        console.log('[apiClient] Using Supabase Edge Function for match analysis');
-        const { data: result, error } = await supabase.functions.invoke('analyze-match', {
-          body: data
-        });
-        
-        if (error) {
-          console.error('[apiClient] Edge Function error:', error);
-          throw new Error(error.message || 'Falha na análise via cloud');
-        }
-        
-        return result;
-      }
-    );
+  // ============== AI Services (100% local) ==============
+  analyzeMatch: async (data: { 
+    matchId: string; 
+    transcription: string; 
+    homeTeam: string; 
+    awayTeam: string; 
+    gameStartMinute?: number; 
+    gameEndMinute?: number; 
+    halfType?: string;
+    autoClip?: boolean;
+    includeSubtitles?: boolean;
+  }) => {
+    // 100% local - sem fallback para Supabase
+    return apiRequest<any>('/api/analyze-match', { 
+      method: 'POST', 
+      body: JSON.stringify({
+        ...data,
+        gameStartMinute: data.gameStartMinute ?? 0,
+        gameEndMinute: data.gameEndMinute ?? (data.halfType === 'second' ? 90 : 45),
+        halfType: data.halfType ?? 'first',
+        autoClip: data.autoClip ?? false,
+        includeSubtitles: data.includeSubtitles ?? true,
+      })
+    });
   },
 
   generateNarration: (data: any) =>
