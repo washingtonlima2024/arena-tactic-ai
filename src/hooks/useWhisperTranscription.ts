@@ -328,23 +328,42 @@ export function useWhisperTranscription() {
     setIsTranscribing(true);
     setUsedFallback(false);
 
-    // PRIORIDADE 1: Tentar servidor local primeiro (mais confiável que FFmpeg no browser)
+    // PRIORIDADE ÚNICA: Usar servidor local/Edge Function (apiClient tem fallback automático)
+    // FFmpeg WASM é instável no preview, então vamos direto para o servidor
     try {
-      console.log('[Transcrição] Tentando servidor local primeiro (prioridade)...');
-      setTranscriptionProgress({ stage: 'transcribing', progress: 10, message: 'Conectando ao servidor local...' });
+      console.log('[Transcrição] Usando apiClient.transcribeLargeVideo (com fallback automático)...');
+      setTranscriptionProgress({ stage: 'transcribing', progress: 20, message: 'Transcrevendo áudio...' });
       
       const serverResult = await transcribeWithServerFallback(videoUrl, matchId, videoId);
       if (serverResult && serverResult.text && serverResult.text.trim().length > 0) {
-        console.log('[Transcrição] ✓ Servidor local funcionou:', serverResult.text.length, 'caracteres');
+        console.log('[Transcrição] ✓ Transcrição completa:', serverResult.text.length, 'caracteres');
         setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });
         setIsTranscribing(false);
         return serverResult;
       }
-    } catch (serverError) {
-      console.warn('[Transcrição] Servidor local indisponível, tentando FFmpeg no browser...', serverError);
+      
+      // Se chegou aqui sem texto, lançar erro
+      throw new Error('Transcrição retornou sem texto');
+    } catch (serverError: any) {
+      console.warn('[Transcrição] Erro na transcrição via servidor/cloud:', serverError);
+      
+      // Se está em ambiente de preview (não localhost), não tentar FFmpeg WASM
+      const isPreview = typeof window !== 'undefined' && 
+        !window.location.hostname.includes('localhost') && 
+        !window.location.hostname.includes('127.0.0.1');
+      
+      if (isPreview) {
+        console.error('[Transcrição] Ambiente de preview - FFmpeg WASM não disponível');
+        setTranscriptionProgress({ stage: 'error', progress: 0, message: 'Transcrição indisponível no preview' });
+        setIsTranscribing(false);
+        throw new Error(
+          serverError?.message || 
+          'Transcrição não disponível. Faça upload de um arquivo SRT ou tente novamente.'
+        );
+      }
     }
 
-    // PRIORIDADE 2: FFmpeg no browser como fallback
+    // FALLBACK: FFmpeg no browser (apenas em localhost)
     let detectedSizeMB = videoSizeMB;
     if (!detectedSizeMB) {
       try {
@@ -367,14 +386,14 @@ export function useWhisperTranscription() {
       
       let ffmpeg: FFmpeg;
       let retryCount = 0;
-      const maxRetries = 2; // Reduzido para 2 tentativas já que servidor falhou
+      const maxRetries = 2;
       
       while (retryCount < maxRetries) {
         try {
           ffmpeg = await Promise.race([
             loadFFmpeg(),
             new Promise<never>((_, reject) => 
-              setTimeout(() => reject(new Error('FFmpeg timeout')), 45000) // Reduzido timeout
+              setTimeout(() => reject(new Error('FFmpeg timeout')), 45000)
             )
           ]);
           console.log('[Transcrição] ✓ FFmpeg pronto');
@@ -394,8 +413,7 @@ export function useWhisperTranscription() {
             ffmpegRef.current = null;
           } else {
             throw new Error(
-              'Servidor local e processador de áudio indisponíveis. ' +
-              'Verifique se o servidor Python está rodando ou faça upload de um arquivo SRT.'
+              'Processador de áudio indisponível. Faça upload de um arquivo SRT.'
             );
           }
         }
