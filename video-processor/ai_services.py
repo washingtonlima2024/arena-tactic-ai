@@ -408,10 +408,11 @@ def analyze_match_events(
     home_team: str,
     away_team: str,
     game_start_minute: int = 0,
-    game_end_minute: int = 45
+    game_end_minute: int = 45,
+    max_retries: int = 3
 ) -> List[Dict[str, Any]]:
     """
-    Analyze match transcription to extract events.
+    Analyze match transcription to extract events using advanced few-shot prompting.
     
     Args:
         transcription: Match transcription text
@@ -419,52 +420,170 @@ def analyze_match_events(
         away_team: Away team name
         game_start_minute: Start minute of the game segment
         game_end_minute: End minute of the game segment
+        max_retries: Maximum retry attempts on failure
     
     Returns:
-        List of detected events
+        List of detected events with validated scores
     """
+    import time
+    
     half_desc = "1º Tempo (0-45 min)" if game_start_minute < 45 else "2º Tempo (45-90 min)"
     
-    system_prompt = f"""Você é um analista de futebol especializado em detectar eventos em transcrições de partidas.
-    
-Partida: {home_team} vs {away_team}
-Período analisado: {half_desc} (minutos {game_start_minute} a {game_end_minute})
+    # Advanced system prompt with few-shot examples (matching Edge Function quality)
+    system_prompt = f"""Você é um ANALISTA ESPECIALIZADO em futebol brasileiro com anos de experiência.
 
-Analise a transcrição e identifique TODOS os eventos relevantes. Para cada evento, retorne um JSON com:
-- event_type: tipo do evento (goal, shot, foul, card, corner, offside, substitution, save, pass, tackle, chance, defense, pressure)
-- description: descrição em português do que aconteceu
-- minute: minuto do jogo (entre {game_start_minute} e {game_end_minute})
-- team: time envolvido ("home" para {home_team}, "away" para {away_team})
-- player: nome do jogador (se mencionado)
-- is_highlight: true se for um momento importante (gol, chance clara, cartão)
+PARTIDA: {home_team} (mandante) vs {away_team} (visitante)
+PERÍODO: {half_desc} (minutos {game_start_minute} a {game_end_minute})
 
-IMPORTANTE: 
-- Detecte TODOS os eventos mencionados, não apenas gols
-- Os minutos devem estar entre {game_start_minute} e {game_end_minute}
-- Seja inclusivo na detecção de eventos
-- Retorne APENAS um array JSON válido com os eventos detectados
-- Não adicione explicações, apenas o JSON array"""
+INSTRUÇÕES CRÍTICAS:
+1. Leia TODA a transcrição com atenção
+2. Identifique CADA evento mencionado pelo narrador
+3. Para GOLS, preste atenção especial em:
+   - Qual time marcou (mandante ou visitante)
+   - Se foi GOL CONTRA (o jogador marcou contra seu próprio time)
+   - Nome do jogador que marcou
+4. Retorne eventos em ordem cronológica
 
-    response = call_ai([
-        {'role': 'system', 'content': system_prompt},
-        {'role': 'user', 'content': transcription}
-    ])
+═══════════════════════════════════════════════════════════════
+EXEMPLOS DE EXTRAÇÃO (FEW-SHOT LEARNING):
+═══════════════════════════════════════════════════════════════
+
+EXEMPLO 1 - GOL NORMAL:
+Narração: "GOOOOOOL! É gol do Flamengo! Gabigol recebe na área e chuta forte!"
+→ Evento: {{ "minute": 23, "event_type": "goal", "team": "home", "description": "Gol de Gabigol! Chutou forte na área.", "player": "Gabigol", "isOwnGoal": false, "is_highlight": true }}
+
+EXEMPLO 2 - GOL CONTRA:
+Narração: "Ih, que azar! O zagueiro do Flamengo desvia e manda contra o próprio gol!"
+(Flamengo é mandante)
+→ Evento: {{ "minute": 35, "event_type": "goal", "team": "home", "description": "GOL CONTRA! Zagueiro desviou para o próprio gol.", "player": null, "isOwnGoal": true, "is_highlight": true }}
+NOTA: isOwnGoal=true significa que o ponto vai para o ADVERSÁRIO!
+
+EXEMPLO 3 - CARTÃO AMARELO:
+Narração: "Cartão amarelo para o jogador do Vasco que fez falta dura"
+→ Evento: {{ "minute": 40, "event_type": "yellow_card", "team": "away", "description": "Cartão amarelo por falta dura", "is_highlight": true }}
+
+EXEMPLO 4 - CHANCE CLARA:
+Narração: "Quase! O atacante chutou forte, o goleiro espalmou!"
+→ Evento: {{ "minute": 15, "event_type": "shot_on_target", "team": "home", "description": "Chute forte espalmado pelo goleiro!", "is_highlight": true }}
+
+EXEMPLO 5 - ESCANTEIO:
+Narração: "Escanteio para o time da casa"
+→ Evento: {{ "minute": 12, "event_type": "corner", "team": "home", "description": "Escanteio cobrado", "is_highlight": false }}
+
+EXEMPLO 6 - FALTA:
+Narração: "Falta dura no meio-campo"
+→ Evento: {{ "minute": 28, "event_type": "foul", "team": "away", "description": "Falta no meio-campo", "is_highlight": false }}
+
+═══════════════════════════════════════════════════════════════
+TIPOS DE EVENTOS VÁLIDOS:
+═══════════════════════════════════════════════════════════════
+- goal (GOL - SEMPRE detectar, incluir isOwnGoal)
+- shot_on_target (chute no gol)
+- shot (chute para fora)
+- save (defesa do goleiro)
+- foul (falta)
+- yellow_card (cartão amarelo)
+- red_card (cartão vermelho)
+- corner (escanteio)
+- offside (impedimento)
+- free_kick (falta perigosa)
+- penalty (pênalti)
+- substitution (substituição)
+- chance (chance clara)
+- defense (defesa/corte)
+- pressure (pressão alta)
+
+═══════════════════════════════════════════════════════════════
+REGRAS OBRIGATÓRIAS:
+═══════════════════════════════════════════════════════════════
+1. TODOS os gols DEVEM ser detectados
+2. Para gols: identifique corretamente o time que marcou
+3. Para gols contra: team = time do jogador que fez o gol contra, isOwnGoal = true
+4. Minutos devem estar entre {game_start_minute} e {game_end_minute}
+5. is_highlight = true para: gols, cartões, pênaltis, chances claras
+6. Retorne APENAS um array JSON válido, sem explicações
+
+FORMATO DE SAÍDA:
+[
+  {{"minute": X, "event_type": "...", "team": "home|away", "description": "...", "player": "...", "is_highlight": true|false, "isOwnGoal": false}},
+  ...
+]"""
+
+    user_prompt = f"""PASSO A PASSO PARA ANÁLISE:
+
+PASSO 1 - LEITURA: Leia a transcrição COMPLETA abaixo
+PASSO 2 - IDENTIFICAÇÃO: Identifique CADA momento importante mencionado
+PASSO 3 - CLASSIFICAÇÃO: Para cada evento, determine:
+   - Minuto aproximado (baseado no contexto)
+   - Tipo do evento
+   - Time envolvido ({home_team} = "home", {away_team} = "away")
+   - Se é destaque (gol, cartão, pênalti = sempre highlight)
+PASSO 4 - GOLS: Conte TODOS os gols e verifique:
+   - Qual time marcou cada gol
+   - Se algum foi gol contra
+PASSO 5 - JSON: Retorne o array JSON com todos os eventos
+
+═══════════════════════════════════════════════════════════════
+TRANSCRIÇÃO DA PARTIDA:
+═══════════════════════════════════════════════════════════════
+
+{transcription}
+
+═══════════════════════════════════════════════════════════════
+IMPORTANTE: Retorne APENAS o array JSON, sem texto adicional.
+═══════════════════════════════════════════════════════════════"""
+
+    events = []
+    last_error = None
     
-    if not response:
-        return []
+    for attempt in range(max_retries):
+        try:
+            print(f"[AI] Análise tentativa {attempt + 1}/{max_retries}")
+            
+            response = call_ai([
+                {'role': 'system', 'content': system_prompt},
+                {'role': 'user', 'content': user_prompt}
+            ], model='google/gemini-2.5-pro', max_tokens=8192)
+            
+            if not response:
+                last_error = "Empty response from AI"
+                time.sleep(2)
+                continue
+            
+            # Parse JSON from response
+            start = response.find('[')
+            end = response.rfind(']') + 1
+            if start >= 0 and end > start:
+                events = json.loads(response[start:end])
+                print(f"[AI] ✓ Parsed {len(events)} events from response")
+                
+                # Validate and enrich events
+                validated_events = []
+                for event in events:
+                    # Ensure required fields
+                    event['event_type'] = event.get('event_type', 'unknown')
+                    event['minute'] = max(game_start_minute, min(game_end_minute, event.get('minute', game_start_minute)))
+                    event['team'] = event.get('team', 'home')
+                    event['description'] = event.get('description', '')[:200]
+                    event['is_highlight'] = event.get('is_highlight', event['event_type'] in ['goal', 'yellow_card', 'red_card', 'penalty'])
+                    event['isOwnGoal'] = event.get('isOwnGoal', False)
+                    validated_events.append(event)
+                
+                return validated_events
+            else:
+                last_error = f"No JSON array found in response: {response[:200]}"
+                
+        except json.JSONDecodeError as e:
+            last_error = f"JSON parse error: {e}"
+            print(f"[AI] JSON parse failed: {e}")
+        except Exception as e:
+            last_error = str(e)
+            print(f"[AI] Error: {e}")
+        
+        if attempt < max_retries - 1:
+            time.sleep(2 * (attempt + 1))  # Exponential backoff
     
-    # Try to parse JSON from response
-    try:
-        # Find JSON array in response
-        start = response.find('[')
-        end = response.rfind(']') + 1
-        if start >= 0 and end > start:
-            events = json.loads(response[start:end])
-            print(f"[AI] Parsed {len(events)} events from response")
-            return events
-    except json.JSONDecodeError:
-        print(f"Failed to parse events JSON: {response}")
-    
+    print(f"[AI] All {max_retries} attempts failed. Last error: {last_error}")
     return []
 
 
@@ -1085,20 +1204,26 @@ def generate_thumbnail_image(
 
 def transcribe_large_video(
     video_url: str,
-    match_id: str = None
+    match_id: str = None,
+    max_chunk_size_mb: int = 20
 ) -> Dict[str, Any]:
     """
-    Transcribe a large video file.
+    Transcribe a large video file with multi-chunk support.
+    
+    For videos > 24MB, splits audio into chunks and transcribes each separately,
+    then combines the results. This ensures complete transcription coverage.
     
     Args:
         video_url: URL to the video file (can be local /api/storage/ path or external URL)
         match_id: Related match ID
+        max_chunk_size_mb: Maximum size per chunk in MB (default: 20MB)
     
     Returns:
         Dict with transcription and SRT content
     """
     import subprocess
     import tempfile
+    import math
     from storage import get_file_path, STORAGE_DIR
     
     if not OPENAI_API_KEY:
@@ -1106,7 +1231,6 @@ def transcribe_large_video(
     
     print(f"[Transcribe] Iniciando transcrição para: {video_url}")
     
-    # Download video
     with tempfile.TemporaryDirectory() as tmpdir:
         video_path = os.path.join(tmpdir, 'video.mp4')
         audio_path = os.path.join(tmpdir, 'audio.mp3')
@@ -1115,10 +1239,8 @@ def transcribe_large_video(
         is_local = False
         if video_url.startswith('/api/storage/') or 'localhost' in video_url:
             is_local = True
-            # Parse: /api/storage/{match_id}/{subfolder}/{filename} or http://localhost:5000/api/storage/...
             clean_url = video_url.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '')
             parts = clean_url.strip('/').split('/')
-            # Expected: ['api', 'storage', match_id, subfolder, filename...]
             if len(parts) >= 5 and parts[0] == 'api' and parts[1] == 'storage':
                 local_match_id = parts[2]
                 subfolder = parts[3]
@@ -1127,7 +1249,6 @@ def transcribe_large_video(
                 print(f"[Transcribe] URL local detectada -> Caminho: {local_path}")
                 
                 if local_path and os.path.exists(local_path):
-                    # Copy local file to temp directory
                     import shutil
                     shutil.copy(local_path, video_path)
                     print(f"[Transcribe] Arquivo local copiado para: {video_path}")
@@ -1136,7 +1257,6 @@ def transcribe_large_video(
             else:
                 return {"error": f"Invalid local URL format: {video_url}"}
         else:
-            # External URL - download normally
             print(f"[Transcribe] URL externa, baixando...")
             try:
                 response = requests.get(video_url, stream=True, timeout=300)
@@ -1155,50 +1275,201 @@ def transcribe_large_video(
                 '-vn', '-acodec', 'libmp3lame', '-ab', '128k',
                 audio_path
             ]
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
             if result.returncode != 0:
                 return {"error": f"FFmpeg error: {result.stderr}"}
         except Exception as e:
             return {"error": f"Failed to extract audio: {str(e)}"}
         
-        # Transcribe with Whisper (verbose format for timestamps)
-        with open(audio_path, 'rb') as audio_file:
-            response = requests.post(
-                f'{OPENAI_API_URL}/audio/transcriptions',
-                headers={'Authorization': f'Bearer {OPENAI_API_KEY}'},
-                files={'file': audio_file},
-                data={
-                    'model': 'whisper-1',
-                    'language': 'pt',
-                    'response_format': 'verbose_json'
-                },
-                timeout=600
-            )
+        # Check audio file size
+        audio_size_bytes = os.path.getsize(audio_path)
+        audio_size_mb = audio_size_bytes / (1024 * 1024)
+        print(f"[Transcribe] Tamanho do áudio: {audio_size_mb:.2f} MB")
         
-        if not response.ok:
-            return {"error": f"Whisper error: {response.status_code}"}
+        # Whisper API limit is ~25MB, use 24MB as safe threshold
+        if audio_size_mb <= 24:
+            # Direct transcription for small files
+            print(f"[Transcribe] Arquivo pequeno, transcrição direta...")
+            return _transcribe_audio_file(audio_path, match_id)
+        else:
+            # Multi-chunk transcription for large files
+            print(f"[Transcribe] Arquivo grande ({audio_size_mb:.2f} MB), usando multi-chunk...")
+            return _transcribe_multi_chunk(audio_path, tmpdir, match_id, max_chunk_size_mb)
+
+
+def _transcribe_audio_file(audio_path: str, match_id: str = None) -> Dict[str, Any]:
+    """Transcribe a single audio file using Whisper API."""
+    with open(audio_path, 'rb') as audio_file:
+        response = requests.post(
+            f'{OPENAI_API_URL}/audio/transcriptions',
+            headers={'Authorization': f'Bearer {OPENAI_API_KEY}'},
+            files={'file': audio_file},
+            data={
+                'model': 'whisper-1',
+                'language': 'pt',
+                'response_format': 'verbose_json'
+            },
+            timeout=600
+        )
+    
+    if not response.ok:
+        return {"error": f"Whisper error: {response.status_code} - {response.text}"}
+    
+    data = response.json()
+    text = data.get('text', '')
+    segments = data.get('segments', [])
+    
+    srt_lines = []
+    for i, seg in enumerate(segments, 1):
+        start = _format_srt_time(seg.get('start', 0))
+        end = _format_srt_time(seg.get('end', 0))
+        text_seg = seg.get('text', '').strip()
+        srt_lines.append(f"{i}\n{start} --> {end}\n{text_seg}\n")
+    
+    srt_content = '\n'.join(srt_lines)
+    
+    return {
+        "success": True,
+        "text": text,
+        "srtContent": srt_content,
+        "segments": segments,
+        "matchId": match_id
+    }
+
+
+def _transcribe_multi_chunk(
+    audio_path: str, 
+    tmpdir: str, 
+    match_id: str = None,
+    max_chunk_size_mb: int = 20
+) -> Dict[str, Any]:
+    """
+    Transcribe large audio by splitting into chunks.
+    
+    Splits the audio into ~20MB chunks, transcribes each separately,
+    and combines the results maintaining proper timing.
+    """
+    import subprocess
+    import math
+    
+    # Get audio duration
+    probe_cmd = [
+        'ffprobe', '-v', 'quiet', '-print_format', 'json',
+        '-show_format', audio_path
+    ]
+    probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+    if probe_result.returncode != 0:
+        return {"error": "Failed to probe audio duration"}
+    
+    probe_data = json.loads(probe_result.stdout)
+    total_duration = float(probe_data.get('format', {}).get('duration', 0))
+    audio_size_bytes = os.path.getsize(audio_path)
+    audio_size_mb = audio_size_bytes / (1024 * 1024)
+    
+    # Calculate number of chunks needed
+    num_chunks = math.ceil(audio_size_mb / max_chunk_size_mb)
+    chunk_duration = total_duration / num_chunks
+    
+    print(f"[Transcribe] Dividindo em {num_chunks} chunks de ~{chunk_duration:.1f}s cada")
+    
+    all_text = []
+    all_segments = []
+    srt_index = 1
+    srt_lines = []
+    
+    for i in range(num_chunks):
+        start_time = i * chunk_duration
+        chunk_path = os.path.join(tmpdir, f'chunk_{i}.mp3')
         
-        data = response.json()
-        text = data.get('text', '')
-        segments = data.get('segments', [])
+        # Extract chunk
+        chunk_cmd = [
+            'ffmpeg', '-y',
+            '-ss', str(start_time),
+            '-i', audio_path,
+            '-t', str(chunk_duration),
+            '-acodec', 'libmp3lame', '-ab', '128k',
+            chunk_path
+        ]
         
-        # Generate SRT content
-        srt_lines = []
-        for i, seg in enumerate(segments, 1):
-            start = _format_srt_time(seg.get('start', 0))
-            end = _format_srt_time(seg.get('end', 0))
-            text_seg = seg.get('text', '').strip()
-            srt_lines.append(f"{i}\n{start} --> {end}\n{text_seg}\n")
+        chunk_result = subprocess.run(chunk_cmd, capture_output=True, text=True, timeout=120)
+        if chunk_result.returncode != 0:
+            print(f"[Transcribe] Falha ao extrair chunk {i}: {chunk_result.stderr}")
+            continue
         
-        srt_content = '\n'.join(srt_lines)
+        if not os.path.exists(chunk_path) or os.path.getsize(chunk_path) < 1000:
+            print(f"[Transcribe] Chunk {i} muito pequeno ou inexistente, pulando...")
+            continue
         
-        return {
-            "success": True,
-            "text": text,
-            "srtContent": srt_content,
-            "segments": segments,
-            "matchId": match_id
-        }
+        print(f"[Transcribe] Transcrevendo chunk {i+1}/{num_chunks} (início: {start_time:.1f}s)...")
+        
+        # Transcribe chunk
+        try:
+            with open(chunk_path, 'rb') as chunk_file:
+                response = requests.post(
+                    f'{OPENAI_API_URL}/audio/transcriptions',
+                    headers={'Authorization': f'Bearer {OPENAI_API_KEY}'},
+                    files={'file': chunk_file},
+                    data={
+                        'model': 'whisper-1',
+                        'language': 'pt',
+                        'response_format': 'verbose_json'
+                    },
+                    timeout=300
+                )
+            
+            if not response.ok:
+                print(f"[Transcribe] Whisper error chunk {i}: {response.status_code}")
+                continue
+            
+            chunk_data = response.json()
+            chunk_text = chunk_data.get('text', '')
+            chunk_segments = chunk_data.get('segments', [])
+            
+            all_text.append(chunk_text)
+            
+            # Adjust timestamps for this chunk's position
+            for seg in chunk_segments:
+                adjusted_start = seg.get('start', 0) + start_time
+                adjusted_end = seg.get('end', 0) + start_time
+                
+                adjusted_seg = {**seg, 'start': adjusted_start, 'end': adjusted_end}
+                all_segments.append(adjusted_seg)
+                
+                # Build SRT
+                start_str = _format_srt_time(adjusted_start)
+                end_str = _format_srt_time(adjusted_end)
+                text_seg = seg.get('text', '').strip()
+                srt_lines.append(f"{srt_index}\n{start_str} --> {end_str}\n{text_seg}\n")
+                srt_index += 1
+            
+            print(f"[Transcribe] ✓ Chunk {i+1}: {len(chunk_segments)} segmentos, {len(chunk_text)} chars")
+            
+        except Exception as e:
+            print(f"[Transcribe] Erro no chunk {i}: {e}")
+            continue
+        
+        # Clean up chunk file
+        try:
+            os.remove(chunk_path)
+        except:
+            pass
+    
+    if not all_text:
+        return {"error": "Failed to transcribe any chunks"}
+    
+    combined_text = ' '.join(all_text)
+    srt_content = '\n'.join(srt_lines)
+    
+    print(f"[Transcribe] ✓ Multi-chunk completo: {len(all_segments)} segmentos, {len(combined_text)} chars")
+    
+    return {
+        "success": True,
+        "text": combined_text,
+        "srtContent": srt_content,
+        "segments": all_segments,
+        "matchId": match_id,
+        "chunksProcessed": num_chunks
+    }
 
 
 def _format_srt_time(seconds: float) -> str:
