@@ -170,6 +170,87 @@ def concatenate_videos(segments: list, output_path: str, tmpdir: str) -> bool:
         return False
 
 
+def split_video(input_path: str, num_parts: int, output_dir: str) -> list:
+    """
+    Divide um vídeo em N partes iguais.
+    
+    Args:
+        input_path: Caminho do vídeo original
+        num_parts: Número de partes para dividir
+        output_dir: Diretório para salvar as partes
+    
+    Returns:
+        Lista de dicts com informações de cada parte:
+        [{'path': str, 'start': float, 'end': float, 'duration': float, 'part': int}]
+    """
+    try:
+        import json as json_lib
+        
+        # Get video duration
+        probe_cmd = [
+            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+            '-show_format', input_path
+        ]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        if probe_result.returncode != 0:
+            print(f"[SPLIT] Erro ao obter duração do vídeo")
+            return []
+        
+        probe_data = json_lib.loads(probe_result.stdout)
+        total_duration = float(probe_data.get('format', {}).get('duration', 0))
+        
+        if total_duration <= 0:
+            print(f"[SPLIT] Duração inválida: {total_duration}")
+            return []
+        
+        part_duration = total_duration / num_parts
+        parts = []
+        
+        print(f"[SPLIT] Dividindo vídeo de {total_duration:.1f}s em {num_parts} partes de ~{part_duration:.1f}s")
+        
+        for i in range(num_parts):
+            start_time = i * part_duration
+            end_time = min((i + 1) * part_duration, total_duration)
+            part_filename = f"part_{i+1}_of_{num_parts}.mp4"
+            part_path = os.path.join(output_dir, part_filename)
+            
+            # Extract part with ffmpeg
+            cmd = [
+                'ffmpeg', '-y',
+                '-ss', str(start_time),
+                '-i', input_path,
+                '-t', str(part_duration),
+                '-c:v', 'libx264',
+                '-c:a', 'aac',
+                '-preset', 'fast',
+                '-crf', '23',
+                '-movflags', '+faststart',
+                part_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            
+            if result.returncode == 0 and os.path.exists(part_path):
+                part_size = os.path.getsize(part_path)
+                parts.append({
+                    'path': part_path,
+                    'start': start_time,
+                    'end': end_time,
+                    'duration': end_time - start_time,
+                    'part': i + 1,
+                    'total_parts': num_parts,
+                    'size_mb': round(part_size / (1024 * 1024), 2)
+                })
+                print(f"[SPLIT] ✓ Parte {i+1}/{num_parts}: {start_time:.1f}s - {end_time:.1f}s ({parts[-1]['size_mb']}MB)")
+            else:
+                print(f"[SPLIT] ✗ Falha na parte {i+1}: {result.stderr[:200] if result.stderr else 'Unknown error'}")
+        
+        return parts
+    except Exception as e:
+        print(f"[SPLIT] Erro: {e}")
+        return []
+
+
 def normalize_video(input_path: str, output_path: str, target_resolution: str = "1280x720") -> bool:
     """Normaliza um vídeo para resolução consistente."""
     try:
@@ -2466,7 +2547,279 @@ def transcribe_large_video_endpoint():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/extract-live-events', methods=['POST'])
+@app.route('/api/transcribe-split-video', methods=['POST'])
+def transcribe_split_video_endpoint():
+    """
+    Transcribe a video by first splitting it into parts.
+    
+    This is especially useful for very large videos (>500MB) where
+    splitting before transcription improves reliability.
+    
+    Input JSON:
+    - videoUrl: URL or local path to the video
+    - matchId: Match ID
+    - numParts: Number of parts to split into (default: 2)
+    - halfType: 'first' or 'second' (for minute offset calculation)
+    - halfDuration: Duration of this half in minutes (default: 45)
+    
+    Returns combined transcription from all parts with adjusted timestamps.
+    """
+    data = request.json
+    video_url = data.get('videoUrl')
+    match_id = data.get('matchId')
+    num_parts = data.get('numParts', 2)
+    half_type = data.get('halfType', 'first')
+    half_duration = data.get('halfDuration', 45)
+    
+    print(f"\n{'='*60}")
+    print(f"[SPLIT-TRANSCRIBE] Nova requisição de transcrição com divisão")
+    print(f"[SPLIT-TRANSCRIBE] Match ID: {match_id}")
+    print(f"[SPLIT-TRANSCRIBE] Video URL: {video_url}")
+    print(f"[SPLIT-TRANSCRIBE] Num Parts: {num_parts}")
+    print(f"[SPLIT-TRANSCRIBE] Half Type: {half_type}")
+    print(f"{'='*60}")
+    
+    if not video_url:
+        return jsonify({'error': 'videoUrl é obrigatório'}), 400
+    
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            video_path = os.path.join(tmpdir, 'original_video.mp4')
+            
+            # Resolve local URL or download external
+            if video_url.startswith('/api/storage/') or 'localhost' in video_url:
+                clean_url = video_url.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '')
+                parts = clean_url.strip('/').split('/')
+                if len(parts) >= 5 and parts[0] == 'api' and parts[1] == 'storage':
+                    local_match_id = parts[2]
+                    subfolder = parts[3]
+                    filename = '/'.join(parts[4:])
+                    local_path = get_file_path(local_match_id, subfolder, filename)
+                    
+                    if local_path and os.path.exists(local_path):
+                        import shutil
+                        shutil.copy(local_path, video_path)
+                        print(f"[SPLIT-TRANSCRIBE] Vídeo local copiado: {local_path}")
+                    else:
+                        return jsonify({'error': f'Arquivo local não encontrado: {local_path}'}), 400
+                else:
+                    return jsonify({'error': f'Formato de URL local inválido'}), 400
+            else:
+                print(f"[SPLIT-TRANSCRIBE] Baixando vídeo externo...")
+                if not download_video(video_url, video_path):
+                    return jsonify({'error': 'Falha ao baixar vídeo'}), 400
+            
+            # Split video into parts
+            print(f"[SPLIT-TRANSCRIBE] Dividindo vídeo em {num_parts} partes...")
+            video_parts = split_video(video_path, num_parts, tmpdir)
+            
+            if not video_parts:
+                return jsonify({'error': 'Falha ao dividir vídeo'}), 400
+            
+            print(f"[SPLIT-TRANSCRIBE] ✓ {len(video_parts)} partes criadas")
+            
+            # Transcribe each part
+            all_transcriptions = []
+            all_srt_lines = []
+            srt_index = 1
+            total_text = []
+            
+            # Calculate minute offset for this half
+            minute_offset = 0 if half_type == 'first' else 45
+            
+            for part_info in video_parts:
+                part_path = part_info['path']
+                part_num = part_info['part']
+                part_start = part_info['start']
+                
+                # Convert start seconds to approximate game minute
+                part_start_minute = minute_offset + (part_start / 60)
+                
+                print(f"[SPLIT-TRANSCRIBE] Transcrevendo parte {part_num}/{num_parts} (início: {part_start_minute:.1f}')...")
+                
+                # Use ai_services to transcribe with explicit path
+                result = ai_services.transcribe_large_video(
+                    f"file://{part_path}",  # Use file:// prefix for local files
+                    match_id
+                )
+                
+                # Fallback: Direct transcription if file:// not supported
+                if not result.get('success') or not result.get('text'):
+                    print(f"[SPLIT-TRANSCRIBE] Tentando transcrição direta da parte {part_num}...")
+                    result = _transcribe_video_part_direct(part_path, part_start, minute_offset)
+                
+                if result.get('success') and result.get('text'):
+                    part_text = result.get('text', '')
+                    total_text.append(f"[{int(part_start_minute)}'-{int(part_start_minute + half_duration/num_parts)}'] {part_text}")
+                    
+                    # Adjust SRT timestamps
+                    if result.get('srtContent'):
+                        adjusted_srt = _adjust_srt_timestamps(
+                            result['srtContent'], 
+                            part_start,
+                            srt_index
+                        )
+                        all_srt_lines.append(adjusted_srt['content'])
+                        srt_index = adjusted_srt['next_index']
+                    
+                    print(f"[SPLIT-TRANSCRIBE] ✓ Parte {part_num}: {len(part_text)} caracteres")
+                    all_transcriptions.append({
+                        'part': part_num,
+                        'text': part_text,
+                        'startMinute': part_start_minute
+                    })
+                else:
+                    print(f"[SPLIT-TRANSCRIBE] ✗ Parte {part_num} falhou: {result.get('error', 'Unknown')}")
+            
+            if not all_transcriptions:
+                return jsonify({'error': 'Nenhuma parte foi transcrita com sucesso'}), 500
+            
+            # Combine results
+            combined_text = '\n\n'.join(total_text)
+            combined_srt = '\n'.join(all_srt_lines)
+            
+            print(f"[SPLIT-TRANSCRIBE] ✓ Transcrição combinada: {len(combined_text)} caracteres")
+            
+            return jsonify({
+                'success': True,
+                'text': combined_text,
+                'srtContent': combined_srt,
+                'partsTranscribed': len(all_transcriptions),
+                'totalParts': num_parts,
+                'parts': all_transcriptions,
+                'matchId': match_id,
+                'halfType': half_type
+            })
+            
+    except Exception as e:
+        print(f"[SPLIT-TRANSCRIBE] EXCEÇÃO: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+def _transcribe_video_part_direct(video_path: str, time_offset: float, minute_offset: float) -> dict:
+    """
+    Transcribe a video part directly using FFmpeg + Whisper.
+    Used as fallback when the main transcription method fails.
+    """
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = os.path.join(tmpdir, 'audio.mp3')
+            
+            # Extract audio
+            cmd = [
+                'ffmpeg', '-y', '-i', video_path,
+                '-vn', '-acodec', 'libmp3lame', '-ab', '128k',
+                audio_path
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            
+            if result.returncode != 0 or not os.path.exists(audio_path):
+                return {'success': False, 'error': 'Failed to extract audio'}
+            
+            # Transcribe with Whisper
+            transcription_result = ai_services._transcribe_audio_file(audio_path, None)
+            
+            if transcription_result.get('success'):
+                # Adjust timestamps by time_offset
+                text = transcription_result.get('text', '')
+                srt = transcription_result.get('srtContent', '')
+                
+                return {
+                    'success': True,
+                    'text': text,
+                    'srtContent': srt,
+                    'timeOffset': time_offset
+                }
+            
+            return transcription_result
+            
+    except Exception as e:
+        return {'success': False, 'error': str(e)}
+
+
+def _adjust_srt_timestamps(srt_content: str, time_offset: float, start_index: int) -> dict:
+    """
+    Adjust SRT timestamps by a time offset and reindex entries.
+    
+    Args:
+        srt_content: Original SRT content
+        time_offset: Seconds to add to all timestamps
+        start_index: Starting index for renumbering
+    
+    Returns:
+        Dict with 'content' (adjusted SRT) and 'next_index'
+    """
+    import re
+    
+    lines = srt_content.strip().split('\n')
+    adjusted_lines = []
+    current_index = start_index
+    
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        
+        # Skip empty lines
+        if not line:
+            i += 1
+            continue
+        
+        # Check if this is an index number
+        if line.isdigit():
+            # Replace with new index
+            adjusted_lines.append(str(current_index))
+            current_index += 1
+            i += 1
+            
+            # Next line should be timestamp
+            if i < len(lines):
+                timestamp_line = lines[i].strip()
+                # Parse and adjust timestamp
+                timestamp_match = re.match(
+                    r'(\d{2}):(\d{2}):(\d{2}),(\d{3}) --> (\d{2}):(\d{2}):(\d{2}),(\d{3})',
+                    timestamp_line
+                )
+                if timestamp_match:
+                    start_h, start_m, start_s, start_ms = map(int, timestamp_match.groups()[:4])
+                    end_h, end_m, end_s, end_ms = map(int, timestamp_match.groups()[4:])
+                    
+                    # Convert to seconds, add offset, convert back
+                    start_total = start_h * 3600 + start_m * 60 + start_s + start_ms / 1000 + time_offset
+                    end_total = end_h * 3600 + end_m * 60 + end_s + end_ms / 1000 + time_offset
+                    
+                    new_timestamp = f"{_format_srt_time(start_total)} --> {_format_srt_time(end_total)}"
+                    adjusted_lines.append(new_timestamp)
+                else:
+                    adjusted_lines.append(timestamp_line)
+                i += 1
+                
+                # Read subtitle text until empty line or end
+                while i < len(lines) and lines[i].strip():
+                    adjusted_lines.append(lines[i])
+                    i += 1
+                
+                adjusted_lines.append('')  # Add blank line between entries
+        else:
+            i += 1
+    
+    return {
+        'content': '\n'.join(adjusted_lines),
+        'next_index': current_index
+    }
+
+
+def _format_srt_time(seconds: float) -> str:
+    """Format seconds to SRT timestamp format."""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds % 1) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+
 def extract_live_events_endpoint():
     """Extract live events from transcript."""
     data = request.json
