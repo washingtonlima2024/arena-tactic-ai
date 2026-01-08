@@ -34,9 +34,9 @@ const App = () => (
         <SidebarProvider>
           <Toaster />
           <Sonner />
-          {/* FloatingLivePlayer OUTSIDE BrowserRouter to persist recording across navigation */}
-          <FloatingLivePlayer />
           <BrowserRouter>
+            {/* FloatingLivePlayer inside BrowserRouter but outside Routes to persist */}
+            <FloatingLivePlayer />
             <Routes>
               <Route path="/welcome" element={<Landing />} />
               <Route path="/auth" element={<Auth />} />
