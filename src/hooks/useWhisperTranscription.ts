@@ -220,8 +220,7 @@ export function useWhisperTranscription() {
         totalParts: numParts
       });
 
-      const audioDataCopy = new Uint8Array(audioData.buffer.slice(0));
-      const audioBlob = new Blob([audioDataCopy], { type: 'audio/mpeg' });
+      const audioBlob = new Blob([new Uint8Array(audioData).buffer as ArrayBuffer], { type: 'audio/mpeg' });
       
       try {
         const uploadResult = await apiClient.uploadBlob(matchId, 'audio', audioBlob, `${videoId}_part_${i}.mp3`);
@@ -437,8 +436,7 @@ export function useWhisperTranscription() {
 
       setTranscriptionProgress({ stage: 'uploading', progress: 40, message: 'Enviando áudio para transcrição...' });
 
-      const audioDataCopy = new Uint8Array(audioUint8.buffer.slice(0));
-      const audioBlob = new Blob([audioDataCopy], { type: 'audio/mpeg' });
+      const audioBlob = new Blob([new Uint8Array(audioUint8).buffer as ArrayBuffer], { type: 'audio/mpeg' });
       
       // Upload audio
       const uploadResult = await apiClient.uploadBlob(matchId, 'audio', audioBlob, `${videoId}_audio.mp3`);
