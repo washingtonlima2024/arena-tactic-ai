@@ -26,8 +26,18 @@ const ClipSyncContext = createContext<ClipSyncContextValue | null>(null);
 
 export function useClipSync() {
   const context = useContext(ClipSyncContext);
+  // Return safe defaults when used outside provider (e.g., during initial render)
   if (!context) {
-    throw new Error('useClipSync must be used within ClipSyncProvider');
+    return {
+      queue: [],
+      isProcessing: false,
+      currentEventId: null,
+      queueEvent: () => {},
+      queueMultipleEvents: () => {},
+      cancelAll: () => {},
+      getEventStatus: () => undefined,
+      isEventProcessing: () => false
+    } as ClipSyncContextValue;
   }
   return context;
 }
