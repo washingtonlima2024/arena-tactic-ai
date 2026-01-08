@@ -570,6 +570,8 @@ export const apiClient = {
 
   // ============== Video Processing ==============
   extractClip: async (data: {
+    eventId?: string;
+    matchId?: string;
     videoUrl: string;
     startSeconds: number;
     durationSeconds: number;
@@ -577,14 +579,34 @@ export const apiClient = {
     includeVignettes?: boolean;
     openingVignette?: string;
     closingVignette?: string;
-  }): Promise<Blob> => {
-    const response = await fetch(`${getApiBase()}/extract-clip`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+  }): Promise<Blob | { clipUrl: string; success: boolean }> => {
+    const isLocalAvailable = await isLocalServerAvailable();
+    
+    if (isLocalAvailable) {
+      // Usar servidor local (retorna Blob)
+      const response = await fetch(`${getApiBase()}/extract-clip`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!response.ok) throw new Error('Extract clip failed');
+      return response.blob();
+    }
+    
+    // Fallback: usar Edge Function
+    console.log('[extractClip] Servidor local indisponível, usando Edge Function...');
+    const { data: result, error } = await supabase.functions.invoke('extract-clip', {
+      body: {
+        eventId: data.eventId,
+        matchId: data.matchId,
+        videoUrl: data.videoUrl,
+        startSeconds: data.startSeconds,
+        durationSeconds: data.durationSeconds
+      }
     });
-    if (!response.ok) throw new Error('Extract clip failed');
-    return response.blob();
+    
+    if (error) throw error;
+    return result as { clipUrl: string; success: boolean };
   },
 
   extractBatch: async (data: {
