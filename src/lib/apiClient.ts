@@ -622,6 +622,34 @@ export const apiClient = {
   deleteMatchStorage: (matchId: string) =>
     apiRequest<{ success: boolean }>(`/api/storage/${matchId}`, { method: 'DELETE' }),
 
+  // ============== Local File Linking (Optimized for Local Environment) ==============
+  // Links a local file path directly without uploading - much faster for large files
+  
+  linkLocalFile: (data: { 
+    local_path: string; 
+    match_id: string; 
+    subfolder?: string;
+    video_type?: 'full' | 'first_half' | 'second_half' | 'clip';
+  }) => apiRequest<{
+    success: boolean;
+    video: any;
+    local_path: string;
+    file_size: number;
+    file_size_mb: number;
+    duration_seconds: number | null;
+    symlink_created: boolean;
+  }>('/api/storage/link-local', { 
+    method: 'POST', 
+    body: JSON.stringify(data) 
+  }),
+
+  browseLocalDirectory: (path?: string) => apiRequest<{
+    current_path: string;
+    parent_path: string | null;
+    directories: Array<{ name: string; path: string; type: 'directory' }>;
+    files: Array<{ name: string; path: string; type: 'video'; size: number; size_mb: number }>;
+  }>(`/api/storage/browse${path ? `?path=${encodeURIComponent(path)}` : ''}`),
+
   // ============== Video Processing ==============
   extractClip: async (data: {
     eventId?: string;
