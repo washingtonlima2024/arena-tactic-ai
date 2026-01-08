@@ -1211,13 +1211,32 @@ def transcribe_large_video_endpoint():
     video_url = data.get('videoUrl')
     match_id = data.get('matchId')
     
+    print(f"\n{'='*60}")
+    print(f"[TRANSCRIBE] Nova requisição de transcrição")
+    print(f"[TRANSCRIBE] Match ID: {match_id}")
+    print(f"[TRANSCRIBE] Video URL: {video_url}")
+    print(f"{'='*60}")
+    
     if not video_url:
+        print("[TRANSCRIBE] ERRO: videoUrl não fornecida")
         return jsonify({'error': 'videoUrl é obrigatório'}), 400
     
     try:
+        print("[TRANSCRIBE] Iniciando transcrição via ai_services...")
         result = ai_services.transcribe_large_video(video_url, match_id)
+        
+        if result.get('success'):
+            text_preview = result.get('text', '')[:200]
+            print(f"[TRANSCRIBE] SUCESSO! Preview do texto: {text_preview}...")
+            print(f"[TRANSCRIBE] Tamanho do SRT: {len(result.get('srtContent', ''))} chars")
+        else:
+            print(f"[TRANSCRIBE] Falha: {result.get('error')}")
+        
         return jsonify(result)
     except Exception as e:
+        print(f"[TRANSCRIBE] EXCEÇÃO: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 
