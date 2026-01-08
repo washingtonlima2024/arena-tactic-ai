@@ -990,8 +990,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       ]);
       
       const clipData = await ffmpeg.readFile(outputFile);
-      const clipDataArray = clipData instanceof Uint8Array ? new Uint8Array(clipData.buffer.slice(0)) : clipData;
-      const clipBlob = new Blob([clipDataArray], { type: 'video/webm' });
+      const clipBlob = new Blob([clipData instanceof Uint8Array ? new Uint8Array(clipData).buffer as ArrayBuffer : clipData], { type: 'video/webm' });
       
       // Upload clip
       const result = await apiClient.uploadBlob(matchId, 'clips', clipBlob, `clip-${event.id}.webm`);
