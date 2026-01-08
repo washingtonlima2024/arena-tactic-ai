@@ -218,8 +218,23 @@ export const apiClient = {
     );
   },
 
-  // ============== Events ==============
-  getMatchEvents: (matchId: string) => apiRequest<any[]>(`/api/matches/${matchId}/events`),
+  // ============== Events (with Supabase fallback) ==============
+  getMatchEvents: async (matchId: string) => {
+    return apiRequestWithFallback<any[]>(
+      `/api/matches/${matchId}/events`,
+      'match_events',
+      {},
+      async () => {
+        const { data, error } = await supabase
+          .from('match_events')
+          .select('*')
+          .eq('match_id', matchId)
+          .order('minute', { ascending: true });
+        if (error) throw new Error(error.message);
+        return data || [];
+      }
+    );
+  },
   getEvent: (id: string) => apiRequest<any>(`/api/events/${id}`),
   createEvent: (matchId: string, event: any) => apiRequest<any>(`/api/matches/${matchId}/events`, { method: 'POST', body: JSON.stringify(event) }),
   updateEvent: (id: string, event: any) => apiRequest<any>(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(event) }),
