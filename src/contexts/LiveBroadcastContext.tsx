@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect, ReactNode } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
@@ -146,14 +146,10 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   const [finishResult, setFinishResult] = useState<FinishMatchResult | null>(null);
   const [isFinishing, setIsFinishing] = useState(false);
   
-  // NEW: Latest video chunk URL for real-time clip generation
   const [latestVideoChunkUrl, setLatestVideoChunkUrl] = useState<string | null>(null);
-  
-  // NEW: Current video ID - created at start of recording, updated at finish
   const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
   const currentVideoIdRef = useRef<string | null>(null);
   
-  // NEW: Segment buffer for 5-minute segment recording
   const segmentBufferRef = useRef<VideoSegmentBuffer | null>(null);
   const [segmentCount, setSegmentCount] = useState(0);
 
@@ -175,18 +171,10 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   const ffmpegRef = useRef<FFmpeg | null>(null);
   const isGeneratingClipRef = useRef(false);
   
-  // CRITICAL: Ref to access current recording time in closures (fixes stale closure bug)
   const recordingTimeRef = useRef(0);
-  
-  // NEW: Separate ref for clip generation - NOT cleared after saveVideoChunk
-  // This maintains a rolling buffer of video chunks for real-time clip generation
   const clipVideoChunksRef = useRef<{ blob: Blob; timestamp: number }[]>([]);
-  
-  // CRITICAL FIX: Permanent storage for ALL video chunks - NEVER cleared during recording
-  // Used by finishMatch to ensure video is always saved even if videoChunksRef is empty
   const allVideoChunksRef = useRef<Blob[]>([]);
   
-  // Ref to hold addDetectedEvent function (to avoid circular dependency in processAudioChunk)
   const addDetectedEventRef = useRef<((eventData: {
     type: string;
     minute: number;
@@ -196,7 +184,6 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     source?: string;
   }) => Promise<void>) | null>(null);
 
-  // CRITICAL: Keep tempMatchIdRef synchronized with currentMatchId state
   useEffect(() => {
     if (currentMatchId && !tempMatchIdRef.current) {
       tempMatchIdRef.current = currentMatchId;
@@ -204,36 +191,27 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [currentMatchId]);
 
-  // Load existing events from database when match is selected
+  // Load existing events from database
   const loadExistingEvents = useCallback(async (matchId: string) => {
     console.log('📥 Loading existing events for match:', matchId);
     try {
-      const { data: events, error } = await supabase
-        .from('match_events')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('minute', { ascending: true });
-      
-      if (error) {
-        console.error('Error loading events:', error);
-        return;
-      }
+      const events = await apiClient.getMatchEvents(matchId);
       
       if (events && events.length > 0) {
         console.log(`📥 Found ${events.length} existing events`);
         
-        const pending = events.filter(e => e.approval_status === 'pending');
-        const approved = events.filter(e => e.approval_status === 'approved');
+        const pending = events.filter((e: any) => e.approval_status === 'pending');
+        const approved = events.filter((e: any) => e.approval_status === 'approved');
         
-        const mapEvent = (e: typeof events[0]): LiveEvent => ({
+        const mapEvent = (e: any): LiveEvent => ({
           id: e.id,
           type: e.event_type,
           minute: e.minute || 0,
           second: e.second || 0,
           description: e.description || '',
-          confidence: (e.metadata as any)?.confidence,
+          confidence: e.metadata?.confidence,
           status: e.approval_status as 'pending' | 'approved' | 'rejected',
-          recordingTimestamp: (e.metadata as any)?.videoSecond,
+          recordingTimestamp: e.metadata?.videoSecond,
           clipUrl: e.clip_url || undefined,
         });
         
@@ -249,106 +227,6 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // REALTIME: Listen for new events inserted into match_events
-  useEffect(() => {
-    if (!currentMatchId) return;
-    
-    console.log('🔴 Setting up realtime listener for match:', currentMatchId);
-    
-    const channel = supabase
-      .channel(`live-events-${currentMatchId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'match_events',
-          filter: `match_id=eq.${currentMatchId}`
-        },
-        (payload) => {
-          const newDbEvent = payload.new as any;
-          console.log('🔴 Realtime: New event received:', newDbEvent.event_type, newDbEvent.id);
-          
-          // Map to LiveEvent format
-          const newEvent: LiveEvent = {
-            id: newDbEvent.id,
-            type: newDbEvent.event_type,
-            minute: newDbEvent.minute || 0,
-            second: newDbEvent.second || 0,
-            description: newDbEvent.description || '',
-            confidence: newDbEvent.metadata?.confidence,
-            status: newDbEvent.approval_status as 'pending' | 'approved' | 'rejected',
-            recordingTimestamp: newDbEvent.metadata?.videoSecond,
-            clipUrl: newDbEvent.clip_url || undefined,
-          };
-          
-          // Add to appropriate list if not already present
-          if (newEvent.status === 'pending') {
-            setDetectedEvents(prev => {
-              const exists = prev.some(e => e.id === newEvent.id);
-              if (!exists) {
-                console.log('✅ Realtime: Added to detectedEvents:', newEvent.type);
-                return [...prev, newEvent];
-              }
-              return prev;
-            });
-          } else if (newEvent.status === 'approved') {
-            setApprovedEvents(prev => {
-              const exists = prev.some(e => e.id === newEvent.id);
-              if (!exists) {
-                console.log('✅ Realtime: Added to approvedEvents:', newEvent.type);
-                return [...prev, newEvent];
-              }
-              return prev;
-            });
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'match_events',
-          filter: `match_id=eq.${currentMatchId}`
-        },
-        (payload) => {
-          const updatedEvent = payload.new as any;
-          console.log('🔴 Realtime: Event updated:', updatedEvent.id, updatedEvent.approval_status);
-          
-          // If status changed to approved, move from detected to approved
-          if (updatedEvent.approval_status === 'approved') {
-            setDetectedEvents(prev => prev.filter(e => e.id !== updatedEvent.id));
-            setApprovedEvents(prev => {
-              const exists = prev.some(e => e.id === updatedEvent.id);
-              if (!exists) {
-                return [...prev, {
-                  id: updatedEvent.id,
-                  type: updatedEvent.event_type,
-                  minute: updatedEvent.minute || 0,
-                  second: updatedEvent.second || 0,
-                  description: updatedEvent.description || '',
-                  confidence: updatedEvent.metadata?.confidence,
-                  status: 'approved' as const,
-                  recordingTimestamp: updatedEvent.metadata?.videoSecond,
-                  clipUrl: updatedEvent.clip_url || undefined,
-                }];
-              }
-              return prev;
-            });
-          }
-        }
-      )
-      .subscribe((status) => {
-        console.log('🔴 Realtime subscription status:', status);
-      });
-
-    return () => {
-      console.log('🔴 Cleaning up realtime listener for match:', currentMatchId);
-      supabase.removeChannel(channel);
-    };
-  }, [currentMatchId]);
-
   // Save transcript to database
   const saveTranscriptToDatabase = useCallback(async (matchId?: string) => {
     if (!transcriptBuffer.trim()) return;
@@ -359,30 +237,22 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     setIsSavingTranscript(true);
     
     try {
-      const { data: existing } = await supabase
-        .from("generated_audio")
-        .select("id, script")
-        .eq("match_id", targetMatchId)
-        .eq("audio_type", "live_transcript")
-        .maybeSingle();
+      // Get existing transcript
+      const audioList = await apiClient.getAudio(targetMatchId, 'live_transcript');
+      const existing = audioList?.[0];
 
       if (existing) {
-        await supabase
-          .from("generated_audio")
-          .update({
-            script: transcriptBuffer.trim(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existing.id);
+        await apiClient.updateAudio(existing.id, {
+          script: transcriptBuffer.trim(),
+          updated_at: new Date().toISOString(),
+        });
       } else {
-        await supabase
-          .from("generated_audio")
-          .insert({
-            match_id: targetMatchId,
-            audio_type: "live_transcript",
-            script: transcriptBuffer.trim(),
-            voice: "whisper",
-          });
+        await apiClient.createAudio({
+          match_id: targetMatchId,
+          audio_type: "live_transcript",
+          script: transcriptBuffer.trim(),
+          voice: "whisper",
+        });
       }
 
       setLastSavedAt(new Date());
@@ -394,13 +264,13 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [transcriptBuffer]);
 
-  // Timer effect - also updates recordingTimeRef for use in closures
+  // Timer effect
   useEffect(() => {
     if (isRecording && !isPaused) {
       timerRef.current = setInterval(() => {
         setRecordingTime((prev) => {
           const newTime = prev + 1;
-          recordingTimeRef.current = newTime; // Keep ref synced for closures
+          recordingTimeRef.current = newTime;
           return newTime;
         });
       }, 1000);
@@ -434,13 +304,10 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     
     const saveScoreToDatabase = async () => {
       try {
-        await supabase
-          .from("matches")
-          .update({
-            home_score: currentScore.home,
-            away_score: currentScore.away,
-          })
-          .eq("id", tempMatchIdRef.current);
+        await apiClient.updateMatch(tempMatchIdRef.current!, {
+          home_score: currentScore.home,
+          away_score: currentScore.away,
+        });
         console.log("Score saved in real-time:", currentScore);
       } catch (error) {
         console.error("Error saving score:", error);
@@ -456,28 +323,13 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     if (!matchId || !segment.blob) return null;
     
     try {
-      const filePath = `live-segments/${matchId}/${segment.id}.webm`;
       console.log(`[SegmentUpload] Uploading segment ${segment.id}, size: ${(segment.blob.size / 1024 / 1024).toFixed(2)}MB`);
       
-      const { error: uploadError } = await supabase.storage
-        .from('match-videos')
-        .upload(filePath, segment.blob, {
-          contentType: 'video/webm',
-          upsert: true
-        });
-
-      if (uploadError) {
-        console.error('[SegmentUpload] Upload error:', uploadError);
-        return null;
-      }
-
-      const { data: urlData } = supabase.storage
-        .from('match-videos')
-        .getPublicUrl(filePath);
+      const result = await apiClient.uploadBlob(matchId, 'videos', segment.blob, `segment-${segment.id}.webm`);
       
-      segment.url = urlData.publicUrl;
+      segment.url = result.url;
       setSegmentCount(prev => prev + 1);
-      console.log(`[SegmentUpload] Segment uploaded: ${urlData.publicUrl}`);
+      console.log(`[SegmentUpload] Segment uploaded: ${result.url}`);
       
       toast({
         title: "Segmento salvo",
@@ -485,21 +337,21 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         duration: 2000,
       });
       
-      return urlData.publicUrl;
+      return result.url;
     } catch (error) {
       console.error('[SegmentUpload] Error:', error);
       return null;
     }
   }, [segmentCount, toast]);
 
-  // Initialize segment buffer with upload callback
+  // Initialize segment buffer
   const initializeSegmentBuffer = useCallback(() => {
     if (segmentBufferRef.current) return;
     
     segmentBufferRef.current = new VideoSegmentBuffer(
       {
-        segmentDurationMs: 5 * 60 * 1000, // 5 minutes
-        overlapDurationMs: 1 * 60 * 1000, // 1 minute overlap
+        segmentDurationMs: 5 * 60 * 1000,
+        overlapDurationMs: 1 * 60 * 1000,
         maxSegments: 3,
       },
       async (segment) => {
@@ -510,8 +362,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     console.log('[SegmentBuffer] Initialized with 5-minute segments and 1-minute overlap');
   }, [uploadSegment]);
 
-  // NEW: Save video chunks periodically for real-time clip generation
-  // Returns the URL directly to avoid race condition with state
+  // Save video chunks periodically
   const saveVideoChunk = useCallback(async (): Promise<string | null> => {
     if (videoChunksRef.current.length === 0 || !tempMatchIdRef.current) {
       console.log('No video chunks or no match ID - cannot save chunk');
@@ -523,29 +374,18 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
       const videoBlob = new Blob(videoChunksRef.current, { type: mimeType });
       
-      const filePath = `live-chunks/${tempMatchIdRef.current}/chunk-${Date.now()}.${extension}`;
-      console.log(`Saving video chunk: ${filePath}, size: ${(videoBlob.size / 1024).toFixed(1)} KB`);
+      console.log(`Saving video chunk, size: ${(videoBlob.size / 1024).toFixed(1)} KB`);
       
-      const { error: uploadError } = await supabase.storage
-        .from('match-videos')
-        .upload(filePath, videoBlob, {
-          contentType: mimeType,
-          upsert: true
-        });
-
-      if (uploadError) {
-        console.error('Error uploading video chunk:', uploadError);
-        return null;
-      }
-
-      const { data: urlData } = supabase.storage
-        .from('match-videos')
-        .getPublicUrl(filePath);
+      const result = await apiClient.uploadBlob(
+        tempMatchIdRef.current, 
+        'videos', 
+        videoBlob, 
+        `chunk-${Date.now()}.${extension}`
+      );
       
-      const chunkUrl = urlData.publicUrl;
-      setLatestVideoChunkUrl(chunkUrl);
-      console.log('Video chunk saved successfully:', chunkUrl);
-      return chunkUrl;
+      setLatestVideoChunkUrl(result.url);
+      console.log('Video chunk saved successfully:', result.url);
+      return result.url;
     } catch (error) {
       console.error('Error saving video chunk:', error);
       return null;
@@ -554,7 +394,6 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
   // Create temporary match
   const createTempMatch = useCallback(async (): Promise<string | null> => {
-    // PREVENT DUPLICATE: If we already have a match ID, don't create a new one
     if (tempMatchIdRef.current) {
       console.log("Match already exists, reusing:", tempMatchIdRef.current);
       return tempMatchIdRef.current;
@@ -563,30 +402,16 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     console.log("Creating new match with info:", matchInfo);
     
     try {
-      const { data: match, error } = await supabase
-        .from("matches")
-        .insert({
-          home_team_id: matchInfo.homeTeamId || null,
-          away_team_id: matchInfo.awayTeamId || null,
-          home_score: 0,
-          away_score: 0,
-          competition: matchInfo.competition || "Transmissão ao vivo",
-          match_date: matchInfo.matchDate,
-          status: "live",
-          venue: "Transmissão ao vivo",
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error("Error creating match:", error);
-        toast({
-          title: "Erro ao criar partida",
-          description: error.message,
-          variant: "destructive",
-        });
-        return null;
-      }
+      const match = await apiClient.createMatch({
+        home_team_id: matchInfo.homeTeamId || null,
+        away_team_id: matchInfo.awayTeamId || null,
+        home_score: 0,
+        away_score: 0,
+        competition: matchInfo.competition || "Transmissão ao vivo",
+        match_date: matchInfo.matchDate,
+        status: "live",
+        venue: "Transmissão ao vivo",
+      });
 
       if (match) {
         tempMatchIdRef.current = match.id;
@@ -611,7 +436,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [matchInfo, toast]);
 
-  // Start video recording with segment buffer
+  // Start video recording
   const startVideoRecording = useCallback((videoElement: HTMLVideoElement) => {
     try {
       const canvas = document.createElement('canvas');
@@ -623,13 +448,10 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
       console.log(`Starting video recording: ${canvas.width}x${canvas.height}`);
       
-      // Initialize segment buffer for 5-minute segments
       initializeSegmentBuffer();
       segmentBufferRef.current?.start(Date.now());
       setSegmentCount(0);
       
-      // NOTE: Always draw frames, even before isRecording is true
-      // This ensures we capture video from the very start
       const drawFrame = () => {
         if (ctx && videoElementRef.current) {
           ctx.drawImage(videoElementRef.current, 0, 0, canvas.width, canvas.height);
@@ -678,43 +500,25 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         if (event.data.size > 0) {
           const chunkSizeKB = event.data.size / 1024;
           
-          // CRITICAL: Store in regular ref
           videoChunksRef.current.push(event.data);
-          
-          // CRITICAL: Also store in permanent ref that is NEVER cleared during recording
           allVideoChunksRef.current.push(event.data);
           
-          // Use ref to get current recording time (fixes stale closure)
           const currentTime = recordingTimeRef.current;
           
-          // Also add to clipVideoChunksRef for real-time clip generation
           clipVideoChunksRef.current.push({ blob: event.data, timestamp: currentTime });
           
-          // Keep only last 3 minutes of clips (36 chunks at 5s each)
           const maxClipChunks = 36;
           if (clipVideoChunksRef.current.length > maxClipChunks) {
             clipVideoChunksRef.current = clipVideoChunksRef.current.slice(-maxClipChunks);
           }
           
-          // Add chunk to segment buffer with current recording time
           if (segmentBufferRef.current) {
             segmentBufferRef.current.addChunk(event.data, currentTime);
           }
           
-          // Log with clear indication of data accumulation - ENHANCED FOR DEBUGGING
           const totalSize = allVideoChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
-          const clipChunksTotal = clipVideoChunksRef.current.reduce((acc, c) => acc + c.blob.size, 0);
-          
-          // Warn if chunk is suspiciously small (< 1KB for 5s of video is very small)
           const warnIcon = chunkSizeKB < 1 ? '⚠️' : '📹';
-          console.log(`${warnIcon} Video chunk: ${chunkSizeKB.toFixed(1)}KB at ${currentTime}s | All: ${allVideoChunksRef.current.length} (${(totalSize / 1024 / 1024).toFixed(2)}MB) | Clip: ${clipVideoChunksRef.current.length} (${(clipChunksTotal / 1024 / 1024).toFixed(2)}MB)`);
-          
-          // DIAGNOSTIC: If chunk is too small, log warning
-          if (chunkSizeKB < 10) {
-            console.warn(`[VideoRecorder] ⚠️ Small chunk detected: ${chunkSizeKB.toFixed(1)}KB - this may cause clip generation issues`);
-          }
-        } else {
-          console.warn('⚠️ Empty video chunk received (0 bytes)');
+          console.log(`${warnIcon} Video chunk: ${chunkSizeKB.toFixed(1)}KB at ${currentTime}s | All: ${allVideoChunksRef.current.length} (${(totalSize / 1024 / 1024).toFixed(2)}MB)`);
         }
       };
 
@@ -723,15 +527,13 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       };
 
       videoRecorderRef.current = videoRecorder;
-      videoRecorder.start(5000); // 5-second chunks
+      videoRecorder.start(5000);
       setIsRecordingVideo(true);
 
-      // Start periodic chunk saving for clip generation (every 20 seconds)
       chunkSaveIntervalRef.current = setInterval(() => {
         saveVideoChunk();
       }, 20000);
       
-      // Save first chunk after 10 seconds to enable early clip generation
       setTimeout(() => {
         if (videoChunksRef.current.length > 0) {
           console.log('Saving initial video chunk for early clip generation...');
@@ -749,108 +551,74 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         variant: "destructive",
       });
     }
-  }, [isRecording, isPaused, toast, saveVideoChunk, initializeSegmentBuffer]);
+  }, [toast, saveVideoChunk, initializeSegmentBuffer]);
 
-  // Save recorded video
-  const saveRecordedVideo = useCallback(async (matchId: string): Promise<string | null> => {
-    if (videoChunksRef.current.length === 0) {
-      console.log('No video chunks to save');
-      return null;
-    }
-
-    setIsUploadingVideo(true);
-    setVideoUploadProgress(0);
-
+  // Start video recording from stream directly
+  const startVideoRecordingFromStream = useCallback((stream: MediaStream) => {
     try {
-      const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
-      const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
-      const videoBlob = new Blob(videoChunksRef.current, { type: mimeType });
+      console.log('[startVideoRecordingFromStream] Starting recording from MediaStream');
       
-      console.log(`Saving video: ${(videoBlob.size / (1024 * 1024)).toFixed(2)} MB`);
+      initializeSegmentBuffer();
+      segmentBufferRef.current?.start(Date.now());
+      setSegmentCount(0);
 
-      const filePath = `live-${matchId}-${Date.now()}.${extension}`;
+      const mimeTypes = [
+        'video/webm;codecs=vp9,opus',
+        'video/webm;codecs=vp8,opus',
+        'video/webm',
+        'video/mp4',
+        ''
+      ];
 
-      setVideoUploadProgress(20);
-
-      const { error: uploadError } = await supabase.storage
-        .from('match-videos')
-        .upload(filePath, videoBlob, {
-          contentType: mimeType,
-          upsert: true
-        });
-
-      if (uploadError) {
-        console.error('Error uploading video:', uploadError);
-        throw uploadError;
-      }
-
-      setVideoUploadProgress(70);
-
-      const { data: urlData } = supabase.storage
-        .from('match-videos')
-        .getPublicUrl(filePath);
-
-      const videoUrl = urlData.publicUrl;
-
-      // FIXED: Update existing video record instead of inserting a new one
-      const videoId = currentVideoIdRef.current;
-      if (videoId) {
-        console.log(`Updating existing video record ${videoId} with URL:`, videoUrl);
-        const { error: updateError } = await supabase
-          .from('videos')
-          .update({
-            file_url: videoUrl,
-            file_name: `Transmissão ao vivo`,
-            end_minute: Math.ceil(recordingTime / 60),
-            duration_seconds: recordingTime,
-            status: 'complete'
-          })
-          .eq('id', videoId);
-
-        if (updateError) {
-          console.error('Error updating video record:', updateError);
-        } else {
-          console.log('Video record updated successfully');
-        }
-      } else {
-        // Fallback: insert new record if no existing video ID
-        console.log('No existing video ID, inserting new record');
-        const { error: insertError } = await supabase.from('videos').insert({
-          match_id: matchId,
-          file_url: videoUrl,
-          file_name: `Transmissão ao vivo`,
-          video_type: 'full',
-          start_minute: 0,
-          end_minute: Math.ceil(recordingTime / 60),
-          duration_seconds: recordingTime,
-          status: 'complete'
-        });
-
-        if (insertError) {
-          console.error('Error inserting video record:', insertError);
+      let selectedMimeType = '';
+      for (const mimeType of mimeTypes) {
+        if (mimeType === '' || MediaRecorder.isTypeSupported(mimeType)) {
+          selectedMimeType = mimeType;
+          break;
         }
       }
 
-      setVideoUploadProgress(100);
-      console.log('Video saved successfully:', videoUrl);
+      const recorderOptions: MediaRecorderOptions = {};
+      if (selectedMimeType) {
+        recorderOptions.mimeType = selectedMimeType;
+      }
 
-      return videoUrl;
+      const videoRecorder = new MediaRecorder(stream, recorderOptions);
 
+      videoRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          videoChunksRef.current.push(event.data);
+          allVideoChunksRef.current.push(event.data);
+          
+          const currentTime = recordingTimeRef.current;
+          clipVideoChunksRef.current.push({ blob: event.data, timestamp: currentTime });
+          
+          const maxClipChunks = 36;
+          if (clipVideoChunksRef.current.length > maxClipChunks) {
+            clipVideoChunksRef.current = clipVideoChunksRef.current.slice(-maxClipChunks);
+          }
+          
+          if (segmentBufferRef.current) {
+            segmentBufferRef.current.addChunk(event.data, currentTime);
+          }
+        }
+      };
+
+      videoRecorderRef.current = videoRecorder;
+      videoRecorder.start(5000);
+      setIsRecordingVideo(true);
+
+      chunkSaveIntervalRef.current = setInterval(() => {
+        saveVideoChunk();
+      }, 20000);
+
+      console.log('[startVideoRecordingFromStream] Recording started, mimeType:', selectedMimeType || 'default');
     } catch (error) {
-      console.error('Error saving video:', error);
-      toast({
-        title: "Erro ao salvar vídeo",
-        description: "O vídeo não pôde ser enviado",
-        variant: "destructive",
-      });
-      return null;
-    } finally {
-      setIsUploadingVideo(false);
+      console.error('[startVideoRecordingFromStream] Error:', error);
     }
-  }, [recordingTime, toast]);
+  }, [saveVideoChunk, initializeSegmentBuffer]);
 
-
-  // Stop video recording and flush segment buffer
+  // Stop video recording
   const stopVideoRecording = useCallback(async () => {
     if (animationFrameRef.current) {
       cancelAnimationFrame(animationFrameRef.current);
@@ -871,7 +639,6 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       segmentSaveIntervalRef.current = null;
     }
     
-    // Flush any remaining segment data
     if (segmentBufferRef.current) {
       console.log('[SegmentBuffer] Flushing remaining segments...');
       await segmentBufferRef.current.flush();
@@ -908,76 +675,67 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         const base64Audio = (reader.result as string).split(",")[1];
         console.log("Sending audio to transcription service...");
 
-        const { data: transcriptData, error: transcriptError } = await supabase.functions.invoke(
-          "transcribe-audio",
-          { body: { audio: base64Audio } }
-        );
+        try {
+          const transcriptData = await apiClient.transcribeAudio({ audio: base64Audio });
 
-        if (transcriptError) {
-          console.error("Transcription error:", transcriptError);
-          setIsProcessingAudio(false);
-          return;
-        }
+          console.log("Transcription result:", transcriptData);
+          setLastProcessedAt(new Date());
 
-        console.log("Transcription result:", transcriptData);
-        setLastProcessedAt(new Date());
+          if (transcriptData?.text && transcriptData.text.trim()) {
+            const newChunk: TranscriptChunk = {
+              id: crypto.randomUUID(),
+              text: transcriptData.text,
+              minute: currentMinute,
+              second: currentSecond,
+              timestamp: new Date(),
+            };
 
-        if (transcriptData?.text && transcriptData.text.trim()) {
-          const newChunk: TranscriptChunk = {
-            id: crypto.randomUUID(),
-            text: transcriptData.text,
-            minute: currentMinute,
-            second: currentSecond,
-            timestamp: new Date(),
-          };
+            setTranscriptChunks((prev) => [...prev, newChunk]);
+            setTranscriptBuffer((prev) => {
+              const updated = prev + " " + transcriptData.text;
+              return updated.trim();
+            });
 
-          setTranscriptChunks((prev) => [...prev, newChunk]);
-          setTranscriptBuffer((prev) => {
-            const updated = prev + " " + transcriptData.text;
-            return updated.trim();
-          });
+            console.log("Extracting events from transcript...");
 
-          console.log("Extracting events from transcript...");
-
-          const { data: eventsData, error: eventsError } = await supabase.functions.invoke(
-            "extract-live-events",
-            {
-              body: {
+            try {
+              const eventsData = await apiClient.extractLiveEvents({
                 transcript: transcriptData.text,
                 homeTeam: matchInfo.homeTeam,
                 awayTeam: matchInfo.awayTeam,
                 currentScore,
                 currentMinute,
-              },
-            }
-          );
+              });
 
-          console.log("Events extraction result:", eventsData);
+              console.log("Events extraction result:", eventsData);
 
-          if (!eventsError && eventsData?.events && eventsData.events.length > 0) {
-            console.log(`Detected ${eventsData.events.length} new events - saving to database...`);
-            
-            // Calculate REAL minute/second based on actual recordingTime
-            // (AI-returned minute may be wrong since it doesn't know the real recording time)
-            const realMinute = Math.floor(recordingTime / 60);
-            const realSecond = recordingTime % 60;
-            
-            // Call addDetectedEvent via ref for each event (saves to DB + state)
-            for (const e of eventsData.events) {
-              if (addDetectedEventRef.current) {
-                await addDetectedEventRef.current({
-                  type: e.type,
-                  minute: realMinute,  // Use real recording time, not AI-guessed time
-                  second: realSecond,
-                  description: e.description,
-                  confidence: e.confidence || 0.8,
-                  source: 'live-transcription'
-                });
+              if (eventsData?.events && eventsData.events.length > 0) {
+                console.log(`Detected ${eventsData.events.length} new events - saving to database...`);
+                
+                const realMinute = Math.floor(recordingTime / 60);
+                const realSecond = recordingTime % 60;
+                
+                for (const e of eventsData.events) {
+                  if (addDetectedEventRef.current) {
+                    await addDetectedEventRef.current({
+                      type: e.type,
+                      minute: realMinute,
+                      second: realSecond,
+                      description: e.description,
+                      confidence: e.confidence || 0.8,
+                      source: 'live-transcription'
+                    });
+                  }
+                }
               }
+            } catch (eventsError) {
+              console.error("Events extraction error:", eventsError);
             }
+          } else {
+            console.log("No text in transcription result");
           }
-        } else {
-          console.log("No text in transcription result");
+        } catch (transcriptError) {
+          console.error("Transcription error:", transcriptError);
         }
         
         setIsProcessingAudio(false);
@@ -988,114 +746,517 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [matchInfo, currentScore, recordingTime, isProcessingAudio]);
 
-  // Start video recording from camera stream directly (when no videoElement available)
-  const startVideoRecordingFromStream = useCallback((stream: MediaStream) => {
-    try {
-      console.log('[startVideoRecordingFromStream] Starting video recording from camera stream...');
-      
-      // Initialize segment buffer for 5-minute segments
-      initializeSegmentBuffer();
-      segmentBufferRef.current?.start(Date.now());
-      setSegmentCount(0);
-      
-      const mimeTypes = [
-        'video/webm;codecs=vp9,opus',
-        'video/webm;codecs=vp8,opus',
-        'video/webm',
-        'video/mp4',
-        ''
-      ];
+  // Add manual event
+  const addManualEvent = useCallback(async (type: string) => {
+    const matchId = tempMatchIdRef.current || currentMatchId;
+    const videoId = currentVideoIdRef.current;
 
-      let selectedMimeType = '';
-      for (const mimeType of mimeTypes) {
-        if (mimeType === '' || MediaRecorder.isTypeSupported(mimeType)) {
-          selectedMimeType = mimeType;
-          break;
-        }
-      }
-
-      const recorderOptions: MediaRecorderOptions = {};
-      if (selectedMimeType) {
-        recorderOptions.mimeType = selectedMimeType;
-      }
-
-      const videoRecorder = new MediaRecorder(stream, recorderOptions);
-
-      videoRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          videoChunksRef.current.push(event.data);
-          
-          // CRITICAL FIX: Also store in permanent ref that is NEVER cleared
-          allVideoChunksRef.current.push(event.data);
-          
-          // CRITICAL: Use ref to get current recording time (fixes stale closure)
-          const currentTime = recordingTimeRef.current;
-          
-          // NEW: Also add to clipVideoChunksRef for real-time clip generation
-          clipVideoChunksRef.current.push({ blob: event.data, timestamp: currentTime });
-          
-          // Keep only last 3 minutes of chunks for clips (36 chunks at 5s each) - INCREASED from 24
-          const maxClipChunks = 36;
-          if (clipVideoChunksRef.current.length > maxClipChunks) {
-            clipVideoChunksRef.current = clipVideoChunksRef.current.slice(-maxClipChunks);
-          }
-          
-          // Add chunk to segment buffer with current recording time
-          if (segmentBufferRef.current) {
-            segmentBufferRef.current.addChunk(event.data, currentTime);
-          }
-          
-          console.log(`[CameraStream] Video chunk recorded: ${(event.data.size / 1024).toFixed(1)} KB at ${currentTime}s, chunks: ${videoChunksRef.current.length}, allChunks: ${allVideoChunksRef.current.length}, clipChunks: ${clipVideoChunksRef.current.length}`);
-        }
-      };
-
-      videoRecorder.onerror = (event) => {
-        console.error('[CameraStream] Video recorder error:', event);
-      };
-
-      videoRecorderRef.current = videoRecorder;
-      videoRecorder.start(5000); // 5-second chunks
-      setIsRecordingVideo(true);
-
-      // Start periodic chunk saving for clip generation (every 20 seconds)
-      chunkSaveIntervalRef.current = setInterval(() => {
-        saveVideoChunk();
-      }, 20000);
-      
-      // Save first chunk after 10 seconds to enable early clip generation
-      setTimeout(() => {
-        if (videoChunksRef.current.length > 0) {
-          console.log('[CameraStream] Saving initial video chunk...');
-          saveVideoChunk();
-        }
-      }, 10000);
-
-      console.log('[CameraStream] Video recording started with mimeType:', selectedMimeType || 'default');
-      
+    if (!matchId) {
       toast({
-        title: "Gravação de vídeo iniciada",
-        description: "Capturando vídeo da câmera",
-      });
-
-    } catch (error) {
-      console.error('[CameraStream] Error starting video recording:', error);
-      toast({
-        title: "Erro na gravação de vídeo",
-        description: "Não foi possível iniciar a gravação do vídeo da câmera",
+        title: "Erro",
+        description: "Inicie a gravação antes de adicionar eventos.",
         variant: "destructive",
       });
+      return;
     }
-  }, [toast, saveVideoChunk, initializeSegmentBuffer]);
 
-  // Start recording - Now accepts existingMatchId to continue existing match
-  const startRecording = useCallback(async (videoElement?: HTMLVideoElement | null, existingMatchId?: string | null) => {
+    const currentRecordingTime = recordingTimeRef.current;
+    const currentMinute = Math.floor(currentRecordingTime / 60);
+    const currentSecond = currentRecordingTime % 60;
+
+    const eventLabels: Record<string, string> = {
+      goal: 'Gol',
+      goal_home: `Gol - ${matchInfo.homeTeam || 'Casa'}`,
+      goal_away: `Gol - ${matchInfo.awayTeam || 'Fora'}`,
+      yellow_card: 'Cartão Amarelo',
+      red_card: 'Cartão Vermelho',
+      foul: 'Falta',
+      corner: 'Escanteio',
+      offside: 'Impedimento',
+      substitution: 'Substituição',
+      penalty: 'Pênalti',
+      shot: 'Finalização',
+      save: 'Defesa',
+    };
+
+    const eventId = crypto.randomUUID();
+    const newEvent: LiveEvent = {
+      id: eventId,
+      type,
+      minute: currentMinute,
+      second: currentSecond,
+      description: eventLabels[type] || type,
+      status: "approved",
+      recordingTimestamp: currentRecordingTime,
+    };
+
+    setApprovedEvents((prev) => [...prev, newEvent]);
+    
+    if (type === 'goal_home' || type === 'goal') {
+      setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
+    } else if (type === 'goal_away') {
+      setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
+    }
+
     try {
-      console.log('[startRecording] Starting...', { 
-        hasVideoElement: !!videoElement, 
-        hasCameraStream: !!cameraStream,
-        existingMatchId 
+      await apiClient.createEvent(matchId, {
+        id: eventId,
+        match_id: matchId,
+        video_id: videoId || null,
+        event_type: type,
+        minute: currentMinute,
+        second: currentSecond,
+        description: newEvent.description,
+        approval_status: "approved",
+        is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(type),
+        match_half: currentMinute < 45 ? 'first' : 'second',
+        metadata: {
+          eventMs: currentRecordingTime * 1000,
+          videoSecond: currentRecordingTime,
+          source: 'manual',
+        }
       });
       
+      console.log("✅ Manual event saved:", type, `at ${currentMinute}:${currentSecond}`);
+      
+      if (videoChunksRef.current.length > 0) {
+        saveVideoChunk();
+      }
+    } catch (error) {
+      console.error("Error saving manual event:", error);
+    }
+
+    toast({
+      title: "Evento adicionado",
+      description: `${newEvent.description} (${currentMinute}:${String(currentSecond).padStart(2, '0')})`,
+      duration: 3000,
+    });
+  }, [currentMatchId, matchInfo, toast, saveVideoChunk]);
+
+  // Trigger live analysis
+  const triggerLiveAnalysis = useCallback(async (event: LiveEvent) => {
+    const matchId = tempMatchIdRef.current || currentMatchId;
+    if (!matchId) return;
+
+    try {
+      console.log('[triggerLiveAnalysis] Starting for event:', event.type);
+      
+      await apiClient.analyzeMatch({
+        matchId,
+        transcription: transcriptBuffer,
+        homeTeam: matchInfo.homeTeam,
+        awayTeam: matchInfo.awayTeam,
+        gameStartMinute: 0,
+        gameEndMinute: Math.ceil(recordingTimeRef.current / 60),
+        halfType: event.minute < 45 ? 'first' : 'second',
+      });
+      
+      console.log('[triggerLiveAnalysis] Analysis completed');
+    } catch (error) {
+      console.error('[triggerLiveAnalysis] Error:', error);
+    }
+  }, [currentMatchId, transcriptBuffer, matchInfo]);
+
+  // Load FFmpeg for clip generation
+  const loadFFmpeg = useCallback(async () => {
+    if (ffmpegRef.current?.loaded) return ffmpegRef.current;
+
+    const ffmpeg = new FFmpeg();
+    ffmpegRef.current = ffmpeg;
+
+    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
+    await ffmpeg.load({
+      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+    });
+
+    return ffmpeg;
+  }, []);
+
+  interface ClipGenerationResult {
+    success: boolean;
+    clipUrl?: string;
+    error?: string;
+  }
+
+  // Generate clip for event
+  const generateClipForEvent = useCallback(async (event: LiveEvent, videoUrl?: string): Promise<ClipGenerationResult> => {
+    const matchId = tempMatchIdRef.current;
+    if (!matchId) {
+      return { success: false, error: 'No match ID' };
+    }
+    if (isGeneratingClipRef.current) {
+      return { success: false, error: 'Already generating clip' };
+    }
+    
+    isGeneratingClipRef.current = true;
+    console.log(`[ClipGen] Generating clip for event ${event.id} at ${event.recordingTimestamp}s...`);
+    
+    try {
+      const ffmpeg = await loadFFmpeg();
+      
+      const eventSeconds = event.recordingTimestamp || (event.minute * 60 + event.second);
+      const { start: startTimeSeconds, duration: durationSeconds } = calculateClipWindow(eventSeconds, 5, 5);
+      
+      let videoData: Uint8Array | null = null;
+      let relativeStartSeconds = 0;
+      
+      // PRIORITY 1: Use clipVideoChunksRef
+      if (clipVideoChunksRef.current.length > 0) {
+        const relevantChunks = clipVideoChunksRef.current.filter(chunk => {
+          const chunkEnd = chunk.timestamp + 5;
+          return chunk.timestamp <= (startTimeSeconds + durationSeconds) && chunkEnd >= startTimeSeconds;
+        });
+        
+        if (relevantChunks.length > 0) {
+          console.log(`[ClipGen] Using clipVideoChunksRef: ${relevantChunks.length} relevant chunks`);
+          const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
+          const rawBlob = new Blob(relevantChunks.map(c => c.blob), { type: mimeType });
+          
+          if (rawBlob.size > 1000) {
+            const arrayBuffer = await rawBlob.arrayBuffer();
+            videoData = new Uint8Array(arrayBuffer);
+            const firstChunkTime = Math.min(...relevantChunks.map(c => c.timestamp));
+            relativeStartSeconds = Math.max(0, startTimeSeconds - firstChunkTime);
+          }
+        }
+      }
+      
+      // PRIORITY 2: Use all video chunks
+      if (!videoData && videoChunksRef.current.length > 0) {
+        console.log(`[ClipGen] Falling back to videoChunksRef: ${videoChunksRef.current.length} chunks`);
+        const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
+        const rawBlob = new Blob(videoChunksRef.current, { type: mimeType });
+        
+        if (rawBlob.size > 1000) {
+          const arrayBuffer = await rawBlob.arrayBuffer();
+          videoData = new Uint8Array(arrayBuffer);
+          relativeStartSeconds = startTimeSeconds;
+        }
+      }
+      
+      // PRIORITY 3: Use segment buffer
+      if (!videoData && segmentBufferRef.current) {
+        const segment = segmentBufferRef.current.getSegmentForTime(eventSeconds);
+        const videoBlob = segmentBufferRef.current.getBlobForTimeRange(startTimeSeconds, startTimeSeconds + durationSeconds);
+        
+        if (videoBlob && videoBlob.size > 1000) {
+          console.log(`[ClipGen] Using segment buffer`);
+          const arrayBuffer = await videoBlob.arrayBuffer();
+          videoData = new Uint8Array(arrayBuffer);
+          
+          if (segment) {
+            relativeStartSeconds = Math.max(0, startTimeSeconds - segment.startTime);
+          }
+        }
+      }
+      
+      // PRIORITY 4: Download from URL
+      if (!videoData && videoUrl) {
+        console.log(`[ClipGen] Falling back to video URL: ${videoUrl}`);
+        videoData = await fetchFile(videoUrl);
+        relativeStartSeconds = startTimeSeconds;
+      }
+      
+      if (!videoData) {
+        console.warn('[ClipGen] No video data available from any source');
+        isGeneratingClipRef.current = false;
+        return { success: false, error: 'No video data available' };
+      }
+      
+      // Validate input size
+      const inputSizeKB = videoData.length / 1024;
+      if (inputSizeKB < 100) {
+        console.warn(`[ClipGen] Input video too small: ${inputSizeKB.toFixed(1)}KB`);
+        isGeneratingClipRef.current = false;
+        return { success: false, error: 'Input video too small' };
+      }
+      
+      // Process with FFmpeg
+      await ffmpeg.writeFile('input.webm', videoData);
+      
+      const extension = 'webm';
+      const outputFile = `clip_${event.id}.${extension}`;
+      
+      await ffmpeg.exec([
+        '-i', 'input.webm',
+        '-ss', relativeStartSeconds.toString(),
+        '-t', durationSeconds.toString(),
+        '-c:v', 'libvpx',
+        '-c:a', 'libvorbis',
+        '-crf', '23',
+        '-preset', 'ultrafast',
+        outputFile
+      ]);
+      
+      const clipData = await ffmpeg.readFile(outputFile);
+      const clipDataArray = clipData instanceof Uint8Array ? new Uint8Array(clipData.buffer.slice(0)) : clipData;
+      const clipBlob = new Blob([clipDataArray], { type: 'video/webm' });
+      
+      // Upload clip
+      const result = await apiClient.uploadBlob(matchId, 'clips', clipBlob, `clip-${event.id}.webm`);
+      
+      // Update event with clip URL
+      await apiClient.updateEvent(event.id, { clip_url: result.url });
+      
+      // Update local state
+      setApprovedEvents(prev => prev.map(e => 
+        e.id === event.id ? { ...e, clipUrl: result.url } : e
+      ));
+      
+      // Cleanup FFmpeg files
+      try {
+        await ffmpeg.deleteFile('input.webm');
+        await ffmpeg.deleteFile(outputFile);
+      } catch {}
+      
+      isGeneratingClipRef.current = false;
+      console.log(`[ClipGen] ✅ Clip generated: ${result.url}`);
+      
+      return { success: true, clipUrl: result.url };
+    } catch (error) {
+      console.error('[ClipGen] Error:', error);
+      isGeneratingClipRef.current = false;
+      return { success: false, error: String(error) };
+    }
+  }, [loadFFmpeg]);
+
+  // Add detected event
+  const addDetectedEvent = useCallback(async (eventData: {
+    type: string;
+    minute: number;
+    second: number;
+    description: string;
+    confidence?: number;
+    source?: string;
+  }) => {
+    const matchId = tempMatchIdRef.current || currentMatchId;
+    const videoId = currentVideoIdRef.current;
+
+    if (!matchId) {
+      console.warn('⚠️ Cannot save detected event - no matchId. Event ignored.');
+      return;
+    }
+
+    const eventId = crypto.randomUUID();
+    const currentRecordingTime = recordingTimeRef.current;
+    
+    const newEvent: LiveEvent = {
+      id: eventId,
+      type: eventData.type,
+      minute: eventData.minute,
+      second: eventData.second,
+      description: eventData.description,
+      confidence: eventData.confidence,
+      status: "pending",
+      recordingTimestamp: currentRecordingTime,
+    };
+
+    const isDuplicate = detectedEvents.some(
+      (e) =>
+        e.type === newEvent.type &&
+        Math.abs((e.recordingTimestamp || 0) - (newEvent.recordingTimestamp || 0)) < 30
+    );
+
+    if (!isDuplicate) {
+      setDetectedEvents((prev) => [...prev, newEvent]);
+      
+      try {
+        await apiClient.createEvent(matchId, {
+          id: eventId,
+          match_id: matchId,
+          video_id: videoId || null,
+          event_type: eventData.type,
+          minute: eventData.minute,
+          second: eventData.second,
+          description: eventData.description,
+          approval_status: "pending",
+          is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(eventData.type),
+          match_half: eventData.minute < 45 ? 'first' : 'second',
+          metadata: {
+            eventMs: currentRecordingTime * 1000,
+            videoSecond: currentRecordingTime,
+            source: eventData.source || 'live-detected',
+            confidence: eventData.confidence
+          }
+        });
+        console.log(`✅ Detected event saved at ${currentRecordingTime}s:`, eventData.type);
+        
+        if (videoChunksRef.current.length > 0) {
+          saveVideoChunk();
+        }
+      } catch (error) {
+        console.error("Error saving detected event to database:", error);
+      }
+      
+      if ((eventData.type === 'goal' || eventData.type === 'goal_home' || eventData.type === 'goal_away') 
+          && eventData.confidence && eventData.confidence >= 0.8) {
+        const desc = eventData.description.toLowerCase();
+        
+        if (eventData.type === 'goal_home' || (eventData.type === 'goal' && matchInfo.homeTeam && desc.includes(matchInfo.homeTeam.toLowerCase()))) {
+          setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
+          toast({
+            title: "⚽ GOL! " + matchInfo.homeTeam,
+            description: eventData.description,
+            duration: 5000,
+          });
+        } else if (eventData.type === 'goal_away' || (eventData.type === 'goal' && matchInfo.awayTeam && desc.includes(matchInfo.awayTeam.toLowerCase()))) {
+          setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
+          toast({
+            title: "⚽ GOL! " + matchInfo.awayTeam,
+            description: eventData.description,
+            duration: 5000,
+          });
+        } else {
+          toast({
+            title: "⚽ GOL Detectado!",
+            description: eventData.description + " (confirme qual time)",
+            duration: 5000,
+          });
+        }
+      } else {
+        toast({
+          title: "Evento detectado",
+          description: `${newEvent.type}: ${newEvent.description}`,
+          duration: 3000,
+        });
+      }
+    }
+  }, [detectedEvents, matchInfo, toast, currentMatchId, saveVideoChunk]);
+
+  // Keep ref synchronized
+  useEffect(() => {
+    addDetectedEventRef.current = addDetectedEvent;
+  }, [addDetectedEvent]);
+
+  // Approve event
+  const approveEvent = useCallback(async (eventId: string) => {
+    const event = detectedEvents.find((e) => e.id === eventId);
+    const matchId = tempMatchIdRef.current || currentMatchId;
+    
+    if (event) {
+      setDetectedEvents((prev) => prev.filter((e) => e.id !== eventId));
+      setApprovedEvents((prev) => [...prev, { ...event, status: "approved" }]);
+
+      if (event.type === "goal") {
+        const desc = event.description.toLowerCase();
+        if (matchInfo.homeTeam && desc.includes(matchInfo.homeTeam.toLowerCase())) {
+          setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
+        } else if (matchInfo.awayTeam && desc.includes(matchInfo.awayTeam.toLowerCase())) {
+          setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
+        }
+      }
+
+      if (matchId) {
+        try {
+          await apiClient.updateEvent(event.id, {
+            approval_status: "approved",
+            approved_at: new Date().toISOString(),
+          });
+          
+          console.log("✅ Event approved and saved:", event.type);
+          
+          let chunkUrl: string | null = null;
+          if (videoChunksRef.current.length > 0) {
+            chunkUrl = await saveVideoChunk();
+          }
+          
+          const videoUrl = chunkUrl || latestVideoChunkUrl;
+          if (videoUrl) {
+            console.log('Generating clip for approved event with URL:', videoUrl);
+            
+            const MAX_RETRIES = 3;
+            const RETRY_DELAYS = [2000, 4000, 6000];
+            let clipResult: ClipGenerationResult = { success: false };
+            
+            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+              console.log(`[ClipGen] Attempt ${attempt}/${MAX_RETRIES} for event ${event.id}`);
+              clipResult = await generateClipForEvent(event, videoUrl);
+              
+              if (clipResult.success) {
+                console.log(`✅ Clip generated successfully on attempt ${attempt}`);
+                break;
+              }
+              
+              if (attempt < MAX_RETRIES) {
+                const delay = RETRY_DELAYS[attempt - 1];
+                console.log(`⏳ Retry ${attempt} failed, waiting ${delay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+              }
+            }
+            
+            if (!clipResult.success) {
+              console.warn(`❌ All ${MAX_RETRIES} attempts failed for event ${event.id}`);
+              
+              await apiClient.deleteEvent(event.id);
+              setApprovedEvents((prev) => prev.filter((e) => e.id !== event.id));
+              
+              if (event.type === "goal") {
+                const desc = event.description.toLowerCase();
+                if (matchInfo.homeTeam && desc.includes(matchInfo.homeTeam.toLowerCase())) {
+                  setCurrentScore((prev) => ({ ...prev, home: Math.max(0, prev.home - 1) }));
+                } else if (matchInfo.awayTeam && desc.includes(matchInfo.awayTeam.toLowerCase())) {
+                  setCurrentScore((prev) => ({ ...prev, away: Math.max(0, prev.away - 1) }));
+                }
+              }
+              
+              toast({
+                title: "Evento removido",
+                description: `Clip não gerado após ${MAX_RETRIES} tentativas`,
+                variant: "destructive"
+              });
+              return;
+            }
+          } else {
+            console.warn('❌ No video URL available for clip generation - deleting event');
+            
+            await apiClient.deleteEvent(event.id);
+            setApprovedEvents((prev) => prev.filter((e) => e.id !== event.id));
+            
+            toast({
+              title: "Evento removido",
+              description: "Sem vídeo disponível para gerar clip",
+              variant: "destructive"
+            });
+            return;
+          }
+
+          console.log('Triggering live analysis for approved event:', event.type);
+          triggerLiveAnalysis(event);
+        } catch (error) {
+          console.error("Error approving event:", error);
+        }
+      }
+    }
+  }, [detectedEvents, matchInfo, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis, currentMatchId, toast]);
+
+  // Edit event
+  const editEvent = useCallback((eventId: string, updates: Partial<LiveEvent>) => {
+    setDetectedEvents((prev) =>
+      prev.map((e) => (e.id === eventId ? { ...e, ...updates } : e))
+    );
+    setApprovedEvents((prev) =>
+      prev.map((e) => (e.id === eventId ? { ...e, ...updates } : e))
+    );
+  }, []);
+
+  // Remove event
+  const removeEvent = useCallback((eventId: string) => {
+    setDetectedEvents((prev) => prev.filter((e) => e.id !== eventId));
+    setApprovedEvents((prev) => prev.filter((e) => e.id !== eventId));
+  }, []);
+
+  // Update score
+  const updateScore = useCallback((team: "home" | "away", delta: number) => {
+    setCurrentScore((prev) => ({
+      ...prev,
+      [team]: Math.max(0, prev[team] + delta),
+    }));
+  }, []);
+
+  // Start recording
+  const startRecording = useCallback(async (videoElement?: HTMLVideoElement | null, existingMatchId?: string | null) => {
+    try {
       let audioStream: MediaStream;
       
       if (cameraStream) {
@@ -1126,46 +1287,29 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
       let matchId: string | null;
 
-      // FIX: Use existing match if provided, don't create new one
       if (existingMatchId) {
         matchId = existingMatchId;
         tempMatchIdRef.current = matchId;
         setCurrentMatchId(matchId);
         
-        // Update status to 'live'
-        await supabase
-          .from("matches")
-          .update({ status: "live" })
-          .eq("id", matchId);
+        await apiClient.updateMatch(matchId, { status: "live" });
         
-        // Load existing events
-        const { data: existingEvents } = await supabase
-          .from("match_events")
-          .select("*")
-          .eq("match_id", matchId)
-          .order("minute", { ascending: true });
+        const existingEvents = await apiClient.getMatchEvents(matchId);
         
         if (existingEvents?.length) {
-          setApprovedEvents(existingEvents.map((e) => ({
+          setApprovedEvents(existingEvents.map((e: any) => ({
             id: e.id,
             type: e.event_type,
             minute: e.minute || 0,
             second: e.second || 0,
             description: e.description || "",
             status: "approved" as const,
-            recordingTimestamp: e.metadata && typeof e.metadata === 'object' && 'videoSecond' in e.metadata 
-              ? (e.metadata as any).videoSecond 
-              : (e.minute || 0) * 60 + (e.second || 0),
+            recordingTimestamp: e.metadata?.videoSecond || (e.minute || 0) * 60 + (e.second || 0),
             clipUrl: e.clip_url || undefined
           })));
         }
 
-        // Load existing score
-        const { data: matchData } = await supabase
-          .from("matches")
-          .select("home_score, away_score")
-          .eq("id", matchId)
-          .single();
+        const matchData = await apiClient.getMatch(matchId);
         
         if (matchData) {
           setCurrentScore({
@@ -1179,12 +1323,11 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           description: "Retomando gravação da partida existente",
         });
       } else {
-        // Create new match
         matchId = await createTempMatch();
         if (!matchId) {
           toast({
             title: "Erro ao iniciar",
-            description: "Não foi possível criar a partida. Verifique os dados e tente novamente.",
+            description: "Não foi possível criar a partida.",
             variant: "destructive",
           });
           audioStream.getTracks().forEach(track => track.stop());
@@ -1228,83 +1371,70 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       setIsRecording(true);
       setIsPaused(false);
       
-      // Only reset if new match
       if (!existingMatchId) {
         setRecordingTime(0);
-        recordingTimeRef.current = 0; // CRITICAL: Reset ref too
+        recordingTimeRef.current = 0;
         setTranscriptBuffer("");
         setTranscriptChunks([]);
       }
       
       audioChunksRef.current = [];
       videoChunksRef.current = [];
-      clipVideoChunksRef.current = []; // Reset clip chunks on new recording
-      allVideoChunksRef.current = []; // CRITICAL: Reset permanent chunks on NEW recording only
+      clipVideoChunksRef.current = [];
+      allVideoChunksRef.current = [];
 
-      // NEW: Create video record IMMEDIATELY with status 'recording'
-      // This ensures all events will have a video_id from the start
+      // Create video record
       if (!existingMatchId) {
         try {
-          const { data: videoRecord, error: videoError } = await supabase.from('videos').insert({
+          const videoRecord = await apiClient.createVideo({
             match_id: matchId,
-            file_url: '', // Will be updated in finishMatch
+            file_url: '',
             file_name: 'Gravação em andamento',
             video_type: 'full',
-            status: 'recording',  // Status indicating recording in progress
+            status: 'recording',
             start_minute: 0,
-          }).select('id').single();
+          });
 
-          if (videoError) {
-            console.error('[startRecording] Error creating video record:', videoError);
-          } else if (videoRecord) {
+          if (videoRecord) {
             setCurrentVideoId(videoRecord.id);
             currentVideoIdRef.current = videoRecord.id;
-            console.log('[startRecording] ✅ Video record created at start:', videoRecord.id);
+            console.log('[startRecording] ✅ Video record created:', videoRecord.id);
           }
         } catch (videoCreateError) {
           console.error('[startRecording] Failed to create video record:', videoCreateError);
         }
       } else {
-        // For existing match, load existing events and check for video
-        console.log('[startRecording] Loading existing events for match:', matchId);
         loadExistingEvents(matchId);
         
-        const { data: existingVideo } = await supabase
-          .from('videos')
-          .select('id')
-          .eq('match_id', matchId)
-          .maybeSingle();
-        
-        if (existingVideo) {
-          setCurrentVideoId(existingVideo.id);
-          currentVideoIdRef.current = existingVideo.id;
-          console.log('[startRecording] Using existing video record:', existingVideo.id);
-        } else {
-          // Create video record for existing match if none exists
-          try {
-            const { data: videoRecord, error: videoError } = await supabase.from('videos').insert({
+        try {
+          const videos = await apiClient.getVideos(matchId);
+          const existingVideo = videos?.[0];
+          
+          if (existingVideo) {
+            setCurrentVideoId(existingVideo.id);
+            currentVideoIdRef.current = existingVideo.id;
+            console.log('[startRecording] Using existing video record:', existingVideo.id);
+          } else {
+            const videoRecord = await apiClient.createVideo({
               match_id: matchId,
               file_url: '',
               file_name: 'Gravação em andamento',
               video_type: 'full',
               status: 'recording',
               start_minute: 0,
-            }).select('id').single();
+            });
 
-            if (videoError) {
-              console.error('[startRecording] Error creating video for existing match:', videoError);
-            } else if (videoRecord) {
+            if (videoRecord) {
               setCurrentVideoId(videoRecord.id);
               currentVideoIdRef.current = videoRecord.id;
-              console.log('[startRecording] ✅ Video record created for existing match:', videoRecord.id);
             }
-          } catch (videoCreateError) {
-            console.error('[startRecording] Failed to create video for existing match:', videoCreateError);
           }
+        } catch (error) {
+          console.error('[startRecording] Error handling video record:', error);
         }
       }
 
-      // CRITICAL FIX: Start video recording from videoElement OR cameraStream
+      // Start video recording
       if (videoElement) {
         console.log('[startRecording] Using videoElement for video recording');
         if (videoElement.readyState >= 2) {
@@ -1315,11 +1445,10 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           }, { once: true });
         }
       } else if (cameraStream) {
-        // NEW: If no videoElement but we have cameraStream, record directly from it
-        console.log('[startRecording] No videoElement, using cameraStream directly for video recording');
+        console.log('[startRecording] Using cameraStream directly');
         startVideoRecordingFromStream(cameraStream);
       } else {
-        console.warn('[startRecording] No video source available - audio only recording');
+        console.warn('[startRecording] No video source available');
       }
 
       transcriptionIntervalRef.current = setInterval(() => {
@@ -1399,701 +1528,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [isPaused]);
 
-  // Load FFmpeg for clip generation
-  const loadFFmpeg = useCallback(async () => {
-    if (ffmpegRef.current?.loaded) return ffmpegRef.current;
-
-    const ffmpeg = new FFmpeg();
-    ffmpegRef.current = ffmpeg;
-
-    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-    await ffmpeg.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-    });
-
-    return ffmpeg;
-  }, []);
-
-  // Result type for clip generation
-  interface ClipGenerationResult {
-    success: boolean;
-    clipUrl?: string;
-    error?: string;
-  }
-
-  // Generate clip for event using FFmpeg - PRIORITIZES clipVideoChunksRef for real-time clips
-  // Returns {success: true, clipUrl} if clip was generated, {success: false, error} otherwise
-  const generateClipForEvent = useCallback(async (event: LiveEvent, videoUrl?: string): Promise<ClipGenerationResult> => {
-    const matchId = tempMatchIdRef.current;
-    if (!matchId) {
-      return { success: false, error: 'No match ID' };
-    }
-    if (isGeneratingClipRef.current) {
-      return { success: false, error: 'Already generating clip' };
-    }
-    
-    isGeneratingClipRef.current = true;
-    console.log(`[ClipGen] Generating clip for event ${event.id} at ${event.recordingTimestamp}s...`);
-    console.log(`[ClipGen] Available sources - clipVideoChunks: ${clipVideoChunksRef.current.length}, videoChunks: ${videoChunksRef.current.length}, segmentBuffer: ${!!segmentBufferRef.current}`);
-    
-    try {
-      const ffmpeg = await loadFFmpeg();
-      
-      // Calculate timestamps (5s before, 5s after)
-      const eventSeconds = event.recordingTimestamp || (event.minute * 60 + event.second);
-      const { start: startTimeSeconds, duration: durationSeconds } = calculateClipWindow(eventSeconds, 5, 5);
-      
-      let videoData: Uint8Array;
-      let relativeStartSeconds = 0; // Default to 0 for raw chunks
-      
-      // PRIORITY 1: Use clipVideoChunksRef (maintained specifically for clips, never cleared)
-      if (clipVideoChunksRef.current.length > 0) {
-        // Filter chunks that overlap with the clip window
-        const relevantChunks = clipVideoChunksRef.current.filter(chunk => {
-          // Each chunk is 5 seconds, so check if it overlaps with [startTimeSeconds, startTimeSeconds + durationSeconds]
-          const chunkEnd = chunk.timestamp + 5;
-          return chunk.timestamp <= (startTimeSeconds + durationSeconds) && chunkEnd >= startTimeSeconds;
-        });
-        
-        if (relevantChunks.length > 0) {
-          console.log(`[ClipGen] Using clipVideoChunksRef: ${relevantChunks.length} relevant chunks (${clipVideoChunksRef.current.length} total)`);
-          const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
-          const rawBlob = new Blob(relevantChunks.map(c => c.blob), { type: mimeType });
-          
-          if (rawBlob.size > 1000) {
-            const arrayBuffer = await rawBlob.arrayBuffer();
-            videoData = new Uint8Array(arrayBuffer);
-            // Calculate relative start within the filtered chunks
-            const firstChunkTime = Math.min(...relevantChunks.map(c => c.timestamp));
-            relativeStartSeconds = Math.max(0, startTimeSeconds - firstChunkTime);
-            console.log(`[ClipGen] Clip blob size: ${(rawBlob.size / 1024).toFixed(1)}KB, relative start: ${relativeStartSeconds}s`);
-          } else {
-            console.log(`[ClipGen] clipVideoChunksRef blob too small (${rawBlob.size}B), trying fallbacks...`);
-            videoData = null as any;
-          }
-        } else {
-          console.log(`[ClipGen] No relevant chunks found in clipVideoChunksRef for time range [${startTimeSeconds}, ${startTimeSeconds + durationSeconds}]`);
-          videoData = null as any;
-        }
-      }
-      
-      // PRIORITY 2: Use all video chunks (may be more complete)
-      if (!videoData && videoChunksRef.current.length > 0) {
-        console.log(`[ClipGen] Falling back to videoChunksRef: ${videoChunksRef.current.length} chunks`);
-        const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
-        const rawBlob = new Blob(videoChunksRef.current, { type: mimeType });
-        
-        if (rawBlob.size > 1000) {
-          const arrayBuffer = await rawBlob.arrayBuffer();
-          videoData = new Uint8Array(arrayBuffer);
-          relativeStartSeconds = startTimeSeconds;
-          console.log(`[ClipGen] videoChunksRef blob size: ${(rawBlob.size / 1024).toFixed(1)}KB`);
-        }
-      }
-      
-      // PRIORITY 3: Use segment buffer
-      if (!videoData && segmentBufferRef.current) {
-        const segment = segmentBufferRef.current.getSegmentForTime(eventSeconds);
-        const videoBlob = segmentBufferRef.current.getBlobForTimeRange(startTimeSeconds, startTimeSeconds + durationSeconds);
-        
-        if (videoBlob && videoBlob.size > 1000) {
-          console.log(`[ClipGen] Using segment buffer, blob size: ${(videoBlob.size / 1024).toFixed(1)}KB`);
-          const arrayBuffer = await videoBlob.arrayBuffer();
-          videoData = new Uint8Array(arrayBuffer);
-          
-          if (segment) {
-            relativeStartSeconds = Math.max(0, startTimeSeconds - segment.startTime);
-          }
-        }
-      }
-      
-      // PRIORITY 4: Download from URL (last resort)
-      if (!videoData && videoUrl) {
-        console.log(`[ClipGen] Falling back to video URL: ${videoUrl}`);
-        videoData = await fetchFile(videoUrl);
-        relativeStartSeconds = startTimeSeconds;
-      }
-      
-      if (!videoData) {
-        console.warn('[ClipGen] No video data available from any source');
-        isGeneratingClipRef.current = false;
-        return { success: false, error: 'No video data available' };
-      }
-      
-      // CRITICAL: Validate video data size BEFORE processing with FFmpeg
-      const inputSizeKB = videoData.length / 1024;
-      const inputSizeMB = inputSizeKB / 1024;
-      console.log(`[ClipGen] 📊 Input video data: ${inputSizeKB.toFixed(1)}KB (${inputSizeMB.toFixed(2)}MB)`);
-      
-      // Minimum 100KB of input data for a valid clip (10s of video should be at least 100KB)
-      const MIN_INPUT_SIZE_KB = 100;
-      if (inputSizeKB < MIN_INPUT_SIZE_KB) {
-        console.warn(`[ClipGen] ⚠️ Input video too small: ${inputSizeKB.toFixed(1)}KB < ${MIN_INPUT_SIZE_KB}KB minimum`);
-        console.log(`[ClipGen] 🔍 Diagnostics: clipVideoChunks=${clipVideoChunksRef.current.length}, videoChunks=${videoChunksRef.current.length}, segmentBuffer=${!!segmentBufferRef.current}`);
-        
-        // FALLBACK: Try to download from URL if local chunks failed
-        if (videoUrl) {
-          console.log(`[ClipGen] 🔄 Attempting fallback: downloading from URL: ${videoUrl}`);
-          try {
-            videoData = await fetchFile(videoUrl);
-            relativeStartSeconds = startTimeSeconds;
-            const fallbackSizeKB = videoData.length / 1024;
-            console.log(`[ClipGen] 📥 Downloaded video from URL: ${fallbackSizeKB.toFixed(1)}KB`);
-            
-            if (fallbackSizeKB < MIN_INPUT_SIZE_KB) {
-              console.error(`[ClipGen] ❌ Even URL fallback too small: ${fallbackSizeKB.toFixed(1)}KB`);
-              isGeneratingClipRef.current = false;
-              return { success: false, error: `Video too small even from URL: ${fallbackSizeKB.toFixed(1)}KB` };
-            }
-          } catch (downloadError) {
-            console.error(`[ClipGen] ❌ Failed to download from URL:`, downloadError);
-            isGeneratingClipRef.current = false;
-            return { success: false, error: `Input video too small: ${inputSizeKB.toFixed(1)}KB, and URL download failed` };
-          }
-        } else {
-          isGeneratingClipRef.current = false;
-          return { success: false, error: `Input video too small: ${inputSizeKB.toFixed(1)}KB` };
-        }
-      }
-      
-      await ffmpeg.writeFile('input.webm', videoData);
-      
-      // Convert seconds to FFmpeg timestamp
-      const hours = Math.floor(relativeStartSeconds / 3600);
-      const minutes = Math.floor((relativeStartSeconds % 3600) / 60);
-      const seconds = relativeStartSeconds % 60;
-      const startTimestamp = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toFixed(3).padStart(6, '0')}`;
-      
-      console.log(`[ClipGen] Extracting from ${startTimestamp} for ${durationSeconds}s`);
-      
-      // Extract clip
-      await ffmpeg.exec([
-        '-ss', startTimestamp,
-        '-i', 'input.webm',
-        '-t', durationSeconds.toString(),
-        '-c:v', 'libvpx-vp9',
-        '-c:a', 'libopus',
-        '-b:v', '1M',
-        '-avoid_negative_ts', 'make_zero',
-        'output.webm'
-      ]);
-      
-      // Read output
-      const clipData = await ffmpeg.readFile('output.webm');
-      let clipBlob: Blob;
-      if (clipData instanceof Uint8Array) {
-        const buffer = new ArrayBuffer(clipData.length);
-        const view = new Uint8Array(buffer);
-        view.set(clipData);
-        clipBlob = new Blob([buffer], { type: 'video/webm' });
-      } else {
-        clipBlob = new Blob([clipData as BlobPart], { type: 'video/webm' });
-      }
-      
-      // Clean up
-      await ffmpeg.deleteFile('input.webm');
-      await ffmpeg.deleteFile('output.webm');
-      
-      // CRITICAL: Minimum 10KB for a valid clip (671 bytes is just headers)
-      const MIN_CLIP_SIZE_KB = 10;
-      const clipSizeKB = clipBlob.size / 1024;
-      if (clipSizeKB < MIN_CLIP_SIZE_KB) {
-        console.error(`[ClipGen] ❌ Generated clip too small: ${clipSizeKB.toFixed(1)}KB < ${MIN_CLIP_SIZE_KB}KB minimum`);
-        console.log(`[ClipGen] 🔍 This indicates FFmpeg received insufficient video data`);
-        isGeneratingClipRef.current = false;
-        return { success: false, error: `Generated clip too small: ${clipSizeKB.toFixed(1)}KB` };
-      }
-      
-      console.log(`[ClipGen] ✅ Clip generated: ${clipSizeKB.toFixed(1)}KB`);
-      
-      // Upload to storage
-      const filePath = `${matchId}/${event.id}-${event.type}-${event.minute}min.webm`;
-      const { error: uploadError } = await supabase.storage
-        .from('event-clips')
-        .upload(filePath, clipBlob, {
-          contentType: 'video/webm',
-          upsert: true
-        });
-
-      if (uploadError) {
-        console.error('[ClipGen] Upload error:', uploadError);
-        isGeneratingClipRef.current = false;
-        return { success: false, error: uploadError.message };
-      }
-
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('event-clips')
-        .getPublicUrl(filePath);
-
-      const clipUrl = urlData.publicUrl;
-
-      // Update database
-      await supabase
-        .from('match_events')
-        .update({ clip_url: clipUrl })
-        .eq('id', event.id);
-
-      // Update local state
-      setApprovedEvents(prev => prev.map(e => 
-        e.id === event.id ? { ...e, clipUrl } : e
-      ));
-
-      console.log(`[ClipGen] Clip uploaded for event ${event.id}:`, clipUrl);
-      
-      toast({
-        title: "Clip gerado em tempo real",
-        description: `Clip do ${event.type} aos ${event.minute}' criado`,
-      });
-
-      return { success: true, clipUrl };
-    } catch (error) {
-      console.error('Error generating clip:', error);
-      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
-    } finally {
-      isGeneratingClipRef.current = false;
-    }
-  }, [loadFFmpeg, toast]);
-
-
-  // Call live analysis edge function
-  const triggerLiveAnalysis = useCallback(async (event: LiveEvent) => {
-    const matchId = tempMatchIdRef.current;
-    if (!matchId) return;
-
-    try {
-      await supabase.functions.invoke('generate-live-analysis', {
-        body: {
-          matchId,
-          event: {
-            id: event.id,
-            type: event.type,
-            minute: event.minute,
-            second: event.second,
-            description: event.description,
-            confidence: event.confidence,
-          },
-          allEvents: approvedEvents.map(e => ({
-            type: e.type,
-            minute: e.minute,
-            second: e.second,
-            description: e.description,
-          })),
-          homeTeam: matchInfo.homeTeam,
-          awayTeam: matchInfo.awayTeam,
-          score: currentScore,
-        }
-      });
-      console.log('Live analysis triggered for event:', event.type);
-    } catch (error) {
-      console.error('Error triggering live analysis:', error);
-    }
-  }, [approvedEvents, matchInfo, currentScore]);
-
-  // Add manual event
-  const addManualEvent = useCallback(async (type: string) => {
-    // CRITICAL: Use multiple fallbacks for matchId
-    const matchId = tempMatchIdRef.current || currentMatchId;
-    const videoId = currentVideoIdRef.current;
-    
-    // CRITICAL: Use recordingTimeRef.current to get actual recording time (fixes stale closure)
-    const currentRecordingTime = recordingTimeRef.current;
-    const minute = Math.floor(currentRecordingTime / 60);
-    const second = currentRecordingTime % 60;
-
-    console.log('=== ADD MANUAL EVENT ===');
-    console.log('type:', type);
-    console.log('tempMatchIdRef.current:', tempMatchIdRef.current);
-    console.log('currentMatchId state:', currentMatchId);
-    console.log('matchId used:', matchId);
-    console.log('videoId:', videoId);
-    console.log('isRecording:', isRecording);
-    console.log('currentRecordingTime:', currentRecordingTime);
-
-    // Warn but don't block if no videoId - will be linked in finishMatch
-    if (!videoId) {
-      console.warn('⚠️ No videoId available - event will be linked to video at finish');
-    }
-
-    if (!matchId) {
-      console.error('❌ CRITICAL: No matchId available - event will NOT be saved to database');
-      toast({
-        title: "Erro",
-        description: "Inicie a gravação antes de adicionar eventos",
-        variant: "destructive"
-      });
-      return;
-    }
-
-    const eventId = crypto.randomUUID();
-    const newEvent: LiveEvent = {
-      id: eventId,
-      type,
-      minute,
-      second,
-      description: `${type} aos ${minute}'${second}"`,
-      status: "approved",
-      recordingTimestamp: currentRecordingTime,
-    };
-
-    setApprovedEvents((prev) => [...prev, newEvent]);
-
-    if (type === "goal_home") {
-      setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
-    } else if (type === "goal_away") {
-      setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
-    }
-
-    // Save to database - video_id may be null, will be linked in finishMatch
-    try {
-      await supabase.from("match_events").insert({
-        id: eventId,
-        match_id: matchId,
-        video_id: videoId || null, // Allow null - will be linked at finish
-        event_type: type,
-        minute,
-        second,
-        description: newEvent.description,
-        approval_status: "approved",
-        is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(type),
-        match_half: minute < 45 ? 'first' : 'second',
-        metadata: {
-          eventMs: currentRecordingTime * 1000,
-          videoSecond: currentRecordingTime,
-          source: 'live-manual'
-        }
-      });
-      console.log(`Manual event saved at ${currentRecordingTime}s ${videoId ? 'with video_id ' + videoId : '(video will be linked at finish)'}:`, type);
-      
-      // IMMEDIATE: Save video chunk and get URL directly (fixes race condition)
-      let chunkUrl: string | null = null;
-      if (videoChunksRef.current.length > 0) {
-        chunkUrl = await saveVideoChunk();
-        console.log('Video chunk saved for manual event, URL:', chunkUrl);
-      }
-      
-      // Generate clip using the returned URL (not stale state)
-      const videoUrl = chunkUrl || latestVideoChunkUrl;
-      if (videoUrl) {
-        console.log('Generating clip for manual event with URL:', videoUrl);
-        generateClipForEvent(newEvent, videoUrl);
-      } else {
-        console.log('No video URL available for clip generation');
-      }
-
-      // Trigger live analysis immediately
-      console.log('Triggering live analysis for manual event:', type);
-      triggerLiveAnalysis(newEvent);
-    } catch (error) {
-      console.error("Error saving manual event:", error);
-    }
-
-    toast({
-      title: "Evento adicionado",
-      description: newEvent.description,
-    });
-  }, [toast, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis, currentMatchId, isRecording]);
-
-  // Add detected event from AI - NOW SAVES TO DATABASE IMMEDIATELY
-  // Events are saved with video_id if available, otherwise linked in finishMatch
-  const addDetectedEvent = useCallback(async (eventData: {
-    type: string;
-    minute: number;
-    second: number;
-    description: string;
-    confidence?: number;
-    source?: string;
-  }) => {
-    const matchId = tempMatchIdRef.current || currentMatchId;
-    const videoId = currentVideoIdRef.current; // May be null during recording start
-
-    if (!matchId) {
-      console.warn('⚠️ Cannot save detected event - no matchId. Event ignored.');
-      return;
-    }
-
-    const eventId = crypto.randomUUID();
-    
-    // CRITICAL: Use recordingTimeRef.current to get actual recording time (fixes stale closure)
-    const currentRecordingTime = recordingTimeRef.current;
-    
-    const newEvent: LiveEvent = {
-      id: eventId,
-      type: eventData.type,
-      minute: eventData.minute,
-      second: eventData.second,
-      description: eventData.description,
-      confidence: eventData.confidence,
-      status: "pending",
-      recordingTimestamp: currentRecordingTime,
-    };
-
-    const isDuplicate = detectedEvents.some(
-      (e) =>
-        e.type === newEvent.type &&
-        Math.abs((e.recordingTimestamp || 0) - (newEvent.recordingTimestamp || 0)) < 30
-    );
-
-    if (!isDuplicate) {
-      setDetectedEvents((prev) => [...prev, newEvent]);
-      
-      // IMMEDIATELY save to database (pending approval)
-      // video_id may be null - will be linked in finishMatch
-      try {
-        await supabase.from("match_events").insert({
-          id: eventId,
-          match_id: matchId,
-          video_id: videoId || null, // Allow null - will be linked at finish
-          event_type: eventData.type,
-          minute: eventData.minute,
-          second: eventData.second,
-          description: eventData.description,
-          approval_status: "pending",
-          is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(eventData.type),
-          match_half: eventData.minute < 45 ? 'first' : 'second',
-          metadata: {
-            eventMs: currentRecordingTime * 1000,
-            videoSecond: currentRecordingTime,
-            source: eventData.source || 'live-detected',
-            confidence: eventData.confidence
-          }
-        });
-        console.log(`✅ Detected event saved at ${currentRecordingTime}s ${videoId ? 'with video_id ' + videoId : '(video will be linked at finish)'}:`, eventData.type);
-        
-        // Save video chunk for potential clip generation later
-        if (videoChunksRef.current.length > 0) {
-          saveVideoChunk();
-        }
-      } catch (error) {
-        console.error("Error saving detected event to database:", error);
-      }
-      
-      if ((eventData.type === 'goal' || eventData.type === 'goal_home' || eventData.type === 'goal_away') 
-          && eventData.confidence && eventData.confidence >= 0.8) {
-        const desc = eventData.description.toLowerCase();
-        
-        if (eventData.type === 'goal_home' || (eventData.type === 'goal' && matchInfo.homeTeam && desc.includes(matchInfo.homeTeam.toLowerCase()))) {
-          setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
-          toast({
-            title: "⚽ GOL! " + matchInfo.homeTeam,
-            description: eventData.description,
-            duration: 5000,
-          });
-        } else if (eventData.type === 'goal_away' || (eventData.type === 'goal' && matchInfo.awayTeam && desc.includes(matchInfo.awayTeam.toLowerCase()))) {
-          setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
-          toast({
-            title: "⚽ GOL! " + matchInfo.awayTeam,
-            description: eventData.description,
-            duration: 5000,
-          });
-        } else {
-          toast({
-            title: "⚽ GOL Detectado!",
-            description: eventData.description + " (confirme qual time)",
-            duration: 5000,
-          });
-        }
-      } else {
-        toast({
-          title: "Evento detectado",
-          description: `${newEvent.type}: ${newEvent.description}`,
-          duration: 3000,
-        });
-      }
-    }
-  }, [detectedEvents, matchInfo, toast, currentMatchId, saveVideoChunk]);
-
-  // Keep ref synchronized with the latest addDetectedEvent function
-  useEffect(() => {
-    addDetectedEventRef.current = addDetectedEvent;
-  }, [addDetectedEvent]);
-
-  const approveEvent = useCallback(async (eventId: string) => {
-    const event = detectedEvents.find((e) => e.id === eventId);
-    const matchId = tempMatchIdRef.current || currentMatchId;
-    
-    if (event) {
-      setDetectedEvents((prev) => prev.filter((e) => e.id !== eventId));
-      setApprovedEvents((prev) => [...prev, { ...event, status: "approved" }]);
-
-      if (event.type === "goal") {
-        const desc = event.description.toLowerCase();
-        if (matchInfo.homeTeam && desc.includes(matchInfo.homeTeam.toLowerCase())) {
-          setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
-        } else if (matchInfo.awayTeam && desc.includes(matchInfo.awayTeam.toLowerCase())) {
-          setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
-        }
-      }
-
-      if (matchId) {
-        try {
-          // UPDATE existing event (already saved when detected) instead of INSERT
-          const { error: updateError } = await supabase
-            .from("match_events")
-            .update({
-              approval_status: "approved",
-              approved_at: new Date().toISOString(),
-            })
-            .eq("id", event.id);
-          
-          if (updateError) {
-            // Fallback: try insert if update fails (event might not exist)
-            console.warn("Update failed, trying insert:", updateError);
-            await supabase.from("match_events").insert({
-              id: event.id,
-              match_id: matchId,
-              event_type: event.type,
-              minute: event.minute,
-              second: event.second,
-              description: event.description,
-              approval_status: "approved",
-              is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(event.type),
-              match_half: event.minute < 45 ? 'first' : 'second',
-              metadata: {
-                eventMs: (event.recordingTimestamp || (event.minute * 60 + event.second)) * 1000,
-                videoSecond: event.recordingTimestamp || (event.minute * 60 + event.second),
-                source: 'live-approved',
-                confidence: event.confidence
-              }
-            });
-          }
-          
-          console.log("✅ Event approved and saved:", event.type);
-          
-          // IMMEDIATE: Save video chunk and get URL directly
-          let chunkUrl: string | null = null;
-          if (videoChunksRef.current.length > 0) {
-            chunkUrl = await saveVideoChunk();
-            console.log('Video chunk saved for approved event, URL:', chunkUrl);
-          }
-          
-          // Generate clip with retry logic (up to 3 attempts)
-          const videoUrl = chunkUrl || latestVideoChunkUrl;
-          if (videoUrl) {
-            console.log('Generating clip for approved event with URL:', videoUrl);
-            
-            const MAX_RETRIES = 3;
-            const RETRY_DELAYS = [2000, 4000, 6000]; // 2s, 4s, 6s delays
-            let clipResult: { success: boolean; clipUrl?: string; error?: string } = { success: false };
-            
-            for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-              console.log(`[ClipGen] Attempt ${attempt}/${MAX_RETRIES} for event ${event.id}`);
-              clipResult = await generateClipForEvent(event, videoUrl);
-              
-              if (clipResult.success) {
-                console.log(`✅ Clip generated successfully on attempt ${attempt}`);
-                break;
-              }
-              
-              // If not the last attempt, wait before retrying
-              if (attempt < MAX_RETRIES) {
-                const delay = RETRY_DELAYS[attempt - 1];
-                console.log(`⏳ Retry ${attempt} failed, waiting ${delay}ms before next attempt...`);
-                toast({
-                  title: "Gerando clip...",
-                  description: `Tentativa ${attempt} falhou, tentando novamente...`,
-                  duration: delay,
-                });
-                await new Promise(resolve => setTimeout(resolve, delay));
-              }
-            }
-            
-            // CRITICAL: If all retries failed, delete the event
-            if (!clipResult.success) {
-              console.warn(`❌ All ${MAX_RETRIES} attempts failed for event ${event.id}: ${clipResult.error}`);
-              
-              // Delete from database
-              const { error: deleteError } = await supabase
-                .from('match_events')
-                .delete()
-                .eq('id', event.id);
-              
-              if (deleteError) {
-                console.error('Error deleting event after clip failure:', deleteError);
-              } else {
-                console.log(`🗑️ Event ${event.id} deleted from database (no clip after ${MAX_RETRIES} attempts)`);
-              }
-              
-              // Remove from local state
-              setApprovedEvents((prev) => prev.filter((e) => e.id !== event.id));
-              
-              // Revert score if it was a goal
-              if (event.type === "goal") {
-                const desc = event.description.toLowerCase();
-                if (matchInfo.homeTeam && desc.includes(matchInfo.homeTeam.toLowerCase())) {
-                  setCurrentScore((prev) => ({ ...prev, home: Math.max(0, prev.home - 1) }));
-                } else if (matchInfo.awayTeam && desc.includes(matchInfo.awayTeam.toLowerCase())) {
-                  setCurrentScore((prev) => ({ ...prev, away: Math.max(0, prev.away - 1) }));
-                }
-              }
-              
-              toast({
-                title: "Evento removido",
-                description: `Clip não gerado após ${MAX_RETRIES} tentativas: ${clipResult.error}`,
-                variant: "destructive"
-              });
-              return;
-            }
-          } else {
-            console.warn('❌ No video URL available for clip generation - deleting event');
-            
-            // Delete event from database since no clip can be generated
-            const { error: deleteError } = await supabase
-              .from('match_events')
-              .delete()
-              .eq('id', event.id);
-            
-            if (!deleteError) {
-              console.log(`🗑️ Event ${event.id} deleted from database (no video URL)`);
-            }
-            
-            // Remove from local state
-            setApprovedEvents((prev) => prev.filter((e) => e.id !== event.id));
-            
-            toast({
-              title: "Evento removido",
-              description: "Sem vídeo disponível para gerar clip",
-              variant: "destructive"
-            });
-            return;
-          }
-
-          // Trigger live analysis immediately
-          console.log('Triggering live analysis for approved event:', event.type);
-          triggerLiveAnalysis(event);
-        } catch (error) {
-          console.error("Error approving event:", error);
-        }
-      }
-    }
-  }, [detectedEvents, matchInfo, latestVideoChunkUrl, generateClipForEvent, saveVideoChunk, triggerLiveAnalysis, currentMatchId, toast]);
-
-  // Edit event
-  const editEvent = useCallback((eventId: string, updates: Partial<LiveEvent>) => {
-    setDetectedEvents((prev) =>
-      prev.map((e) => (e.id === eventId ? { ...e, ...updates } : e))
-    );
-    setApprovedEvents((prev) =>
-      prev.map((e) => (e.id === eventId ? { ...e, ...updates } : e))
-    );
-  }, []);
-
-  // Remove event
-  const removeEvent = useCallback((eventId: string) => {
-    setDetectedEvents((prev) => prev.filter((e) => e.id !== eventId));
-    setApprovedEvents((prev) => prev.filter((e) => e.id !== eventId));
-  }, []);
-
-  // Update score
-  const updateScore = useCallback((team: "home" | "away", delta: number) => {
-    setCurrentScore((prev) => ({
-      ...prev,
-      [team]: Math.max(0, prev[team] + delta),
-    }));
-  }, []);
-
-  // Finish match - generates all remaining clips and saves everything with robust error handling
+  // Finish match
   const finishMatch = useCallback(async (): Promise<FinishMatchResult | null> => {
     setIsFinishing(true);
     
@@ -2104,73 +1539,42 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     console.log('=== FINISH MATCH START ===');
     console.log('[finishMatch] matchId:', matchId);
     console.log('[finishMatch] allVideoChunks:', allVideoChunksRef.current.length);
-    console.log('[finishMatch] videoChunks:', videoChunksRef.current.length);
-    console.log('[finishMatch] clipVideoChunks:', clipVideoChunksRef.current.length);
     console.log('[finishMatch] approvedEvents:', approvedEvents.length);
-    console.log('[finishMatch] isRecordingVideo:', isRecordingVideo);
-    console.log('[finishMatch] videoRecorder state:', videoRecorderRef.current?.state);
     
-    // STEP 0: Sync approved events from database (in case state is stale)
+    // Sync events from database
     let syncedEventsCount = approvedEvents.length;
     try {
       if (matchId) {
-        const { data: dbEvents, error: dbError } = await supabase
-          .from('match_events')
-          .select('*')
-          .eq('match_id', matchId);
+        const dbEvents = await apiClient.getMatchEvents(matchId);
         
-        if (!dbError && dbEvents) {
+        if (dbEvents) {
           syncedEventsCount = Math.max(approvedEvents.length, dbEvents.length);
-          console.log(`[finishMatch] Events synced - state: ${approvedEvents.length}, db: ${dbEvents.length}, using: ${syncedEventsCount}`);
-          
-          // If DB has more events than state, update state
-          if (dbEvents.length > approvedEvents.length) {
-            const mappedEvents: LiveEvent[] = dbEvents.map((e) => ({
-              id: e.id,
-              type: e.event_type,
-              minute: e.minute || 0,
-              second: e.second || 0,
-              description: e.description || "",
-              status: "approved" as const,
-              recordingTimestamp: e.metadata && typeof e.metadata === 'object' && 'videoSecond' in e.metadata 
-                ? (e.metadata as any).videoSecond 
-                : (e.minute || 0) * 60 + (e.second || 0),
-              clipUrl: e.clip_url || undefined
-            }));
-            setApprovedEvents(mappedEvents);
-          }
+          console.log(`[finishMatch] Events synced - state: ${approvedEvents.length}, db: ${dbEvents.length}`);
         }
       }
     } catch (syncError) {
-      console.error('[finishMatch] Error syncing events from DB:', syncError);
+      console.error('[finishMatch] Error syncing events:', syncError);
     }
     
-  // STEP 1: Save video - UPDATE existing record created at start (not INSERT)
-    // CRITICAL FIX: Use allVideoChunksRef first (never cleared), fallback to videoChunksRef
+    // STEP 1: Save video
     const existingVideoId = currentVideoIdRef.current;
     
-    // CRITICAL: Force MediaRecorder to flush any remaining data before saving
     if (videoRecorderRef.current && videoRecorderRef.current.state === 'recording') {
       console.log('[finishMatch] Requesting final data from MediaRecorder...');
       videoRecorderRef.current.requestData();
-      // Give it a moment to flush
       await new Promise(resolve => setTimeout(resolve, 500));
     }
     
     try {
-      // Combine all sources to maximize chances of having video data
       let chunksToUse = allVideoChunksRef.current.length > 0 
-        ? [...allVideoChunksRef.current]  // Clone to prevent mutation issues
+        ? [...allVideoChunksRef.current]
         : [...videoChunksRef.current];
       
-      // Also check clipVideoChunksRef as additional fallback
       if (chunksToUse.length === 0 && clipVideoChunksRef.current.length > 0) {
-        console.log('[finishMatch] Using clipVideoChunksRef as fallback source');
         chunksToUse = clipVideoChunksRef.current.map(c => c.blob);
       }
       
-      console.log(`[finishMatch] Video sources - allVideoChunks: ${allVideoChunksRef.current.length}, videoChunks: ${videoChunksRef.current.length}, clipChunks: ${clipVideoChunksRef.current.length}, using: ${chunksToUse.length}`);
-      console.log(`[finishMatch] Existing video ID from startRecording: ${existingVideoId}`);
+      console.log(`[finishMatch] Using ${chunksToUse.length} video chunks`);
       
       if (matchId && chunksToUse.length > 0) {
         toast({ 
@@ -2182,223 +1586,71 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
         const videoBlob = new Blob(chunksToUse, { type: mimeType });
         
-        // Validate blob size before upload
         if (videoBlob.size < 1000) {
-          console.error('[finishMatch] Video blob too small, likely corrupted:', videoBlob.size);
-          throw new Error('Video data too small - recording may have failed');
+          throw new Error('Video data too small');
         }
         
-        console.log(`[finishMatch] Saving final video: ${(videoBlob.size / (1024 * 1024)).toFixed(2)} MB from ${chunksToUse.length} chunks`);
+        console.log(`[finishMatch] Saving video: ${(videoBlob.size / (1024 * 1024)).toFixed(2)} MB`);
         
         setIsUploadingVideo(true);
         setVideoUploadProgress(20);
         
-        const filePath = `live-${matchId}-${Date.now()}.${extension}`;
+        const result = await apiClient.uploadBlob(matchId, 'videos', videoBlob, `live-${Date.now()}.${extension}`);
+        videoUrl = result.url;
         
-        const { error: uploadError } = await supabase.storage
-          .from('match-videos')
-          .upload(filePath, videoBlob, {
-            contentType: mimeType,
-            upsert: true
+        setVideoUploadProgress(70);
+        
+        // Update video record
+        if (existingVideoId) {
+          await apiClient.updateVideo(existingVideoId, {
+            file_url: videoUrl,
+            file_name: 'Transmissão ao vivo',
+            end_minute: Math.ceil(recordingTime / 60),
+            duration_seconds: recordingTime,
+            status: 'complete'
           });
-
-        if (uploadError) {
-          console.error('[finishMatch] CRITICAL: Video upload failed:', uploadError);
-          toast({
-            title: "Erro no upload do vídeo",
-            description: "O vídeo não foi salvo, mas os eventos foram preservados",
-            variant: "destructive",
-          });
+          videoId = existingVideoId;
         } else {
-          setVideoUploadProgress(70);
-          
-          const { data: urlData } = supabase.storage
-            .from('match-videos')
-            .getPublicUrl(filePath);
-
-          videoUrl = urlData.publicUrl;
-          console.log('[finishMatch] Video uploaded to:', videoUrl);
-          
-          // NEW ARCHITECTURE: UPDATE existing video record instead of INSERT
-          if (existingVideoId) {
-            console.log('[finishMatch] Updating existing video record:', existingVideoId);
-            const { error: updateError } = await supabase
-              .from('videos')
-              .update({
-                file_url: videoUrl,
-                file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
-                end_minute: Math.ceil(recordingTimeRef.current / 60),
-                duration_seconds: recordingTimeRef.current,
-                status: 'completed'
-              })
-              .eq('id', existingVideoId);
-
-            if (updateError) {
-              console.error('[finishMatch] Error updating video record:', updateError);
-              // Fallback: try insert
-              const { data: newVideo } = await supabase.from('videos').insert({
-                match_id: matchId,
-                file_url: videoUrl,
-                file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
-                video_type: 'full',
-                start_minute: 0,
-                end_minute: Math.ceil(recordingTimeRef.current / 60),
-                duration_seconds: recordingTimeRef.current,
-                status: 'completed'
-              }).select('id').single();
-              videoId = newVideo?.id || null;
-            } else {
-              videoId = existingVideoId;
-              console.log('[finishMatch] ✅ Video record updated successfully:', videoId);
-            }
-          } else {
-            // Fallback: No existing video, create new one
-            console.log('[finishMatch] No existing video ID, creating new record...');
-            const { data: videoRecord, error: insertError } = await supabase.from('videos').insert({
-              match_id: matchId,
-              file_url: videoUrl,
-              file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
-              video_type: 'full',
-              start_minute: 0,
-              end_minute: Math.ceil(recordingTimeRef.current / 60),
-              duration_seconds: recordingTimeRef.current,
-              status: 'completed'
-            }).select('id').single();
-
-            if (insertError) {
-              console.error('[finishMatch] Failed to insert video record:', insertError);
-            } else {
-              videoId = videoRecord?.id || null;
-              console.log('[finishMatch] Video record created:', videoId);
-            }
-          }
-          
-          setVideoUploadProgress(100);
-        }
-        
-        setIsUploadingVideo(false);
-      } else if (matchId && chunksToUse.length === 0) {
-        // FALLBACK: Try to find existing video in storage
-        console.log('[finishMatch] No local chunks - checking storage for existing video...');
-        const { data: storageFiles } = await supabase.storage
-          .from('match-videos')
-          .list('', { 
-            search: `live-${matchId}`,
-            limit: 5,
-            sortBy: { column: 'created_at', order: 'desc' }
-          });
-        
-        if (storageFiles && storageFiles.length > 0) {
-          const existingFile = storageFiles[0];
-          const { data: urlData } = supabase.storage
-            .from('match-videos')
-            .getPublicUrl(existingFile.name);
-          
-          videoUrl = urlData.publicUrl;
-          console.log('[finishMatch] Found existing video in storage:', videoUrl);
-          
-          // Update existing video record with URL
-          if (existingVideoId) {
-            await supabase
-              .from('videos')
-              .update({
-                file_url: videoUrl,
-                status: 'completed',
-                end_minute: Math.ceil(recordingTimeRef.current / 60),
-                duration_seconds: recordingTimeRef.current,
-              })
-              .eq('id', existingVideoId);
-            videoId = existingVideoId;
-            console.log('[finishMatch] Updated existing video record from storage:', videoId);
-          } else {
-            // Create new video record
-            const { data: newVideo } = await supabase.from('videos').insert({
-              match_id: matchId,
-              file_url: videoUrl,
-              file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
-              video_type: 'full',
-              start_minute: 0,
-              end_minute: Math.ceil(recordingTimeRef.current / 60),
-              duration_seconds: recordingTimeRef.current,
-              status: 'completed'
-            }).select('id').maybeSingle();
-            videoId = newVideo?.id || null;
-          }
-        } else {
-          console.log('[finishMatch] No video found in storage either');
-        }
-      } else {
-        console.log('[finishMatch] No matchId or video chunks available');
-      }
-    } catch (videoError) {
-      console.error('[finishMatch] Critical error saving video:', videoError);
-      setIsUploadingVideo(false);
-      toast({
-        title: "Erro crítico no vídeo",
-        description: "Não foi possível salvar o vídeo. Os eventos foram salvos.",
-        variant: "destructive",
-      });
-    }
-    
-    // STEP 2: Stop recording (after video is saved)
-    try {
-      stopRecording();
-    } catch (stopError) {
-      console.error('[finishMatch] Error stopping recording:', stopError);
-    }
-    
-    // STEP 3: Link events to video (if video was saved or create placeholder video)
-    try {
-      if (matchId) {
-        // If no videoId exists yet, create a placeholder video record
-        // This ensures events can always be linked
-        if (!videoId && !existingVideoId) {
-          console.log('[finishMatch] Creating placeholder video record for event linking...');
-          const { data: placeholderVideo } = await supabase.from('videos').insert({
+          const newVideo = await apiClient.createVideo({
             match_id: matchId,
-            file_url: '', // No file yet
-            file_name: `Transmissão ao vivo - ${new Date().toLocaleDateString()}`,
+            file_url: videoUrl,
+            file_name: 'Transmissão ao vivo',
             video_type: 'full',
             start_minute: 0,
-            end_minute: Math.ceil(recordingTimeRef.current / 60),
-            duration_seconds: recordingTimeRef.current,
-            status: 'pending' // Will be updated when video is linked
-          }).select('id').maybeSingle();
-          
-          if (placeholderVideo) {
-            videoId = placeholderVideo.id;
-            console.log('[finishMatch] Placeholder video created:', videoId);
-          }
+            end_minute: Math.ceil(recordingTime / 60),
+            duration_seconds: recordingTime,
+            status: 'complete'
+          });
+          videoId = newVideo?.id;
         }
         
-        // Now link all events without video_id
-        if (videoId || existingVideoId) {
-          const linkVideoId = videoId || existingVideoId;
-          toast({ 
-            title: "Vinculando eventos ao vídeo...", 
-            description: "Associando clips e eventos" 
-          });
-          
-          const { error: linkError, count } = await supabase
-            .from('match_events')
-            .update({ video_id: linkVideoId })
-            .eq('match_id', matchId)
-            .is('video_id', null);
-          
-          if (linkError) {
-            console.error('[finishMatch] Error linking events to video:', linkError);
-          } else {
-            console.log('[finishMatch] Events linked to video:', linkVideoId, 'count:', count);
-          }
-        } else {
-          console.log('[finishMatch] No video ID available for linking events');
-        }
+        setVideoUploadProgress(100);
+        console.log('[finishMatch] Video saved:', videoUrl);
       }
-    } catch (linkError) {
-      console.error('[finishMatch] Error in event linking:', linkError);
+    } catch (videoError) {
+      console.error('[finishMatch] Video upload error:', videoError);
+    } finally {
+      setIsUploadingVideo(false);
     }
-
-    // STEP 4: Generate clips for approved events (non-critical, can fail)
+    
+    // STEP 2: Link events to video
+    if (videoId && matchId) {
+      try {
+        const events = await apiClient.getMatchEvents(matchId);
+        for (const event of events || []) {
+          if (!event.video_id) {
+            await apiClient.updateEvent(event.id, { video_id: videoId });
+          }
+        }
+      } catch (error) {
+        console.error('[finishMatch] Error linking events:', error);
+      }
+    }
+    
+    // Stop recording
+    stopRecording();
+    
+    // STEP 3: Generate clips
     try {
       if (videoUrl && approvedEvents.length > 0) {
         const eventsWithoutClips = approvedEvents.filter(e => !e.clipUrl);
@@ -2409,13 +1661,12 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             description: `Processando ${eventsWithoutClips.length} eventos` 
           });
           
-          // Generate clips sequentially to avoid overwhelming FFmpeg
           for (const event of eventsWithoutClips) {
             if (!isGeneratingClipRef.current) {
               try {
                 await generateClipForEvent(event, videoUrl);
               } catch (clipError) {
-                console.warn('[finishMatch] Failed to generate clip for event:', event.id, clipError);
+                console.warn('[finishMatch] Failed to generate clip:', event.id, clipError);
               }
             }
           }
@@ -2423,30 +1674,26 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       }
     } catch (clipsError) {
       console.error('[finishMatch] Error generating clips:', clipsError);
-      // Non-critical - clips can be generated later from Events page
     }
 
-    // STEP 5: Update match record (important but not critical)
+    // STEP 4: Update match record
     try {
       if (matchId) {
-        await supabase
-          .from("matches")
-          .update({
-            home_team_id: matchInfo.homeTeamId || null,
-            away_team_id: matchInfo.awayTeamId || null,
-            home_score: currentScore.home,
-            away_score: currentScore.away,
-            competition: matchInfo.competition,
-            status: "analyzed",
-          })
-          .eq("id", matchId);
+        await apiClient.updateMatch(matchId, {
+          home_team_id: matchInfo.homeTeamId || null,
+          away_team_id: matchInfo.awayTeamId || null,
+          home_score: currentScore.home,
+          away_score: currentScore.away,
+          competition: matchInfo.competition,
+          status: "analyzed",
+        });
         console.log('[finishMatch] Match record updated');
       }
     } catch (matchUpdateError) {
       console.error('[finishMatch] Error updating match:', matchUpdateError);
     }
 
-    // STEP 6: Save transcript
+    // STEP 5: Save transcript
     try {
       if (matchId) {
         await saveTranscriptToDatabase(matchId);
@@ -2456,10 +1703,10 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       console.error('[finishMatch] Error saving transcript:', transcriptError);
     }
 
-    // STEP 7: Create analysis job record
+    // STEP 6: Create analysis job record
     try {
       if (matchId) {
-        const { error: analysisError } = await supabase.from("analysis_jobs").insert({
+        await apiClient.createAnalysisJob({
           match_id: matchId,
           video_id: videoId,
           status: 'completed',
@@ -2481,18 +1728,13 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             }
           }
         });
-        
-        if (analysisError) {
-          console.error('[finishMatch] Error creating analysis job:', analysisError);
-        } else {
-          console.log('[finishMatch] Analysis job created with source: live');
-        }
+        console.log('[finishMatch] Analysis job created');
       }
     } catch (analysisError) {
       console.error('[finishMatch] Error creating analysis job:', analysisError);
     }
 
-    // STEP 8: Prepare result and clean up
+    // Prepare result
     const result: FinishMatchResult | null = matchId ? {
       matchId,
       videoUrl,
@@ -2509,7 +1751,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     if (matchId) {
       toast({ 
         title: "Partida finalizada!", 
-        description: `${syncedEventsCount} eventos salvos${videoUrl ? ' com vídeo' : ''}. Acesse Eventos para ver os clips.` 
+        description: `${syncedEventsCount} eventos salvos${videoUrl ? ' com vídeo' : ''}.` 
       });
     }
     
@@ -2521,7 +1763,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     setFinishResult(null);
     tempMatchIdRef.current = null;
     setCurrentMatchId(null);
-    setCurrentVideoId(null); // NEW: Reset video ID
+    setCurrentVideoId(null);
     currentVideoIdRef.current = null;
     setDetectedEvents([]);
     setApprovedEvents([]);
@@ -2531,29 +1773,22 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     setRecordingTime(0);
     recordingTimeRef.current = 0;
     setLatestVideoChunkUrl(null);
-    // CRITICAL: Only reset video chunks AFTER finishMatch completes
-    clipVideoChunksRef.current = []; // Reset clip chunks
-    videoChunksRef.current = []; // Reset video chunks
-    allVideoChunksRef.current = []; // Reset permanent chunks
+    clipVideoChunksRef.current = [];
+    videoChunksRef.current = [];
+    allVideoChunksRef.current = [];
   }, []);
 
-  // NEW: Get clip chunks for a specific time range (for real-time replay)
+  // Get clip chunks for time range
   const getClipChunksForTime = useCallback((startTime: number, endTime: number): VideoChunk[] => {
     console.log('[getClipChunksForTime] Searching chunks for range:', startTime, '-', endTime);
-    console.log('[getClipChunksForTime] Available chunks:', clipVideoChunksRef.current.length);
     
     if (clipVideoChunksRef.current.length === 0) {
-      console.log('[getClipChunksForTime] No chunks available');
       return [];
     }
 
-    // Filter chunks that fall within the time range
     const matchingChunks = clipVideoChunksRef.current.filter(chunk => {
-      // Each chunk covers approximately 5 seconds of video
       const chunkStartTime = chunk.timestamp;
-      const chunkEndTime = chunk.timestamp + 5; // Approximate chunk duration
-      
-      // Check if chunk overlaps with requested range
+      const chunkEndTime = chunk.timestamp + 5;
       return chunkStartTime <= endTime && chunkEndTime >= startTime;
     });
 
