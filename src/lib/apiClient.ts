@@ -1,7 +1,7 @@
 /**
  * Arena Play - API Client para servidor Python local
  * Substitui as chamadas Supabase por chamadas HTTP ao servidor local
- * Com fallback para Supabase Storage quando servidor local indisponível
+ * Com fallback para Supabase quando servidor local indisponível
  */
 
 import { supabase } from '@/integrations/supabase/client';
@@ -58,6 +58,27 @@ async function apiRequest<T>(
   return response.json();
 }
 
+// Fallback API request with Supabase
+async function apiRequestWithFallback<T>(
+  endpoint: string,
+  tableName: string,
+  options: RequestInit = {},
+  supabaseFallback?: () => Promise<T>
+): Promise<T> {
+  const serverUp = await isLocalServerAvailable();
+  
+  if (serverUp) {
+    return apiRequest<T>(endpoint, options);
+  }
+  
+  // Fallback to Supabase
+  if (supabaseFallback) {
+    console.log(`[apiClient] Local server unavailable, using Supabase fallback for ${tableName}`);
+    return supabaseFallback();
+  }
+  
+  throw new Error(`Local server unavailable and no fallback for ${endpoint}`);
+}
 // Upload to Supabase Storage as fallback
 async function uploadToSupabase(
   matchId: string, 
@@ -128,16 +149,46 @@ export const apiClient = {
   updatePlayer: (id: string, player: any) => apiRequest<any>(`/api/players/${id}`, { method: 'PUT', body: JSON.stringify(player) }),
   deletePlayer: (id: string) => apiRequest<any>(`/api/players/${id}`, { method: 'DELETE' }),
 
-  // ============== Videos ==============
+  // ============== Videos (with Supabase fallback) ==============
   getVideos: (matchId?: string) => apiRequest<any[]>(`/api/videos${matchId ? `?match_id=${matchId}` : ''}`),
-  createVideo: (video: any) => apiRequest<any>('/api/videos', { method: 'POST', body: JSON.stringify(video) }),
+  createVideo: async (video: any) => {
+    return apiRequestWithFallback<any>(
+      '/api/videos',
+      'videos',
+      { method: 'POST', body: JSON.stringify(video) },
+      async () => {
+        const { data, error } = await supabase
+          .from('videos')
+          .insert(video)
+          .select()
+          .single();
+        if (error) throw new Error(error.message);
+        return data;
+      }
+    );
+  },
   updateVideo: (id: string, video: any) => apiRequest<any>(`/api/videos/${id}`, { method: 'PUT', body: JSON.stringify(video) }),
   deleteVideo: (id: string) => apiRequest<any>(`/api/videos/${id}`, { method: 'DELETE' }),
 
-  // ============== Analysis Jobs ==============
+  // ============== Analysis Jobs (with Supabase fallback) ==============
   getAnalysisJobs: (matchId?: string) => apiRequest<any[]>(`/api/analysis-jobs${matchId ? `?match_id=${matchId}` : ''}`),
   getAnalysisJob: (id: string) => apiRequest<any>(`/api/analysis-jobs/${id}`),
-  createAnalysisJob: (job: any) => apiRequest<any>('/api/analysis-jobs', { method: 'POST', body: JSON.stringify(job) }),
+  createAnalysisJob: async (job: any) => {
+    return apiRequestWithFallback<any>(
+      '/api/analysis-jobs',
+      'analysis_jobs',
+      { method: 'POST', body: JSON.stringify(job) },
+      async () => {
+        const { data, error } = await supabase
+          .from('analysis_jobs')
+          .insert(job)
+          .select()
+          .single();
+        if (error) throw new Error(error.message);
+        return data;
+      }
+    );
+  },
   updateAnalysisJob: (id: string, job: any) => apiRequest<any>(`/api/analysis-jobs/${id}`, { method: 'PUT', body: JSON.stringify(job) }),
 
   // ============== Audio ==============
