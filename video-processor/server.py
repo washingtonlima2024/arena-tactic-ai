@@ -1187,6 +1187,141 @@ def analyze_goal_play():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/transcribe-audio', methods=['POST'])
+def transcribe_audio_endpoint():
+    """Transcribe audio from base64 data."""
+    data = request.json
+    audio = data.get('audio')
+    language = data.get('language', 'pt')
+    
+    if not audio:
+        return jsonify({'error': 'Audio data é obrigatório'}), 400
+    
+    try:
+        text = ai_services.transcribe_audio_base64(audio, language)
+        return jsonify({'text': text})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/transcribe-large-video', methods=['POST'])
+def transcribe_large_video_endpoint():
+    """Transcribe a large video file."""
+    data = request.json
+    video_url = data.get('videoUrl')
+    match_id = data.get('matchId')
+    
+    if not video_url:
+        return jsonify({'error': 'videoUrl é obrigatório'}), 400
+    
+    try:
+        result = ai_services.transcribe_large_video(video_url, match_id)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/extract-live-events', methods=['POST'])
+def extract_live_events_endpoint():
+    """Extract live events from transcript."""
+    data = request.json
+    transcript = data.get('transcript', '')
+    home_team = data.get('homeTeam', 'Time A')
+    away_team = data.get('awayTeam', 'Time B')
+    current_score = data.get('currentScore', {'home': 0, 'away': 0})
+    current_minute = data.get('currentMinute', 0)
+    
+    if not transcript or len(transcript) < 20:
+        return jsonify({'events': []})
+    
+    try:
+        events = ai_services.extract_live_events(
+            transcript, home_team, away_team, current_score, current_minute
+        )
+        return jsonify({'events': events})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/detect-players', methods=['POST'])
+def detect_players_endpoint():
+    """Detect players in a video frame."""
+    data = request.json
+    image_base64 = data.get('imageBase64')
+    image_url = data.get('imageUrl')
+    frame_timestamp = data.get('frameTimestamp', 0)
+    
+    if not image_base64 and not image_url:
+        return jsonify({'error': 'imageBase64 ou imageUrl é obrigatório'}), 400
+    
+    try:
+        result = ai_services.detect_players_in_frame(
+            image_data=image_base64,
+            image_url=image_url,
+            frame_timestamp=frame_timestamp
+        )
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/generate-thumbnail', methods=['POST'])
+def generate_thumbnail_endpoint():
+    """Generate a thumbnail image using AI."""
+    data = request.json
+    prompt = data.get('prompt')
+    event_id = data.get('eventId')
+    match_id = data.get('matchId')
+    
+    if not prompt:
+        return jsonify({'error': 'prompt é obrigatório'}), 400
+    
+    try:
+        result = ai_services.generate_thumbnail_image(prompt, event_id, match_id)
+        
+        if result.get('error'):
+            return jsonify(result), 500
+        
+        # If we got image data, save to storage
+        if result.get('imageData') and match_id:
+            image_data = result['imageData']
+            
+            # Extract base64 data if it's a data URL
+            if image_data.startswith('data:'):
+                _, base64_data = image_data.split(',', 1)
+            else:
+                base64_data = image_data
+            
+            image_bytes = base64.b64decode(base64_data)
+            filename = f"thumbnail_{event_id or 'gen'}_{uuid.uuid4().hex[:8]}.png"
+            
+            # Save to match storage
+            from storage import save_file
+            file_result = save_file(match_id, 'images', image_bytes, filename)
+            result['imageUrl'] = file_result['url']
+            
+            # Save to database
+            if event_id:
+                session = get_session()
+                try:
+                    thumbnail = Thumbnail(
+                        match_id=match_id,
+                        event_id=event_id,
+                        event_type=data.get('eventType', 'goal'),
+                        image_url=result['imageUrl'],
+                        title=data.get('title')
+                    )
+                    session.add(thumbnail)
+                    session.commit()
+                    result['thumbnailId'] = thumbnail.id
+                finally:
+                    session.close()
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ============================================================================
 # VIDEO PROCESSING ENDPOINTS
 # ============================================================================
