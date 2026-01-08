@@ -726,7 +726,7 @@ def transcribe_large_video(
     Transcribe a large video file.
     
     Args:
-        video_url: URL to the video file
+        video_url: URL to the video file (can be local /api/storage/ path or external URL)
         match_id: Related match ID
     
     Returns:
@@ -734,24 +734,54 @@ def transcribe_large_video(
     """
     import subprocess
     import tempfile
+    from storage import get_file_path, STORAGE_DIR
     
     if not OPENAI_API_KEY:
         raise ValueError("OPENAI_API_KEY not configured")
+    
+    print(f"[Transcribe] Iniciando transcrição para: {video_url}")
     
     # Download video
     with tempfile.TemporaryDirectory() as tmpdir:
         video_path = os.path.join(tmpdir, 'video.mp4')
         audio_path = os.path.join(tmpdir, 'audio.mp3')
         
-        # Download video
-        try:
-            response = requests.get(video_url, stream=True, timeout=300)
-            response.raise_for_status()
-            with open(video_path, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-        except Exception as e:
-            return {"error": f"Failed to download video: {str(e)}"}
+        # Check if it's a local URL and resolve to disk path
+        is_local = False
+        if video_url.startswith('/api/storage/') or 'localhost' in video_url:
+            is_local = True
+            # Parse: /api/storage/{match_id}/{subfolder}/{filename} or http://localhost:5000/api/storage/...
+            clean_url = video_url.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '')
+            parts = clean_url.strip('/').split('/')
+            # Expected: ['api', 'storage', match_id, subfolder, filename...]
+            if len(parts) >= 5 and parts[0] == 'api' and parts[1] == 'storage':
+                local_match_id = parts[2]
+                subfolder = parts[3]
+                filename = '/'.join(parts[4:])
+                local_path = get_file_path(local_match_id, subfolder, filename)
+                print(f"[Transcribe] URL local detectada -> Caminho: {local_path}")
+                
+                if local_path and os.path.exists(local_path):
+                    # Copy local file to temp directory
+                    import shutil
+                    shutil.copy(local_path, video_path)
+                    print(f"[Transcribe] Arquivo local copiado para: {video_path}")
+                else:
+                    return {"error": f"Local file not found: {local_path}"}
+            else:
+                return {"error": f"Invalid local URL format: {video_url}"}
+        else:
+            # External URL - download normally
+            print(f"[Transcribe] URL externa, baixando...")
+            try:
+                response = requests.get(video_url, stream=True, timeout=300)
+                response.raise_for_status()
+                with open(video_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                print(f"[Transcribe] Download concluído: {video_path}")
+            except Exception as e:
+                return {"error": f"Failed to download video: {str(e)}"}
         
         # Extract audio with ffmpeg
         try:
