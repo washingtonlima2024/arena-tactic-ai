@@ -444,8 +444,20 @@ export const apiClient = {
   detectPlayers: (data: { imageBase64?: string; imageUrl?: string; frameTimestamp?: number; confidence?: number }) =>
     apiRequest<any>('/api/detect-players', { method: 'POST', body: JSON.stringify(data) }),
 
-  generateThumbnailAI: (data: { prompt: string; eventId: string; matchId: string; eventType: string }) =>
-    apiRequest<{ imageUrl: string }>('/api/generate-thumbnail', { method: 'POST', body: JSON.stringify(data) }),
+  generateThumbnailAI: async (data: { prompt: string; eventId: string; matchId: string; eventType: string }) => {
+    const serverUp = await isLocalServerAvailable();
+    
+    if (serverUp) {
+      return apiRequest<{ imageUrl: string }>('/api/generate-thumbnail', { method: 'POST', body: JSON.stringify(data) });
+    }
+    
+    // Fallback to Supabase Edge Function
+    console.log('[apiClient] Using Supabase Edge Function for thumbnail generation');
+    const { data: result, error } = await supabase.functions.invoke('generate-thumbnail', { body: data });
+    
+    if (error) throw error;
+    return result as { imageUrl: string };
+  },
 
   // ============== Search ==============
   search: (query: string) => apiRequest<any[]>(`/api/search?q=${encodeURIComponent(query)}`),
