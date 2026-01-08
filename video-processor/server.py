@@ -181,6 +181,163 @@ def normalize_video(input_path: str, output_path: str, target_resolution: str = 
         return False
 
 
+def get_video_info(file_path: str) -> dict:
+    """
+    Retorna metadados completos de um vídeo via ffprobe.
+    """
+    import json as json_lib
+    
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Arquivo não encontrado: {file_path}")
+    
+    try:
+        cmd = [
+            'ffprobe', '-v', 'quiet',
+            '-print_format', 'json',
+            '-show_format', '-show_streams',
+            file_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode != 0:
+            raise Exception(f"ffprobe falhou: {result.stderr}")
+        
+        data = json_lib.loads(result.stdout)
+        
+        # Find video stream
+        video_stream = None
+        for stream in data.get('streams', []):
+            if stream.get('codec_type') == 'video':
+                video_stream = stream
+                break
+        
+        if not video_stream:
+            raise Exception("Nenhum stream de vídeo encontrado")
+        
+        # Extract info
+        width = int(video_stream.get('width', 0))
+        height = int(video_stream.get('height', 0))
+        codec = video_stream.get('codec_name', 'unknown')
+        
+        # Duration from format or stream
+        format_info = data.get('format', {})
+        duration_str = format_info.get('duration') or video_stream.get('duration', '0')
+        duration_seconds = float(duration_str)
+        
+        # Frame rate
+        fps_str = video_stream.get('r_frame_rate', '0/1')
+        if '/' in fps_str:
+            num, den = map(int, fps_str.split('/'))
+            fps = round(num / den, 2) if den > 0 else 0
+        else:
+            fps = float(fps_str)
+        
+        # Bitrate
+        bitrate = int(format_info.get('bit_rate', 0))
+        bitrate_kbps = round(bitrate / 1000)
+        
+        # File size
+        size_bytes = int(format_info.get('size', os.path.getsize(file_path)))
+        size_mb = round(size_bytes / (1024 * 1024), 2)
+        
+        # Format size
+        if size_mb >= 1024:
+            size_formatted = f"{round(size_mb / 1024, 2)} GB"
+        else:
+            size_formatted = f"{size_mb} MB"
+        
+        # Format duration
+        hours = int(duration_seconds // 3600)
+        minutes = int((duration_seconds % 3600) // 60)
+        seconds = int(duration_seconds % 60)
+        if hours > 0:
+            duration_formatted = f"{hours}:{minutes:02d}:{seconds:02d}"
+        else:
+            duration_formatted = f"{minutes}:{seconds:02d}"
+        
+        # Resolution label
+        if height >= 2160:
+            resolution_label = "4K"
+        elif height >= 1440:
+            resolution_label = "2K"
+        elif height >= 1080:
+            resolution_label = "Full HD"
+        elif height >= 720:
+            resolution_label = "HD"
+        elif height >= 480:
+            resolution_label = "SD"
+        else:
+            resolution_label = "Low"
+        
+        # Codec friendly name
+        codec_names = {
+            'h264': 'H.264',
+            'hevc': 'H.265/HEVC',
+            'h265': 'H.265/HEVC',
+            'vp9': 'VP9',
+            'av1': 'AV1',
+            'mpeg4': 'MPEG-4',
+            'mpeg2video': 'MPEG-2',
+        }
+        codec_name = codec_names.get(codec.lower(), codec.upper())
+        
+        # Check if conversion needed (height > 480)
+        needs_conversion = height > 480
+        
+        # Estimate 480p size (rough estimate based on resolution ratio)
+        if needs_conversion and height > 0:
+            ratio = (480 / height) ** 2  # Area ratio
+            estimated_size_480p_mb = round(size_mb * ratio * 1.2, 0)  # +20% for reencoding overhead
+        else:
+            estimated_size_480p_mb = size_mb
+        
+        return {
+            'path': file_path,
+            'filename': os.path.basename(file_path),
+            'width': width,
+            'height': height,
+            'resolution': f"{width}x{height}",
+            'resolution_label': resolution_label,
+            'codec': codec,
+            'codec_name': codec_name,
+            'duration_seconds': round(duration_seconds, 2),
+            'duration_formatted': duration_formatted,
+            'size_bytes': size_bytes,
+            'size_mb': size_mb,
+            'size_formatted': size_formatted,
+            'bitrate_kbps': bitrate_kbps,
+            'fps': fps,
+            'needs_conversion': needs_conversion,
+            'estimated_size_480p_mb': estimated_size_480p_mb
+        }
+        
+    except subprocess.TimeoutExpired:
+        raise Exception("Timeout ao analisar vídeo")
+    except json_lib.JSONDecodeError:
+        raise Exception("Falha ao parsear saída do ffprobe")
+
+
+@app.route('/api/video/info', methods=['POST'])
+def video_info_endpoint():
+    """Retorna metadados de um arquivo de vídeo via ffprobe."""
+    data = request.json
+    if not data:
+        return jsonify({'error': 'JSON body required'}), 400
+    
+    path = data.get('path')
+    if not path:
+        return jsonify({'error': 'path is required'}), 400
+    
+    try:
+        info = get_video_info(path)
+        return jsonify(info)
+    except FileNotFoundError as e:
+        return jsonify({'error': str(e)}), 404
+    except Exception as e:
+        print(f"[video/info] Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
 # ============================================================================
 # HEALTH & STATUS
 # ============================================================================
