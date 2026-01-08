@@ -13,20 +13,150 @@ from typing import Optional, List, Dict, Any
 LOVABLE_API_KEY = os.environ.get('LOVABLE_API_KEY', '')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 ELEVENLABS_API_KEY = os.environ.get('ELEVENLABS_API_KEY', '')
+GOOGLE_API_KEY = os.environ.get('GOOGLE_GENERATIVE_AI_API_KEY', '')
 
 LOVABLE_API_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions'
 OPENAI_API_URL = 'https://api.openai.com/v1'
+GOOGLE_API_URL = 'https://generativelanguage.googleapis.com/v1beta'
 
 
-def set_api_keys(lovable_key: str = None, openai_key: str = None, elevenlabs_key: str = None):
+def set_api_keys(lovable_key: str = None, openai_key: str = None, elevenlabs_key: str = None, google_key: str = None):
     """Set API keys programmatically."""
-    global LOVABLE_API_KEY, OPENAI_API_KEY, ELEVENLABS_API_KEY
+    global LOVABLE_API_KEY, OPENAI_API_KEY, ELEVENLABS_API_KEY, GOOGLE_API_KEY
     if lovable_key:
         LOVABLE_API_KEY = lovable_key
     if openai_key:
         OPENAI_API_KEY = openai_key
     if elevenlabs_key:
         ELEVENLABS_API_KEY = elevenlabs_key
+    if google_key:
+        GOOGLE_API_KEY = google_key
+
+
+def call_google_gemini(
+    messages: List[Dict[str, str]],
+    model: str = 'gemini-2.5-flash',
+    temperature: float = 0.7,
+    max_tokens: int = 4096
+) -> Optional[str]:
+    """
+    Call Google Gemini API directly.
+    
+    Args:
+        messages: List of message dicts with 'role' and 'content'
+        model: Model to use (default: gemini-2.5-flash)
+        temperature: Sampling temperature
+        max_tokens: Maximum tokens in response
+    
+    Returns:
+        The AI response text or None on error
+    """
+    if not GOOGLE_API_KEY:
+        raise ValueError("GOOGLE_API_KEY not configured")
+    
+    # Map model names
+    model_map = {
+        'gemini-2.5-flash': 'gemini-2.0-flash',
+        'gemini-2.5-pro': 'gemini-2.0-pro',
+        'google/gemini-2.5-flash': 'gemini-2.0-flash',
+        'google/gemini-2.5-pro': 'gemini-2.0-pro',
+    }
+    api_model = model_map.get(model, 'gemini-2.0-flash')
+    
+    # Convert messages to Gemini format
+    contents = []
+    system_instruction = None
+    
+    for msg in messages:
+        role = msg.get('role', 'user')
+        content = msg.get('content', '')
+        
+        if role == 'system':
+            system_instruction = content
+        else:
+            gemini_role = 'user' if role == 'user' else 'model'
+            contents.append({
+                'role': gemini_role,
+                'parts': [{'text': content}]
+            })
+    
+    payload = {
+        'contents': contents,
+        'generationConfig': {
+            'temperature': temperature,
+            'maxOutputTokens': max_tokens,
+        }
+    }
+    
+    if system_instruction:
+        payload['systemInstruction'] = {'parts': [{'text': system_instruction}]}
+    
+    url = f"{GOOGLE_API_URL}/models/{api_model}:generateContent?key={GOOGLE_API_KEY}"
+    
+    try:
+        response = requests.post(url, json=payload, timeout=120)
+        
+        if not response.ok:
+            print(f"Google Gemini error: {response.status_code} - {response.text}")
+            return None
+        
+        data = response.json()
+        candidates = data.get('candidates', [])
+        if candidates:
+            content = candidates[0].get('content', {})
+            parts = content.get('parts', [])
+            if parts:
+                return parts[0].get('text', '')
+        return None
+    except Exception as e:
+        print(f"Google Gemini request error: {e}")
+        return None
+
+
+def call_ai(
+    messages: List[Dict[str, str]],
+    model: str = 'gemini-2.5-flash',
+    temperature: float = 0.7,
+    max_tokens: int = 4096
+) -> Optional[str]:
+    """
+    Universal AI caller - tries Lovable AI, then Google Gemini, then OpenAI.
+    
+    Args:
+        messages: List of message dicts
+        model: Model to use
+        temperature: Sampling temperature
+        max_tokens: Maximum tokens
+    
+    Returns:
+        AI response text or None
+    """
+    # Try Lovable AI first (if key available)
+    if LOVABLE_API_KEY:
+        try:
+            result = call_lovable_ai(messages, model, temperature, max_tokens)
+            if result:
+                return result
+        except Exception as e:
+            print(f"Lovable AI failed, trying fallback: {e}")
+    
+    # Try Google Gemini directly
+    if GOOGLE_API_KEY:
+        try:
+            result = call_google_gemini(messages, model, temperature, max_tokens)
+            if result:
+                return result
+        except Exception as e:
+            print(f"Google Gemini failed, trying OpenAI: {e}")
+    
+    # Fallback to OpenAI
+    if OPENAI_API_KEY:
+        try:
+            return call_openai(messages, 'gpt-4o-mini', temperature, max_tokens)
+        except Exception as e:
+            print(f"OpenAI also failed: {e}")
+    
+    raise ValueError("No AI API key configured. Please configure in Settings > API.")
 
 
 def call_lovable_ai(
@@ -228,7 +358,7 @@ Analise a transcrição e identifique TODOS os eventos relevantes. Para cada eve
 
 Retorne APENAS um array JSON válido com os eventos detectados."""
 
-    response = call_lovable_ai([
+    response = call_ai([
         {'role': 'system', 'content': system_prompt},
         {'role': 'user', 'content': transcription}
     ])
@@ -285,7 +415,7 @@ Crie uma narração empolgante no estilo de narrador brasileiro, com emoção e 
 A narração deve ser contínua e fluida, conectando os eventos naturalmente.
 Use expressões típicas de narradores brasileiros."""
 
-    response = call_lovable_ai([
+    response = call_ai([
         {'role': 'system', 'content': 'Você é um narrador esportivo brasileiro famoso. Narre com emoção e paixão.'},
         {'role': 'user', 'content': prompt}
     ])
@@ -335,7 +465,7 @@ Eventos:
 
 O podcast deve ser em português brasileiro, com linguagem natural e envolvente."""
 
-    response = call_lovable_ai([
+    response = call_ai([
         {'role': 'system', 'content': 'Você é um apresentador de podcast esportivo brasileiro.'},
         {'role': 'user', 'content': prompt}
     ])
@@ -378,7 +508,7 @@ Retorne um JSON com:
   - ball: {{x, y}} posição da bola (0-100)
   - players: array de jogadores com {{x, y, team}}"""
 
-    response = call_lovable_ai([
+    response = call_ai([
         {'role': 'system', 'content': 'Você é um analista tático de futebol. Retorne APENAS JSON válido.'},
         {'role': 'user', 'content': prompt}
     ])
@@ -432,7 +562,7 @@ Contexto da partida atual:
     
     messages.append({'role': 'user', 'content': message})
     
-    response = call_lovable_ai(messages)
+    response = call_ai(messages)
     return response or 'Desculpe, não consegui processar sua mensagem. Tente novamente.'
 
 
@@ -474,7 +604,7 @@ Partida atual:
     
     messages.append({'role': 'user', 'content': message})
     
-    response = call_lovable_ai(messages)
+    response = call_ai(messages)
     return response or 'Opa, deu ruim aqui! Manda de novo aí, torcedor!'
 
 
@@ -550,7 +680,7 @@ Detecte eventos mencionados na transcrição. Para cada evento retorne:
 
 IMPORTANTE: Retorne APENAS um array JSON válido. Sem texto adicional."""
 
-    response = call_lovable_ai([
+    response = call_ai([
         {'role': 'system', 'content': system_prompt},
         {'role': 'user', 'content': f"Transcrição: {transcript}"}
     ], max_tokens=2048)
@@ -585,8 +715,8 @@ def detect_players_in_frame(
     Returns:
         Detection results with players, ball, etc.
     """
-    if not LOVABLE_API_KEY:
-        raise ValueError("LOVABLE_API_KEY not configured")
+    if not LOVABLE_API_KEY and not GOOGLE_API_KEY:
+        raise ValueError("LOVABLE_API_KEY or GOOGLE_API_KEY not configured")
     
     # Build the content with image
     content = []
@@ -623,26 +753,55 @@ Retorne JSON com:
     else:
         return {"error": "No image provided"}
     
-    response = requests.post(
-        LOVABLE_API_URL,
-        headers={
-            'Authorization': f'Bearer {LOVABLE_API_KEY}',
-            'Content-Type': 'application/json'
-        },
-        json={
-            'model': 'google/gemini-2.5-flash',
-            'messages': [{'role': 'user', 'content': content}],
-            'max_tokens': 2048
-        },
-        timeout=60
-    )
+    # Try Lovable AI first
+    if LOVABLE_API_KEY:
+        response = requests.post(
+            LOVABLE_API_URL,
+            headers={
+                'Authorization': f'Bearer {LOVABLE_API_KEY}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'google/gemini-2.5-flash',
+                'messages': [{'role': 'user', 'content': content}],
+                'max_tokens': 2048
+            },
+            timeout=60
+        )
+    elif GOOGLE_API_KEY:
+        # Use Google Gemini directly for vision
+        parts = [{"text": content[0]["text"]}]
+        if image_data:
+            parts.append({"inline_data": {"mime_type": "image/jpeg", "data": image_data}})
+        
+        response = requests.post(
+            f"{GOOGLE_API_URL}/models/gemini-2.0-flash:generateContent?key={GOOGLE_API_KEY}",
+            json={
+                'contents': [{'role': 'user', 'parts': parts}],
+                'generationConfig': {'maxOutputTokens': 2048}
+            },
+            timeout=60
+        )
+    else:
+        return {"error": "No API key configured"}
     
     if not response.ok:
         print(f"Detection error: {response.status_code}")
         return {"error": f"API error: {response.status_code}"}
     
     data = response.json()
-    result_text = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+    
+    # Parse response based on API used
+    if LOVABLE_API_KEY:
+        result_text = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+    else:
+        # Google Gemini format
+        candidates = data.get('candidates', [])
+        if candidates:
+            parts = candidates[0].get('content', {}).get('parts', [])
+            result_text = parts[0].get('text', '') if parts else ''
+        else:
+            result_text = ''
     
     try:
         start = result_text.find('{')

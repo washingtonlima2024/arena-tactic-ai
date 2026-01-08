@@ -36,6 +36,36 @@ CORS(app)
 # Initialize database
 init_db()
 
+
+def load_api_keys_from_db():
+    """Load API keys from database on server startup."""
+    session = get_session()
+    try:
+        settings = session.query(ApiSetting).all()
+        keys_loaded = []
+        for s in settings:
+            if s.setting_key == 'openai_api_key' and s.setting_value:
+                ai_services.set_api_keys(openai_key=s.setting_value)
+                keys_loaded.append('OPENAI')
+            elif s.setting_key == 'gemini_api_key' and s.setting_value:
+                ai_services.set_api_keys(google_key=s.setting_value)
+                keys_loaded.append('GOOGLE')
+            elif s.setting_key == 'LOVABLE_API_KEY' and s.setting_value:
+                ai_services.set_api_keys(lovable_key=s.setting_value)
+                keys_loaded.append('LOVABLE')
+        if keys_loaded:
+            print(f"✓ API keys loaded from database: {', '.join(keys_loaded)}")
+        else:
+            print("⚠ No API keys found in database. Configure in Settings.")
+    except Exception as e:
+        print(f"⚠ Could not load API keys from database: {e}")
+    finally:
+        session.close()
+
+
+# Load API keys from database
+load_api_keys_from_db()
+
 # Diretório para vinhetas locais
 VIGNETTES_DIR = Path(__file__).parent / "vinhetas"
 VIGNETTES_DIR.mkdir(exist_ok=True)

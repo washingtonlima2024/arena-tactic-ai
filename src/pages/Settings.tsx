@@ -126,13 +126,16 @@ export default function Settings() {
         upsertApiSetting.mutateAsync({ key: 'notify_insights', value: String(notifyInsights) }),
         upsertApiSetting.mutateAsync({ key: 'notify_errors', value: String(notifyErrors) }),
         upsertApiSetting.mutateAsync({ key: 'notify_updates', value: String(notifyUpdates) }),
-        // AI Provider settings
+        // AI Provider settings - use correct key names for Python server
         upsertApiSetting.mutateAsync({ key: 'gemini_api_key', value: geminiApiKey }),
         upsertApiSetting.mutateAsync({ key: 'gemini_model', value: geminiModel }),
         upsertApiSetting.mutateAsync({ key: 'gemini_enabled', value: String(geminiEnabled) }),
         upsertApiSetting.mutateAsync({ key: 'openai_api_key', value: openaiApiKey }),
         upsertApiSetting.mutateAsync({ key: 'openai_model', value: openaiModel }),
         upsertApiSetting.mutateAsync({ key: 'openai_enabled', value: String(openaiEnabled) }),
+        // Also save with standard env var names for Python server compatibility
+        ...(geminiApiKey ? [upsertApiSetting.mutateAsync({ key: 'GOOGLE_GENERATIVE_AI_API_KEY', value: geminiApiKey })] : []),
+        ...(openaiApiKey ? [upsertApiSetting.mutateAsync({ key: 'OPENAI_API_KEY', value: openaiApiKey })] : []),
       ]);
       toast.success('Todas as configurações foram salvas!');
     } catch (error) {
