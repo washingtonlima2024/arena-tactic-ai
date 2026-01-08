@@ -29,7 +29,10 @@ import {
   ArrowLeft,
   ListPlus,
   FilePlus,
-  HardDrive
+  HardDrive,
+  Server,
+  Cloud,
+  Loader2
 } from 'lucide-react';
 import { useTeams } from '@/hooks/useTeams';
 import { useCreateMatch } from '@/hooks/useMatches';
@@ -1803,6 +1806,52 @@ export default function VideoUpload() {
                     Link/Embed
                   </TabsTrigger>
                 </TabsList>
+
+                {/* Pipeline Status Indicator */}
+                <div className={`mt-4 p-3 rounded-lg border flex items-center justify-between ${
+                  isLocalServerOnline 
+                    ? 'bg-emerald-500/10 border-emerald-500/30' 
+                    : 'bg-muted/50 border-border/50'
+                }`}>
+                  <div className="flex items-center gap-3">
+                    <div className={`h-8 w-8 rounded-full flex items-center justify-center ${
+                      isLocalServerOnline ? 'bg-emerald-500/20' : 'bg-muted'
+                    }`}>
+                      {isLocalServerOnline === undefined ? (
+                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                      ) : isLocalServerOnline ? (
+                        <Server className="h-4 w-4 text-emerald-400" />
+                      ) : (
+                        <Cloud className="h-4 w-4 text-muted-foreground" />
+                      )}
+                    </div>
+                    <div>
+                      <p className={`text-sm font-medium ${isLocalServerOnline ? 'text-emerald-400' : 'text-muted-foreground'}`}>
+                        {isLocalServerOnline === undefined 
+                          ? 'Verificando servidor...' 
+                          : isLocalServerOnline 
+                            ? 'Servidor Python Online' 
+                            : 'Servidor Python Offline'}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        {isLocalServerOnline 
+                          ? 'Pipeline paralelo disponível • FFmpeg nativo' 
+                          : 'Usando Supabase Cloud • FFmpeg via WebAssembly'}
+                      </p>
+                    </div>
+                  </div>
+                  <Badge 
+                    variant={isLocalServerOnline ? 'default' : 'secondary'}
+                    className={`gap-1 ${isLocalServerOnline ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : ''}`}
+                  >
+                    <Zap className="h-3 w-3" />
+                    {uploadMode === 'local' && isLocalServerOnline 
+                      ? 'Processamento Paralelo' 
+                      : isLocalServerOnline 
+                        ? 'Pipeline Local' 
+                        : 'Pipeline Cloud'}
+                  </Badge>
+                </div>
 
                 {/* LOCAL FILE MODE - No upload needed */}
                 <TabsContent value="local" className="mt-4 space-y-4">
