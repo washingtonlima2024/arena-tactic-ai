@@ -1,9 +1,42 @@
 /**
  * Arena Play - API Client para servidor Python local
  * Substitui as chamadas Supabase por chamadas HTTP ao servidor local
+ * Com fallback para Supabase Storage quando servidor local indisponível
  */
 
+import { supabase } from '@/integrations/supabase/client';
+
 const getApiBase = () => localStorage.getItem('arenaApiUrl') || 'http://localhost:5000';
+
+// Check if local server is available
+let serverAvailable: boolean | null = null;
+let lastServerCheck = 0;
+const SERVER_CHECK_INTERVAL = 30000; // 30 seconds
+
+export async function isLocalServerAvailable(): Promise<boolean> {
+  const now = Date.now();
+  if (serverAvailable !== null && (now - lastServerCheck) < SERVER_CHECK_INTERVAL) {
+    return serverAvailable;
+  }
+  
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 3000);
+    
+    const response = await fetch(`${getApiBase()}/health`, { 
+      signal: controller.signal 
+    });
+    clearTimeout(timeout);
+    
+    serverAvailable = response.ok;
+    lastServerCheck = now;
+    return serverAvailable;
+  } catch {
+    serverAvailable = false;
+    lastServerCheck = now;
+    return false;
+  }
+}
 
 async function apiRequest<T>(
   endpoint: string,
@@ -23,6 +56,41 @@ async function apiRequest<T>(
   }
 
   return response.json();
+}
+
+// Upload to Supabase Storage as fallback
+async function uploadToSupabase(
+  matchId: string, 
+  subfolder: string, 
+  file: File, 
+  filename?: string
+): Promise<{ url: string; filename: string; match_id: string; subfolder: string }> {
+  const sanitizedFilename = filename || `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
+  const path = `${matchId}/${subfolder}/${sanitizedFilename}`;
+  
+  // Upload to match-videos bucket
+  const { data, error } = await supabase.storage
+    .from('match-videos')
+    .upload(path, file, { 
+      cacheControl: '3600',
+      upsert: true 
+    });
+
+  if (error) {
+    throw new Error(`Supabase upload failed: ${error.message}`);
+  }
+
+  // Get public URL
+  const { data: urlData } = supabase.storage
+    .from('match-videos')
+    .getPublicUrl(path);
+
+  return {
+    url: urlData.publicUrl,
+    filename: sanitizedFilename,
+    match_id: matchId,
+    subfolder
+  };
 }
 
 export const apiClient = {
@@ -149,15 +217,24 @@ export const apiClient = {
   getAllStorageStats: () => apiRequest<any>('/api/storage'),
 
   uploadFile: async (matchId: string, subfolder: string, file: File, filename?: string): Promise<{ url: string; filename: string; match_id: string; subfolder: string }> => {
-    const formData = new FormData();
-    formData.append('file', file);
-    if (filename) formData.append('filename', filename);
-    const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
-      method: 'POST',
-      body: formData,
-    });
-    if (!response.ok) throw new Error('Upload failed');
-    return response.json();
+    // Try local server first, fallback to Supabase
+    const serverUp = await isLocalServerAvailable();
+    
+    if (serverUp) {
+      const formData = new FormData();
+      formData.append('file', file);
+      if (filename) formData.append('filename', filename);
+      const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
+        method: 'POST',
+        body: formData,
+      });
+      if (!response.ok) throw new Error('Upload failed');
+      return response.json();
+    } else {
+      // Fallback to Supabase Storage
+      console.log('[apiClient] Local server unavailable, using Supabase Storage fallback');
+      return uploadToSupabase(matchId, subfolder, file, filename);
+    }
   },
 
   uploadBlob: async (matchId: string, subfolder: string, blob: Blob, filename: string): Promise<{ url: string; filename: string; match_id: string; subfolder: string }> => {
