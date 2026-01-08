@@ -30,6 +30,7 @@ export function FloatingLivePlayer() {
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [position, setPosition] = useState({ x: 20, y: 20 });
   const [isDragging, setIsDragging] = useState(false);
+  const [isOnLivePage, setIsOnLivePage] = useState(false);
   const dragStartRef = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -65,7 +66,7 @@ export function FloatingLivePlayer() {
     setIsDragging(false);
   }, []);
 
-  // Add/remove event listeners
+  // Add/remove event listeners for dragging
   useEffect(() => {
     if (isDragging) {
       window.addEventListener('mousemove', handleMouseMove);
@@ -76,6 +77,26 @@ export function FloatingLivePlayer() {
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDragging, handleMouseMove, handleMouseUp]);
+
+  // Check if we're on live page - MUST be before conditional returns
+  useEffect(() => {
+    const checkPath = () => {
+      setIsOnLivePage(window.location.pathname === '/live');
+    };
+    
+    checkPath();
+    
+    // Listen for popstate (back/forward navigation)
+    window.addEventListener('popstate', checkPath);
+    
+    // Periodic check for navigation
+    const interval = setInterval(checkPath, 500);
+    
+    return () => {
+      window.removeEventListener('popstate', checkPath);
+      clearInterval(interval);
+    };
+  }, []);
   
   // If context is not available, don't render anything (AFTER all hooks)
   if (!context) {
@@ -132,28 +153,6 @@ export function FloatingLivePlayer() {
       window.location.href = '/matches';
     }
   };
-
-  // Check if we're on live page using window.location
-  const [isOnLivePage, setIsOnLivePage] = useState(false);
-  
-  useEffect(() => {
-    const checkPath = () => {
-      setIsOnLivePage(window.location.pathname === '/live');
-    };
-    
-    checkPath();
-    
-    // Listen for popstate (back/forward navigation)
-    window.addEventListener('popstate', checkPath);
-    
-    // Periodic check for navigation
-    const interval = setInterval(checkPath, 500);
-    
-    return () => {
-      window.removeEventListener('popstate', checkPath);
-      clearInterval(interval);
-    };
-  }, []);
 
   // Don't show if not recording or already on live page
   if (!isRecording) return null;
