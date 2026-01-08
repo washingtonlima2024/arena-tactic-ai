@@ -1045,8 +1045,18 @@ export default function VideoUpload() {
             totalEventsDetected += result.eventsDetected || 0;
             setProcessingProgress(75);
             setProcessingMessage(`✓ 1º tempo: ${result.eventsDetected} eventos`);
-          } catch (error) {
+          } catch (error: any) {
             console.error('Erro na análise do 1º tempo:', error);
+            const errorMsg = error?.message || 'Erro desconhecido';
+            // Traduzir erros comuns
+            const friendlyMsg = errorMsg.includes('Failed to send a request to the Edge Function')
+              ? 'Serviço de análise temporariamente indisponível. Tente novamente.'
+              : errorMsg;
+            toast({
+              title: "⚠️ Erro na análise do 1º Tempo",
+              description: friendlyMsg,
+              variant: "destructive",
+            });
           }
         }
 
@@ -1068,8 +1078,17 @@ export default function VideoUpload() {
             totalEventsDetected += result.eventsDetected || 0;
             setProcessingProgress(90);
             setProcessingMessage(`✓ 2º tempo: ${result.eventsDetected} eventos`);
-          } catch (error) {
+          } catch (error: any) {
             console.error('Erro na análise do 2º tempo:', error);
+            const errorMsg = error?.message || 'Erro desconhecido';
+            const friendlyMsg = errorMsg.includes('Failed to send a request to the Edge Function')
+              ? 'Serviço de análise temporariamente indisponível. Tente novamente.'
+              : errorMsg;
+            toast({
+              title: "⚠️ Erro na análise do 2º Tempo",
+              description: friendlyMsg,
+              variant: "destructive",
+            });
           }
         }
       }
