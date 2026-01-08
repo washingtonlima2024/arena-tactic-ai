@@ -5,10 +5,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
-const MAX_WHISPER_SIZE = 24 * 1024 * 1024; // 24MB - Whisper limit is 25MB
-const MAX_ELEVENLABS_SIZE = 100 * 1024 * 1024; // 100MB for ElevenLabs
-const MAX_VIDEO_SIZE = 2 * 1024 * 1024 * 1024; // 2GB max - increased for full match videos
-const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB chunks for multi-chunk transcription
+const MAX_WHISPER_SIZE = 20 * 1024 * 1024; // 20MB - safe limit for Whisper
+const MAX_ELEVENLABS_SIZE = 25 * 1024 * 1024; // 25MB for ElevenLabs (reduced to avoid memory issues)
+const MAX_VIDEO_SIZE = 5 * 1024 * 1024 * 1024; // 5GB max - support full match videos
+const CHUNK_SIZE = 15 * 1024 * 1024; // 15MB chunks - safe for edge function memory
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -53,14 +53,26 @@ serve(async (req) => {
       console.log(`[TranscribeLarge] Vídeo grande (${videoSizeMB.toFixed(0)}MB), usando estratégia de chunks...`);
     }
 
-    // For small videos (≤24MB), use Whisper directly
+    // For small videos (≤20MB), use Whisper directly
     if (videoSizeBytes <= MAX_WHISPER_SIZE) {
       console.log('[TranscribeLarge] Usando Whisper para vídeo pequeno...');
       return await transcribeWithWhisper(videoUrl, videoSizeBytes, videoSizeMB);
     }
 
-    // For larger videos, try ElevenLabs first
-    console.log('[TranscribeLarge] Vídeo grande, tentando ElevenLabs Scribe...');
+    // For very large videos (>500MB), skip ElevenLabs (memory issues) and go straight to multi-chunk
+    if (videoSizeBytes > 500 * 1024 * 1024) {
+      console.log(`[TranscribeLarge] Vídeo muito grande (${videoSizeMB.toFixed(0)}MB), usando multi-chunk direto...`);
+      const multiChunkResult = await transcribeWithWhisperMultiChunk(videoUrl, videoSizeBytes, videoSizeMB);
+      if (multiChunkResult) {
+        return multiChunkResult;
+      }
+      // Final fallback: partial Whisper
+      console.log('[TranscribeLarge] Multi-chunk falhou, usando Whisper parcial...');
+      return await transcribeWithWhisper(videoUrl, videoSizeBytes, videoSizeMB, true);
+    }
+
+    // For medium videos (20-500MB), try ElevenLabs first
+    console.log('[TranscribeLarge] Vídeo médio, tentando ElevenLabs Scribe...');
     
     const elevenLabsResult = await transcribeWithElevenLabs(videoUrl, videoSizeBytes, videoSizeMB);
     if (elevenLabsResult) {
@@ -74,7 +86,7 @@ serve(async (req) => {
       return multiChunkResult;
     }
 
-    // Final fallback: partial Whisper (first 24MB only)
+    // Final fallback: partial Whisper (first 20MB only)
     console.log('[TranscribeLarge] Multi-chunk falhou, usando Whisper parcial...');
     return await transcribeWithWhisper(videoUrl, videoSizeBytes, videoSizeMB, true);
 
@@ -183,11 +195,12 @@ async function transcribeWithWhisperMultiChunk(videoUrl: string, videoSizeBytes:
   }
 
   try {
-    const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB chunks
-    const MAX_CHUNKS = 10; // Limit to prevent timeout - covers ~200MB of video
+    // Use smaller chunks to avoid memory issues in edge functions
+    const chunkSize = CHUNK_SIZE; // 15MB from constant
+    const MAX_CHUNKS = 6; // Reduced to prevent timeout and memory issues
     
     // Calculate total chunks needed
-    const totalChunks = Math.ceil(videoSizeBytes / CHUNK_SIZE);
+    const totalChunks = Math.ceil(videoSizeBytes / chunkSize);
     
     // For very large videos, sample distributed chunks instead of sequential
     let chunksToProcess: number[];
@@ -212,10 +225,10 @@ async function transcribeWithWhisperMultiChunk(videoUrl: string, videoSizeBytes:
 
     for (let i = 0; i < chunksToProcess.length; i++) {
       const chunkIndex = chunksToProcess[i];
-      const startByte = chunkIndex * CHUNK_SIZE;
-      const endByte = Math.min((chunkIndex + 1) * CHUNK_SIZE - 1, videoSizeBytes - 1);
+      const startByte = chunkIndex * chunkSize;
+      const endByte = Math.min((chunkIndex + 1) * chunkSize - 1, videoSizeBytes - 1);
       const chunkSizeMB = (endByte - startByte + 1) / (1024 * 1024);
-      const chunkMinutes = Math.floor((chunkIndex * CHUNK_SIZE) / videoSizeBytes * 90); // Estimate match minute
+      const chunkMinutes = Math.floor((chunkIndex * chunkSize) / videoSizeBytes * 90); // Estimate match minute
 
       console.log(`[WhisperMulti] Chunk ${i + 1}/${chunksToProcess.length} (idx ${chunkIndex}, ~${chunkMinutes}'): bytes ${startByte}-${endByte} (${chunkSizeMB.toFixed(1)}MB)...`);
 
