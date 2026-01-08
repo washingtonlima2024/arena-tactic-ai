@@ -1,6 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
 import { apiClient } from '@/lib/apiClient';
+import { getApiMode } from '@/lib/apiMode';
 
 export interface Match {
   id: string;
@@ -22,7 +24,24 @@ export function useMatches() {
   return useQuery({
     queryKey: ['matches'],
     queryFn: async () => {
-      const data = await apiClient.getMatches();
+      const mode = getApiMode();
+      
+      if (mode === 'local') {
+        try {
+          return await apiClient.getMatches() as Match[];
+        } catch (error) {
+          console.warn('Local API failed, falling back to Supabase:', error);
+        }
+      }
+      
+      const { data, error } = await supabase
+        .from('matches')
+        .select(`
+          *,
+          home_team:teams!matches_home_team_id_fkey(*),
+          away_team:teams!matches_away_team_id_fkey(*)
+        `);
+      if (error) throw error;
       return data as Match[];
     },
   });
@@ -39,10 +58,19 @@ export function useCreateMatch() {
       match_date?: string;
       venue?: string;
     }) => {
-      const data = await apiClient.createMatch({
-        ...matchData,
-        status: 'analyzing',
-      });
+      const mode = getApiMode();
+      const payload = { ...matchData, status: 'analyzing' };
+      
+      if (mode === 'local') {
+        try {
+          return await apiClient.createMatch(payload);
+        } catch (error) {
+          console.warn('Local API failed, falling back to Supabase:', error);
+        }
+      }
+      
+      const { data, error } = await supabase.from('matches').insert(payload).select().single();
+      if (error) throw error;
       return data;
     },
     onSuccess: () => {
