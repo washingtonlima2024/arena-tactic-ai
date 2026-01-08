@@ -35,6 +35,7 @@ import { useCreateMatch } from '@/hooks/useMatches';
 import { useStartAnalysis, useAnalysisJob } from '@/hooks/useAnalysisJob';
 import { useWhisperTranscription } from '@/hooks/useWhisperTranscription';
 import { AnalysisProgress } from '@/components/analysis/AnalysisProgress';
+import { ProcessingProgress, ProcessingStage } from '@/components/upload/ProcessingProgress';
 import { toast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/apiClient';
 import { useQuery } from '@tanstack/react-query';
@@ -584,9 +585,15 @@ export default function VideoUpload() {
     }));
   };
 
-  // State for transcription progress
+  // State for processing progress
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [transcriptionProgress, setTranscriptionProgress] = useState('');
+  
+  // Detailed processing state
+  const [processingStage, setProcessingStage] = useState<ProcessingStage>('idle');
+  const [processingProgress, setProcessingProgress] = useState(0);
+  const [processingMessage, setProcessingMessage] = useState('');
+  const [processingError, setProcessingError] = useState<string | undefined>();
 
   // Transcribe video/embed using Whisper API with FFmpeg audio extraction - WITH RETRIES AND FALLBACK
   const transcribeWithWhisper = async (segment: VideoSegment, matchId: string): Promise<string | null> => {
@@ -701,6 +708,12 @@ export default function VideoUpload() {
   };
 
   const handleStartAnalysis = async () => {
+    // Reset and start processing
+    setProcessingStage('preparing');
+    setProcessingProgress(0);
+    setProcessingMessage('Validando arquivos e configurações...');
+    setProcessingError(undefined);
+    
     try {
       // CORREÇÃO: Usar ref para obter valor atual dos segmentos (evita stale closure)
       const currentSegments = segmentsRef.current;
@@ -713,6 +726,8 @@ export default function VideoUpload() {
       // Validação: verificar se há segmentos disponíveis
       if (currentSegments.length === 0) {
         console.error('ERRO CRÍTICO: Nenhum segmento disponível!');
+        setProcessingStage('error');
+        setProcessingError('Nenhum vídeo encontrado. Por favor, faça upload de vídeos.');
         toast({
           title: "Nenhum vídeo encontrado",
           description: "Por favor, faça upload de vídeos ou recarregue a página.",
@@ -787,6 +802,11 @@ export default function VideoUpload() {
         matchId = match.id;
       }
 
+      // Update progress - Uploading stage
+      setProcessingStage('uploading');
+      setProcessingProgress(10);
+      setProcessingMessage('Registrando vídeos na partida...');
+
       // Register all video segments - USANDO currentSegments
       for (const segment of currentSegments) {
         if (segment.status === 'complete' || segment.status === 'ready') {
@@ -802,6 +822,8 @@ export default function VideoUpload() {
           });
         }
       }
+      
+      setProcessingProgress(30);
 
       // Collect transcriptions from SRT files first
       let firstHalfTranscription = '';
@@ -865,17 +887,24 @@ export default function VideoUpload() {
         const segment = firstHalfSegments[0];
         const isFullMatch = segment.videoType === 'full';
         
+        // Update to extracting audio stage
+        setProcessingStage('extracting_audio');
+        setProcessingProgress(10);
+        setProcessingMessage(`Extraindo áudio de ${segment.name}...`);
+        
         console.log(`Sem SRT para ${isFullMatch ? 'partida completa' : '1º tempo'} - tentando transcrição automática Whisper...`);
         console.log('Segmento selecionado:', segment.name, 'URL:', segment.url, 'isLink:', segment.isLink);
         
-        toast({
-          title: isFullMatch ? "🎙️ Transcrevendo Partida Completa" : "🎙️ Transcrevendo 1º Tempo",
-          description: "Extraindo áudio e enviando para Whisper API...",
-        });
+        // Update to transcribing stage
+        setProcessingStage('transcribing');
+        setProcessingProgress(30);
+        setProcessingMessage(isFullMatch ? 'Transcrevendo partida completa...' : 'Transcrevendo 1º tempo...');
         
         const transcription = await transcribeWithWhisper(segment, matchId);
         if (transcription) {
           firstHalfTranscription = transcription;
+          setProcessingProgress(70);
+          setProcessingMessage(`✓ ${transcription.length} caracteres transcritos`);
           toast({
             title: isFullMatch ? "✓ Partida transcrita" : "✓ 1º Tempo transcrito",
             description: `${transcription.length} caracteres extraídos do áudio`,
@@ -932,6 +961,9 @@ export default function VideoUpload() {
       // WARNING: Continue even without transcription - analysis will be limited
       if (!hasTranscription) {
         console.log('⚠️ Sem transcrição disponível - partida será criada mas sem análise de eventos');
+        setProcessingStage('complete');
+        setProcessingProgress(100);
+        setProcessingMessage('Partida criada sem transcrição');
         toast({
           title: "⚠️ Sem transcrição disponível",
           description: "A partida foi criada. Para detectar eventos, reimporte com arquivo de vídeo MP4 ou adicione SRT.",
@@ -941,9 +973,14 @@ export default function VideoUpload() {
         // Redirect to match anyway - user can add videos/transcription later
         setTimeout(() => {
           navigate(`/events?match=${matchId}`);
-        }, 1500);
+        }, 2000);
         return;
       }
+
+      // Update to analyzing stage
+      setProcessingStage('analyzing');
+      setProcessingProgress(50);
+      setProcessingMessage('Analisando transcrição com IA...');
 
       let totalEventsDetected = 0;
 
@@ -955,6 +992,7 @@ export default function VideoUpload() {
       if (isFullMatchAnalysis && firstHalfTranscription) {
         // ANÁLISE DE PARTIDA COMPLETA (0-90 min)
         console.log('Iniciando análise da PARTIDA COMPLETA (0-90 min)...');
+        setProcessingMessage('Detectando eventos em partida completa (0-90 min)...');
         
         try {
           const result = await startAnalysis({
@@ -967,10 +1005,8 @@ export default function VideoUpload() {
           });
           
           totalEventsDetected += result.eventsDetected || 0;
-          toast({
-            title: "Partida analisada",
-            description: `${result.eventsDetected} eventos detectados na partida completa`,
-          });
+          setProcessingProgress(90);
+          setProcessingMessage(`✓ ${result.eventsDetected} eventos detectados`);
         } catch (error) {
           console.error('Erro na análise da partida completa:', error);
           toast({
@@ -981,6 +1017,7 @@ export default function VideoUpload() {
         }
       } else {
         // ANÁLISE POR TEMPOS SEPARADOS
+        setProcessingMessage('Analisando 1º tempo...');
         
         // Analyze first half if has transcription
         if (firstHalfTranscription) {
@@ -997,23 +1034,17 @@ export default function VideoUpload() {
             });
             
             totalEventsDetected += result.eventsDetected || 0;
-            toast({
-              title: "1º Tempo analisado",
-              description: `${result.eventsDetected} eventos detectados`,
-            });
+            setProcessingProgress(75);
+            setProcessingMessage(`✓ 1º tempo: ${result.eventsDetected} eventos`);
           } catch (error) {
             console.error('Erro na análise do 1º tempo:', error);
-            toast({
-              title: "⚠️ Erro no 1º Tempo",
-              description: "Análise parcial - continuando com 2º tempo...",
-              variant: "destructive",
-            });
           }
         }
 
         // Analyze second half if has transcription
         if (secondHalfTranscription) {
           console.log('Iniciando análise do 2º Tempo...');
+          setProcessingMessage('Analisando 2º tempo...');
           
           try {
             const result = await startAnalysis({
@@ -1026,20 +1057,23 @@ export default function VideoUpload() {
             });
             
             totalEventsDetected += result.eventsDetected || 0;
-            toast({
-              title: "2º Tempo analisado",
-              description: `${result.eventsDetected} eventos detectados`,
-            });
+            setProcessingProgress(90);
+            setProcessingMessage(`✓ 2º tempo: ${result.eventsDetected} eventos`);
           } catch (error) {
             console.error('Erro na análise do 2º tempo:', error);
-            toast({
-              title: "⚠️ Erro no 2º Tempo",
-              description: "Análise parcial concluída",
-              variant: "destructive",
-            });
           }
         }
       }
+
+      // Update to saving stage
+      setProcessingStage('saving');
+      setProcessingProgress(95);
+      setProcessingMessage('Salvando eventos...');
+
+      // Complete!
+      setProcessingStage('complete');
+      setProcessingProgress(100);
+      setProcessingMessage(`✓ ${totalEventsDetected} eventos detectados!`);
 
       // Success - redirect to events
       toast({
@@ -1051,11 +1085,13 @@ export default function VideoUpload() {
 
       setTimeout(() => {
         navigate(`/events?match=${matchId}`);
-      }, 1500);
+      }, 2000);
 
     } catch (error: any) {
       setIsTranscribing(false);
       setTranscriptionProgress('');
+      setProcessingStage('error');
+      setProcessingError(error.message || 'Erro desconhecido no processamento');
       console.error('Erro na análise:', error);
       toast({
         title: "Erro ao analisar",
@@ -1071,7 +1107,67 @@ export default function VideoUpload() {
   const firstHalfCount = segments.filter(s => s.half === 'first' || s.videoType === 'first_half').length;
   const secondHalfCount = segments.filter(s => s.half === 'second' || s.videoType === 'second_half').length;
 
-  // Show analysis progress
+  // Show real-time processing progress
+  if (processingStage !== 'idle') {
+    return (
+      <AppLayout>
+        <div className="space-y-6">
+          <div>
+            <h1 className="font-display text-3xl font-bold">
+              {processingStage === 'complete' ? 'Análise Concluída' : 
+               processingStage === 'error' ? 'Erro no Processamento' : 
+               'Processando Vídeo'}
+            </h1>
+            <p className="text-muted-foreground">
+              Acompanhe o progresso em tempo real
+            </p>
+          </div>
+
+          <div className="max-w-2xl">
+            <ProcessingProgress 
+              stage={processingStage}
+              currentStep={processingMessage}
+              progress={processingProgress}
+              message={processingMessage}
+              error={processingError}
+              transcriptionProgress={transcriptionProgress}
+              isTranscribing={isTranscribing}
+              isAnalyzing={isStartingAnalysis}
+            />
+
+            {(processingStage === 'complete' || processingStage === 'error') && (
+              <div className="mt-6 flex gap-4">
+                <Button variant="arena" onClick={() => navigate('/matches')}>
+                  Ver Partidas
+                </Button>
+                <Button variant="arena-outline" onClick={() => {
+                  setProcessingStage('idle');
+                  setProcessingProgress(0);
+                  setProcessingMessage('');
+                  setProcessingError(undefined);
+                  setCurrentJobId(null);
+                  setSegments([]);
+                  setMatchData({
+                    homeTeamId: '',
+                    awayTeamId: '',
+                    competition: '',
+                    matchDate: '',
+                    matchTime: '',
+                    venue: '',
+                  });
+                  setCurrentStep('choice');
+                }}>
+                  Nova Análise
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // Show legacy analysis progress (for compatibility)
   if (currentJobId && analysisJob) {
     return (
       <AppLayout>
@@ -1121,7 +1217,7 @@ export default function VideoUpload() {
         { id: 'videos' as const, label: 'Vídeos', icon: '🎬' },
         { id: 'summary' as const, label: 'Análise', icon: '🚀' },
       ];
-  
+
   // Determine which step is active for the indicator
   const isStepActive = (stepId: WizardStep) => {
     if (stepId === 'match') return currentStep === 'match';
