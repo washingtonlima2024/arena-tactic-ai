@@ -730,7 +730,7 @@ export default function VideoUpload() {
         }
         
         console.log('[Fallback] Invocando transcribe-large-video via apiClient...');
-        let data: { success?: boolean; text?: string; srtContent?: string; requiresSrt?: boolean; error?: string };
+        let data: { success?: boolean; text?: string; srtContent?: string; requiresSrt?: boolean; requiresLocalServer?: boolean; suggestion?: string; error?: string };
         try {
           data = await apiClient.transcribeLargeVideo({ 
             videoUrl: requestBody.videoUrl || requestBody.embedUrl 
@@ -744,7 +744,18 @@ export default function VideoUpload() {
           throw error;
         }
         
-        console.log('[Fallback] Resposta:', { success: data?.success, hasText: !!data?.text, error: data?.error });
+        console.log('[Fallback] Resposta:', { success: data?.success, hasText: !!data?.text, requiresLocalServer: data?.requiresLocalServer });
+        
+        // Check if video is too large for cloud processing
+        if (data?.requiresLocalServer) {
+          console.log('[Fallback] Vídeo requer servidor local:', data.suggestion);
+          toast({
+            title: "⚠️ Vídeo muito grande para transcrição na nuvem",
+            description: data.suggestion || "Vídeos maiores que 500MB precisam do servidor Python local (python server.py) ou um arquivo SRT.",
+            variant: "destructive",
+          });
+          return null;
+        }
         
         // Check if embed requires SRT
         if (data?.requiresSrt) {
