@@ -476,3 +476,340 @@ Partida atual:
     
     response = call_lovable_ai(messages)
     return response or 'Opa, deu ruim aqui! Manda de novo aí, torcedor!'
+
+
+def transcribe_audio_base64(audio_base64: str, language: str = 'pt') -> Optional[str]:
+    """
+    Transcribe audio from base64 data using OpenAI Whisper.
+    
+    Args:
+        audio_base64: Base64-encoded audio data
+        language: Language code
+    
+    Returns:
+        Transcription text or None on error
+    """
+    import tempfile
+    
+    if not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY not configured")
+    
+    # Decode base64 and save to temp file
+    audio_data = base64.b64decode(audio_base64)
+    
+    with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as tmp:
+        tmp.write(audio_data)
+        tmp_path = tmp.name
+    
+    try:
+        return transcribe_audio(tmp_path, language)
+    finally:
+        import os
+        os.unlink(tmp_path)
+
+
+def extract_live_events(
+    transcript: str,
+    home_team: str,
+    away_team: str,
+    current_score: Dict[str, int],
+    current_minute: int
+) -> List[Dict[str, Any]]:
+    """
+    Extract live events from a match transcript.
+    
+    Args:
+        transcript: Recent transcript text
+        home_team: Home team name
+        away_team: Away team name
+        current_score: Dict with home and away scores
+        current_minute: Current match minute
+    
+    Returns:
+        List of detected events
+    """
+    if len(transcript) < 20:
+        return []
+    
+    home_score = current_score.get('home', 0)
+    away_score = current_score.get('away', 0)
+    
+    system_prompt = f"""Você analisa transcrições de partidas de futebol AO VIVO e detecta eventos.
+
+Contexto:
+- Partida: {home_team} {home_score} x {away_score} {away_team}
+- Minuto atual: {current_minute}'
+
+Detecte eventos mencionados na transcrição. Para cada evento retorne:
+- event_type: goal, shot, foul, card, corner, offside, substitution, save
+- description: descrição curta em português
+- minute: minuto do evento
+- team: "home" ou "away"
+- player: nome do jogador se mencionado
+- is_highlight: true se for momento importante
+
+IMPORTANTE: Retorne APENAS um array JSON válido. Sem texto adicional."""
+
+    response = call_lovable_ai([
+        {'role': 'system', 'content': system_prompt},
+        {'role': 'user', 'content': f"Transcrição: {transcript}"}
+    ], max_tokens=2048)
+    
+    if not response:
+        return []
+    
+    try:
+        start = response.find('[')
+        end = response.rfind(']') + 1
+        if start >= 0 and end > start:
+            return json.loads(response[start:end])
+    except json.JSONDecodeError:
+        print(f"Failed to parse live events: {response}")
+    
+    return []
+
+
+def detect_players_in_frame(
+    image_data: str = None,
+    image_url: str = None,
+    frame_timestamp: float = 0
+) -> Dict[str, Any]:
+    """
+    Detect players in a video frame using vision model.
+    
+    Args:
+        image_data: Base64-encoded image
+        image_url: URL to image
+        frame_timestamp: Timestamp of the frame
+    
+    Returns:
+        Detection results with players, ball, etc.
+    """
+    if not LOVABLE_API_KEY:
+        raise ValueError("LOVABLE_API_KEY not configured")
+    
+    # Build the content with image
+    content = []
+    content.append({
+        "type": "text",
+        "text": """Analise esta imagem de partida de futebol e detecte:
+
+1. Jogadores visíveis (posição x,y em %, cor do uniforme, número se visível)
+2. Bola (posição x,y em %)
+3. Árbitros (posição x,y)
+4. Área do campo visível
+
+Retorne JSON com:
+{
+  "players": [{"x": 0-100, "y": 0-100, "team": "home/away/unknown", "number": null, "confidence": 0-1}],
+  "ball": {"x": 0-100, "y": 0-100, "confidence": 0-1} ou null,
+  "referees": [{"x": 0-100, "y": 0-100}],
+  "fieldArea": "attacking/midfield/defending",
+  "homeTeamColor": "#hexcolor",
+  "awayTeamColor": "#hexcolor"
+}"""
+    })
+    
+    if image_data:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{image_data}"}
+        })
+    elif image_url:
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": image_url}
+        })
+    else:
+        return {"error": "No image provided"}
+    
+    response = requests.post(
+        LOVABLE_API_URL,
+        headers={
+            'Authorization': f'Bearer {LOVABLE_API_KEY}',
+            'Content-Type': 'application/json'
+        },
+        json={
+            'model': 'google/gemini-2.5-flash',
+            'messages': [{'role': 'user', 'content': content}],
+            'max_tokens': 2048
+        },
+        timeout=60
+    )
+    
+    if not response.ok:
+        print(f"Detection error: {response.status_code}")
+        return {"error": f"API error: {response.status_code}"}
+    
+    data = response.json()
+    result_text = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+    
+    try:
+        start = result_text.find('{')
+        end = result_text.rfind('}') + 1
+        if start >= 0 and end > start:
+            result = json.loads(result_text[start:end])
+            result['frameTimestamp'] = frame_timestamp
+            return result
+    except json.JSONDecodeError:
+        print(f"Failed to parse detection: {result_text}")
+    
+    return {"error": "Failed to parse detection results"}
+
+
+def generate_thumbnail_image(
+    prompt: str,
+    event_id: str = None,
+    match_id: str = None
+) -> Dict[str, Any]:
+    """
+    Generate a thumbnail image using AI.
+    
+    Args:
+        prompt: Description for the image
+        event_id: Related event ID
+        match_id: Related match ID
+    
+    Returns:
+        Dict with image data or error
+    """
+    if not LOVABLE_API_KEY:
+        raise ValueError("LOVABLE_API_KEY not configured")
+    
+    response = requests.post(
+        LOVABLE_API_URL,
+        headers={
+            'Authorization': f'Bearer {LOVABLE_API_KEY}',
+            'Content-Type': 'application/json'
+        },
+        json={
+            'model': 'google/gemini-2.5-flash-image-preview',
+            'messages': [
+                {
+                    'role': 'user',
+                    'content': f"Generate a high-quality thumbnail image: {prompt}. Style: sports, dynamic, vibrant colors."
+                }
+            ],
+            'modalities': ['image', 'text']
+        },
+        timeout=120
+    )
+    
+    if not response.ok:
+        if response.status_code == 429:
+            return {"error": "Rate limit exceeded"}
+        if response.status_code == 402:
+            return {"error": "Insufficient credits"}
+        return {"error": f"API error: {response.status_code}"}
+    
+    data = response.json()
+    
+    # Extract image from response
+    images = data.get('choices', [{}])[0].get('message', {}).get('images', [])
+    if images:
+        image_url = images[0].get('image_url', {}).get('url', '')
+        return {
+            "success": True,
+            "imageData": image_url,
+            "eventId": event_id,
+            "matchId": match_id
+        }
+    
+    return {"error": "No image generated"}
+
+
+def transcribe_large_video(
+    video_url: str,
+    match_id: str = None
+) -> Dict[str, Any]:
+    """
+    Transcribe a large video file.
+    
+    Args:
+        video_url: URL to the video file
+        match_id: Related match ID
+    
+    Returns:
+        Dict with transcription and SRT content
+    """
+    import subprocess
+    import tempfile
+    
+    if not OPENAI_API_KEY:
+        raise ValueError("OPENAI_API_KEY not configured")
+    
+    # Download video
+    with tempfile.TemporaryDirectory() as tmpdir:
+        video_path = os.path.join(tmpdir, 'video.mp4')
+        audio_path = os.path.join(tmpdir, 'audio.mp3')
+        
+        # Download video
+        try:
+            response = requests.get(video_url, stream=True, timeout=300)
+            response.raise_for_status()
+            with open(video_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+        except Exception as e:
+            return {"error": f"Failed to download video: {str(e)}"}
+        
+        # Extract audio with ffmpeg
+        try:
+            cmd = [
+                'ffmpeg', '-y', '-i', video_path,
+                '-vn', '-acodec', 'libmp3lame', '-ab', '128k',
+                audio_path
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if result.returncode != 0:
+                return {"error": f"FFmpeg error: {result.stderr}"}
+        except Exception as e:
+            return {"error": f"Failed to extract audio: {str(e)}"}
+        
+        # Transcribe with Whisper (verbose format for timestamps)
+        with open(audio_path, 'rb') as audio_file:
+            response = requests.post(
+                f'{OPENAI_API_URL}/audio/transcriptions',
+                headers={'Authorization': f'Bearer {OPENAI_API_KEY}'},
+                files={'file': audio_file},
+                data={
+                    'model': 'whisper-1',
+                    'language': 'pt',
+                    'response_format': 'verbose_json'
+                },
+                timeout=600
+            )
+        
+        if not response.ok:
+            return {"error": f"Whisper error: {response.status_code}"}
+        
+        data = response.json()
+        text = data.get('text', '')
+        segments = data.get('segments', [])
+        
+        # Generate SRT content
+        srt_lines = []
+        for i, seg in enumerate(segments, 1):
+            start = _format_srt_time(seg.get('start', 0))
+            end = _format_srt_time(seg.get('end', 0))
+            text_seg = seg.get('text', '').strip()
+            srt_lines.append(f"{i}\n{start} --> {end}\n{text_seg}\n")
+        
+        srt_content = '\n'.join(srt_lines)
+        
+        return {
+            "success": True,
+            "text": text,
+            "srtContent": srt_content,
+            "segments": segments,
+            "matchId": match_id
+        }
+
+
+def _format_srt_time(seconds: float) -> str:
+    """Format seconds to SRT timestamp format."""
+    hours = int(seconds // 3600)
+    minutes = int((seconds % 3600) // 60)
+    secs = int(seconds % 60)
+    millis = int((seconds % 1) * 1000)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
