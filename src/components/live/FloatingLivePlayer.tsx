@@ -25,35 +25,13 @@ export function FloatingLivePlayer() {
   // Use safe version that doesn't throw if context is not available
   const context = useLiveBroadcastContextSafe();
   
+  // ALL hooks must be called before any conditional returns
   const [isMinimized, setIsMinimized] = useState(true);
   const [showStopConfirm, setShowStopConfirm] = useState(false);
   const [position, setPosition] = useState({ x: 20, y: 20 });
   const [isDragging, setIsDragging] = useState(false);
   const dragStartRef = useRef({ x: 0, y: 0 });
   const containerRef = useRef<HTMLDivElement>(null);
-  
-  // If context is not available, don't render anything
-  if (!context) {
-    return null;
-  }
-  
-  const {
-    isRecording,
-    isPaused,
-    recordingTime,
-    matchInfo,
-    currentScore,
-    pauseRecording,
-    resumeRecording,
-    finishMatch,
-  } = context;
-
-  // Format time as MM:SS
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
-  };
 
   // Handle drag start
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
@@ -98,6 +76,29 @@ export function FloatingLivePlayer() {
       window.removeEventListener('mouseup', handleMouseUp);
     };
   }, [isDragging, handleMouseMove, handleMouseUp]);
+  
+  // If context is not available, don't render anything (AFTER all hooks)
+  if (!context) {
+    return null;
+  }
+  
+  const {
+    isRecording,
+    isPaused,
+    recordingTime,
+    matchInfo,
+    currentScore,
+    pauseRecording,
+    resumeRecording,
+    finishMatch,
+  } = context;
+
+  // Format time as MM:SS
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
 
   // Navigate to live page on double click - use window.location since we're outside Router
   const handleDoubleClick = () => {
