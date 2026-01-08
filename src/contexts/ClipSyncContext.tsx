@@ -196,6 +196,46 @@ export function ClipSyncProvider({ children, matchId }: ClipSyncProviderProps) {
            queue.some(q => q.eventId === eventId && q.status === 'processing');
   }, [currentEventId, queue]);
 
+  // Process pending clips on mount
+  useEffect(() => {
+    if (!matchId) return;
+    
+    const processPendingClips = async () => {
+      console.log('[ClipSyncProvider] Checking for pending clips...');
+      
+      const { data: pendingEvents, error } = await supabase
+        .from('match_events')
+        .select('*')
+        .eq('match_id', matchId)
+        .eq('clip_pending', true);
+      
+      if (error) {
+        console.error('[ClipSyncProvider] Error fetching pending events:', error);
+        return;
+      }
+      
+      if (!pendingEvents || pendingEvents.length === 0) {
+        console.log('[ClipSyncProvider] No pending clips found');
+        return;
+      }
+      
+      const videos = await fetchMatchVideos(matchId);
+      if (videos.length === 0) {
+        console.log('[ClipSyncProvider] No videos found for match');
+        return;
+      }
+      
+      console.log(`[ClipSyncProvider] Found ${pendingEvents.length} pending clips, queuing...`);
+      toast.info(`${pendingEvents.length} clips pendentes encontrados. Iniciando geração...`);
+      
+      queueMultipleEvents(pendingEvents as MatchEvent[], videos);
+    };
+    
+    // Small delay to ensure component is fully mounted
+    const timer = setTimeout(processPendingClips, 1000);
+    return () => clearTimeout(timer);
+  }, [matchId, fetchMatchVideos, queueMultipleEvents]);
+
   // Listen to realtime changes for match_events
   useEffect(() => {
     if (!matchId) return;

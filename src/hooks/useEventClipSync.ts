@@ -64,6 +64,11 @@ export function needsClipRegeneration(
   oldEvent: MatchEvent | null,
   newEvent: MatchEvent
 ): boolean {
+  // Skip if clip_pending just changed to false (we just processed it)
+  if (oldEvent?.clip_pending === true && newEvent.clip_pending === false) {
+    return false;
+  }
+  
   // New event without clip
   if (!oldEvent && !newEvent.clip_url) return true;
   
