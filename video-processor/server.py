@@ -962,34 +962,83 @@ def analyze_match():
     transcription = data.get('transcription')
     home_team = data.get('homeTeam', 'Time A')
     away_team = data.get('awayTeam', 'Time B')
+    half_type = data.get('halfType', 'first')  # 'first' or 'second'
+    game_start_minute = data.get('gameStartMinute', 0)
+    game_end_minute = data.get('gameEndMinute', 45)
+    
+    print(f"\n{'='*60}")
+    print(f"[ANALYZE-MATCH] Nova requisição de análise")
+    print(f"[ANALYZE-MATCH] Match ID: {match_id}")
+    print(f"[ANALYZE-MATCH] Half Type: {half_type}")
+    print(f"[ANALYZE-MATCH] Game Minutes: {game_start_minute} - {game_end_minute}")
+    print(f"[ANALYZE-MATCH] Transcription length: {len(transcription)} chars")
+    print(f"{'='*60}")
     
     if not transcription:
         return jsonify({'error': 'Transcrição é obrigatória'}), 400
     
     try:
         events = ai_services.analyze_match_events(
-            transcription, home_team, away_team
+            transcription, home_team, away_team, game_start_minute, game_end_minute
         )
+        
+        # Determine match_half based on halfType
+        match_half = 'first_half' if half_type == 'first' else 'second_half'
+        
+        # Count goals for score calculation
+        home_score = 0
+        away_score = 0
         
         # Save events to database
         session = get_session()
         try:
             for event_data in events:
+                # Adjust minute based on half type
+                raw_minute = event_data.get('minute', 0)
+                if half_type == 'second' and raw_minute < 45:
+                    # If second half and minute is relative (0-45), add 45
+                    raw_minute = raw_minute + 45
+                
                 event = MatchEvent(
                     match_id=match_id,
                     event_type=event_data.get('event_type', 'unknown'),
                     description=event_data.get('description'),
-                    minute=event_data.get('minute'),
+                    minute=raw_minute,
+                    match_half=match_half,
                     is_highlight=event_data.get('is_highlight', False),
-                    metadata={'ai_generated': True, **event_data}
+                    metadata={'ai_generated': True, 'original_minute': event_data.get('minute'), **event_data}
                 )
                 session.add(event)
+                
+                # Count goals for this team
+                if event_data.get('event_type') == 'goal':
+                    desc = (event_data.get('description') or '').lower()
+                    if home_team.lower() in desc:
+                        home_score += 1
+                    elif away_team.lower() in desc:
+                        away_score += 1
+                    else:
+                        # Default: try to infer from metadata
+                        home_score += 1  # fallback
+                        
             session.commit()
+            print(f"[ANALYZE-MATCH] Saved {len(events)} events with match_half={match_half}")
+            print(f"[ANALYZE-MATCH] Goals detected: {home_team}={home_score}, {away_team}={away_score}")
         finally:
             session.close()
         
-        return jsonify({'success': True, 'events': events})
+        return jsonify({
+            'success': True, 
+            'events': events,
+            'eventsDetected': len(events),
+            'homeScore': home_score,
+            'awayScore': away_score,
+            'matchHalf': match_half
+        })
     except Exception as e:
+        print(f"[ANALYZE-MATCH] ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 

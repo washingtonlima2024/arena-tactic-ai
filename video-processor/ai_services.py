@@ -329,7 +329,8 @@ def analyze_match_events(
     transcription: str,
     home_team: str,
     away_team: str,
-    current_score: str = '0x0'
+    game_start_minute: int = 0,
+    game_end_minute: int = 45
 ) -> List[Dict[str, Any]]:
     """
     Analyze match transcription to extract events.
@@ -338,25 +339,33 @@ def analyze_match_events(
         transcription: Match transcription text
         home_team: Home team name
         away_team: Away team name
-        current_score: Current score
+        game_start_minute: Start minute of the game segment
+        game_end_minute: End minute of the game segment
     
     Returns:
         List of detected events
     """
+    half_desc = "1º Tempo (0-45 min)" if game_start_minute < 45 else "2º Tempo (45-90 min)"
+    
     system_prompt = f"""Você é um analista de futebol especializado em detectar eventos em transcrições de partidas.
     
 Partida: {home_team} vs {away_team}
-Placar atual: {current_score}
+Período analisado: {half_desc} (minutos {game_start_minute} a {game_end_minute})
 
 Analise a transcrição e identifique TODOS os eventos relevantes. Para cada evento, retorne um JSON com:
-- event_type: tipo do evento (goal, shot, foul, card, corner, offside, substitution, save, pass, tackle)
-- description: descrição em português
-- minute: minuto aproximado (se mencionado)
-- team: time envolvido (home/away)
+- event_type: tipo do evento (goal, shot, foul, card, corner, offside, substitution, save, pass, tackle, chance, defense, pressure)
+- description: descrição em português do que aconteceu
+- minute: minuto do jogo (entre {game_start_minute} e {game_end_minute})
+- team: time envolvido ("home" para {home_team}, "away" para {away_team})
 - player: nome do jogador (se mencionado)
-- is_highlight: true se for um momento importante
+- is_highlight: true se for um momento importante (gol, chance clara, cartão)
 
-Retorne APENAS um array JSON válido com os eventos detectados."""
+IMPORTANTE: 
+- Detecte TODOS os eventos mencionados, não apenas gols
+- Os minutos devem estar entre {game_start_minute} e {game_end_minute}
+- Seja inclusivo na detecção de eventos
+- Retorne APENAS um array JSON válido com os eventos detectados
+- Não adicione explicações, apenas o JSON array"""
 
     response = call_ai([
         {'role': 'system', 'content': system_prompt},
@@ -372,7 +381,9 @@ Retorne APENAS um array JSON válido com os eventos detectados."""
         start = response.find('[')
         end = response.rfind(']') + 1
         if start >= 0 and end > start:
-            return json.loads(response[start:end])
+            events = json.loads(response[start:end])
+            print(f"[AI] Parsed {len(events)} events from response")
+            return events
     except json.JSONDecodeError:
         print(f"Failed to parse events JSON: {response}")
     
