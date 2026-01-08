@@ -358,7 +358,7 @@ export const apiClient = {
     );
   },
 
-  // ============== AI Services (100% local) ==============
+  // ============== AI Services (com fallback para Edge Functions) ==============
   analyzeMatch: async (data: { 
     matchId: string; 
     transcription: string; 
@@ -370,18 +370,37 @@ export const apiClient = {
     autoClip?: boolean;
     includeSubtitles?: boolean;
   }) => {
-    // 100% local - sem fallback para Supabase
-    return apiRequest<any>('/api/analyze-match', { 
-      method: 'POST', 
-      body: JSON.stringify({
-        ...data,
-        gameStartMinute: data.gameStartMinute ?? 0,
-        gameEndMinute: data.gameEndMinute ?? (data.halfType === 'second' ? 90 : 45),
-        halfType: data.halfType ?? 'first',
-        autoClip: data.autoClip ?? false,
-        includeSubtitles: data.includeSubtitles ?? true,
-      })
-    });
+    const body = {
+      matchId: data.matchId,
+      transcription: data.transcription,
+      homeTeam: data.homeTeam,
+      awayTeam: data.awayTeam,
+      gameStartMinute: data.gameStartMinute ?? 0,
+      gameEndMinute: data.gameEndMinute ?? (data.halfType === 'second' ? 90 : 45),
+      halfType: data.halfType ?? 'first',
+      autoClip: data.autoClip ?? false,
+      includeSubtitles: data.includeSubtitles ?? true,
+    };
+
+    const serverUp = await isLocalServerAvailable();
+    
+    if (serverUp) {
+      return apiRequest<any>('/api/analyze-match', { 
+        method: 'POST', 
+        body: JSON.stringify(body)
+      });
+    }
+    
+    // Fallback para Edge Function do Lovable Cloud
+    console.log('[apiClient] Servidor local indisponível, usando Edge Function analyze-match...');
+    const { data: result, error } = await supabase.functions.invoke('analyze-match', { body });
+    
+    if (error) {
+      console.error('[apiClient] Edge Function analyze-match error:', error);
+      throw new Error(error.message || 'Falha na análise via cloud');
+    }
+    
+    return result;
   },
 
   generateNarration: (data: any) =>
