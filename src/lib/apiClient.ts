@@ -545,6 +545,42 @@ export const apiClient = {
     );
   },
 
+  /**
+   * Transcribe a video by first splitting it into parts.
+   * Recommended for very large videos (>500MB) for better reliability.
+   */
+  transcribeSplitVideo: async (data: { 
+    videoUrl: string; 
+    matchId?: string; 
+    numParts?: number; 
+    halfType?: 'first' | 'second';
+    halfDuration?: number;
+  }): Promise<{ 
+    success: boolean; 
+    text: string; 
+    srtContent?: string; 
+    partsTranscribed?: number;
+    totalParts?: number;
+    parts?: Array<{ part: number; text: string; startMinute: number }>;
+  }> => {
+    const serverUp = await isLocalServerAvailable();
+    
+    if (!serverUp) {
+      throw new Error('Transcrição com divisão só está disponível com o servidor Python local. Inicie com: cd video-processor && python server.py');
+    }
+    
+    return apiRequest('/api/transcribe-split-video', { 
+      method: 'POST', 
+      body: JSON.stringify({
+        videoUrl: data.videoUrl,
+        matchId: data.matchId,
+        numParts: data.numParts || 2,
+        halfType: data.halfType || 'first',
+        halfDuration: data.halfDuration || 45
+      })
+    });
+  },
+
   extractLiveEvents: (data: { transcript: string; homeTeam: string; awayTeam: string; currentScore: { home: number; away: number }; currentMinute: number }) =>
     apiRequest<{ events: any[] }>('/api/extract-live-events', { method: 'POST', body: JSON.stringify(data) }),
 

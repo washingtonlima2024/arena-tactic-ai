@@ -283,15 +283,54 @@ export function useWhisperTranscription() {
     };
   };
 
-  // Fallback: usar API server-side
+  // Fallback: usar API server-side com suporte a divisão automática
   const transcribeWithServerFallback = async (
     videoUrl: string,
     matchId: string,
-    videoId: string
+    videoId: string,
+    videoSizeMB?: number,
+    halfType?: 'first' | 'second'
   ): Promise<TranscriptionResult | null> => {
     console.log('[Server Fallback] ========================================');
     console.log('[Server Fallback] Usando transcrição server-side...');
+    if (videoSizeMB) console.log('[Server Fallback] Tamanho do vídeo:', videoSizeMB, 'MB');
     
+    // Para vídeos muito grandes (>300MB), usar divisão automática
+    const useSplitTranscription = videoSizeMB && videoSizeMB > 300;
+    
+    if (useSplitTranscription) {
+      console.log('[Server Fallback] Vídeo grande detectado, usando transcrição com divisão (2 partes)...');
+      setTranscriptionProgress({ 
+        stage: 'transcribing', 
+        progress: 20, 
+        message: 'Dividindo vídeo em partes para transcrição...' 
+      });
+      
+      try {
+        const splitData = await apiClient.transcribeSplitVideo({ 
+          videoUrl, 
+          matchId, 
+          numParts: 2,
+          halfType: halfType || 'first',
+          halfDuration: 45
+        });
+        
+        if (splitData?.success && splitData?.text) {
+          console.log('[Server Fallback] ✓ Transcrição com divisão completa:', splitData.text.length, 'caracteres');
+          console.log('[Server Fallback] Partes transcritas:', splitData.partsTranscribed, '/', splitData.totalParts);
+          
+          return {
+            srtContent: splitData.srtContent || '',
+            text: splitData.text,
+            audioUrl: ''
+          };
+        }
+      } catch (splitError: any) {
+        console.warn('[Server Fallback] Transcrição com divisão falhou, tentando método padrão:', splitError.message);
+      }
+    }
+    
+    // Método padrão (sem divisão)
     setTranscriptionProgress({ 
       stage: 'transcribing', 
       progress: 30, 
@@ -338,11 +377,18 @@ export function useWhisperTranscription() {
 
     // PRIORIDADE ÚNICA: Usar servidor local/Edge Function (apiClient tem fallback automático)
     // FFmpeg WASM é instável no preview, então vamos direto para o servidor
+    // Para vídeos grandes (>300MB), o servidor automaticamente divide em partes
     try {
-      console.log('[Transcrição] Usando apiClient.transcribeLargeVideo (com fallback automático)...');
-      setTranscriptionProgress({ stage: 'transcribing', progress: 20, message: 'Transcrevendo áudio...' });
+      console.log('[Transcrição] Usando apiClient (com fallback automático e divisão para vídeos grandes)...');
+      setTranscriptionProgress({ 
+        stage: 'transcribing', 
+        progress: 20, 
+        message: videoSizeMB && videoSizeMB > 300 
+          ? 'Dividindo vídeo para transcrição...' 
+          : 'Transcrevendo áudio...' 
+      });
       
-      const serverResult = await transcribeWithServerFallback(videoUrl, matchId, videoId);
+      const serverResult = await transcribeWithServerFallback(videoUrl, matchId, videoId, videoSizeMB);
       if (serverResult && serverResult.text && serverResult.text.trim().length > 0) {
         console.log('[Transcrição] ✓ Transcrição completa:', serverResult.text.length, 'caracteres');
         setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });
