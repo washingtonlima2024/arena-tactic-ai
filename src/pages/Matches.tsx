@@ -169,29 +169,52 @@ export default function Matches() {
         
         console.log(`[Reprocess] PASSO 3.${i + 1}: Analisando ${halfLabel} (${gameStartMinute}'-${gameEndMinute}')...`);
         
-        // Análise com IA
-        const analysisResult = await apiClient.analyzeMatch({
-          matchId,
-          transcription: transcriptionResult.text,
-          homeTeam: matchToReprocess.home_team?.name || 'Time Casa',
-          awayTeam: matchToReprocess.away_team?.name || 'Time Visitante',
-          gameStartMinute,
-          gameEndMinute,
-          halfType
-        });
+        // Análise com IA - com tratamento de erro
+        let analysisResult: any = null;
+        try {
+          analysisResult = await apiClient.analyzeMatch({
+            matchId,
+            transcription: transcriptionResult.text,
+            homeTeam: matchToReprocess.home_team?.name || 'Time Casa',
+            awayTeam: matchToReprocess.away_team?.name || 'Time Visitante',
+            gameStartMinute,
+            gameEndMinute,
+            halfType
+          });
+          console.log(`[Reprocess] ✓ Resultado ${halfLabel}:`, analysisResult);
+        } catch (analysisError: any) {
+          console.error(`[Reprocess] ✗ Erro na análise do ${halfLabel}:`, analysisError);
+          toast({
+            title: `Erro na análise do ${halfLabel}`,
+            description: analysisError.message || 'Erro desconhecido',
+            variant: "destructive"
+          });
+          // Continuar com próximo vídeo
+          continue;
+        }
         
-        console.log(`[Reprocess] ✓ Resultado ${halfLabel}:`, analysisResult);
+        // Acumular resultados (eventsDetected é o campo correto retornado pela API)
+        const eventsCount = analysisResult?.eventsDetected || analysisResult?.eventsCreated || 0;
+        totalEventsCreated += eventsCount;
         
-        // Acumular resultados
-        totalEventsCreated += analysisResult?.eventsCreated || 0;
-        finalHomeScore += analysisResult?.homeScore || 0;
-        finalAwayScore += analysisResult?.awayScore || 0;
+        // NÃO acumular placar aqui - a Edge Function já acumula no banco
+        // Apenas guardar o último valor (que já é o acumulado)
+        if (analysisResult?.homeScore !== undefined) {
+          finalHomeScore = analysisResult.homeScore;
+        }
+        if (analysisResult?.awayScore !== undefined) {
+          finalAwayScore = analysisResult.awayScore;
+        }
+        
+        console.log(`[Reprocess] Progresso: vídeo ${i + 1}/${sortedVideos.length} - ${eventsCount} eventos`);
         
         toast({
           title: `${halfLabel} analisado`,
-          description: `${analysisResult?.eventsCreated || 0} eventos detectados`
+          description: `${eventsCount} eventos detectados`
         });
       }
+      
+      console.log(`[Reprocess] Loop completo. Total vídeos processados: ${sortedVideos.length}`);
       
       // Limpar timeout de segurança
       clearTimeout(safetyTimeoutId);
