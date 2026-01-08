@@ -214,10 +214,10 @@ export default function VideoUpload() {
     });
   };
 
-  // Large file threshold (50MB)
-  const LARGE_FILE_THRESHOLD = 50 * 1024 * 1024;
-  // Upload timeout (60 seconds)
-  const UPLOAD_TIMEOUT = 60000;
+  // Large file threshold (500MB for HTTP uploads)
+  const LARGE_FILE_THRESHOLD = 500 * 1024 * 1024;
+  // Upload timeout (5 minutes for large files)
+  const UPLOAD_TIMEOUT = 300000;
 
   const uploadFile = async (file: File, half?: 'first' | 'second') => {
     const segmentId = crypto.randomUUID();
@@ -233,11 +233,11 @@ export default function VideoUpload() {
     const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
     const isLargeFile = file.size > LARGE_FILE_THRESHOLD;
 
-    // Warn about large files
-    if (isLargeFile) {
+    // Warn about very large files (only for HTTP upload, not local)
+    if (isLargeFile && uploadMode !== 'local') {
       toast({
-        title: "⚠️ Arquivo grande detectado",
-        description: `${file.name} (${fileSizeMB} MB) pode demorar ou falhar. Considere usar link externo para arquivos >50MB.`,
+        title: "⚠️ Arquivo muito grande",
+        description: `${file.name} (${fileSizeMB} MB) pode demorar. Para arquivos maiores, use o modo local.`,
         variant: "destructive",
       });
     }
