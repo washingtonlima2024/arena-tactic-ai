@@ -3,8 +3,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { apiClient, isLocalServerAvailable } from '@/lib/apiClient';
-import { Folder, FileVideo, ArrowLeft, HardDrive, Loader2, CheckCircle2 } from 'lucide-react';
+import { apiClient, isLocalServerAvailable, VideoInfo } from '@/lib/apiClient';
+import { Folder, FileVideo, ArrowLeft, HardDrive, Loader2, CheckCircle2, Monitor, Film, Clock, HardDrive as StorageIcon, Gauge, AlertTriangle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface LocalFileBrowserProps {
@@ -33,6 +33,10 @@ export function LocalFileBrowser({ open, onOpenChange, onSelectFile, matchId }: 
   const [selectedFile, setSelectedFile] = useState<DirectoryEntry | null>(null);
   const [isLinking, setIsLinking] = useState(false);
   const [serverAvailable, setServerAvailable] = useState(true);
+  
+  // Video info state
+  const [videoInfo, setVideoInfo] = useState<VideoInfo | null>(null);
+  const [isLoadingInfo, setIsLoadingInfo] = useState(false);
 
   // Check server availability
   useEffect(() => {
@@ -48,10 +52,20 @@ export function LocalFileBrowser({ open, onOpenChange, onSelectFile, matchId }: 
     }
   }, [open, serverAvailable]);
 
+  // Load video info when file is selected
+  useEffect(() => {
+    if (selectedFile) {
+      loadVideoInfo(selectedFile.path);
+    } else {
+      setVideoInfo(null);
+    }
+  }, [selectedFile]);
+
   const loadDirectory = async (path?: string) => {
     setIsLoading(true);
     setError(null);
     setSelectedFile(null);
+    setVideoInfo(null);
     
     try {
       const result = await apiClient.browseLocalDirectory(path);
@@ -64,6 +78,19 @@ export function LocalFileBrowser({ open, onOpenChange, onSelectFile, matchId }: 
       setError(err.message || 'Erro ao carregar diretório');
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  const loadVideoInfo = async (path: string) => {
+    setIsLoadingInfo(true);
+    try {
+      const info = await apiClient.getVideoInfo(path);
+      setVideoInfo(info);
+    } catch (err: any) {
+      console.error('Failed to load video info:', err);
+      setVideoInfo(null);
+    } finally {
+      setIsLoadingInfo(false);
     }
   };
 
@@ -86,7 +113,7 @@ export function LocalFileBrowser({ open, onOpenChange, onSelectFile, matchId }: 
       onSelectFile({
         path: selectedFile.path,
         name: selectedFile.name,
-        size_mb: selectedFile.size_mb || 0
+        size_mb: videoInfo?.size_mb || selectedFile.size_mb || 0
       });
       onOpenChange(false);
     } finally {
@@ -179,7 +206,7 @@ export function LocalFileBrowser({ open, onOpenChange, onSelectFile, matchId }: 
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <ScrollArea className="h-[300px] border rounded-md">
+          <ScrollArea className="h-[250px] border rounded-md">
             <div className="p-2 space-y-1">
               {/* Directories */}
               {directories.map((dir) => (
@@ -225,14 +252,79 @@ export function LocalFileBrowser({ open, onOpenChange, onSelectFile, matchId }: 
           </ScrollArea>
         )}
 
-        {/* Selected file info */}
+        {/* Video info card */}
         {selectedFile && (
-          <div className="flex items-center justify-between p-3 rounded-md bg-muted">
-            <div className="flex items-center gap-2 min-w-0">
+          <div className="border rounded-lg overflow-hidden">
+            <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 border-b">
               <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />
               <span className="truncate text-sm font-medium">{selectedFile.name}</span>
-              <span className="text-xs text-muted-foreground">({selectedFile.size_mb} MB)</span>
             </div>
+            
+            {isLoadingInfo ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+                <span className="ml-2 text-sm text-muted-foreground">Analisando vídeo...</span>
+              </div>
+            ) : videoInfo ? (
+              <div className="p-3 space-y-3">
+                {/* Info grid */}
+                <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
+                  <div className="flex items-center gap-2">
+                    <Monitor className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">Resolução:</span>
+                    <span className="font-medium">{videoInfo.resolution} ({videoInfo.resolution_label})</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Film className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">Codec:</span>
+                    <span className="font-medium">{videoInfo.codec_name}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Clock className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">Duração:</span>
+                    <span className="font-medium">{videoInfo.duration_formatted}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <StorageIcon className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">Tamanho:</span>
+                    <span className="font-medium">{videoInfo.size_formatted}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Gauge className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">Bitrate:</span>
+                    <span className="font-medium">{videoInfo.bitrate_kbps} kbps</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Film className="h-4 w-4 text-muted-foreground" />
+                    <span className="text-muted-foreground">FPS:</span>
+                    <span className="font-medium">{videoInfo.fps}</span>
+                  </div>
+                </div>
+
+                {/* Conversion warning */}
+                {videoInfo.needs_conversion && (
+                  <div className="flex items-start gap-2 p-2 rounded-md bg-amber-500/10 text-amber-700 dark:text-amber-400 text-sm">
+                    <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+                    <div>
+                      <p className="font-medium">Resolução alta detectada</p>
+                      <p className="text-xs opacity-80">
+                        Conversão para 480p será implementada em breve (~{videoInfo.estimated_size_480p_mb} MB estimado)
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Local link badge */}
+                <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <HardDrive className="h-3 w-3" />
+                  <span>Link local (sem upload)</span>
+                </div>
+              </div>
+            ) : (
+              <div className="p-3 text-sm text-muted-foreground">
+                Não foi possível obter informações do vídeo
+              </div>
+            )}
           </div>
         )}
 

@@ -58,6 +58,27 @@ async function apiRequest<T>(
   return response.json();
 }
 
+// Video info interface
+export interface VideoInfo {
+  path: string;
+  filename: string;
+  width: number;
+  height: number;
+  resolution: string;
+  resolution_label: string;
+  codec: string;
+  codec_name: string;
+  duration_seconds: number;
+  duration_formatted: string;
+  size_bytes: number;
+  size_mb: number;
+  size_formatted: string;
+  bitrate_kbps: number;
+  fps: number;
+  needs_conversion: boolean;
+  estimated_size_480p_mb: number;
+}
+
 // Fallback API request with Supabase
 async function apiRequestWithFallback<T>(
   endpoint: string,
@@ -708,6 +729,13 @@ export const apiClient = {
   },
 
   getVignettes: () => apiRequest<{ vignettes: Array<{ name: string; size: number }> }>('/vignettes'),
+
+  // Video info
+  getVideoInfo: (path: string): Promise<VideoInfo> => 
+    apiRequest<VideoInfo>('/api/video/info', {
+      method: 'POST',
+      body: JSON.stringify({ path })
+    }),
 };
 
 export default apiClient;
