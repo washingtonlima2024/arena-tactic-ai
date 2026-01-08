@@ -991,6 +991,13 @@ export default function VideoUpload() {
         s.videoType === 'full' && (s.status === 'complete' || s.status === 'ready')
       );
 
+      console.log('=== MODO DE ANÁLISE ===');
+      console.log('É partida completa (full)?', isFullMatchAnalysis);
+      console.log('Tem 1º tempo separado?', firstHalfSegments.length > 0 && !isFullMatchAnalysis);
+      console.log('Tem 2º tempo separado?', secondHalfSegments.length > 0 && !hasFullVideo);
+      console.log('Transcrição 1º Tempo:', firstHalfTranscription ? `${firstHalfTranscription.length} chars` : 'N/A');
+      console.log('Transcrição 2º Tempo:', secondHalfTranscription ? `${secondHalfTranscription.length} chars` : 'N/A');
+
       if (isFullMatchAnalysis && firstHalfTranscription) {
         // ANÁLISE DE PARTIDA COMPLETA (0-90 min)
         console.log('Iniciando análise da PARTIDA COMPLETA (0-90 min)...');
