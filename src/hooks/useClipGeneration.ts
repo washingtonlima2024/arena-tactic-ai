@@ -2,9 +2,9 @@
 // Extracts 10-second clips (5s before + 5s after event) from original video
 
 import { useState, useCallback, useRef } from 'react';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { fetchFile } from '@ffmpeg/util';
 import { supabase } from '@/integrations/supabase/client';
+import { getFFmpeg } from '@/lib/ffmpegSingleton';
 
 // Timing constants in milliseconds
 export const CLIP_BUFFER_BEFORE_MS = 3000; // 3 seconds before event
@@ -86,75 +86,15 @@ export function useClipGeneration() {
   const [generatingEventIds, setGeneratingEventIds] = useState<Set<string>>(new Set());
   const [isCancelled, setIsCancelled] = useState(false);
   
-  const ffmpegRef = useRef<FFmpeg | null>(null);
   const cancelRef = useRef(false);
 
-  // Load FFmpeg - usando versão UMD (single-threaded) que não requer SharedArrayBuffer
+  // Load FFmpeg using singleton
   const loadFFmpeg = async () => {
-    if (ffmpegRef.current?.loaded) return ffmpegRef.current;
-
-    console.log('[ClipGeneration] Carregando FFmpeg.wasm...');
+    console.log('[ClipGeneration] Loading FFmpeg via singleton...');
     setProgress({ stage: 'loading', progress: 5, message: 'Carregando processador de vídeo...' });
-
-    const ffmpeg = new FFmpeg();
-    ffmpegRef.current = ffmpeg;
-
-    ffmpeg.on('log', ({ message }) => {
-      console.log('[FFmpeg]', message);
-    });
-
-    ffmpeg.on('progress', ({ progress: p }) => {
-      console.log('[FFmpeg] Progresso:', Math.round(p * 100), '%');
-      setProgress(prev => ({
-        ...prev,
-        progress: Math.min(prev.progress + p * 10, 80),
-        message: `Extraindo clip... ${Math.round(p * 100)}%`
-      }));
-    });
-
-    try {
-      // Usar versão UMD (single-threaded) diretamente do CDN
-      // A versão 0.12.6 UMD funciona sem SharedArrayBuffer
-      const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-      console.log('[ClipGeneration] Carregando core de:', baseURL);
-      
-      // Usar toBlobURL do @ffmpeg/util para carregar corretamente
-      const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
-      const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
-      
-      console.log('[ClipGeneration] URLs criadas, carregando FFmpeg...');
-      console.log('[ClipGeneration] coreURL:', coreURL.substring(0, 50) + '...');
-      console.log('[ClipGeneration] wasmURL:', wasmURL.substring(0, 50) + '...');
-      
-      await ffmpeg.load({
-        coreURL,
-        wasmURL,
-      });
-      
-      console.log('[ClipGeneration] FFmpeg carregado com sucesso!');
-    } catch (error) {
-      console.error('[ClipGeneration] Erro ao carregar FFmpeg:', error);
-      
-      // Tentar fallback com jsDelivr
-      try {
-        console.log('[ClipGeneration] Tentando fallback com jsDelivr...');
-        const fallbackURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd';
-        
-        const coreURL = await toBlobURL(`${fallbackURL}/ffmpeg-core.js`, 'text/javascript');
-        const wasmURL = await toBlobURL(`${fallbackURL}/ffmpeg-core.wasm`, 'application/wasm');
-        
-        await ffmpeg.load({
-          coreURL,
-          wasmURL,
-        });
-        
-        console.log('[ClipGeneration] FFmpeg carregado via fallback!');
-      } catch (fallbackError) {
-        console.error('[ClipGeneration] Fallback também falhou:', fallbackError);
-        throw new Error('Falha ao carregar processador de vídeo. Tente recarregar a página.');
-      }
-    }
-
+    
+    const ffmpeg = await getFFmpeg();
+    console.log('[ClipGeneration] FFmpeg ready');
     return ffmpeg;
   };
 
@@ -539,7 +479,7 @@ export function useClipGeneration() {
     reset,
     isCancelled,
     // Legacy compatibility
-    isLoaded: !!ffmpegRef.current?.loaded,
+    isLoaded: true, // Singleton handles loading
     generatingEventIds,
     generateAllClipsOptimized: generateAllClips
   };
