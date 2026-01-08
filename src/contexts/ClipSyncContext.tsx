@@ -206,47 +206,43 @@ export function ClipSyncProvider({ children, matchId }: ClipSyncProviderProps) {
            queue.some(q => q.eventId === eventId && q.status === 'processing');
   }, [currentEventId, queue]);
 
-  // Process pending clips on mount
+  // Note: Clips pendentes são processados automaticamente pelo servidor Python
+  // Este useEffect apenas monitora e mostra notificação quando há clips prontos
   useEffect(() => {
     if (!matchId) return;
     
-    const processPendingClips = async () => {
-      console.log('[ClipSyncProvider] Checking for pending clips...');
+    const checkClipsReady = async () => {
+      console.log('[ClipSyncProvider] Verificando status de clips...');
       
-      const { data: pendingEvents, error } = await supabase
+      const { data: events, error } = await supabase
         .from('match_events')
-        .select('*')
-        .eq('match_id', matchId)
-        .eq('clip_pending', true);
+        .select('id, clip_url, clip_pending')
+        .eq('match_id', matchId);
       
       if (error) {
-        console.error('[ClipSyncProvider] Error fetching pending events:', error);
+        console.error('[ClipSyncProvider] Error fetching events:', error);
         return;
       }
       
-      if (!pendingEvents || pendingEvents.length === 0) {
-        console.log('[ClipSyncProvider] No pending clips found');
-        return;
+      if (!events) return;
+      
+      const withClips = events.filter(e => e.clip_url && !e.clip_pending);
+      const pending = events.filter(e => e.clip_pending);
+      
+      if (withClips.length > 0) {
+        console.log(`[ClipSyncProvider] ${withClips.length} clips prontos`);
       }
       
-      const videos = await fetchMatchVideos(matchId);
-      if (videos.length === 0) {
-        console.log('[ClipSyncProvider] No videos found for match');
-        return;
+      if (pending.length > 0) {
+        console.log(`[ClipSyncProvider] ${pending.length} clips pendentes (serão processados pelo servidor)`);
       }
-      
-      console.log(`[ClipSyncProvider] Found ${pendingEvents.length} pending clips, queuing...`);
-      toast.info(`${pendingEvents.length} clips pendentes encontrados. Iniciando geração...`);
-      
-      queueMultipleEvents(pendingEvents as MatchEvent[], videos);
     };
     
-    // Small delay to ensure component is fully mounted
-    const timer = setTimeout(processPendingClips, 1000);
+    const timer = setTimeout(checkClipsReady, 1000);
     return () => clearTimeout(timer);
-  }, [matchId, fetchMatchVideos, queueMultipleEvents]);
+  }, [matchId]);
 
-  // Listen to realtime changes for match_events
+  // Listen to realtime changes for match_events - apenas para atualizar UI
   useEffect(() => {
     if (!matchId) return;
 
@@ -265,26 +261,13 @@ export function ClipSyncProvider({ children, matchId }: ClipSyncProviderProps) {
         async (payload) => {
           console.log('[ClipSyncProvider] Received realtime event:', payload.eventType);
 
-          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
+          if (payload.eventType === 'UPDATE') {
             const newEvent = payload.new as MatchEvent;
-            const oldEvent = payload.eventType === 'UPDATE' ? payload.old as MatchEvent : null;
-
-            // Check if clip needs to be (re)generated
-            if (needsClipRegeneration(oldEvent, newEvent)) {
-              console.log('[ClipSyncProvider] Event needs clip regeneration:', newEvent.id);
-              
-              // Fetch videos for this match
-              const videos = await fetchMatchVideos(newEvent.match_id);
-              
-              if (videos.length > 0) {
-                queueEvent(newEvent, videos);
-                
-                if (payload.eventType === 'INSERT') {
-                  toast.info('Novo evento detectado - gerando clip automaticamente');
-                } else {
-                  toast.info('Evento atualizado - regenerando clip');
-                }
-              }
+            
+            // Apenas notificar quando clip ficou pronto
+            if (newEvent.clip_url && !newEvent.clip_pending) {
+              console.log('[ClipSyncProvider] Clip ready for event:', newEvent.id);
+              // Não mostrar toast para cada clip - apenas log
             }
           }
         }
@@ -297,7 +280,7 @@ export function ClipSyncProvider({ children, matchId }: ClipSyncProviderProps) {
       console.log('[ClipSyncProvider] Cleaning up realtime listener');
       supabase.removeChannel(channel);
     };
-  }, [matchId, queueEvent, fetchMatchVideos]);
+  }, [matchId]);
 
   const value: ClipSyncContextValue = {
     queue,

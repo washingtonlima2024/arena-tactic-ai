@@ -65,7 +65,9 @@ export function useMatchAnalysis() {
         awayTeam,
         gameStartMinute,
         gameEndMinute,
-        halfType: halfType || (gameStartMinute >= 45 ? 'second' : 'first')
+        halfType: halfType || (gameStartMinute >= 45 ? 'second' : 'first'),
+        autoClip: true,
+        includeSubtitles: true
       });
 
       if (!data?.success) {
