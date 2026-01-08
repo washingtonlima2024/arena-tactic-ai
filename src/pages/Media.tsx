@@ -292,13 +292,16 @@ export default function Media() {
                       id: c.id,
                       minute: c.minute,
                       second: c.second,
+                      event_type: c.type,
+                      description: c.title,
                       metadata: { eventMs: c.eventMs, videoSecond: c.videoSecond }
                     })),
                     video.file_url,
                     matchId,
                     {
                       videoStartMinute: video.start_minute ?? 0,
-                      videoDurationSeconds: video.duration_seconds ?? undefined
+                      videoDurationSeconds: video.duration_seconds ?? undefined,
+                      addSubtitles: true
                     }
                   );
                 }

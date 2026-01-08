@@ -17,6 +17,10 @@ export interface ClipConfig {
   matchId: string;
   bufferBeforeMs?: number;
   bufferAfterMs?: number;
+  // Subtitle overlay options
+  eventType?: string;
+  eventMinute?: number;
+  eventDescription?: string;
 }
 
 export interface ClipPlaybackInfo {
@@ -25,6 +29,29 @@ export interface ClipPlaybackInfo {
   endTimeSeconds: number;
   durationSeconds: number;
 }
+
+// Event type translations for display
+const EVENT_TYPE_LABELS: Record<string, string> = {
+  'goal': 'GOL',
+  'shot': 'CHUTE',
+  'shot_on_target': 'CHUTE NO GOL',
+  'foul': 'FALTA',
+  'corner': 'ESCANTEIO',
+  'offside': 'IMPEDIMENTO',
+  'yellow_card': 'CARTÃO AMARELO',
+  'red_card': 'CARTÃO VERMELHO',
+  'substitution': 'SUBSTITUIÇÃO',
+  'penalty': 'PÊNALTI',
+  'free_kick': 'TIRO LIVRE',
+  'save': 'DEFESA',
+  'clearance': 'CORTE',
+  'tackle': 'DESARME',
+  'pass': 'PASSE',
+  'cross': 'CRUZAMENTO',
+  'header': 'CABECEIO',
+  'dribble': 'DRIBLE',
+  'interception': 'INTERCEPTAÇÃO',
+};
 
 export interface ClipGenerationProgress {
   stage: 'idle' | 'loading' | 'downloading' | 'extracting' | 'uploading' | 'complete' | 'error';
@@ -186,24 +213,75 @@ export function useClipGeneration() {
       // Write to FFmpeg filesystem
       await ffmpeg.writeFile('input.mp4', videoData);
 
-      // Extract clip using stream copy (fast, no re-encoding)
-      setProgress(prev => ({
-        ...prev,
-        stage: 'extracting',
-        progress: 40,
-        message: `Extraindo clip (${Math.round(startTimeSeconds)}s - ${Math.round(startTimeSeconds + durationSeconds)}s)...`
-      }));
-
-      const startTimestamp = msToFFmpegTimestamp(startTimeSeconds * 1000);
+      // Build FFmpeg command - with or without subtitles
+      const hasSubtitles = config.eventType || config.eventMinute !== undefined;
       
-      await ffmpeg.exec([
-        '-ss', startTimestamp,           // Seek to start (before input for faster seeking)
-        '-i', 'input.mp4',
-        '-t', durationSeconds.toString(), // Duration
-        '-c', 'copy',                     // Stream copy (no re-encoding)
-        '-avoid_negative_ts', 'make_zero',
-        'output.mp4'
-      ]);
+      if (hasSubtitles) {
+        // With subtitles - requires re-encoding
+        setProgress(prev => ({
+          ...prev,
+          stage: 'extracting',
+          progress: 40,
+          message: `Extraindo clip com legendas (${Math.round(startTimeSeconds)}s - ${Math.round(startTimeSeconds + durationSeconds)}s)...`
+        }));
+
+        const startTimestamp = msToFFmpegTimestamp(startTimeSeconds * 1000);
+        
+        // Build subtitle text
+        const eventLabel = config.eventType ? (EVENT_TYPE_LABELS[config.eventType] || config.eventType.toUpperCase()) : '';
+        const minuteText = config.eventMinute !== undefined ? `${config.eventMinute}'` : '';
+        const topText = [minuteText, eventLabel].filter(Boolean).join(' | ');
+        const bottomText = config.eventDescription || '';
+        
+        // Build drawtext filters - escape special characters
+        const escapeText = (text: string) => text.replace(/'/g, "\\'").replace(/:/g, "\\:").replace(/\\/g, "\\\\");
+        
+        // Top bar with minute and event type
+        const topFilter = topText ? 
+          `drawtext=text='${escapeText(topText)}':fontsize=28:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=30:box=1:boxcolor=black@0.6:boxborderw=8` : '';
+        
+        // Bottom subtitle with description
+        const bottomFilter = bottomText ?
+          `drawtext=text='${escapeText(bottomText)}':fontsize=22:fontcolor=white:borderw=2:bordercolor=black:x=(w-text_w)/2:y=h-60:box=1:boxcolor=black@0.7:boxborderw=6` : '';
+        
+        // Combine filters
+        const filters = [topFilter, bottomFilter].filter(Boolean).join(',');
+        
+        const ffmpegArgs = [
+          '-ss', startTimestamp,
+          '-i', 'input.mp4',
+          '-t', durationSeconds.toString(),
+          '-vf', filters || 'null',
+          '-c:v', 'libx264',
+          '-preset', 'ultrafast',
+          '-crf', '23',
+          '-c:a', 'aac',
+          '-b:a', '128k',
+          '-avoid_negative_ts', 'make_zero',
+          'output.mp4'
+        ];
+        
+        await ffmpeg.exec(ffmpegArgs);
+      } else {
+        // Without subtitles - fast stream copy
+        setProgress(prev => ({
+          ...prev,
+          stage: 'extracting',
+          progress: 40,
+          message: `Extraindo clip (${Math.round(startTimeSeconds)}s - ${Math.round(startTimeSeconds + durationSeconds)}s)...`
+        }));
+
+        const startTimestamp = msToFFmpegTimestamp(startTimeSeconds * 1000);
+        
+        await ffmpeg.exec([
+          '-ss', startTimestamp,
+          '-i', 'input.mp4',
+          '-t', durationSeconds.toString(),
+          '-c', 'copy',
+          '-avoid_negative_ts', 'make_zero',
+          'output.mp4'
+        ]);
+      }
 
       if (cancelRef.current) {
         await ffmpeg.deleteFile('input.mp4');
@@ -298,6 +376,8 @@ export function useClipGeneration() {
       id: string;
       minute: number;
       second?: number;
+      event_type?: string;
+      description?: string;
       metadata?: { eventMs?: number; videoSecond?: number };
     }>,
     videoUrl: string,
@@ -306,11 +386,13 @@ export function useClipGeneration() {
       limit?: number;
       videoStartMinute?: number; // Game minute where video starts
       videoDurationSeconds?: number; // Actual video duration
+      addSubtitles?: boolean; // Add hard subtitles with event info
     }
   ): Promise<void> => {
     const limit = options?.limit ?? 20;
     const videoStartMinute = options?.videoStartMinute ?? 0;
     const videoDurationSeconds = options?.videoDurationSeconds;
+    const addSubtitles = options?.addSubtitles ?? true; // Default: add subtitles
     
     setIsGenerating(true);
     cancelRef.current = false;
@@ -396,7 +478,11 @@ export function useClipGeneration() {
           eventId: event.id,
           eventMs,
           videoUrl,
-          matchId
+          matchId,
+          // Add subtitle info if enabled
+          eventType: addSubtitles ? event.event_type : undefined,
+          eventMinute: addSubtitles ? event.minute : undefined,
+          eventDescription: addSubtitles ? event.description : undefined
         });
 
         completedCount++;
