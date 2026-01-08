@@ -161,9 +161,12 @@ export default function VideoUpload() {
   }, [existingMatchId, userWantsChoice]);
   
   const [isDragging, setIsDragging] = useState(false);
-  const [uploadMode, setUploadMode] = useState<'file' | 'local' | 'link'>('local');
   const [showLocalBrowser, setShowLocalBrowser] = useState(false);
   const [localBrowserHalf, setLocalBrowserHalf] = useState<'first' | 'second' | null>(null);
+  
+  // Auto-detect environment: use 'local' on localhost, 'file' on preview/production
+  const isLocalHost = typeof window !== 'undefined' && window.location.hostname === 'localhost';
+  const [uploadMode, setUploadMode] = useState<'file' | 'local' | 'link'>(isLocalHost ? 'local' : 'file');
   
   // SRT files per half
   const [firstHalfSrt, setFirstHalfSrt] = useState<File | null>(null);

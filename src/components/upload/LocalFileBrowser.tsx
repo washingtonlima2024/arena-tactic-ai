@@ -99,12 +99,29 @@ export function LocalFileBrowser({ open, onOpenChange, onSelectFile, matchId }: 
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-md">
           <DialogHeader>
-            <DialogTitle>Servidor Local Indisponível</DialogTitle>
+            <DialogTitle className="flex items-center gap-2">
+              <HardDrive className="h-5 w-5 text-muted-foreground" />
+              Servidor Local Indisponível
+            </DialogTitle>
           </DialogHeader>
-          <p className="text-muted-foreground text-sm">
-            O navegador de arquivos locais requer o servidor Python rodando em localhost:5000.
-            Use a opção de upload tradicional ou link externo.
-          </p>
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              O navegador de arquivos locais requer o servidor Python rodando em <code className="bg-muted px-1 rounded">localhost:5000</code>.
+            </p>
+            <div className="p-3 rounded-lg bg-muted/50 text-sm">
+              <p className="font-medium mb-1">Para iniciar o servidor:</p>
+              <code className="text-xs bg-background px-2 py-1 rounded block">
+                cd video-processor && python server.py
+              </code>
+            </div>
+            <Button 
+              variant="outline" 
+              className="w-full"
+              onClick={() => onOpenChange(false)}
+            >
+              Usar Upload Tradicional
+            </Button>
+          </div>
         </DialogContent>
       </Dialog>
     );
