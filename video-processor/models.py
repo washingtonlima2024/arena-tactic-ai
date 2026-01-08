@@ -138,7 +138,7 @@ class MatchEvent(Base):
     approval_status = Column(String(20), default='pending')
     approved_by = Column(String(36))
     approved_at = Column(DateTime)
-    metadata = Column(JSON, default=dict)
+    event_metadata = Column(JSON, default=dict)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -164,7 +164,7 @@ class MatchEvent(Base):
             'approval_status': self.approval_status,
             'approved_by': self.approved_by,
             'approved_at': self.approved_at.isoformat() if self.approved_at else None,
-            'metadata': self.metadata,
+            'metadata': self.event_metadata,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 
