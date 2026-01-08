@@ -25,8 +25,11 @@ import {
   Shield,
   CheckCircle2,
   AlertCircle,
-  Loader2
+  Loader2,
+  Server,
+  Cloud
 } from 'lucide-react';
+import { getApiMode, setApiMode, type ApiMode } from '@/lib/apiMode';
 
 export default function Settings() {
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
@@ -47,6 +50,18 @@ export default function Settings() {
   const [notifyInsights, setNotifyInsights] = useState(true);
   const [notifyErrors, setNotifyErrors] = useState(true);
   const [notifyUpdates, setNotifyUpdates] = useState(false);
+
+  // API Mode
+  const [apiMode, setApiModeState] = useState<ApiMode>(getApiMode());
+
+  const handleApiModeChange = (useLocal: boolean) => {
+    const newMode: ApiMode = useLocal ? 'local' : 'supabase';
+    setApiMode(newMode);
+    setApiModeState(newMode);
+    toast.success(`Modo alterado para ${useLocal ? 'Local (Python)' : 'Supabase Cloud'}`);
+    // Reload to apply changes
+    setTimeout(() => window.location.reload(), 500);
+  };
 
   // Teams
   const { data: teams, isLoading: teamsLoading } = useTeams();
@@ -395,24 +410,64 @@ export default function Settings() {
               </CardContent>
             </Card>
 
-            <Card variant="glass">
+            <Card variant="glow">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Database className="h-5 w-5" />
-                  Banco de Dados
+                  Modo de Operação
                 </CardTitle>
                 <CardDescription>
-                  Status do armazenamento
+                  Escolha entre servidor local ou nuvem
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    {apiMode === 'local' ? (
+                      <Server className="h-5 w-5 text-primary" />
+                    ) : (
+                      <Cloud className="h-5 w-5 text-primary" />
+                    )}
+                    <div>
+                      <p className="font-medium">Servidor Local (Python)</p>
+                      <p className="text-sm text-muted-foreground">
+                        {apiMode === 'local' 
+                          ? 'Usando servidor Python local em localhost:5000' 
+                          : 'Usando Supabase Cloud'}
+                      </p>
+                    </div>
+                  </div>
+                  <Switch 
+                    checked={apiMode === 'local'} 
+                    onCheckedChange={handleApiModeChange}
+                  />
+                </div>
+                
+                <Separator />
+
+                <div className={`rounded-lg border p-4 ${apiMode === 'local' ? 'border-primary/30 bg-primary/5' : 'border-muted bg-muted/30'}`}>
                   <div className="flex items-center gap-3 mb-2">
-                    <CheckCircle2 className="h-5 w-5 text-primary" />
-                    <p className="font-medium text-primary">Lovable Cloud Conectado</p>
+                    <Server className={`h-5 w-5 ${apiMode === 'local' ? 'text-primary' : 'text-muted-foreground'}`} />
+                    <p className={`font-medium ${apiMode === 'local' ? 'text-primary' : 'text-muted-foreground'}`}>
+                      Modo Local {apiMode === 'local' && '(Ativo)'}
+                    </p>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Times, partidas e análises são salvos automaticamente no banco de dados.
+                    Banco SQLite local, armazenamento em ./storage, processamento via Python/FFmpeg.
+                    Requer servidor Python rodando.
+                  </p>
+                </div>
+
+                <div className={`rounded-lg border p-4 ${apiMode === 'supabase' ? 'border-primary/30 bg-primary/5' : 'border-muted bg-muted/30'}`}>
+                  <div className="flex items-center gap-3 mb-2">
+                    <Cloud className={`h-5 w-5 ${apiMode === 'supabase' ? 'text-primary' : 'text-muted-foreground'}`} />
+                    <p className={`font-medium ${apiMode === 'supabase' ? 'text-primary' : 'text-muted-foreground'}`}>
+                      Modo Supabase {apiMode === 'supabase' && '(Ativo)'}
+                    </p>
+                  </div>
+                  <p className="text-sm text-muted-foreground">
+                    Banco PostgreSQL na nuvem, storage em buckets, Edge Functions para processamento.
+                    Funciona sem servidor local.
                   </p>
                 </div>
               </CardContent>
