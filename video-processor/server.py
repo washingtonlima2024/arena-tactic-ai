@@ -1317,19 +1317,60 @@ def analyze_match():
         # Determine match_half based on halfType
         match_half = 'first_half' if half_type == 'first' else 'second_half'
         
-        # Count goals for score calculation
+        # SCORE VALIDATION: Calculate scores from detected goal events
+        # This ensures score accuracy matches actual goals detected
         home_score = 0
         away_score = 0
+        goal_events = [e for e in events if e.get('event_type') == 'goal']
+        
+        for goal in goal_events:
+            team = goal.get('team', 'home')
+            is_own_goal = goal.get('isOwnGoal', False)
+            description = (goal.get('description') or '').lower()
+            
+            # Determine which team scored based on 'team' field and 'isOwnGoal' flag
+            if is_own_goal:
+                # Own goal: point goes to the OPPOSING team
+                if team == 'home':
+                    away_score += 1
+                    print(f"[SCORE] Gol contra do {home_team} -> +1 para {away_team}")
+                else:
+                    home_score += 1
+                    print(f"[SCORE] Gol contra do {away_team} -> +1 para {home_team}")
+            else:
+                # Regular goal: point goes to the scoring team
+                if team == 'home':
+                    home_score += 1
+                    print(f"[SCORE] Gol do {home_team} -> +1 para {home_team}")
+                elif team == 'away':
+                    away_score += 1
+                    print(f"[SCORE] Gol do {away_team} -> +1 para {away_team}")
+                else:
+                    # Fallback: try to infer from description
+                    if home_team.lower() in description:
+                        home_score += 1
+                        print(f"[SCORE] Gol inferido do {home_team} via descrição")
+                    elif away_team.lower() in description:
+                        away_score += 1
+                        print(f"[SCORE] Gol inferido do {away_team} via descrição")
+                    else:
+                        # Last resort: default to home
+                        home_score += 1
+                        print(f"[SCORE] Gol sem time identificado, atribuído ao mandante")
+        
+        print(f"[ANALYZE-MATCH] ═══════════════════════════════════════")
+        print(f"[ANALYZE-MATCH] PLACAR VALIDADO: {home_team} {home_score} x {away_score} {away_team}")
+        print(f"[ANALYZE-MATCH] Gols detectados: {len(goal_events)}")
+        print(f"[ANALYZE-MATCH] ═══════════════════════════════════════")
         
         # Save events to database and collect their IDs
         session = get_session()
-        saved_events = []  # Store event objects with their IDs
+        saved_events = []
         try:
             for event_data in events:
                 # Adjust minute based on half type
                 raw_minute = event_data.get('minute', 0)
                 if half_type == 'second' and raw_minute < 45:
-                    # If second half and minute is relative (0-45), add 45
                     raw_minute = raw_minute + 45
                 
                 event = MatchEvent(
@@ -1340,35 +1381,30 @@ def analyze_match():
                     second=event_data.get('second', 0),
                     match_half=match_half,
                     is_highlight=event_data.get('is_highlight', False),
-                    clip_pending=True,  # Marcar como pendente inicialmente
-                    metadata={'ai_generated': True, 'original_minute': event_data.get('minute'), **event_data}
+                    clip_pending=True,
+                    metadata={
+                        'ai_generated': True, 
+                        'original_minute': event_data.get('minute'),
+                        'team': event_data.get('team'),
+                        'isOwnGoal': event_data.get('isOwnGoal', False),
+                        'player': event_data.get('player'),
+                        **event_data
+                    }
                 )
                 session.add(event)
-                session.flush()  # Get the ID
+                session.flush()
                 
-                # Store event info for clip extraction
                 saved_events.append({
                     'id': event.id,
                     'minute': raw_minute,
                     'second': event_data.get('second', 0),
                     'event_type': event_data.get('event_type', 'unknown'),
-                    'description': event_data.get('description', '')
+                    'description': event_data.get('description', ''),
+                    'team': event_data.get('team', 'home')
                 })
-                
-                # Count goals for this team
-                if event_data.get('event_type') == 'goal':
-                    desc = (event_data.get('description') or '').lower()
-                    if home_team.lower() in desc:
-                        home_score += 1
-                    elif away_team.lower() in desc:
-                        away_score += 1
-                    else:
-                        # Default: try to infer from metadata
-                        home_score += 1  # fallback
                         
             session.commit()
             print(f"[ANALYZE-MATCH] Saved {len(events)} events with match_half={match_half}")
-            print(f"[ANALYZE-MATCH] Goals detected: {home_team}={home_score}, {away_team}={away_score}")
         finally:
             session.close()
         
