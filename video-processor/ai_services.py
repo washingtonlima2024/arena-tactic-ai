@@ -14,15 +14,27 @@ LOVABLE_API_KEY = os.environ.get('LOVABLE_API_KEY', '')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')
 ELEVENLABS_API_KEY = os.environ.get('ELEVENLABS_API_KEY', '')
 GOOGLE_API_KEY = os.environ.get('GOOGLE_GENERATIVE_AI_API_KEY', '')
+OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://localhost:11434')
+OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'llama3.2')
+OLLAMA_ENABLED = os.environ.get('OLLAMA_ENABLED', 'false').lower() == 'true'
 
 LOVABLE_API_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions'
 OPENAI_API_URL = 'https://api.openai.com/v1'
 GOOGLE_API_URL = 'https://generativelanguage.googleapis.com/v1beta'
 
 
-def set_api_keys(lovable_key: str = None, openai_key: str = None, elevenlabs_key: str = None, google_key: str = None):
+def set_api_keys(
+    lovable_key: str = None, 
+    openai_key: str = None, 
+    elevenlabs_key: str = None, 
+    google_key: str = None,
+    ollama_url: str = None,
+    ollama_model: str = None,
+    ollama_enabled: bool = None
+):
     """Set API keys programmatically."""
     global LOVABLE_API_KEY, OPENAI_API_KEY, ELEVENLABS_API_KEY, GOOGLE_API_KEY
+    global OLLAMA_URL, OLLAMA_MODEL, OLLAMA_ENABLED
     if lovable_key:
         LOVABLE_API_KEY = lovable_key
     if openai_key:
@@ -31,6 +43,62 @@ def set_api_keys(lovable_key: str = None, openai_key: str = None, elevenlabs_key
         ELEVENLABS_API_KEY = elevenlabs_key
     if google_key:
         GOOGLE_API_KEY = google_key
+    if ollama_url:
+        OLLAMA_URL = ollama_url
+    if ollama_model:
+        OLLAMA_MODEL = ollama_model
+    if ollama_enabled is not None:
+        OLLAMA_ENABLED = ollama_enabled
+
+
+def call_ollama(
+    messages: List[Dict[str, str]],
+    model: str = None,
+    temperature: float = 0.7,
+    max_tokens: int = 4096
+) -> Optional[str]:
+    """
+    Call local Ollama API.
+    
+    Args:
+        messages: List of message dicts with 'role' and 'content'
+        model: Model to use (default: from settings)
+        temperature: Sampling temperature
+        max_tokens: Maximum tokens in response
+    
+    Returns:
+        The AI response text or None on error
+    """
+    model = model or OLLAMA_MODEL
+    url = f"{OLLAMA_URL}/api/chat"
+    
+    try:
+        response = requests.post(
+            url,
+            json={
+                'model': model,
+                'messages': messages,
+                'stream': False,
+                'options': {
+                    'temperature': temperature,
+                    'num_predict': max_tokens
+                }
+            },
+            timeout=300
+        )
+        
+        if not response.ok:
+            print(f"Ollama error: {response.status_code} - {response.text}")
+            return None
+        
+        data = response.json()
+        return data.get('message', {}).get('content')
+    except requests.exceptions.ConnectionError:
+        print(f"Ollama not available at {OLLAMA_URL}")
+        return None
+    except Exception as e:
+        print(f"Ollama request error: {e}")
+        return None
 
 
 def call_google_gemini(
@@ -120,7 +188,7 @@ def call_ai(
     max_tokens: int = 4096
 ) -> Optional[str]:
     """
-    Universal AI caller - tries Lovable AI, then Google Gemini, then OpenAI.
+    Universal AI caller - tries Ollama (if enabled), then Lovable AI, then Google Gemini, then OpenAI.
     
     Args:
         messages: List of message dicts
@@ -131,7 +199,17 @@ def call_ai(
     Returns:
         AI response text or None
     """
-    # Try Lovable AI first (if key available)
+    # Try Ollama first if enabled (local, free)
+    if OLLAMA_ENABLED:
+        try:
+            result = call_ollama(messages, model=OLLAMA_MODEL, temperature=temperature, max_tokens=max_tokens)
+            if result:
+                print(f"[AI] Using Ollama ({OLLAMA_MODEL})")
+                return result
+        except Exception as e:
+            print(f"Ollama failed, trying cloud APIs: {e}")
+    
+    # Try Lovable AI (if key available)
     if LOVABLE_API_KEY:
         try:
             result = call_lovable_ai(messages, model, temperature, max_tokens)
@@ -156,7 +234,7 @@ def call_ai(
         except Exception as e:
             print(f"OpenAI also failed: {e}")
     
-    raise ValueError("No AI API key configured. Please configure in Settings > API.")
+    raise ValueError("No AI API configured. Enable Ollama or configure API keys in Settings > API.")
 
 
 def call_lovable_ai(

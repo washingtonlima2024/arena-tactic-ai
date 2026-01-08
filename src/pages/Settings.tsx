@@ -70,6 +70,11 @@ export default function Settings() {
   const [elevenlabsApiKey, setElevenlabsApiKey] = useState('');
   const [elevenlabsEnabled, setElevenlabsEnabled] = useState(true);
 
+  // Ollama settings
+  const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
+  const [ollamaModel, setOllamaModel] = useState('llama3.2');
+  const [ollamaEnabled, setOllamaEnabled] = useState(false);
+
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [showElevenlabsKey, setShowElevenlabsKey] = useState(false);
@@ -121,6 +126,11 @@ export default function Settings() {
       // ElevenLabs settings
       setElevenlabsApiKey(apiSettings.find(s => s.setting_key === 'elevenlabs_api_key')?.setting_value || '');
       setElevenlabsEnabled(apiSettings.find(s => s.setting_key === 'elevenlabs_enabled')?.setting_value !== 'false');
+      
+      // Ollama settings
+      setOllamaUrl(apiSettings.find(s => s.setting_key === 'ollama_url')?.setting_value || 'http://localhost:11434');
+      setOllamaModel(apiSettings.find(s => s.setting_key === 'ollama_model')?.setting_value || 'llama3.2');
+      setOllamaEnabled(apiSettings.find(s => s.setting_key === 'ollama_enabled')?.setting_value === 'true');
     }
   }, [apiSettings]);
 
@@ -146,10 +156,16 @@ export default function Settings() {
         // ElevenLabs settings
         upsertApiSetting.mutateAsync({ key: 'elevenlabs_api_key', value: elevenlabsApiKey }),
         upsertApiSetting.mutateAsync({ key: 'elevenlabs_enabled', value: String(elevenlabsEnabled) }),
+        // Ollama settings
+        upsertApiSetting.mutateAsync({ key: 'ollama_url', value: ollamaUrl }),
+        upsertApiSetting.mutateAsync({ key: 'ollama_model', value: ollamaModel }),
+        upsertApiSetting.mutateAsync({ key: 'ollama_enabled', value: String(ollamaEnabled) }),
         // Also save with standard env var names for Python server compatibility
         ...(geminiApiKey ? [upsertApiSetting.mutateAsync({ key: 'GOOGLE_GENERATIVE_AI_API_KEY', value: geminiApiKey })] : []),
         ...(openaiApiKey ? [upsertApiSetting.mutateAsync({ key: 'OPENAI_API_KEY', value: openaiApiKey })] : []),
         ...(elevenlabsApiKey ? [upsertApiSetting.mutateAsync({ key: 'ELEVENLABS_API_KEY', value: elevenlabsApiKey })] : []),
+        upsertApiSetting.mutateAsync({ key: 'OLLAMA_URL', value: ollamaUrl }),
+        upsertApiSetting.mutateAsync({ key: 'OLLAMA_MODEL', value: ollamaModel }),
       ]);
       toast.success('Todas as configurações foram salvas!');
     } catch (error) {
@@ -626,6 +642,77 @@ export default function Settings() {
                         <span className="text-sm text-muted-foreground">
                           {!elevenlabsEnabled ? 'Desativado' : 'Aguardando chave de API'}
                         </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Ollama Configuration */}
+            <Card variant="glow">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Server className="h-5 w-5 text-orange-500" />
+                      Ollama (Local)
+                    </CardTitle>
+                    <CardDescription>
+                      Modelos de IA rodando localmente - gratuito e offline
+                    </CardDescription>
+                  </div>
+                  <Switch 
+                    checked={ollamaEnabled} 
+                    onCheckedChange={setOllamaEnabled}
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label>URL do Servidor</Label>
+                    <Input 
+                      value={ollamaUrl}
+                      onChange={(e) => setOllamaUrl(e.target.value)}
+                      placeholder="http://localhost:11434"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Modelo</Label>
+                    <Select value={ollamaModel} onValueChange={setOllamaModel}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="llama3.2">Llama 3.2 (8B)</SelectItem>
+                        <SelectItem value="llama3.2:1b">Llama 3.2 (1B - Rápido)</SelectItem>
+                        <SelectItem value="llama3.1">Llama 3.1 (8B)</SelectItem>
+                        <SelectItem value="llama3.1:70b">Llama 3.1 (70B - Avançado)</SelectItem>
+                        <SelectItem value="mistral">Mistral (7B)</SelectItem>
+                        <SelectItem value="mixtral">Mixtral 8x7B</SelectItem>
+                        <SelectItem value="qwen2.5">Qwen 2.5 (7B)</SelectItem>
+                        <SelectItem value="gemma2">Gemma 2 (9B)</SelectItem>
+                        <SelectItem value="deepseek-r1">DeepSeek R1</SelectItem>
+                        <SelectItem value="phi3">Phi-3 (3.8B)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Instale o Ollama em <a href="https://ollama.com" target="_blank" className="text-primary hover:underline">ollama.com</a> e execute: <code className="bg-muted px-1 rounded">ollama pull {ollamaModel}</code>
+                </p>
+                <div className={`rounded-lg border p-3 ${ollamaEnabled ? 'border-orange-500/30 bg-orange-500/5' : 'border-muted bg-muted/30'}`}>
+                  <div className="flex items-center gap-2">
+                    {ollamaEnabled ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 text-orange-500" />
+                        <span className="text-sm text-orange-500">Prioridade ativa (será usado primeiro)</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">Desativado - usando APIs na nuvem</span>
                       </>
                     )}
                   </div>

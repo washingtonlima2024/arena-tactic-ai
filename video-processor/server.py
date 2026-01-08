@@ -44,6 +44,10 @@ def load_api_keys_from_db():
     try:
         settings = session.query(ApiSetting).all()
         keys_loaded = []
+        ollama_url = None
+        ollama_model = None
+        ollama_enabled = False
+        
         for s in settings:
             if s.setting_key == 'openai_api_key' and s.setting_value:
                 ai_services.set_api_keys(openai_key=s.setting_value)
@@ -54,10 +58,27 @@ def load_api_keys_from_db():
             elif s.setting_key == 'LOVABLE_API_KEY' and s.setting_value:
                 ai_services.set_api_keys(lovable_key=s.setting_value)
                 keys_loaded.append('LOVABLE')
+            elif s.setting_key == 'ollama_url' and s.setting_value:
+                ollama_url = s.setting_value
+            elif s.setting_key == 'ollama_model' and s.setting_value:
+                ollama_model = s.setting_value
+            elif s.setting_key == 'ollama_enabled':
+                ollama_enabled = s.setting_value == 'true'
+        
+        # Configure Ollama if settings exist
+        if ollama_url or ollama_model or ollama_enabled:
+            ai_services.set_api_keys(
+                ollama_url=ollama_url,
+                ollama_model=ollama_model,
+                ollama_enabled=ollama_enabled
+            )
+            if ollama_enabled:
+                keys_loaded.append(f'OLLAMA ({ollama_model or "llama3.2"})')
+        
         if keys_loaded:
-            print(f"✓ API keys loaded from database: {', '.join(keys_loaded)}")
+            print(f"✓ AI providers loaded: {', '.join(keys_loaded)}")
         else:
-            print("⚠ No API keys found in database. Configure in Settings.")
+            print("⚠ No AI providers configured. Configure in Settings > API.")
     except Exception as e:
         print(f"⚠ Could not load API keys from database: {e}")
     finally:
