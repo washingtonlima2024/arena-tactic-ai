@@ -73,51 +73,65 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
-    // IMPROVED: System prompt with Few-Shot Learning examples
-    const systemPrompt = `Você é um ANALISTA ESPECIALIZADO em futebol brasileiro que assiste milhares de jogos.
-Seu trabalho é analisar transcrições de narrações e extrair TODOS os eventos com MÁXIMA PRECISÃO.
+    // IMPROVED: System prompt with Few-Shot Learning examples + EXPLICIT GOAL DETECTION
+    const systemPrompt = `Você é um NARRADOR VETERANO de futebol brasileiro com 30 anos de experiência.
+Sua missão CRÍTICA é extrair ABSOLUTAMENTE TODOS os eventos da narração, especialmente GOLS.
+
+⚽⚽⚽ REGRA NÚMERO 1 - NUNCA PERCA UM GOL! ⚽⚽⚽
+
+Quando o narrador gritar "GOOOL!", "GOLAÇO!", "É GOL!", "PRA DENTRO!" ou qualquer variação:
+→ VOCÊ DEVE CRIAR UM EVENTO DE GOL IMEDIATAMENTE!
 
 ═══════════════════════════════════════════════════════════════
-EXEMPLOS DE EXTRAÇÃO (FEW-SHOT LEARNING) - SIGA ESTE PADRÃO:
+PALAVRAS-CHAVE PARA GOLS (NUNCA IGNORE):
+═══════════════════════════════════════════════════════════════
+- "GOOOL", "GOOOOL", "GOL", "GOLAÇO" → É GOL!
+- "PRA DENTRO", "ENTROU", "MANDOU PRA REDE" → É GOL!
+- "BOLA NO FUNDO DA REDE", "ESTUFOU A REDE" → É GOL!
+- "ABRE O PLACAR", "AMPLIA", "EMPATA", "VIRA O JOGO" → É GOL!
+- "PRIMEIRO GOL", "SEGUNDO GOL", "TERCEIRO GOL" → É GOL!
+- "GOL CONTRA", "PRÓPRIO GOL" → É GOL COM isOwnGoal: true!
+
+═══════════════════════════════════════════════════════════════
+EXEMPLOS DE EXTRAÇÃO (FEW-SHOT LEARNING):
 ═══════════════════════════════════════════════════════════════
 
-EXEMPLO 1 - GOL:
-Narração: "GOOOOOL! Neymar recebe na área, dribla o marcador e chuta no canto! Brasil abre o placar!"
-→ Evento: { minute: (estimado), event_type: "goal", team: "home", description: "Gol de Neymar! Drible e chute no canto!", isOwnGoal: false }
+EXEMPLO 1 - GOL NORMAL:
+Narração: "GOOOOOL do Brasil! Neymar chuta e a bola entra!"
+→ { minute: X, event_type: "goal", team: "home", description: "GOOOOL! Neymar marca!", isOwnGoal: false }
 
-EXEMPLO 2 - GOL CONTRA:
-Narração: "Que azar! O zagueiro tenta cortar e manda contra o próprio gol! Gol contra do Sport!"
-→ Evento: { minute: (estimado), event_type: "goal", team: "home", description: "GOL CONTRA! Zagueiro corta errado!", isOwnGoal: true }
-NOTA: isOwnGoal=true quando o jogador marca em seu próprio gol
+EXEMPLO 2 - GOL COM EMOÇÃO:
+Narração: "PRA DENTRO! É GOLAÇO! Que pintura!"
+→ { minute: X, event_type: "goal", team: "home/away", description: "GOLAÇO! Pintura de gol!", isOwnGoal: false }
 
-EXEMPLO 3 - CARTÃO AMARELO:
-Narração: "Cartão amarelo para o zagueiro que derrubou o atacante na entrada da área"
-→ Evento: { minute: (estimado), event_type: "yellow_card", team: "away", description: "Amarelo por falta no atacante" }
+EXEMPLO 3 - GOL CONTRA:
+Narração: "Que azar! Gol contra! O zagueiro mandou contra!"
+→ { minute: X, event_type: "goal", team: "home", description: "GOL CONTRA! Zagueiro falha!", isOwnGoal: true }
 
-EXEMPLO 4 - DEFESA:
-Narração: "Que defesa espetacular! O goleiro voou no canto e salvou o que seria o gol!"
-→ Evento: { minute: (estimado), event_type: "save", team: "away", description: "Defesa espetacular do goleiro!" }
+EXEMPLO 4 - CARTÃO AMARELO:
+Narração: "Cartão amarelo para o lateral"
+→ { minute: X, event_type: "yellow_card", team: "away", description: "Amarelo para o lateral" }
 
-EXEMPLO 5 - CHANCE:
-Narração: "Quase gol! A bola passa raspando a trave, por pouco não foi!"
-→ Evento: { minute: (estimado), event_type: "chance", team: "home", description: "Bola raspando a trave!" }
+EXEMPLO 5 - DEFESA DIFÍCIL:
+Narração: "Que defesa! O goleiro salva!"
+→ { minute: X, event_type: "save", team: "away", description: "Defesa espetacular!" }
 
-EXEMPLO 6 - FALTA:
-Narração: "Falta dura do lateral! O árbitro marca falta perigosa"
-→ Evento: { minute: (estimado), event_type: "foul", team: "away", description: "Falta dura do lateral" }
+EXEMPLO 6 - CHANCE PERDIDA:
+Narração: "Quase! Passou perto da trave!"
+→ { minute: X, event_type: "chance", team: "home", description: "Bola raspando a trave!" }
 
 ═══════════════════════════════════════════════════════════════
 REGRAS CRÍTICAS:
 ═══════════════════════════════════════════════════════════════
 
-1. EXTRAIA ABSOLUTAMENTE TODOS OS EVENTOS - não perca NENHUM gol, cartão ou lance importante
-2. GOLS CONTRA: Se narrador menciona "gol contra", "próprio gol", "contra si mesmo" → isOwnGoal: true
-3. TIME CORRETO: Analise QUEM atacava e QUEM defendia no contexto da narração
-4. MINUTOS: Estime baseado na progressão (início ~2'-10', meio ~15'-30', fim ~35'-45'+)
-5. DESCRIÇÕES: Máximo 60 caracteres, capture a EMOÇÃO do narrador
-6. PLACAR: Conte TODOS os gols corretamente ao final
+1. ⚽ GOLS SÃO PRIORIDADE MÁXIMA - Se tem "GOL" na narração, CRIE O EVENTO!
+2. Cada vez que o narrador menciona um gol, CONTE COMO +1 NO PLACAR
+3. GOLS CONTRA: isOwnGoal=true quando marcam em seu próprio gol
+4. TIME CORRETO: Analise contexto para saber quem atacava
+5. MINUTOS: Estime progressivamente (início 2'-15', meio 20'-35', fim 40'-47')
+6. DESCRIÇÕES: Máximo 60 caracteres, capture a EMOÇÃO!
 
-TIPOS DE EVENTOS (use exatamente):
+TIPOS DE EVENTOS:
 goal, shot, save, foul, yellow_card, red_card, corner, offside, substitution, chance, penalty
 
 TIMES DA PARTIDA:
@@ -125,38 +139,41 @@ TIMES DA PARTIDA:
 - AWAY (visitante): ${awayTeam}
 - Período: ${matchHalf === 'first' ? '1º Tempo' : '2º Tempo'} (${gameStartMinute}' - ${gameEndMinute}')`;
 
-    // IMPROVED: User prompt with Chain-of-Thought instructions
-    const userPrompt = `═══════════════════════════════════════════════════════════════
+    // IMPROVED: User prompt with Chain-of-Thought + EXPLICIT GOAL COUNTING
+    const userPrompt = `⚽⚽⚽ MISSÃO CRÍTICA: ENCONTRAR TODOS OS GOLS! ⚽⚽⚽
+
+═══════════════════════════════════════════════════════════════
 PARTIDA: ${homeTeam} (casa) vs ${awayTeam} (visitante)
 PERÍODO: ${matchHalf === 'first' ? '1º Tempo' : '2º Tempo'} (minutos ${gameStartMinute}' a ${gameEndMinute}')
 ═══════════════════════════════════════════════════════════════
 
-INSTRUÇÕES DE ANÁLISE (CHAIN-OF-THOUGHT):
+INSTRUÇÕES (SIGA EXATAMENTE):
 
-PASSO 1: Leia a transcrição COMPLETA abaixo com atenção
-PASSO 2: Identifique CADA momento importante (gols, defesas, faltas, cartões, chances)
-PASSO 3: Para cada momento, determine:
-   - Minuto aproximado (${gameStartMinute}' a ${gameEndMinute}')
-   - Tipo de evento (goal, shot, save, foul, etc)
-   - Qual time realizou a ação (home=${homeTeam} ou away=${awayTeam})
-   - Se é gol contra (isOwnGoal: true/false)
-PASSO 4: Gere descrições que capturam a EMOÇÃO do narrador (máx 60 chars)
-PASSO 5: Conte TODOS os gols para calcular o placar final correto
+1️⃣ PRIMEIRO: Leia TODA a transcrição abaixo
+2️⃣ SEGUNDO: PROCURE por TODAS as palavras: GOL, GOOOL, GOLAÇO, ENTROU, PRA DENTRO
+3️⃣ TERCEIRO: Para CADA gol encontrado, crie um evento com event_type: "goal"
+4️⃣ QUARTO: Identifique cartões, faltas, chances, defesas
+5️⃣ QUINTO: CONTE os gols para homeScore e awayScore
 
 ═══════════════════════════════════════════════════════════════
-TRANSCRIÇÃO COMPLETA DA NARRAÇÃO:
+TRANSCRIÇÃO COMPLETA (LEIA COM ATENÇÃO):
 ═══════════════════════════════════════════════════════════════
 
 ${transcription}
 
 ═══════════════════════════════════════════════════════════════
-IMPORTANTE: 
-- NÃO PERCA NENHUM GOL! 
-- Conte todos os gols para determinar o placar final correto
-- Gols de ${homeTeam} aumentam homeScore
-- Gols de ${awayTeam} aumentam awayScore
-- Gols contra de ${homeTeam} aumentam awayScore (isOwnGoal=true, team="home")
-- Gols contra de ${awayTeam} aumentam homeScore (isOwnGoal=true, team="away")
+⚽ CHECKLIST DE VALIDAÇÃO (ANTES DE RESPONDER):
+═══════════════════════════════════════════════════════════════
+□ Quantas vezes aparece "GOL" na transcrição? → Deve haver o mesmo número de eventos de gol
+□ homeScore + awayScore = total de gols detectados?
+□ Cada gol tem team: "home" ou "away" correto?
+□ Gols contra têm isOwnGoal: true?
+
+LEMBRE-SE:
+- Gols de ${homeTeam} → homeScore++
+- Gols de ${awayTeam} → awayScore++  
+- Gol contra de ${homeTeam} → awayScore++ (isOwnGoal=true, team="home")
+- Gol contra de ${awayTeam} → homeScore++ (isOwnGoal=true, team="away")
 ═══════════════════════════════════════════════════════════════`;
 
     // Retry logic for API calls
