@@ -224,10 +224,46 @@ export const apiClient = {
   getThumbnails: (matchId?: string) => apiRequest<any[]>(`/api/thumbnails${matchId ? `?match_id=${matchId}` : ''}`),
   createThumbnail: (thumbnail: any) => apiRequest<any>('/api/thumbnails', { method: 'POST', body: JSON.stringify(thumbnail) }),
 
-  // ============== Settings ==============
-  getSettings: () => apiRequest<any[]>('/api/settings'),
-  upsertSetting: (setting: { setting_key: string; setting_value: string }) =>
-    apiRequest<any>('/api/settings', { method: 'POST', body: JSON.stringify(setting) }),
+  // ============== Settings (with Supabase fallback) ==============
+  getSettings: async () => {
+    return apiRequestWithFallback<any[]>(
+      '/api/settings',
+      'api_settings',
+      {},
+      async () => {
+        const { data, error } = await supabase
+          .from('api_settings')
+          .select('*')
+          .order('setting_key');
+        if (error) throw new Error(error.message);
+        return data || [];
+      }
+    );
+  },
+  
+  upsertSetting: async (setting: { setting_key: string; setting_value: string }) => {
+    return apiRequestWithFallback<any>(
+      '/api/settings',
+      'api_settings',
+      { method: 'POST', body: JSON.stringify(setting) },
+      async () => {
+        const { data, error } = await supabase
+          .from('api_settings')
+          .upsert(
+            { 
+              setting_key: setting.setting_key, 
+              setting_value: setting.setting_value,
+              updated_at: new Date().toISOString()
+            },
+            { onConflict: 'setting_key' }
+          )
+          .select()
+          .single();
+        if (error) throw new Error(error.message);
+        return data;
+      }
+    );
+  },
 
   // ============== AI Services ==============
   analyzeMatch: (data: { matchId: string; transcription: string; homeTeam: string; awayTeam: string; gameStartMinute?: number; gameEndMinute?: number; halfType?: string }) =>

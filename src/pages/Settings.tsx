@@ -31,7 +31,8 @@ import {
   Eye,
   EyeOff,
   Sparkles,
-  Brain
+  Brain,
+  Mic
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getApiMode, setApiMode, type ApiMode } from '@/lib/apiMode';
@@ -65,8 +66,13 @@ export default function Settings() {
   const [openaiModel, setOpenaiModel] = useState('gpt-4o-mini');
   const [openaiEnabled, setOpenaiEnabled] = useState(false);
 
+  // ElevenLabs settings
+  const [elevenlabsApiKey, setElevenlabsApiKey] = useState('');
+  const [elevenlabsEnabled, setElevenlabsEnabled] = useState(true);
+
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
+  const [showElevenlabsKey, setShowElevenlabsKey] = useState(false);
 
   // API Mode
   const [apiMode, setApiModeState] = useState<ApiMode>(getApiMode());
@@ -111,6 +117,10 @@ export default function Settings() {
       setOpenaiApiKey(apiSettings.find(s => s.setting_key === 'openai_api_key')?.setting_value || '');
       setOpenaiModel(apiSettings.find(s => s.setting_key === 'openai_model')?.setting_value || 'gpt-4o-mini');
       setOpenaiEnabled(apiSettings.find(s => s.setting_key === 'openai_enabled')?.setting_value === 'true');
+      
+      // ElevenLabs settings
+      setElevenlabsApiKey(apiSettings.find(s => s.setting_key === 'elevenlabs_api_key')?.setting_value || '');
+      setElevenlabsEnabled(apiSettings.find(s => s.setting_key === 'elevenlabs_enabled')?.setting_value !== 'false');
     }
   }, [apiSettings]);
 
@@ -133,9 +143,13 @@ export default function Settings() {
         upsertApiSetting.mutateAsync({ key: 'openai_api_key', value: openaiApiKey }),
         upsertApiSetting.mutateAsync({ key: 'openai_model', value: openaiModel }),
         upsertApiSetting.mutateAsync({ key: 'openai_enabled', value: String(openaiEnabled) }),
+        // ElevenLabs settings
+        upsertApiSetting.mutateAsync({ key: 'elevenlabs_api_key', value: elevenlabsApiKey }),
+        upsertApiSetting.mutateAsync({ key: 'elevenlabs_enabled', value: String(elevenlabsEnabled) }),
         // Also save with standard env var names for Python server compatibility
         ...(geminiApiKey ? [upsertApiSetting.mutateAsync({ key: 'GOOGLE_GENERATIVE_AI_API_KEY', value: geminiApiKey })] : []),
         ...(openaiApiKey ? [upsertApiSetting.mutateAsync({ key: 'OPENAI_API_KEY', value: openaiApiKey })] : []),
+        ...(elevenlabsApiKey ? [upsertApiSetting.mutateAsync({ key: 'ELEVENLABS_API_KEY', value: elevenlabsApiKey })] : []),
       ]);
       toast.success('Todas as configurações foram salvas!');
     } catch (error) {
@@ -547,6 +561,70 @@ export default function Settings() {
                         <AlertCircle className="h-4 w-4 text-muted-foreground" />
                         <span className="text-sm text-muted-foreground">
                           {!openaiEnabled ? 'Desativado' : 'Aguardando chave de API'}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* ElevenLabs Configuration */}
+            <Card variant="glow">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Mic className="h-5 w-5 text-purple-500" />
+                      ElevenLabs
+                    </CardTitle>
+                    <CardDescription>
+                      Transcrição de áudio e síntese de voz de alta qualidade
+                    </CardDescription>
+                  </div>
+                  <Switch 
+                    checked={elevenlabsEnabled} 
+                    onCheckedChange={setElevenlabsEnabled}
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Chave de API</Label>
+                  <div className="relative">
+                    <Input 
+                      type={showElevenlabsKey ? 'text' : 'password'}
+                      value={elevenlabsApiKey}
+                      onChange={(e) => setElevenlabsApiKey(e.target.value)}
+                      placeholder="sk_..."
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-0 h-full px-3"
+                      onClick={() => setShowElevenlabsKey(!showElevenlabsKey)}
+                    >
+                      {showElevenlabsKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Usado para transcrição de vídeos grandes (até 100MB) via ElevenLabs Scribe
+                  </p>
+                </div>
+                <div className={`rounded-lg border p-3 ${elevenlabsEnabled && elevenlabsApiKey ? 'border-green-500/30 bg-green-500/5' : 'border-muted bg-muted/30'}`}>
+                  <div className="flex items-center gap-2">
+                    {elevenlabsEnabled && elevenlabsApiKey ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        <span className="text-sm text-green-500">Configurado e ativo</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">
+                          {!elevenlabsEnabled ? 'Desativado' : 'Aguardando chave de API'}
                         </span>
                       </>
                     )}
