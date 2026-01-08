@@ -96,6 +96,9 @@ export function useStartAnalysis() {
         transcription: params.transcription,
         homeTeam: params.homeTeam,
         awayTeam: params.awayTeam,
+        gameStartMinute: params.gameStartMinute ?? 0,
+        gameEndMinute: params.gameEndMinute ?? (halfType === 'second' ? 90 : 45),
+        halfType: halfType,
       });
 
       if (!data?.success) {

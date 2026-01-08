@@ -1047,6 +1047,62 @@ def analyze_match():
 # AUTOMATIC CLIP EXTRACTION
 # ============================================================================
 
+def add_subtitles_to_clip(
+    input_path: str,
+    output_path: str,
+    event_description: str,
+    event_minute: int,
+    event_type: str,
+    team_name: str = None
+) -> bool:
+    """
+    Adiciona tarja informativa com minuto, tipo e descrição usando FFmpeg drawtext.
+    """
+    try:
+        # Escapar caracteres especiais para FFmpeg
+        description_safe = event_description.replace("'", "\\'").replace(":", "\\:")
+        description_safe = description_safe[:80]  # Limitar tamanho
+        
+        # Texto da tarja superior: "12' | GOL"
+        type_label = event_type.upper().replace('_', ' ')
+        header_text = f"{event_minute}' | {type_label}"
+        if team_name:
+            header_text += f" - {team_name}"
+        
+        # Filtros drawtext para tarja superior e descrição inferior
+        filter_str = (
+            f"drawtext=text='{header_text}':"
+            f"fontsize=28:fontcolor=white:"
+            f"x=(w-text_w)/2:y=30:"
+            f"box=1:boxcolor=black@0.7:boxborderw=10,"
+            f"drawtext=text='{description_safe}':"
+            f"fontsize=20:fontcolor=white:"
+            f"x=(w-text_w)/2:y=h-50:"
+            f"box=1:boxcolor=black@0.7:boxborderw=8"
+        )
+        
+        cmd = [
+            'ffmpeg', '-y', '-i', input_path,
+            '-vf', filter_str,
+            '-c:v', 'libx264', '-c:a', 'copy',
+            '-preset', 'fast', '-crf', '23',
+            output_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        
+        if result.returncode == 0:
+            print(f"[SUBTITLE] ✓ Legendas adicionadas: {output_path}")
+            return True
+        else:
+            print(f"[SUBTITLE] ✗ Erro FFmpeg: {result.stderr[:200]}")
+            return False
+            
+    except Exception as e:
+        print(f"[SUBTITLE] Erro: {e}")
+        return False
+
+
 def extract_event_clips_auto(
     match_id: str, 
     video_path: str, 
@@ -1055,7 +1111,8 @@ def extract_event_clips_auto(
     home_team: str = None,
     away_team: str = None,
     pre_buffer: float = 3.0,
-    post_buffer: float = 7.0
+    post_buffer: float = 7.0,
+    include_subtitles: bool = True
 ) -> list:
     """
     Extract clips for all events automatically.
@@ -1121,6 +1178,23 @@ def extract_event_clips_auto(
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
             
             if result.returncode == 0 and os.path.exists(clip_path):
+                # Aplicar legendas se habilitado
+                if include_subtitles:
+                    subtitled_path = clip_path.replace('.mp4', '_sub.mp4')
+                    team_name = None
+                    if home_team and home_team.lower() in description.lower():
+                        team_name = home_team
+                    elif away_team and away_team.lower() in description.lower():
+                        team_name = away_team
+                    
+                    if add_subtitles_to_clip(
+                        clip_path, subtitled_path,
+                        description, minute, event_type, team_name
+                    ):
+                        # Substituir original pelo legendado
+                        os.replace(subtitled_path, clip_path)
+                        print(f"[CLIP] ✓ Legendas aplicadas: {filename}")
+                
                 # Normalize half type for URL
                 half_normalized = 'first_half' if half_type == 'first' else 'second_half'
                 clip_url = f"http://localhost:5000/api/storage/{match_id}/clips/{half_normalized}/{filename}"
