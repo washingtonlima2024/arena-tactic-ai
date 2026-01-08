@@ -274,6 +274,156 @@ def delete_all_match_storage(match_id: str):
     return jsonify({'error': 'Storage da partida não encontrado'}), 404
 
 
+@app.route('/api/storage/link-local', methods=['POST'])
+def link_local_file():
+    """
+    Vincula um arquivo local ao sistema sem fazer upload.
+    O arquivo permanece no caminho original e é referenciado diretamente.
+    Otimizado para ambiente local - evita transferência de dados desnecessária.
+    """
+    data = request.json
+    local_path = data.get('local_path')
+    match_id = data.get('match_id')
+    subfolder = data.get('subfolder', 'videos')
+    video_type = data.get('video_type', 'full')
+    
+    if not local_path:
+        return jsonify({'error': 'Caminho local é obrigatório'}), 400
+    if not match_id:
+        return jsonify({'error': 'match_id é obrigatório'}), 400
+    
+    # Validate file exists
+    file_path = Path(local_path)
+    if not file_path.exists():
+        return jsonify({'error': f'Arquivo não encontrado: {local_path}'}), 404
+    
+    if not file_path.is_file():
+        return jsonify({'error': 'Caminho não é um arquivo'}), 400
+    
+    # Get file stats
+    file_stats = file_path.stat()
+    file_size = file_stats.st_size
+    filename = file_path.name
+    
+    # Detect video duration using ffprobe
+    duration_seconds = None
+    try:
+        result = subprocess.run([
+            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+            '-show_format', str(file_path)
+        ], capture_output=True, text=True, timeout=30)
+        
+        if result.returncode == 0:
+            import json
+            probe_data = json.loads(result.stdout)
+            duration_seconds = int(float(probe_data.get('format', {}).get('duration', 0)))
+    except Exception as e:
+        print(f"[link-local] Não foi possível detectar duração: {e}")
+    
+    # Create symlink in match storage (optional - for easier browsing)
+    try:
+        match_storage = get_match_storage_path(match_id)
+        subfolder_path = match_storage / subfolder
+        symlink_path = subfolder_path / filename
+        
+        # Remove existing symlink if it exists
+        if symlink_path.exists() or symlink_path.is_symlink():
+            symlink_path.unlink()
+        
+        # Create symbolic link to original file
+        symlink_path.symlink_to(file_path.absolute())
+        
+        # URL for the symlinked file (can be served normally)
+        file_url = f"http://localhost:5000/api/storage/{match_id}/{subfolder}/{filename}"
+    except Exception as e:
+        # If symlink fails (Windows without admin), use direct path reference
+        print(f"[link-local] Symlink falhou, usando referência direta: {e}")
+        file_url = f"file://{file_path.absolute()}"
+    
+    # Create video record in database
+    session = get_session()
+    try:
+        video = Video(
+            match_id=match_id,
+            file_url=file_url,
+            file_name=filename,
+            video_type=video_type,
+            duration_seconds=duration_seconds,
+            status='ready',
+            start_minute=0 if video_type == 'first_half' else (45 if video_type == 'second_half' else 0),
+            end_minute=45 if video_type == 'first_half' else (90 if video_type in ['second_half', 'full'] else None)
+        )
+        session.add(video)
+        session.commit()
+        
+        return jsonify({
+            'success': True,
+            'video': video.to_dict(),
+            'local_path': str(file_path.absolute()),
+            'file_size': file_size,
+            'file_size_mb': round(file_size / (1024 * 1024), 2),
+            'duration_seconds': duration_seconds,
+            'symlink_created': file_url.startswith('http')
+        })
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+@app.route('/api/storage/browse', methods=['GET'])
+def browse_local_directory():
+    """
+    Lista arquivos de vídeo em um diretório local.
+    Usado para navegação de arquivos no frontend.
+    """
+    directory = request.args.get('path', os.path.expanduser('~'))
+    
+    try:
+        dir_path = Path(directory)
+        if not dir_path.exists():
+            return jsonify({'error': 'Diretório não encontrado'}), 404
+        
+        if not dir_path.is_dir():
+            return jsonify({'error': 'Caminho não é um diretório'}), 400
+        
+        files = []
+        directories = []
+        
+        for item in sorted(dir_path.iterdir()):
+            if item.name.startswith('.'):
+                continue  # Skip hidden files
+            
+            if item.is_dir():
+                directories.append({
+                    'name': item.name,
+                    'path': str(item.absolute()),
+                    'type': 'directory'
+                })
+            elif item.is_file():
+                ext = item.suffix.lower()
+                if ext in ['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.wmv']:
+                    files.append({
+                        'name': item.name,
+                        'path': str(item.absolute()),
+                        'type': 'video',
+                        'size': item.stat().st_size,
+                        'size_mb': round(item.stat().st_size / (1024 * 1024), 2)
+                    })
+        
+        return jsonify({
+            'current_path': str(dir_path.absolute()),
+            'parent_path': str(dir_path.parent.absolute()) if dir_path.parent != dir_path else None,
+            'directories': directories,
+            'files': files
+        })
+    except PermissionError:
+        return jsonify({'error': 'Sem permissão para acessar o diretório'}), 403
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/storage', methods=['GET'])
 def get_all_storage_stats():
     """Retorna estatísticas de todo o storage."""

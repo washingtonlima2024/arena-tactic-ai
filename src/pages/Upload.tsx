@@ -28,7 +28,8 @@ import {
   FolderOpen,
   ArrowLeft,
   ListPlus,
-  FilePlus
+  FilePlus,
+  HardDrive
 } from 'lucide-react';
 import { useTeams } from '@/hooks/useTeams';
 import { useCreateMatch } from '@/hooks/useMatches';
@@ -47,6 +48,7 @@ import { CoverageTimeline } from '@/components/upload/CoverageTimeline';
 import { AnalysisSummary } from '@/components/upload/AnalysisSummary';
 import { MatchTimesConfig, defaultMatchTimes, MatchTimes } from '@/components/upload/MatchTimesConfig';
 import { HalfDropzone, getDefaultVideoType, getDefaultMinutes } from '@/components/upload/HalfDropzone';
+import { LocalFileBrowser } from '@/components/upload/LocalFileBrowser';
 import { cn } from '@/lib/utils';
 
 // Helper to extract embed URL from various formats
@@ -159,7 +161,9 @@ export default function VideoUpload() {
   }, [existingMatchId, userWantsChoice]);
   
   const [isDragging, setIsDragging] = useState(false);
-  const [uploadMode, setUploadMode] = useState<'file' | 'link'>('file');
+  const [uploadMode, setUploadMode] = useState<'file' | 'local' | 'link'>('local');
+  const [showLocalBrowser, setShowLocalBrowser] = useState(false);
+  const [localBrowserHalf, setLocalBrowserHalf] = useState<'first' | 'second' | null>(null);
   
   // SRT files per half
   const [firstHalfSrt, setFirstHalfSrt] = useState<File | null>(null);
@@ -521,6 +525,72 @@ export default function VideoUpload() {
         title: "Erro ao validar link",
         description: "Não foi possível validar o link. Tente novamente.",
         variant: "destructive"
+      });
+    }
+  };
+
+  // Handle local file selection (no upload - just link the path)
+  const handleLocalFileSelect = async (file: { path: string; name: string; size_mb: number }) => {
+    const matchId = selectedExistingMatch || existingMatchId || 'temp-' + Date.now();
+    const videoType = localBrowserHalf === 'first' ? 'first_half' : 
+                      localBrowserHalf === 'second' ? 'second_half' : 'full';
+    
+    const segmentId = crypto.randomUUID();
+    const defaultMins = {
+      first_half: { start: 0, end: 45 },
+      second_half: { start: 45, end: 90 },
+      full: { start: 0, end: 90 },
+    }[videoType];
+
+    // Add segment immediately as "linking"
+    const newSegment: VideoSegment = {
+      id: segmentId,
+      name: file.name,
+      size: file.size_mb * 1024 * 1024,
+      videoType: videoType as VideoType,
+      title: file.name.replace(/\.[^/.]+$/, ''),
+      durationSeconds: null,
+      startMinute: defaultMins.start,
+      endMinute: defaultMins.end,
+      progress: 50,
+      status: 'uploading',
+      isLink: false,
+      half: localBrowserHalf || undefined,
+    };
+    setSegments(prev => [...prev, newSegment]);
+
+    try {
+      const result = await apiClient.linkLocalFile({
+        local_path: file.path,
+        match_id: matchId,
+        subfolder: 'videos',
+        video_type: videoType as any,
+      });
+
+      setSegments(prev => prev.map(s => 
+        s.id === segmentId 
+          ? { 
+              ...s, 
+              progress: 100, 
+              status: 'complete' as const, 
+              url: result.video.file_url,
+              durationSeconds: result.duration_seconds,
+            }
+          : s
+      ));
+
+      toast({
+        title: "✓ Vídeo vinculado",
+        description: `${file.name} (${file.size_mb} MB) - Sem upload necessário!`,
+      });
+    } catch (error: any) {
+      setSegments(prev => prev.map(s => 
+        s.id === segmentId ? { ...s, status: 'error' as const } : s
+      ));
+      toast({
+        title: "Erro ao vincular arquivo",
+        description: error.message,
+        variant: "destructive",
       });
     }
   };
@@ -1544,11 +1614,15 @@ export default function VideoUpload() {
               <MatchTimesConfig times={matchTimes} onChange={setMatchTimes} />
 
               {/* Upload Mode Tabs */}
-              <Tabs value={uploadMode} onValueChange={(v) => setUploadMode(v as 'file' | 'link')}>
-                <TabsList className="grid w-full grid-cols-2">
+              <Tabs value={uploadMode} onValueChange={(v) => setUploadMode(v as 'file' | 'local' | 'link')}>
+                <TabsList className="grid w-full grid-cols-3">
+                  <TabsTrigger value="local" className="gap-2">
+                    <HardDrive className="h-4 w-4" />
+                    Arquivo Local
+                  </TabsTrigger>
                   <TabsTrigger value="file" className="gap-2">
                     <UploadIcon className="h-4 w-4" />
-                    Upload de Arquivo
+                    Upload
                   </TabsTrigger>
                   <TabsTrigger value="link" className="gap-2">
                     <LinkIcon className="h-4 w-4" />
@@ -1556,6 +1630,77 @@ export default function VideoUpload() {
                   </TabsTrigger>
                 </TabsList>
 
+                {/* LOCAL FILE MODE - No upload needed */}
+                <TabsContent value="local" className="mt-4 space-y-4">
+                  <div className="p-4 rounded-lg bg-primary/5 border border-primary/20">
+                    <p className="text-sm text-muted-foreground">
+                      <strong className="text-foreground">⚡ Modo Local Otimizado:</strong> Selecione arquivos diretamente do seu disco. 
+                      O servidor acessa o arquivo original sem upload, economizando tempo e espaço.
+                    </p>
+                  </div>
+                  
+                  {/* Half Selection Buttons */}
+                  <div className="grid grid-cols-2 gap-4">
+                    <button
+                      onClick={() => {
+                        setLocalBrowserHalf('first');
+                        setShowLocalBrowser(true);
+                      }}
+                      className="group relative p-6 rounded-lg border-2 border-dashed border-blue-500/30 bg-blue-500/5 hover:border-blue-400 hover:bg-blue-500/10 transition-all text-center"
+                    >
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="h-12 w-12 rounded-full bg-blue-500/20 flex items-center justify-center group-hover:bg-blue-500/30 transition-colors">
+                          <HardDrive className="h-6 w-6 text-blue-400" />
+                        </div>
+                        <span className="font-medium text-blue-400">1º Tempo</span>
+                        <span className="text-xs text-muted-foreground">Clique para navegar</span>
+                        {firstHalfCount > 0 && (
+                          <Badge variant="secondary" className="mt-1">{firstHalfCount} vídeo(s)</Badge>
+                        )}
+                      </div>
+                    </button>
+                    
+                    <button
+                      onClick={() => {
+                        setLocalBrowserHalf('second');
+                        setShowLocalBrowser(true);
+                      }}
+                      className="group relative p-6 rounded-lg border-2 border-dashed border-orange-500/30 bg-orange-500/5 hover:border-orange-400 hover:bg-orange-500/10 transition-all text-center"
+                    >
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="h-12 w-12 rounded-full bg-orange-500/20 flex items-center justify-center group-hover:bg-orange-500/30 transition-colors">
+                          <HardDrive className="h-6 w-6 text-orange-400" />
+                        </div>
+                        <span className="font-medium text-orange-400">2º Tempo</span>
+                        <span className="text-xs text-muted-foreground">Clique para navegar</span>
+                        {secondHalfCount > 0 && (
+                          <Badge variant="secondary" className="mt-1">{secondHalfCount} vídeo(s)</Badge>
+                        )}
+                      </div>
+                    </button>
+                  </div>
+                  
+                  {/* Full match button */}
+                  <button
+                    onClick={() => {
+                      setLocalBrowserHalf(null);
+                      setShowLocalBrowser(true);
+                    }}
+                    className="w-full group relative p-4 rounded-lg border-2 border-dashed border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-400 hover:bg-emerald-500/10 transition-all"
+                  >
+                    <div className="flex items-center justify-center gap-3">
+                      <div className="h-10 w-10 rounded-full bg-emerald-500/20 flex items-center justify-center group-hover:bg-emerald-500/30 transition-colors">
+                        <HardDrive className="h-5 w-5 text-emerald-400" />
+                      </div>
+                      <div className="text-left">
+                        <span className="font-medium text-emerald-400">Partida Completa ou Trecho</span>
+                        <p className="text-xs text-muted-foreground">Clique para navegar pelos arquivos</p>
+                      </div>
+                    </div>
+                  </button>
+                </TabsContent>
+
+                {/* UPLOAD MODE */}
                 <TabsContent value="file" className="mt-4 space-y-4">
                   {/* Half Dropzones */}
                   <div className="grid grid-cols-2 gap-4">
@@ -1816,6 +1961,14 @@ export default function VideoUpload() {
           </div>
         )}
       </div>
+
+      {/* Local File Browser Dialog */}
+      <LocalFileBrowser
+        open={showLocalBrowser}
+        onOpenChange={setShowLocalBrowser}
+        onSelectFile={handleLocalFileSelect}
+        matchId={selectedExistingMatch || existingMatchId || 'temp'}
+      />
     </AppLayout>
   );
 }
