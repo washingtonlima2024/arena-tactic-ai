@@ -26,16 +26,21 @@ Deno.serve(async (req) => {
 
     const { eventId, matchId, videoUrl, startSeconds, durationSeconds }: ExtractClipRequest = await req.json();
 
-    if (!eventId || !matchId || !videoUrl) {
+    if (!videoUrl) {
       return new Response(
-        JSON.stringify({ error: 'Missing required fields' }),
+        JSON.stringify({ error: 'Missing required field: videoUrl' }),
         { status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
       );
     }
+    
+    // eventId and matchId are optional for direct clip extraction
+    const effectiveEventId = eventId || crypto.randomUUID();
+    const effectiveMatchId = matchId || 'temp';
 
-    console.log(`[ExtractClip] Starting extraction for event ${eventId}`);
+    console.log(`[ExtractClip] Starting extraction for event ${effectiveEventId}`);
     console.log(`[ExtractClip] Video: ${videoUrl}`);
     console.log(`[ExtractClip] Start: ${startSeconds}s, Duration: ${durationSeconds}s`);
+    console.log(`[ExtractClip] Match: ${effectiveMatchId}`);
 
     // Download video segment using range request
     const start = Math.max(0, startSeconds);
@@ -54,7 +59,7 @@ Deno.serve(async (req) => {
 
     // Upload the full video as a "clip" for now
     // In a real implementation, you'd use FFmpeg via a worker or external service
-    const filePath = `${matchId}/${eventId}.mp4`;
+    const filePath = `${effectiveMatchId}/${effectiveEventId}.mp4`;
     
     const { error: uploadError } = await supabase.storage
       .from('event-clips')
@@ -75,14 +80,16 @@ Deno.serve(async (req) => {
     const clipUrl = urlData.publicUrl;
     console.log(`[ExtractClip] Clip uploaded: ${clipUrl}`);
 
-    // Update event with clip URL
-    const { error: updateError } = await supabase
-      .from('match_events')
-      .update({ clip_url: clipUrl })
-      .eq('id', eventId);
+    // Update event with clip URL (only if eventId was provided)
+    if (eventId) {
+      const { error: updateError } = await supabase
+        .from('match_events')
+        .update({ clip_url: clipUrl })
+        .eq('id', eventId);
 
-    if (updateError) {
-      console.error('[ExtractClip] Failed to update event:', updateError);
+      if (updateError) {
+        console.error('[ExtractClip] Failed to update event:', updateError);
+      }
     }
 
     return new Response(
