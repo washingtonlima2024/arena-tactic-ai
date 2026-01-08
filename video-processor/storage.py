@@ -23,6 +23,14 @@ MATCH_SUBFOLDERS = [
     "json"       # Structured data exports, metadata
 ]
 
+# Clip sub-subfolders for organization by half
+CLIP_SUBFOLDERS = [
+    "first_half",    # Clips from 1st half
+    "second_half",   # Clips from 2nd half
+    "full",          # Clips from full match
+    "extra"          # Clips from extra time or other segments
+]
+
 # Legacy bucket names mapped to new subfolder names
 BUCKET_TO_SUBFOLDER = {
     'match-videos': 'videos',
@@ -49,7 +57,111 @@ def get_match_storage_path(match_id: str) -> Path:
     for subfolder in MATCH_SUBFOLDERS:
         (match_path / subfolder).mkdir(exist_ok=True)
     
+    # Create clip sub-subfolders for organization by half
+    clips_path = match_path / "clips"
+    for clip_subfolder in CLIP_SUBFOLDERS:
+        (clips_path / clip_subfolder).mkdir(exist_ok=True)
+    
     return match_path
+
+
+def get_clip_subfolder_path(match_id: str, half_type: str) -> Path:
+    """
+    Get the path for clips organized by half type.
+    
+    Args:
+        match_id: The match ID
+        half_type: One of 'first_half', 'second_half', 'first', 'second', 'full', 'extra'
+    
+    Returns:
+        Path to the clip subfolder
+    """
+    # Normalize half_type
+    half_map = {
+        'first': 'first_half',
+        'second': 'second_half',
+        'first_half': 'first_half',
+        'second_half': 'second_half',
+        'full': 'full',
+        'extra': 'extra'
+    }
+    normalized_half = half_map.get(half_type, 'full')
+    
+    match_path = get_match_storage_path(match_id)
+    clips_path = match_path / "clips" / normalized_half
+    clips_path.mkdir(parents=True, exist_ok=True)
+    
+    return clips_path
+
+
+def save_clip_file(
+    match_id: str, 
+    half_type: str, 
+    file_data: bytes, 
+    filename: str = None,
+    event_minute: int = None,
+    event_type: str = None,
+    team_short: str = None
+) -> dict:
+    """
+    Save a clip file to the appropriate half subfolder.
+    
+    Args:
+        match_id: The match ID
+        half_type: 'first_half', 'second_half', 'full', or 'extra'
+        file_data: Raw bytes of the clip
+        filename: Optional filename (auto-generated if not provided)
+        event_minute: Optional minute for filename generation
+        event_type: Optional event type for filename generation
+        team_short: Optional team short name for filename generation
+    
+    Returns:
+        Dict with file metadata
+    """
+    clip_folder = get_clip_subfolder_path(match_id, half_type)
+    
+    # Generate standardized filename if not provided
+    if not filename:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        file_id = str(uuid.uuid4())[:8]
+        
+        if event_minute is not None and event_type:
+            # Standardized format: {minute}min-{type}-{team}.mp4
+            team_suffix = f"-{team_short}" if team_short else ""
+            filename = f"{event_minute:02d}min-{event_type}{team_suffix}.mp4"
+        else:
+            filename = f"{timestamp}_{file_id}.mp4"
+    
+    # Ensure unique filename if it already exists
+    file_path = clip_folder / filename
+    counter = 1
+    while file_path.exists():
+        name_parts = filename.rsplit('.', 1)
+        if len(name_parts) == 2:
+            filename = f"{name_parts[0]}_{counter}.{name_parts[1]}"
+        else:
+            filename = f"{filename}_{counter}"
+        file_path = clip_folder / filename
+        counter += 1
+    
+    # Write the file
+    with open(file_path, 'wb') as f:
+        f.write(file_data)
+    
+    # Normalize half type for URL
+    half_map = {'first': 'first_half', 'second': 'second_half'}
+    normalized_half = half_map.get(half_type, half_type)
+    
+    return {
+        "match_id": match_id,
+        "subfolder": f"clips/{normalized_half}",
+        "half_type": normalized_half,
+        "filename": filename,
+        "path": str(file_path),
+        "url": f"http://localhost:5000/api/storage/{match_id}/clips/{normalized_half}/{filename}",
+        "size": len(file_data),
+        "created_at": datetime.now().isoformat()
+    }
 
 
 def get_subfolder_path(match_id: str, subfolder: str) -> Path:

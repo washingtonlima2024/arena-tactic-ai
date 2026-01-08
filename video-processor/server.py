@@ -26,7 +26,8 @@ from models import (
 from storage import (
     save_file, save_uploaded_file, get_file_path, file_exists,
     delete_file, list_match_files, get_storage_stats, get_match_storage_stats,
-    delete_match_storage, STORAGE_DIR, MATCH_SUBFOLDERS, get_subfolder_path
+    delete_match_storage, STORAGE_DIR, MATCH_SUBFOLDERS, get_subfolder_path,
+    get_clip_subfolder_path, save_clip_file, CLIP_SUBFOLDERS
 )
 import ai_services
 
@@ -1035,6 +1036,420 @@ def analyze_match():
             'awayScore': away_score,
             'matchHalf': match_half
         })
+    except Exception as e:
+        print(f"[ANALYZE-MATCH] ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
+# AUTOMATIC CLIP EXTRACTION
+# ============================================================================
+
+def extract_event_clips_auto(
+    match_id: str, 
+    video_path: str, 
+    events: list, 
+    half_type: str,
+    home_team: str = None,
+    away_team: str = None,
+    pre_buffer: float = 3.0,
+    post_buffer: float = 7.0
+) -> list:
+    """
+    Extract clips for all events automatically.
+    
+    Args:
+        match_id: Match ID
+        video_path: Path to the video file
+        events: List of event dicts with minute, second, event_type
+        half_type: 'first' or 'second'
+        home_team: Home team name for labeling
+        away_team: Away team name for labeling
+        pre_buffer: Seconds before the event
+        post_buffer: Seconds after the event
+    
+    Returns:
+        List of extracted clip info dicts
+    """
+    extracted = []
+    duration = pre_buffer + post_buffer
+    
+    for event in events:
+        try:
+            minute = event.get('minute', 0)
+            second = event.get('second', 0)
+            event_type = event.get('event_type', 'event')
+            description = event.get('description', '')
+            
+            # Calculate start time in video (with pre-buffer)
+            total_seconds = (minute * 60) + second
+            start_seconds = max(0, total_seconds - pre_buffer)
+            
+            # Determine team for filename
+            team_short = None
+            if home_team and home_team.lower() in description.lower():
+                team_short = home_team[:3].upper()
+            elif away_team and away_team.lower() in description.lower():
+                team_short = away_team[:3].upper()
+            
+            # Generate clip filename
+            filename = f"{minute:02d}min-{event_type}"
+            if team_short:
+                filename += f"-{team_short}"
+            filename += ".mp4"
+            
+            # Get clip subfolder path
+            clip_folder = get_clip_subfolder_path(match_id, half_type)
+            clip_path = str(clip_folder / filename)
+            
+            # Extract clip using FFmpeg
+            cmd = [
+                'ffmpeg', '-y',
+                '-ss', str(start_seconds),
+                '-i', video_path,
+                '-t', str(duration),
+                '-c:v', 'libx264',
+                '-c:a', 'aac',
+                '-preset', 'fast',
+                '-crf', '23',
+                '-movflags', '+faststart',
+                clip_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+            
+            if result.returncode == 0 and os.path.exists(clip_path):
+                # Normalize half type for URL
+                half_normalized = 'first_half' if half_type == 'first' else 'second_half'
+                clip_url = f"http://localhost:5000/api/storage/{match_id}/clips/{half_normalized}/{filename}"
+                
+                extracted.append({
+                    'event_minute': minute,
+                    'event_type': event_type,
+                    'filename': filename,
+                    'path': clip_path,
+                    'url': clip_url,
+                    'half_type': half_normalized,
+                    'description': description
+                })
+                print(f"[CLIP] ✓ Extracted: {filename}")
+            else:
+                print(f"[CLIP] ✗ Failed to extract clip for minute {minute}")
+                
+        except Exception as e:
+            print(f"[CLIP] Error extracting clip: {e}")
+            continue
+    
+    return extracted
+
+
+@app.route('/api/process-match', methods=['POST'])
+def process_match_complete():
+    """
+    Pipeline completo de processamento de partida.
+    
+    Executa automaticamente:
+    1. Transcrição de cada vídeo
+    2. Geração de SRT
+    3. Análise IA para eventos
+    4. Extração automática de clips
+    5. Salvamento organizado por tempo
+    
+    Input JSON:
+    - matchId: ID da partida
+    - videos: Lista de vídeos [{url, videoType, startMinute, endMinute}]
+    - homeTeam, awayTeam: Nomes dos times
+    - autoClip: Se deve cortar clips automaticamente (default: True)
+    - autoTactical: Se deve gerar análise tática (default: True)
+    """
+    data = request.json
+    match_id = data.get('matchId')
+    videos = data.get('videos', [])
+    home_team = data.get('homeTeam', 'Time Casa')
+    away_team = data.get('awayTeam', 'Time Fora')
+    auto_clip = data.get('autoClip', True)
+    auto_tactical = data.get('autoTactical', True)
+    
+    print(f"\n{'='*60}")
+    print(f"[PROCESS-MATCH] Pipeline completo iniciado")
+    print(f"[PROCESS-MATCH] Match ID: {match_id}")
+    print(f"[PROCESS-MATCH] Videos: {len(videos)}")
+    print(f"[PROCESS-MATCH] Teams: {home_team} vs {away_team}")
+    print(f"[PROCESS-MATCH] Auto Clip: {auto_clip}, Auto Tactical: {auto_tactical}")
+    print(f"{'='*60}")
+    
+    if not match_id:
+        return jsonify({'error': 'matchId é obrigatório'}), 400
+    
+    if not videos:
+        return jsonify({'error': 'Pelo menos um vídeo é obrigatório'}), 400
+    
+    results = {
+        'matchId': match_id,
+        'videos': [],
+        'totalEvents': 0,
+        'totalClips': 0,
+        'homeScore': 0,
+        'awayScore': 0,
+        'errors': []
+    }
+    
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for video_info in videos:
+                video_url = video_info.get('url')
+                video_type = video_info.get('videoType', 'full')
+                start_minute = video_info.get('startMinute', 0)
+                end_minute = video_info.get('endMinute', 45 if video_type == 'first_half' else 90)
+                
+                half_type = 'first' if start_minute < 45 else 'second'
+                
+                print(f"\n[PROCESS-MATCH] Processando vídeo: {video_type}")
+                print(f"[PROCESS-MATCH] URL: {video_url[:50]}...")
+                print(f"[PROCESS-MATCH] Minutos: {start_minute} - {end_minute}")
+                
+                video_result = {
+                    'videoType': video_type,
+                    'startMinute': start_minute,
+                    'endMinute': end_minute,
+                    'transcription': None,
+                    'srt': None,
+                    'events': [],
+                    'clips': [],
+                    'error': None
+                }
+                
+                # Step 1: Download video
+                video_path = os.path.join(tmpdir, f'video_{video_type}.mp4')
+                
+                # Check if local URL
+                if video_url.startswith('/api/storage/') or 'localhost' in video_url:
+                    # Resolve local path
+                    clean_url = video_url.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '')
+                    parts = clean_url.strip('/').split('/')
+                    if len(parts) >= 5 and parts[0] == 'api' and parts[1] == 'storage':
+                        local_match_id = parts[2]
+                        subfolder = parts[3]
+                        filename = '/'.join(parts[4:])
+                        local_path = get_file_path(local_match_id, subfolder, filename)
+                        if local_path and os.path.exists(local_path):
+                            import shutil
+                            shutil.copy(local_path, video_path)
+                            print(f"[PROCESS-MATCH] Vídeo local copiado: {local_path}")
+                        else:
+                            video_result['error'] = f"Arquivo local não encontrado: {local_path}"
+                            results['errors'].append(video_result['error'])
+                            results['videos'].append(video_result)
+                            continue
+                else:
+                    # Download external URL
+                    if not download_video(video_url, video_path):
+                        video_result['error'] = "Falha ao baixar vídeo"
+                        results['errors'].append(video_result['error'])
+                        results['videos'].append(video_result)
+                        continue
+                
+                # Step 2: Transcribe video
+                print(f"[PROCESS-MATCH] Transcrevendo vídeo...")
+                transcription_result = ai_services.transcribe_large_video(video_url, match_id)
+                
+                if not transcription_result.get('success'):
+                    video_result['error'] = f"Falha na transcrição: {transcription_result.get('error')}"
+                    results['errors'].append(video_result['error'])
+                    results['videos'].append(video_result)
+                    continue
+                
+                transcription = transcription_result.get('text', '')
+                srt_content = transcription_result.get('srtContent', '')
+                
+                video_result['transcription'] = transcription[:500] + '...' if len(transcription) > 500 else transcription
+                video_result['srt'] = srt_content[:500] + '...' if len(srt_content) > 500 else srt_content
+                
+                # Save SRT file
+                if srt_content:
+                    srt_filename = f"{video_type}.srt"
+                    srt_path = get_subfolder_path(match_id, 'srt') / srt_filename
+                    with open(srt_path, 'w', encoding='utf-8') as f:
+                        f.write(srt_content)
+                    print(f"[PROCESS-MATCH] SRT salvo: {srt_path}")
+                
+                # Step 3: Analyze transcription with AI
+                print(f"[PROCESS-MATCH] Analisando transcrição com IA...")
+                events = ai_services.analyze_match_events(
+                    transcription, home_team, away_team, start_minute, end_minute
+                )
+                
+                if not events:
+                    print(f"[PROCESS-MATCH] Nenhum evento detectado")
+                    video_result['events'] = []
+                else:
+                    print(f"[PROCESS-MATCH] {len(events)} eventos detectados")
+                    
+                    # Determine match_half
+                    match_half = 'first_half' if half_type == 'first' else 'second_half'
+                    
+                    # Count goals
+                    for event in events:
+                        if event.get('event_type') == 'goal':
+                            desc = (event.get('description') or '').lower()
+                            if home_team.lower() in desc:
+                                results['homeScore'] += 1
+                            elif away_team.lower() in desc:
+                                results['awayScore'] += 1
+                            else:
+                                results['homeScore'] += 1  # fallback
+                    
+                    # Save events to database
+                    session = get_session()
+                    try:
+                        for event_data in events:
+                            raw_minute = event_data.get('minute', 0)
+                            if half_type == 'second' and raw_minute < 45:
+                                raw_minute = raw_minute + 45
+                            
+                            event = MatchEvent(
+                                match_id=match_id,
+                                event_type=event_data.get('event_type', 'unknown'),
+                                description=event_data.get('description'),
+                                minute=raw_minute,
+                                match_half=match_half,
+                                is_highlight=event_data.get('is_highlight', False),
+                                metadata={'ai_generated': True, 'pipeline': 'process-match', **event_data}
+                            )
+                            session.add(event)
+                        session.commit()
+                        print(f"[PROCESS-MATCH] Eventos salvos no banco")
+                    finally:
+                        session.close()
+                    
+                    video_result['events'] = events
+                    results['totalEvents'] += len(events)
+                    
+                    # Step 4: Extract clips automatically
+                    if auto_clip and events:
+                        print(f"[PROCESS-MATCH] Extraindo clips automaticamente...")
+                        clips = extract_event_clips_auto(
+                            match_id=match_id,
+                            video_path=video_path,
+                            events=events,
+                            half_type=half_type,
+                            home_team=home_team,
+                            away_team=away_team
+                        )
+                        video_result['clips'] = clips
+                        results['totalClips'] += len(clips)
+                        print(f"[PROCESS-MATCH] {len(clips)} clips extraídos")
+                
+                results['videos'].append(video_result)
+            
+            # Step 5: Generate tactical analysis (if enabled)
+            if auto_tactical and results['totalEvents'] > 0:
+                print(f"[PROCESS-MATCH] Gerando análise tática...")
+                try:
+                    all_events = []
+                    for v in results['videos']:
+                        all_events.extend(v.get('events', []))
+                    
+                    tactical = ai_services.generate_tactical_summary(
+                        all_events, home_team, away_team,
+                        results['homeScore'], results['awayScore']
+                    )
+                    
+                    if tactical:
+                        # Save tactical analysis to JSON
+                        json_path = get_subfolder_path(match_id, 'json') / 'tactical_analysis.json'
+                        with open(json_path, 'w', encoding='utf-8') as f:
+                            json.dump(tactical, f, ensure_ascii=False, indent=2)
+                        print(f"[PROCESS-MATCH] Análise tática salva: {json_path}")
+                        results['tacticalAnalysis'] = tactical
+                except Exception as e:
+                    print(f"[PROCESS-MATCH] Erro na análise tática: {e}")
+                    results['errors'].append(f"Tactical analysis failed: {str(e)}")
+            
+            # Update match status
+            session = get_session()
+            try:
+                match = session.query(Match).filter_by(id=match_id).first()
+                if match:
+                    match.home_score = (match.home_score or 0) + results['homeScore']
+                    match.away_score = (match.away_score or 0) + results['awayScore']
+                    match.status = 'completed'
+                    session.commit()
+                    print(f"[PROCESS-MATCH] Match atualizado: {match.home_score} x {match.away_score}")
+            finally:
+                session.close()
+        
+        results['success'] = True
+        print(f"\n[PROCESS-MATCH] Pipeline concluído com sucesso!")
+        print(f"[PROCESS-MATCH] Total eventos: {results['totalEvents']}")
+        print(f"[PROCESS-MATCH] Total clips: {results['totalClips']}")
+        print(f"[PROCESS-MATCH] Placar: {results['homeScore']} x {results['awayScore']}")
+        
+        return jsonify(results)
+        
+    except Exception as e:
+        print(f"[PROCESS-MATCH] ERRO: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        results['success'] = False
+        results['error'] = str(e)
+        return jsonify(results), 500
+
+
+@app.route('/api/clips/<match_id>', methods=['GET'])
+def list_match_clips(match_id: str):
+    """
+    List all clips for a match, organized by half.
+    
+    Returns structure:
+    {
+      "first_half": [...clips],
+      "second_half": [...clips],
+      "full": [...clips],
+      "extra": [...clips]
+    }
+    """
+    from storage import CLIP_SUBFOLDERS
+    
+    result = {}
+    
+    for half in CLIP_SUBFOLDERS:
+        try:
+            clip_folder = get_clip_subfolder_path(match_id, half)
+            if clip_folder.exists():
+                clips = []
+                for file_path in clip_folder.iterdir():
+                    if file_path.is_file() and file_path.suffix.lower() in ['.mp4', '.webm', '.mov']:
+                        stat = file_path.stat()
+                        clips.append({
+                            'filename': file_path.name,
+                            'url': f"/api/storage/{match_id}/clips/{half}/{file_path.name}",
+                            'size': stat.st_size,
+                            'modified_at': datetime.fromtimestamp(stat.st_mtime).isoformat()
+                        })
+                result[half] = clips
+            else:
+                result[half] = []
+        except Exception as e:
+            print(f"Error listing clips for {half}: {e}")
+            result[half] = []
+    
+    return jsonify(result)
+
+
+@app.route('/api/storage/<match_id>/clips/<half_type>/<path:filename>', methods=['GET'])
+def serve_clip_file(match_id: str, half_type: str, filename: str):
+    """Serve a clip file from the half-organized structure."""
+    try:
+        clip_folder = get_clip_subfolder_path(match_id, half_type)
+        file_path = clip_folder / filename
+        if not file_path.exists():
+            return jsonify({'error': 'Clip não encontrado'}), 404
+        return send_from_directory(clip_folder, filename)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 400
     except Exception as e:
         print(f"[ANALYZE-MATCH] ERROR: {str(e)}")
         import traceback
