@@ -1,5 +1,5 @@
 import { useRef, useState, useEffect, useCallback } from "react";
-import { useLiveBroadcastContext } from "@/contexts/LiveBroadcastContext";
+import { useLiveBroadcastContextSafe } from "@/contexts/LiveBroadcastContext";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { 
@@ -22,6 +22,21 @@ import {
 } from "@/components/ui/alert-dialog";
 
 export function FloatingLivePlayer() {
+  // Use safe version that doesn't throw if context is not available
+  const context = useLiveBroadcastContextSafe();
+  
+  const [isMinimized, setIsMinimized] = useState(true);
+  const [showStopConfirm, setShowStopConfirm] = useState(false);
+  const [position, setPosition] = useState({ x: 20, y: 20 });
+  const [isDragging, setIsDragging] = useState(false);
+  const dragStartRef = useRef({ x: 0, y: 0 });
+  const containerRef = useRef<HTMLDivElement>(null);
+  
+  // If context is not available, don't render anything
+  if (!context) {
+    return null;
+  }
+  
   const {
     isRecording,
     isPaused,
@@ -31,14 +46,7 @@ export function FloatingLivePlayer() {
     pauseRecording,
     resumeRecording,
     finishMatch,
-  } = useLiveBroadcastContext();
-
-  const [isMinimized, setIsMinimized] = useState(true);
-  const [showStopConfirm, setShowStopConfirm] = useState(false);
-  const [position, setPosition] = useState({ x: 20, y: 20 });
-  const [isDragging, setIsDragging] = useState(false);
-  const dragStartRef = useRef({ x: 0, y: 0 });
-  const containerRef = useRef<HTMLDivElement>(null);
+  } = context;
 
   // Format time as MM:SS
   const formatTime = (seconds: number) => {

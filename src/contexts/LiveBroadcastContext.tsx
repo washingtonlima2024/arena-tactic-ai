@@ -1852,3 +1852,8 @@ export function useLiveBroadcastContext() {
   }
   return context;
 }
+
+// Safe version that doesn't throw - for components that might render before provider
+export function useLiveBroadcastContextSafe() {
+  return useContext(LiveBroadcastContext);
+}
