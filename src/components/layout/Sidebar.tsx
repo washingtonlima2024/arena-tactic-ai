@@ -19,6 +19,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useAuth } from '@/hooks/useAuth';
+import { ServerStatusIndicator } from './ServerStatusIndicator';
 import arenaIcon from '@/assets/arena-play-icon.png';
 import arenaWordmark from '@/assets/arena-play-wordmark.png';
 import kakttusLogo from '@/assets/logo-kakttus.png';
@@ -130,10 +131,14 @@ export function Sidebar() {
         )}
       </nav>
 
-      {/* Kakttus Solutions Branding */}
-      <div className="border-t border-border p-3">
+      {/* Server Status & Kakttus Solutions Branding */}
+      <div className="border-t border-border p-3 space-y-3">
+        {/* Server Status Indicator */}
+        <ServerStatusIndicator collapsed={collapsed} />
+
+        {/* Kakttus Solutions Branding */}
         {!collapsed && (
-          <div className="flex items-center gap-2 mb-3 px-2">
+          <div className="flex items-center gap-2 px-2">
             <img 
               src={kakttusLogo} 
               alt="Kakttus Solutions" 
@@ -145,7 +150,7 @@ export function Sidebar() {
           </div>
         )}
         {collapsed && (
-          <div className="flex justify-center mb-3">
+          <div className="flex justify-center">
             <img 
               src={kakttusLogo} 
               alt="Kakttus Solutions" 
