@@ -965,8 +965,8 @@ export default function VideoUpload() {
         setProcessingProgress(100);
         setProcessingMessage('Partida criada sem transcrição');
         toast({
-          title: "⚠️ Sem transcrição disponível",
-          description: "A partida foi criada. Para detectar eventos, reimporte com arquivo de vídeo MP4 ou adicione SRT.",
+          title: "⚠️ Transcrição não disponível",
+          description: "A partida foi criada. Use 'Analisar com Transcrição' na página de eventos para detectar eventos manualmente.",
           variant: "default"
         });
         
