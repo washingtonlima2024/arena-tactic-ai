@@ -273,46 +273,38 @@ export default function Media() {
                   return;
                 }
                 
-                toast({ title: `Gerando ${eventsWithoutClips.length} clips...`, description: "Isso pode levar alguns minutos" });
-                
-                let successCount = 0;
+                // Agrupar eventos por vídeo para processar cada grupo
+                const eventsByVideo = new Map<string, typeof eventsWithoutClips>();
                 for (const clip of eventsWithoutClips) {
-                  try {
-                    const startSeconds = Math.max(0, clip.videoRelativeSeconds - 3);
-                    const result = await apiClient.extractClip({
-                      eventId: clip.id,
-                      matchId: matchId,
-                      videoUrl: clip.eventVideo!.file_url,
-                      startSeconds,
-                      durationSeconds: 10
-                    });
-                    
-                    // Se retornou objeto (Edge Function), atualizar DB
-                    if (result && typeof result === 'object' && 'clipUrl' in result) {
-                      // Clip URL já foi salvo pela Edge Function
-                      successCount++;
-                    } else if (result instanceof Blob) {
-                      // Servidor local retornou Blob - fazer upload
-                      const uploadResult = await apiClient.uploadBlob(
-                        matchId, 
-                        'clips', 
-                        result, 
-                        `${clip.id}.mp4`
-                      );
-                      // Atualizar evento com clip URL
-                      await supabase.from('match_events').update({ clip_url: uploadResult.url }).eq('id', clip.id);
-                      successCount++;
-                    }
-                  } catch (error) {
-                    console.error(`Erro ao gerar clip ${clip.id}:`, error);
+                  const videoId = clip.eventVideo!.id;
+                  if (!eventsByVideo.has(videoId)) {
+                    eventsByVideo.set(videoId, []);
                   }
+                  eventsByVideo.get(videoId)!.push(clip);
                 }
                 
-                toast({ 
-                  title: `${successCount}/${eventsWithoutClips.length} clips gerados`, 
-                  variant: successCount > 0 ? "default" : "destructive" 
-                });
+                // Processar cada grupo de eventos por vídeo usando FFmpeg WASM
+                for (const [videoId, videoClips] of eventsByVideo) {
+                  const video = videoClips[0].eventVideo!;
+                  
+                  await generateAllClips(
+                    videoClips.map(c => ({
+                      id: c.id,
+                      minute: c.minute,
+                      second: c.second,
+                      metadata: { eventMs: c.eventMs, videoSecond: c.videoSecond }
+                    })),
+                    video.file_url,
+                    matchId,
+                    {
+                      videoStartMinute: video.start_minute ?? 0,
+                      videoDurationSeconds: video.duration_seconds ?? undefined
+                    }
+                  );
+                }
+                
                 refetchEvents();
+                refetchClipsByHalf();
               }}
               disabled={isGeneratingClips}
             >
