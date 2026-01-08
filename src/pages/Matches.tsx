@@ -29,7 +29,7 @@ import { Link, useNavigate } from 'react-router-dom';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { TeamBadge } from '@/components/teams/TeamBadge';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -88,12 +88,9 @@ export default function Matches() {
       console.log('[Reprocess] PASSO 1: Buscando vídeos...');
       setReprocessProgress({ stage: 'Buscando vídeos...', progress: 5 });
       
-      const { data: videos, error: videoError } = await supabase
-        .from('videos')
-        .select('*')
-        .eq('match_id', matchId);
+      const videos = await apiClient.getVideos(matchId);
       
-      if (videoError || !videos?.length) {
+      if (!videos?.length) {
         throw new Error('Nenhum vídeo encontrado para esta partida');
       }
       
@@ -111,18 +108,17 @@ export default function Matches() {
       console.log('[Reprocess] URL do vídeo:', videoUrl);
       setReprocessProgress({ stage: 'Transcrevendo vídeo (servidor)...', progress: 20 });
       
-      // 3. Usar edge function server-side diretamente (sem FFmpeg no browser)
-      const { data: transcriptionResult, error: transcriptionError } = await supabase.functions.invoke('transcribe-large-video', {
-        body: { videoUrl }
-      });
-      
-      // Limpar timeout de segurança se chegamos aqui
-      clearTimeout(safetyTimeoutId);
-      
-      if (transcriptionError) {
+      // 3. Usar servidor local para transcrição
+      let transcriptionResult: { text: string; success?: boolean };
+      try {
+        transcriptionResult = await apiClient.transcribeLargeVideo({ videoUrl, matchId });
+      } catch (transcriptionError: any) {
         console.error('[Reprocess] ✗ Erro na transcrição:', transcriptionError);
         throw new Error(transcriptionError.message || 'Erro na transcrição do vídeo');
       }
+      
+      // Limpar timeout de segurança se chegamos aqui
+      clearTimeout(safetyTimeoutId);
       
       if (!transcriptionResult?.text) {
         throw new Error('Transcrição retornou vazia. Verifique se o vídeo contém áudio.');
@@ -140,22 +136,15 @@ export default function Matches() {
       console.log('[Reprocess] PASSO 3: Analisando eventos com IA...');
       setReprocessProgress({ stage: 'Analisando eventos com IA...', progress: 70 });
       
-      const { data: analysisResult, error: analysisError } = await supabase.functions.invoke('analyze-match', {
-        body: {
-          matchId,
-          transcription: transcriptionResult.text,
-          homeTeam: matchToReprocess.home_team?.name || 'Time Casa',
-          awayTeam: matchToReprocess.away_team?.name || 'Time Visitante',
-          gameStartMinute: 0,
-          gameEndMinute: 90,
-          halfType: 'full'
-        }
+      const analysisResult = await apiClient.analyzeMatch({
+        matchId,
+        transcription: transcriptionResult.text,
+        homeTeam: matchToReprocess.home_team?.name || 'Time Casa',
+        awayTeam: matchToReprocess.away_team?.name || 'Time Visitante',
+        gameStartMinute: 0,
+        gameEndMinute: 90,
+        halfType: 'full'
       });
-      
-      if (analysisError) {
-        console.error('[Reprocess] ✗ Erro na análise:', analysisError);
-        throw new Error(`Erro na análise: ${analysisError.message}`);
-      }
       
       console.log('[Reprocess] ✓ Resultado da análise:', analysisResult);
       
@@ -163,14 +152,11 @@ export default function Matches() {
       console.log('[Reprocess] PASSO 4: Finalizando...');
       setReprocessProgress({ stage: 'Finalizando...', progress: 90 });
       
-      await supabase
-        .from('matches')
-        .update({ 
-          status: 'completed',
-          home_score: analysisResult?.homeScore ?? 0,
-          away_score: analysisResult?.awayScore ?? 0
-        })
-        .eq('id', matchId);
+      await apiClient.updateMatch(matchId, { 
+        status: 'completed',
+        home_score: analysisResult?.homeScore ?? 0,
+        away_score: analysisResult?.awayScore ?? 0
+      });
       
       setReprocessProgress({ stage: 'Concluído!', progress: 100 });
       
