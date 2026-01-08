@@ -129,12 +129,31 @@ export const apiClient = {
   updateTeam: (id: string, team: any) => apiRequest<any>(`/api/teams/${id}`, { method: 'PUT', body: JSON.stringify(team) }),
   deleteTeam: (id: string) => apiRequest<any>(`/api/teams/${id}`, { method: 'DELETE' }),
 
-  // ============== Matches ==============
+  // ============== Matches (with Supabase fallback) ==============
   getMatches: () => apiRequest<any[]>('/api/matches'),
   getMatch: (id: string) => apiRequest<any>(`/api/matches/${id}`),
   createMatch: (match: any) => apiRequest<any>('/api/matches', { method: 'POST', body: JSON.stringify(match) }),
   updateMatch: (id: string, match: any) => apiRequest<any>(`/api/matches/${id}`, { method: 'PUT', body: JSON.stringify(match) }),
-  deleteMatch: (id: string) => apiRequest<any>(`/api/matches/${id}`, { method: 'DELETE' }),
+  deleteMatch: async (id: string) => {
+    return apiRequestWithFallback<any>(
+      `/api/matches/${id}`,
+      'matches',
+      { method: 'DELETE' },
+      async () => {
+        // Cascade delete all related data
+        await supabase.from('analysis_jobs').delete().eq('match_id', id);
+        await supabase.from('match_events').delete().eq('match_id', id);
+        await supabase.from('videos').delete().eq('match_id', id);
+        await supabase.from('generated_audio').delete().eq('match_id', id);
+        await supabase.from('thumbnails').delete().eq('match_id', id);
+        await supabase.from('chatbot_conversations').delete().eq('match_id', id);
+        
+        const { error } = await supabase.from('matches').delete().eq('id', id);
+        if (error) throw new Error(error.message);
+        return { success: true };
+      }
+    );
+  },
 
   // ============== Events ==============
   getMatchEvents: (matchId: string) => apiRequest<any[]>(`/api/matches/${matchId}/events`),
