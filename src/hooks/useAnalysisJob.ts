@@ -99,6 +99,8 @@ export function useStartAnalysis() {
         gameStartMinute: params.gameStartMinute ?? 0,
         gameEndMinute: params.gameEndMinute ?? (halfType === 'second' ? 90 : 45),
         halfType: halfType,
+        autoClip: true,
+        includeSubtitles: true
       });
 
       if (!data?.success) {

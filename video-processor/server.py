@@ -978,7 +978,7 @@ def upsert_api_setting():
 
 @app.route('/api/analyze-match', methods=['POST'])
 def analyze_match():
-    """Analisa uma partida a partir de transcrição."""
+    """Analisa uma partida a partir de transcrição e extrai clips automaticamente."""
     data = request.json
     match_id = data.get('matchId')
     transcription = data.get('transcription')
@@ -987,12 +987,15 @@ def analyze_match():
     half_type = data.get('halfType', 'first')  # 'first' or 'second'
     game_start_minute = data.get('gameStartMinute', 0)
     game_end_minute = data.get('gameEndMinute', 45)
+    auto_clip = data.get('autoClip', True)  # Corte automático de clips
+    include_subtitles = data.get('includeSubtitles', True)
     
     print(f"\n{'='*60}")
     print(f"[ANALYZE-MATCH] Nova requisição de análise")
     print(f"[ANALYZE-MATCH] Match ID: {match_id}")
     print(f"[ANALYZE-MATCH] Half Type: {half_type}")
     print(f"[ANALYZE-MATCH] Game Minutes: {game_start_minute} - {game_end_minute}")
+    print(f"[ANALYZE-MATCH] Auto Clip: {auto_clip}")
     print(f"[ANALYZE-MATCH] Transcription length: {len(transcription)} chars")
     print(f"{'='*60}")
     
@@ -1011,8 +1014,9 @@ def analyze_match():
         home_score = 0
         away_score = 0
         
-        # Save events to database
+        # Save events to database and collect their IDs
         session = get_session()
+        saved_events = []  # Store event objects with their IDs
         try:
             for event_data in events:
                 # Adjust minute based on half type
@@ -1026,11 +1030,23 @@ def analyze_match():
                     event_type=event_data.get('event_type', 'unknown'),
                     description=event_data.get('description'),
                     minute=raw_minute,
+                    second=event_data.get('second', 0),
                     match_half=match_half,
                     is_highlight=event_data.get('is_highlight', False),
+                    clip_pending=True,  # Marcar como pendente inicialmente
                     metadata={'ai_generated': True, 'original_minute': event_data.get('minute'), **event_data}
                 )
                 session.add(event)
+                session.flush()  # Get the ID
+                
+                # Store event info for clip extraction
+                saved_events.append({
+                    'id': event.id,
+                    'minute': raw_minute,
+                    'second': event_data.get('second', 0),
+                    'event_type': event_data.get('event_type', 'unknown'),
+                    'description': event_data.get('description', '')
+                })
                 
                 # Count goals for this team
                 if event_data.get('event_type') == 'goal':
@@ -1049,13 +1065,97 @@ def analyze_match():
         finally:
             session.close()
         
+        # Auto clip extraction
+        clips_extracted = []
+        if auto_clip and saved_events and match_id:
+            print(f"[ANALYZE-MATCH] Iniciando extração automática de clips...")
+            
+            # Fetch videos for this match
+            session = get_session()
+            try:
+                videos = session.query(Video).filter_by(match_id=match_id).all()
+                
+                if videos:
+                    # Find the appropriate video for this half
+                    target_video = None
+                    for v in videos:
+                        video_type = v.video_type or 'full'
+                        if half_type == 'first' and video_type in ['first_half', 'full']:
+                            target_video = v
+                            break
+                        elif half_type == 'second' and video_type in ['second_half', 'full']:
+                            target_video = v
+                            break
+                        elif video_type == 'full':
+                            target_video = v
+                    
+                    if target_video:
+                        # Resolve video path
+                        video_url = target_video.file_url
+                        video_path = None
+                        
+                        # Check if local URL
+                        if video_url.startswith('/api/storage/') or 'localhost' in video_url:
+                            clean_url = video_url.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '')
+                            parts = clean_url.strip('/').split('/')
+                            if len(parts) >= 5 and parts[0] == 'api' and parts[1] == 'storage':
+                                local_match_id = parts[2]
+                                subfolder = parts[3]
+                                filename = '/'.join(parts[4:])
+                                video_path = get_file_path(local_match_id, subfolder, filename)
+                        
+                        if video_path and os.path.exists(video_path):
+                            print(f"[ANALYZE-MATCH] Video encontrado: {video_path}")
+                            
+                            # Extract clips
+                            clips = extract_event_clips_auto(
+                                match_id=match_id,
+                                video_path=video_path,
+                                events=saved_events,
+                                half_type=half_type,
+                                home_team=home_team,
+                                away_team=away_team,
+                                include_subtitles=include_subtitles
+                            )
+                            
+                            clips_extracted = clips
+                            print(f"[ANALYZE-MATCH] {len(clips)} clips extraídos")
+                            
+                            # Update events with clip URLs
+                            if clips:
+                                session2 = get_session()
+                                try:
+                                    for clip in clips:
+                                        # Find event by minute and event_type
+                                        for saved_event in saved_events:
+                                            if saved_event['minute'] == clip['event_minute'] and saved_event['event_type'] == clip['event_type']:
+                                                event_obj = session2.query(MatchEvent).filter_by(id=saved_event['id']).first()
+                                                if event_obj:
+                                                    event_obj.clip_url = clip['url']
+                                                    event_obj.clip_pending = False
+                                                    print(f"[ANALYZE-MATCH] Evento {saved_event['id']} atualizado com clip_url")
+                                                break
+                                    session2.commit()
+                                finally:
+                                    session2.close()
+                        else:
+                            print(f"[ANALYZE-MATCH] Video não encontrado localmente: {video_url}")
+                    else:
+                        print(f"[ANALYZE-MATCH] Nenhum vídeo encontrado para half_type={half_type}")
+                else:
+                    print(f"[ANALYZE-MATCH] Nenhum vídeo cadastrado para match_id={match_id}")
+            finally:
+                session.close()
+        
         return jsonify({
             'success': True, 
             'events': events,
             'eventsDetected': len(events),
             'homeScore': home_score,
             'awayScore': away_score,
-            'matchHalf': match_half
+            'matchHalf': match_half,
+            'clipsExtracted': len(clips_extracted),
+            'clips': clips_extracted
         })
     except Exception as e:
         print(f"[ANALYZE-MATCH] ERROR: {str(e)}")

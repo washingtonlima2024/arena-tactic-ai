@@ -432,7 +432,7 @@ export const apiClient = {
       gameStartMinute: data.gameStartMinute ?? 0,
       gameEndMinute: data.gameEndMinute ?? (data.halfType === 'second' ? 90 : 45),
       halfType: data.halfType ?? 'first',
-      autoClip: data.autoClip ?? false,
+      autoClip: data.autoClip ?? true,
       includeSubtitles: data.includeSubtitles ?? true,
     };
 
