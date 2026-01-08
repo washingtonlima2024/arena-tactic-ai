@@ -7,7 +7,8 @@ const corsHeaders = {
 
 const MAX_WHISPER_SIZE = 24 * 1024 * 1024; // 24MB - Whisper limit is 25MB
 const MAX_ELEVENLABS_SIZE = 100 * 1024 * 1024; // 100MB for ElevenLabs
-const MAX_VIDEO_SIZE = 200 * 1024 * 1024; // 200MB max
+const MAX_VIDEO_SIZE = 2 * 1024 * 1024 * 1024; // 2GB max - increased for full match videos
+const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB chunks for multi-chunk transcription
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -32,19 +33,24 @@ serve(async (req) => {
 
     // Reject videos that are too large
     if (videoSizeBytes > MAX_VIDEO_SIZE) {
-      console.log(`[TranscribeLarge] Vídeo muito grande (${videoSizeMB.toFixed(0)}MB > 200MB)`);
+      console.log(`[TranscribeLarge] Vídeo muito grande (${videoSizeMB.toFixed(0)}MB > 2GB)`);
       return new Response(
         JSON.stringify({ 
           success: false, 
-          error: `Vídeo de ${videoSizeMB.toFixed(0)}MB é muito grande. Faça upload de um arquivo SRT/VTT.`,
+          error: `Vídeo de ${videoSizeMB.toFixed(0)}MB é muito grande. Use o servidor local com FFmpeg para extrair áudio.`,
           videoSizeMB: videoSizeMB.toFixed(1),
-          requiresSrtUpload: true
+          requiresLocalServer: true
         }),
         { 
           status: 400,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
         }
       );
+    }
+
+    // For videos larger than 200MB, recommend local server but try cloud transcription
+    if (videoSizeBytes > 200 * 1024 * 1024) {
+      console.log(`[TranscribeLarge] Vídeo grande (${videoSizeMB.toFixed(0)}MB), usando estratégia de chunks...`);
     }
 
     // For small videos (≤24MB), use Whisper directly
@@ -168,6 +174,7 @@ async function transcribeWithElevenLabs(videoUrl: string, videoSizeBytes: number
 }
 
 // NEW: Multi-chunk Whisper transcription for large videos
+// Processes representative chunks distributed across the video for coverage
 async function transcribeWithWhisperMultiChunk(videoUrl: string, videoSizeBytes: number, videoSizeMB: number): Promise<Response | null> {
   const OPENAI_API_KEY = Deno.env.get('OPENAI_API_KEY');
   if (!OPENAI_API_KEY) {
@@ -176,71 +183,103 @@ async function transcribeWithWhisperMultiChunk(videoUrl: string, videoSizeBytes:
   }
 
   try {
-    // Calculate number of chunks needed (20MB each to stay under 25MB limit)
     const CHUNK_SIZE = 20 * 1024 * 1024; // 20MB chunks
-    const numChunks = Math.ceil(videoSizeBytes / CHUNK_SIZE);
+    const MAX_CHUNKS = 10; // Limit to prevent timeout - covers ~200MB of video
     
-    console.log(`[WhisperMulti] Dividindo ${videoSizeMB.toFixed(1)}MB em ${numChunks} chunks de ~20MB...`);
+    // Calculate total chunks needed
+    const totalChunks = Math.ceil(videoSizeBytes / CHUNK_SIZE);
+    
+    // For very large videos, sample distributed chunks instead of sequential
+    let chunksToProcess: number[];
+    if (totalChunks <= MAX_CHUNKS) {
+      // Process all chunks
+      chunksToProcess = Array.from({ length: totalChunks }, (_, i) => i);
+    } else {
+      // Sample distributed chunks: first, last, and evenly distributed middle ones
+      chunksToProcess = [0]; // First chunk
+      const step = Math.floor(totalChunks / (MAX_CHUNKS - 1));
+      for (let i = 1; i < MAX_CHUNKS - 1; i++) {
+        chunksToProcess.push(Math.min(i * step, totalChunks - 1));
+      }
+      chunksToProcess.push(totalChunks - 1); // Last chunk
+      // Remove duplicates and sort
+      chunksToProcess = [...new Set(chunksToProcess)].sort((a, b) => a - b);
+    }
+    
+    console.log(`[WhisperMulti] ${videoSizeMB.toFixed(1)}MB = ${totalChunks} chunks totais, processando ${chunksToProcess.length} chunks: [${chunksToProcess.join(', ')}]`);
 
     const allTranscriptions: { text: string; srt: string; chunkIndex: number }[] = [];
 
-    for (let i = 0; i < numChunks; i++) {
-      const startByte = i * CHUNK_SIZE;
-      const endByte = Math.min((i + 1) * CHUNK_SIZE - 1, videoSizeBytes - 1);
+    for (let i = 0; i < chunksToProcess.length; i++) {
+      const chunkIndex = chunksToProcess[i];
+      const startByte = chunkIndex * CHUNK_SIZE;
+      const endByte = Math.min((chunkIndex + 1) * CHUNK_SIZE - 1, videoSizeBytes - 1);
       const chunkSizeMB = (endByte - startByte + 1) / (1024 * 1024);
+      const chunkMinutes = Math.floor((chunkIndex * CHUNK_SIZE) / videoSizeBytes * 90); // Estimate match minute
 
-      console.log(`[WhisperMulti] Chunk ${i + 1}/${numChunks}: bytes ${startByte}-${endByte} (${chunkSizeMB.toFixed(1)}MB)...`);
+      console.log(`[WhisperMulti] Chunk ${i + 1}/${chunksToProcess.length} (idx ${chunkIndex}, ~${chunkMinutes}'): bytes ${startByte}-${endByte} (${chunkSizeMB.toFixed(1)}MB)...`);
 
-      // Download chunk
-      const downloadResponse = await fetch(videoUrl, {
-        headers: { 'Range': `bytes=${startByte}-${endByte}` }
-      });
-
-      if (!downloadResponse.ok && downloadResponse.status !== 206) {
-        console.error(`[WhisperMulti] Erro ao baixar chunk ${i + 1}: ${downloadResponse.status}`);
-        continue;
-      }
-
-      const chunkBuffer = await downloadResponse.arrayBuffer();
-      console.log(`[WhisperMulti] ✓ Chunk ${i + 1} baixado: ${(chunkBuffer.byteLength / 1024 / 1024).toFixed(1)}MB`);
-
-      // Send to Whisper
-      const formData = new FormData();
-      const chunkBlob = new Blob([chunkBuffer], { type: 'video/mp4' });
-      formData.append('file', chunkBlob, `chunk_${i}.mp4`);
-      formData.append('model', 'whisper-1');
-      formData.append('language', 'pt');
-      formData.append('response_format', 'srt');
-
-      const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${OPENAI_API_KEY}`,
-        },
-        body: formData,
-      });
-
-      if (!whisperResponse.ok) {
-        const errorText = await whisperResponse.text();
-        console.error(`[WhisperMulti] Erro Whisper chunk ${i + 1}:`, errorText);
-        // Continue with next chunk instead of failing completely
-        continue;
-      }
-
-      const srtContent = await whisperResponse.text();
-      const plainText = srtToPlainText(srtContent);
+      // Download chunk with timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000); // 60s timeout per chunk
       
-      console.log(`[WhisperMulti] ✓ Chunk ${i + 1} transcrito: ${plainText.length} caracteres`);
+      try {
+        const downloadResponse = await fetch(videoUrl, {
+          headers: { 'Range': `bytes=${startByte}-${endByte}` },
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
 
-      allTranscriptions.push({
-        text: plainText,
-        srt: srtContent,
-        chunkIndex: i
-      });
+        if (!downloadResponse.ok && downloadResponse.status !== 206) {
+          console.error(`[WhisperMulti] Erro ao baixar chunk ${chunkIndex}: ${downloadResponse.status}`);
+          continue;
+        }
+
+        const chunkBuffer = await downloadResponse.arrayBuffer();
+        console.log(`[WhisperMulti] ✓ Chunk ${chunkIndex} baixado: ${(chunkBuffer.byteLength / 1024 / 1024).toFixed(1)}MB`);
+
+        // Send to Whisper
+        const formData = new FormData();
+        const chunkBlob = new Blob([chunkBuffer], { type: 'video/mp4' });
+        formData.append('file', chunkBlob, `chunk_${chunkIndex}.mp4`);
+        formData.append('model', 'whisper-1');
+        formData.append('language', 'pt');
+        formData.append('response_format', 'srt');
+
+        const whisperResponse = await fetch('https://api.openai.com/v1/audio/transcriptions', {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${OPENAI_API_KEY}`,
+          },
+          body: formData,
+        });
+
+        if (!whisperResponse.ok) {
+          const errorText = await whisperResponse.text();
+          console.error(`[WhisperMulti] Erro Whisper chunk ${chunkIndex}:`, errorText);
+          continue;
+        }
+
+        const srtContent = await whisperResponse.text();
+        const plainText = srtToPlainText(srtContent);
+        
+        console.log(`[WhisperMulti] ✓ Chunk ${chunkIndex} transcrito: ${plainText.length} caracteres`);
+
+        allTranscriptions.push({
+          text: `[~${chunkMinutes}']\n${plainText}`,
+          srt: srtContent,
+          chunkIndex
+        });
+
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        console.error(`[WhisperMulti] Timeout ou erro no chunk ${chunkIndex}:`, fetchError);
+        continue;
+      }
 
       // Small delay between chunks to avoid rate limiting
-      if (i < numChunks - 1) {
-        await new Promise(resolve => setTimeout(resolve, 1000));
+      if (i < chunksToProcess.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 500));
       }
     }
 
@@ -253,14 +292,14 @@ async function transcribeWithWhisperMultiChunk(videoUrl: string, videoSizeBytes:
     const combinedText = allTranscriptions
       .sort((a, b) => a.chunkIndex - b.chunkIndex)
       .map(t => t.text)
-      .join(' ');
+      .join('\n\n');
 
     const combinedSrt = allTranscriptions
       .sort((a, b) => a.chunkIndex - b.chunkIndex)
       .map(t => t.srt)
       .join('\n\n');
 
-    console.log(`[WhisperMulti] ✓ Transcrição combinada: ${combinedText.length} caracteres de ${allTranscriptions.length}/${numChunks} chunks`);
+    console.log(`[WhisperMulti] ✓ Transcrição combinada: ${combinedText.length} caracteres de ${allTranscriptions.length}/${totalChunks} chunks`);
 
     const responseData: Record<string, any> = {
       success: true,
@@ -269,11 +308,16 @@ async function transcribeWithWhisperMultiChunk(videoUrl: string, videoSizeBytes:
       videoSizeMB: videoSizeMB.toFixed(1),
       method: 'whisper-multi-chunk',
       chunksProcessed: allTranscriptions.length,
-      totalChunks: numChunks
+      totalChunks
     };
 
-    if (allTranscriptions.length < numChunks) {
-      responseData.warning = `Apenas ${allTranscriptions.length} de ${numChunks} chunks foram transcritos.`;
+    if (allTranscriptions.length < chunksToProcess.length) {
+      responseData.warning = `Apenas ${allTranscriptions.length} de ${chunksToProcess.length} trechos do vídeo foram transcritos.`;
+    }
+    
+    if (totalChunks > MAX_CHUNKS) {
+      responseData.partialCoverage = true;
+      responseData.coverageWarning = `Vídeo grande (${videoSizeMB.toFixed(0)}MB) - transcrição parcial de ${chunksToProcess.length} trechos distribuídos.`;
     }
 
     return new Response(
