@@ -36,9 +36,11 @@ import { useCreateMatch } from '@/hooks/useMatches';
 import { useStartAnalysis, useAnalysisJob } from '@/hooks/useAnalysisJob';
 import { useWhisperTranscription } from '@/hooks/useWhisperTranscription';
 import { useTranscriptionQueue } from '@/hooks/useTranscriptionQueue';
+import { useAsyncProcessing, VideoInput } from '@/hooks/useAsyncProcessing';
 import { AnalysisProgress } from '@/components/analysis/AnalysisProgress';
 import { ProcessingProgress, ProcessingStage } from '@/components/upload/ProcessingProgress';
 import { TranscriptionQueue } from '@/components/upload/TranscriptionQueue';
+import { AsyncProcessingProgress } from '@/components/upload/AsyncProcessingProgress';
 import { toast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/apiClient';
 import { useQuery } from '@tanstack/react-query';
@@ -189,6 +191,7 @@ export default function VideoUpload() {
 
   // Analysis state
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
+  const [createdMatchId, setCreatedMatchId] = useState<string | null>(null);
   
   const { data: teams = [] } = useTeams();
   const createMatch = useCreateMatch();
@@ -196,6 +199,24 @@ export default function VideoUpload() {
   const analysisJob = useAnalysisJob(currentJobId);
   const { transcribeVideo, transcriptionProgress: whisperProgress, isTranscribing: isWhisperTranscribing } = useWhisperTranscription();
   const transcriptionQueue = useTranscriptionQueue();
+  
+  // Async processing hook for local server
+  const asyncProcessing = useAsyncProcessing();
+  
+  // Check if local server is available
+  const { data: isLocalServerOnline } = useQuery({
+    queryKey: ['local-server-status'],
+    queryFn: async () => {
+      try {
+        const status = await apiClient.health();
+        return status?.status === 'ok' || status?.ffmpeg === true;
+      } catch {
+        return false;
+      }
+    },
+    refetchInterval: 10000, // Check every 10 seconds
+    staleTime: 5000,
+  });
 
   // Detect video duration using HTML5 video element
   const detectVideoDuration = (file: File): Promise<number> => {
@@ -845,6 +866,7 @@ export default function VideoUpload() {
       } else {
         // VALIDATION: Check teams are different
         if (matchData.homeTeamId && matchData.awayTeamId && matchData.homeTeamId === matchData.awayTeamId) {
+          setProcessingStage('idle');
           toast({
             title: "Erro de validação",
             description: "Os times da casa e visitante não podem ser iguais.",
@@ -855,6 +877,7 @@ export default function VideoUpload() {
 
         // VALIDATION: Confirm teams exist
         if (!matchData.homeTeamId || !matchData.awayTeamId) {
+          setProcessingStage('idle');
           toast({
             title: "Times não selecionados",
             description: "Por favor, selecione os times da partida antes de iniciar a análise.",
@@ -888,7 +911,65 @@ export default function VideoUpload() {
         
         matchId = match.id;
       }
+      
+      // Store the matchId for later navigation
+      setCreatedMatchId(matchId);
 
+      // Check if we should use async processing (local server available + large files or local mode)
+      const hasLargeVideos = currentSegments.some(s => (s.size || 0) > 300 * 1024 * 1024); // 300MB+
+      const isUsingLocalMode = uploadMode === 'local';
+      const shouldUseAsyncPipeline = isLocalServerOnline && (hasLargeVideos || isUsingLocalMode);
+      
+      console.log('=== PIPELINE SELECTION ===');
+      console.log('Local server online:', isLocalServerOnline);
+      console.log('Has large videos (>300MB):', hasLargeVideos);
+      console.log('Using local mode:', isUsingLocalMode);
+      console.log('Will use async pipeline:', shouldUseAsyncPipeline);
+      
+      if (shouldUseAsyncPipeline) {
+        // USE ASYNC PIPELINE - Parallel processing on local server
+        console.log('🚀 Iniciando pipeline assíncrono paralelo...');
+        setProcessingStage('idle'); // Hide old progress, show async progress
+        
+        // Build video inputs for async processing
+        const videoInputs: VideoInput[] = currentSegments
+          .filter(s => s.status === 'complete' || s.status === 'ready')
+          .map(s => ({
+            url: s.url || '',
+            halfType: s.half === 'second' || s.videoType === 'second_half' ? 'second' : 'first',
+            videoType: s.videoType,
+            startMinute: s.startMinute ?? 0,
+            endMinute: s.endMinute ?? 90,
+            sizeMB: (s.size || 0) / (1024 * 1024),
+          }));
+        
+        try {
+          await asyncProcessing.startProcessing({
+            matchId,
+            videos: videoInputs,
+            homeTeam: homeTeamName,
+            awayTeam: awayTeamName,
+            autoClip: true,
+            autoAnalysis: true,
+          });
+          
+          toast({
+            title: "🚀 Processamento paralelo iniciado",
+            description: "O servidor local está processando os vídeos em paralelo. Acompanhe o progresso abaixo.",
+          });
+        } catch (error: any) {
+          console.error('Erro ao iniciar pipeline assíncrono:', error);
+          toast({
+            title: "Erro no processamento",
+            description: error.message || "Falha ao iniciar o processamento paralelo.",
+            variant: "destructive",
+          });
+        }
+        
+        return; // Exit - async processing will handle the rest
+      }
+
+      // FALLBACK: Original sequential processing for cloud/small files
       // Update progress - Uploading stage
       setProcessingStage('uploading');
       setProcessingProgress(10);
@@ -1226,7 +1307,79 @@ export default function VideoUpload() {
   const firstHalfCount = segments.filter(s => s.half === 'first' || s.videoType === 'first_half').length;
   const secondHalfCount = segments.filter(s => s.half === 'second' || s.videoType === 'second_half').length;
 
-  // Show real-time processing progress
+  // Show async processing progress (parallel pipeline)
+  if (asyncProcessing.isProcessing || asyncProcessing.status) {
+    const handleAsyncComplete = () => {
+      const matchId = createdMatchId || existingMatchId || selectedExistingMatch;
+      
+      asyncProcessing.reset();
+      setCreatedMatchId(null);
+      
+      if (matchId) {
+        navigate(`/events?match=${matchId}`);
+      } else {
+        navigate('/matches');
+      }
+    };
+    
+    const handleAsyncRetry = () => {
+      asyncProcessing.reset();
+      handleStartAnalysis();
+    };
+
+    return (
+      <AppLayout>
+        <div className="space-y-6">
+          <div>
+            <h1 className="font-display text-3xl font-bold">
+              {asyncProcessing.isComplete ? 'Processamento Concluído' : 
+               asyncProcessing.isError ? 'Erro no Processamento' : 
+               '⚡ Processamento Paralelo'}
+            </h1>
+            <p className="text-muted-foreground">
+              {asyncProcessing.isComplete ? 'Todos os vídeos foram processados com sucesso' :
+               asyncProcessing.isError ? 'Ocorreu um erro durante o processamento' :
+               'O servidor local está processando os vídeos em paralelo para maior velocidade'}
+            </p>
+          </div>
+
+          <div className="max-w-2xl">
+            <AsyncProcessingProgress 
+              status={asyncProcessing.status}
+              onCancel={asyncProcessing.cancelProcessing}
+              onRetry={handleAsyncRetry}
+              onComplete={handleAsyncComplete}
+            />
+            
+            {asyncProcessing.isComplete && (
+              <div className="mt-6 flex gap-4">
+                <Button variant="arena" onClick={handleAsyncComplete}>
+                  Ver Eventos
+                </Button>
+                <Button variant="arena-outline" onClick={() => {
+                  asyncProcessing.reset();
+                  setSegments([]);
+                  setMatchData({
+                    homeTeamId: '',
+                    awayTeamId: '',
+                    competition: '',
+                    matchDate: '',
+                    matchTime: '',
+                    venue: '',
+                  });
+                  setCurrentStep('choice');
+                }}>
+                  Nova Análise
+                </Button>
+              </div>
+            )}
+          </div>
+        </div>
+      </AppLayout>
+    );
+  }
+
+  // Show real-time processing progress (sequential pipeline)
   if (processingStage !== 'idle') {
     return (
       <AppLayout>
