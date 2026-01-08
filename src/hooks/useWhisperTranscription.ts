@@ -328,6 +328,23 @@ export function useWhisperTranscription() {
     setIsTranscribing(true);
     setUsedFallback(false);
 
+    // PRIORIDADE 1: Tentar servidor local primeiro (mais confiável que FFmpeg no browser)
+    try {
+      console.log('[Transcrição] Tentando servidor local primeiro (prioridade)...');
+      setTranscriptionProgress({ stage: 'transcribing', progress: 10, message: 'Conectando ao servidor local...' });
+      
+      const serverResult = await transcribeWithServerFallback(videoUrl, matchId, videoId);
+      if (serverResult && serverResult.text && serverResult.text.trim().length > 0) {
+        console.log('[Transcrição] ✓ Servidor local funcionou:', serverResult.text.length, 'caracteres');
+        setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });
+        setIsTranscribing(false);
+        return serverResult;
+      }
+    } catch (serverError) {
+      console.warn('[Transcrição] Servidor local indisponível, tentando FFmpeg no browser...', serverError);
+    }
+
+    // PRIORIDADE 2: FFmpeg no browser como fallback
     let detectedSizeMB = videoSizeMB;
     if (!detectedSizeMB) {
       try {
@@ -346,18 +363,18 @@ export function useWhisperTranscription() {
     }
 
     try {
-      console.log('[Transcrição] PASSO 1: Carregando FFmpeg...');
+      console.log('[Transcrição] PASSO 1: Carregando FFmpeg no browser...');
       
       let ffmpeg: FFmpeg;
       let retryCount = 0;
-      const maxRetries = 3;
+      const maxRetries = 2; // Reduzido para 2 tentativas já que servidor falhou
       
       while (retryCount < maxRetries) {
         try {
           ffmpeg = await Promise.race([
             loadFFmpeg(),
             new Promise<never>((_, reject) => 
-              setTimeout(() => reject(new Error('FFmpeg timeout')), 60000)
+              setTimeout(() => reject(new Error('FFmpeg timeout')), 45000) // Reduzido timeout
             )
           ]);
           console.log('[Transcrição] ✓ FFmpeg pronto');
@@ -367,18 +384,18 @@ export function useWhisperTranscription() {
           console.warn(`[Transcrição] ⚠️ FFmpeg tentativa ${retryCount}/${maxRetries} falhou:`, ffmpegError);
           
           if (retryCount < maxRetries) {
-            console.log('[Transcrição] Aguardando 2s antes de tentar novamente...');
+            console.log('[Transcrição] Aguardando 1s antes de tentar novamente...');
             setTranscriptionProgress({ 
               stage: 'loading', 
               progress: retryCount * 2, 
               message: `Carregando processador... tentativa ${retryCount + 1}/${maxRetries}` 
             });
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 1000));
             ffmpegRef.current = null;
           } else {
             throw new Error(
-              'Não foi possível carregar o processador de áudio após várias tentativas. ' +
-              'Por favor, faça upload de um arquivo SRT ou VTT com a transcrição.'
+              'Servidor local e processador de áudio indisponíveis. ' +
+              'Verifique se o servidor Python está rodando ou faça upload de um arquivo SRT.'
             );
           }
         }
@@ -472,27 +489,16 @@ export function useWhisperTranscription() {
       };
 
     } catch (error) {
-      console.error('[Transcrição] Erro no fluxo principal:', error);
+      console.error('[Transcrição] Erro no fluxo FFmpeg:', error);
       
-      // Try server fallback
-      console.log('[Transcrição] Tentando fallback server-side...');
-      setUsedFallback(true);
-      
-      try {
-        const fallbackResult = await transcribeWithServerFallback(videoUrl, matchId, videoId);
-        setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa (servidor)!' });
-        setIsTranscribing(false);
-        return fallbackResult;
-      } catch (fallbackError) {
-        console.error('[Transcrição] Fallback também falhou:', fallbackError);
-        setTranscriptionProgress({ 
-          stage: 'error', 
-          progress: 0, 
-          message: `Erro: ${fallbackError instanceof Error ? fallbackError.message : 'Falha na transcrição'}` 
-        });
-        setIsTranscribing(false);
-        throw fallbackError;
-      }
+      // Servidor já foi tentado no início, apenas reportar erro
+      setTranscriptionProgress({ 
+        stage: 'error', 
+        progress: 0, 
+        message: `Erro: ${error instanceof Error ? error.message : 'Falha na transcrição'}` 
+      });
+      setIsTranscribing(false);
+      throw error;
     }
   };
 
