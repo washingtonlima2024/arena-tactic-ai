@@ -96,76 +96,126 @@ export default function Matches() {
       
       console.log('[Reprocess] ✓ Vídeos encontrados:', videos.length);
       
-      // 2. Pegar primeiro vídeo para transcrição
-      const video = videos[0];
-      const videoUrl = video.file_url;
+      // Ordenar vídeos: primeiro tempo primeiro, depois segundo tempo
+      const sortedVideos = [...videos].sort((a, b) => {
+        const order = { 'first_half': 1, 'full': 2, 'second_half': 3 };
+        return (order[a.video_type as keyof typeof order] || 99) - (order[b.video_type as keyof typeof order] || 99);
+      });
       
-      if (!videoUrl) {
-        throw new Error('URL do vídeo não encontrada');
+      let totalEventsCreated = 0;
+      let finalHomeScore = 0;
+      let finalAwayScore = 0;
+      
+      // 2. Processar cada vídeo separadamente
+      for (let i = 0; i < sortedVideos.length; i++) {
+        const video = sortedVideos[i];
+        const videoUrl = video.file_url;
+        const isFirstHalf = video.video_type === 'first_half';
+        const isSecondHalf = video.video_type === 'second_half';
+        const halfLabel = isFirstHalf ? '1º Tempo' : isSecondHalf ? '2º Tempo' : 'Jogo Completo';
+        
+        if (!videoUrl) {
+          console.warn(`[Reprocess] Vídeo ${i + 1} sem URL, pulando...`);
+          continue;
+        }
+        
+        console.log(`[Reprocess] PASSO 2.${i + 1}: Transcrevendo ${halfLabel}...`);
+        console.log('[Reprocess] URL do vídeo:', videoUrl);
+        
+        const progressBase = 10 + (i * 40);
+        setReprocessProgress({ 
+          stage: `Transcrevendo ${halfLabel}...`, 
+          progress: progressBase 
+        });
+        
+        // Transcrição do vídeo atual
+        let transcriptionResult: { text: string; success?: boolean };
+        try {
+          transcriptionResult = await apiClient.transcribeLargeVideo({ 
+            videoUrl, 
+            matchId,
+            language: 'pt'
+          });
+        } catch (transcriptionError: any) {
+          console.error(`[Reprocess] ✗ Erro na transcrição do ${halfLabel}:`, transcriptionError);
+          // Continuar com próximo vídeo se houver
+          if (i < sortedVideos.length - 1) {
+            toast({
+              title: `Erro no ${halfLabel}`,
+              description: "Continuando com próximo vídeo...",
+              variant: "destructive"
+            });
+            continue;
+          }
+          throw new Error(transcriptionError.message || 'Erro na transcrição do vídeo');
+        }
+        
+        if (!transcriptionResult?.text || transcriptionResult.text.length < 50) {
+          console.warn(`[Reprocess] Transcrição do ${halfLabel} muito curta, pulando análise...`);
+          continue;
+        }
+        
+        console.log(`[Reprocess] ✓ Transcrição ${halfLabel}:`, transcriptionResult.text.length, 'caracteres');
+        
+        // Determinar período do jogo
+        const gameStartMinute = video.start_minute ?? (isFirstHalf ? 0 : 45);
+        const gameEndMinute = video.end_minute ?? (isFirstHalf ? 45 : 90);
+        const halfType = isFirstHalf ? 'first' : isSecondHalf ? 'second' : 'full';
+        
+        setReprocessProgress({ 
+          stage: `Analisando ${halfLabel} com IA...`, 
+          progress: progressBase + 20 
+        });
+        
+        console.log(`[Reprocess] PASSO 3.${i + 1}: Analisando ${halfLabel} (${gameStartMinute}'-${gameEndMinute}')...`);
+        
+        // Análise com IA
+        const analysisResult = await apiClient.analyzeMatch({
+          matchId,
+          transcription: transcriptionResult.text,
+          homeTeam: matchToReprocess.home_team?.name || 'Time Casa',
+          awayTeam: matchToReprocess.away_team?.name || 'Time Visitante',
+          gameStartMinute,
+          gameEndMinute,
+          halfType
+        });
+        
+        console.log(`[Reprocess] ✓ Resultado ${halfLabel}:`, analysisResult);
+        
+        // Acumular resultados
+        totalEventsCreated += analysisResult?.eventsCreated || 0;
+        finalHomeScore += analysisResult?.homeScore || 0;
+        finalAwayScore += analysisResult?.awayScore || 0;
+        
+        toast({
+          title: `${halfLabel} analisado`,
+          description: `${analysisResult?.eventsCreated || 0} eventos detectados`
+        });
       }
       
-      console.log('[Reprocess] PASSO 2: Iniciando transcrição server-side...');
-      console.log('[Reprocess] URL do vídeo:', videoUrl);
-      setReprocessProgress({ stage: 'Transcrevendo vídeo (servidor)...', progress: 20 });
-      
-      // 3. Usar servidor local para transcrição
-      let transcriptionResult: { text: string; success?: boolean };
-      try {
-        transcriptionResult = await apiClient.transcribeLargeVideo({ videoUrl, matchId });
-      } catch (transcriptionError: any) {
-        console.error('[Reprocess] ✗ Erro na transcrição:', transcriptionError);
-        throw new Error(transcriptionError.message || 'Erro na transcrição do vídeo');
-      }
-      
-      // Limpar timeout de segurança se chegamos aqui
+      // Limpar timeout de segurança
       clearTimeout(safetyTimeoutId);
       
-      if (!transcriptionResult?.text) {
-        throw new Error('Transcrição retornou vazia. Verifique se o vídeo contém áudio.');
-      }
-      
-      console.log('[Reprocess] ✓ Transcrição obtida:', transcriptionResult.text.length, 'caracteres');
-      console.log('[Reprocess] Preview:', transcriptionResult.text.substring(0, 200) + '...');
-      
-      toast({
-        title: "Transcrição concluída",
-        description: "Transcrição realizada no servidor com sucesso"
-      });
-      
-      // 4. Chamar analyze-match para detectar eventos
-      console.log('[Reprocess] PASSO 3: Analisando eventos com IA...');
-      setReprocessProgress({ stage: 'Analisando eventos com IA...', progress: 70 });
-      
-      const analysisResult = await apiClient.analyzeMatch({
-        matchId,
-        transcription: transcriptionResult.text,
-        homeTeam: matchToReprocess.home_team?.name || 'Time Casa',
-        awayTeam: matchToReprocess.away_team?.name || 'Time Visitante',
-        gameStartMinute: 0,
-        gameEndMinute: 90,
-        halfType: 'full'
-      });
-      
-      console.log('[Reprocess] ✓ Resultado da análise:', analysisResult);
-      
-      // 5. Atualizar status do match
+      // 4. Atualizar status do match
       console.log('[Reprocess] PASSO 4: Finalizando...');
-      setReprocessProgress({ stage: 'Finalizando...', progress: 90 });
+      setReprocessProgress({ stage: 'Finalizando...', progress: 95 });
       
       await apiClient.updateMatch(matchId, { 
         status: 'completed',
-        home_score: analysisResult?.homeScore ?? 0,
-        away_score: analysisResult?.awayScore ?? 0
+        home_score: finalHomeScore,
+        away_score: finalAwayScore
       });
       
       setReprocessProgress({ stage: 'Concluído!', progress: 100 });
       
       console.log('[Reprocess] ✓ CONCLUÍDO!');
+      console.log('[Reprocess] Total de eventos:', totalEventsCreated);
+      console.log('[Reprocess] Placar final:', finalHomeScore, 'x', finalAwayScore);
       console.log('========================================');
       
       toast({
-        title: "Análise concluída!",
-        description: `${analysisResult?.eventsCreated || 0} eventos detectados.`
+        title: "Análise completa!",
+        description: `${totalEventsCreated} eventos detectados. Placar: ${finalHomeScore} x ${finalAwayScore}`
       });
       
       // Invalidar todas as queries relacionadas à partida
