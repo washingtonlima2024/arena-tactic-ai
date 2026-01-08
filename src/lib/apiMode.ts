@@ -1,9 +1,7 @@
-type ApiMode = 'local' | 'supabase';
+type ApiMode = 'local';
 
 export const getApiMode = (): ApiMode => {
-  const stored = localStorage.getItem('api_mode');
-  if (stored === 'local' || stored === 'supabase') return stored;
-  return 'supabase'; // default to supabase for Lovable preview
+  return 'local'; // Always use local server
 };
 
 export const setApiMode = (mode: ApiMode) => {

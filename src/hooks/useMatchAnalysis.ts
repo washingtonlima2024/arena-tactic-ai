@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 
 export interface AnalysisProgress {
@@ -58,21 +58,15 @@ export function useMatchAnalysis() {
       console.log('Starting analysis for match:', matchId);
       console.log('Transcription length:', transcription.length);
 
-      const { data, error } = await supabase.functions.invoke('analyze-match', {
-        body: {
-          matchId,
-          transcription,
-          homeTeam,
-          awayTeam,
-          gameStartMinute,
-          gameEndMinute,
-          halfType: halfType || (gameStartMinute >= 45 ? 'second' : 'first')
-        }
+      const data = await apiClient.analyzeMatch({
+        matchId,
+        transcription,
+        homeTeam,
+        awayTeam,
+        gameStartMinute,
+        gameEndMinute,
+        halfType: halfType || (gameStartMinute >= 45 ? 'second' : 'first')
       });
-
-      if (error) {
-        throw error;
-      }
 
       if (!data?.success) {
         throw new Error(data?.error || 'Análise falhou');
@@ -127,27 +121,16 @@ export function useMatchAnalysis() {
     setIsAnalyzing(true);
 
     try {
-      // Step 1: Transcribe audio/video using large video transcriber (supports up to 200MB)
+      // Step 1: Transcribe audio/video using local server
       setProgress({ stage: 'transcribing', progress: 20, message: 'Transcrevendo mídia...' });
 
-      const { data: transcriptionData, error: transcriptionError } = await supabase.functions.invoke('transcribe-large-video', {
-        body: { videoUrl: audioUrl, matchId }
+      const transcriptionData = await apiClient.transcribeLargeVideo({
+        videoUrl: audioUrl,
+        matchId
       });
 
-      if (transcriptionError) {
-        throw new Error(transcriptionError?.message || 'Falha na transcrição');
-      }
-
-      if (!transcriptionData?.success) {
-        // Check if it requires SRT upload
-        if (transcriptionData?.requiresSrtUpload) {
-          throw new Error(`Arquivo muito grande (${transcriptionData?.videoSizeMB || ''}MB). Faça upload de um arquivo SRT/VTT.`);
-        }
-        throw new Error(transcriptionData?.error || 'Falha na transcrição');
-      }
-
-      if (!transcriptionData?.text) {
-        throw new Error('Transcrição vazia');
+      if (!transcriptionData?.success || !transcriptionData?.text) {
+        throw new Error('Falha na transcrição ou transcrição vazia');
       }
 
       console.log('Transcription completed:', transcriptionData.text.length, 'chars');

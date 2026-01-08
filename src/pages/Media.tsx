@@ -475,7 +475,11 @@ export default function Media() {
                             matchId: matchId
                           };
                         });
-                      extractAllFrames(eventsToExtract);
+                      extractAllFrames(
+                        eventsToExtract.map(e => ({ id: e.eventId, event_type: e.eventType, minute: Math.floor(e.timestamp / 60), second: e.timestamp % 60 })),
+                        eventsToExtract[0]?.videoUrl || '',
+                        matchId
+                      );
                     }}
                     disabled={extractingIds.size > 0 || generatingIds.size > 0 || isGeneratingClips}
                   >
@@ -507,7 +511,14 @@ export default function Media() {
                           matchId: matchId,
                           description: c.description
                         }));
-                      generateAllThumbnails(eventsToGenerate);
+                      generateAllThumbnails(
+                        eventsToGenerate.map(e => ({ id: e.eventId, event_type: e.eventType, minute: e.minute, description: e.description })),
+                        eventsToGenerate[0]?.homeTeam || 'Time Casa',
+                        eventsToGenerate[0]?.awayTeam || 'Time Fora',
+                        eventsToGenerate[0]?.homeScore || 0,
+                        eventsToGenerate[0]?.awayScore || 0,
+                        matchId
+                      );
                     }}
                     disabled={generatingIds.size > 0 || extractingIds.size > 0 || isGeneratingClips}
                   >

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 
 interface ThumbnailData {
@@ -41,19 +41,11 @@ export function useThumbnailGeneration(matchId?: string) {
 
     setIsLoading(true);
     try {
-      const { data, error } = await supabase
-        .from('thumbnails')
-        .select('*')
-        .eq('match_id', matchId);
-
-      if (error) {
-        console.error('Error loading thumbnails:', error);
-        return;
-      }
+      const data = await apiClient.getThumbnails(matchId);
 
       if (data && data.length > 0) {
         const loaded: Record<string, ThumbnailData> = {};
-        data.forEach((thumb) => {
+        data.forEach((thumb: any) => {
           loaded[thumb.event_id] = {
             eventId: thumb.event_id,
             imageUrl: thumb.image_url,
@@ -75,7 +67,7 @@ export function useThumbnailGeneration(matchId?: string) {
     loadThumbnails();
   }, [loadThumbnails]);
 
-  // Extract frame from video using canvas and upload to Storage
+  // Extract frame from video using canvas and upload to local storage
   const extractFrameFromVideo = async (params: ExtractFrameParams): Promise<ThumbnailData | null> => {
     const { eventId, eventType, videoUrl, timestamp, matchId: eventMatchId } = params;
 
@@ -106,7 +98,6 @@ export function useThumbnailGeneration(matchId?: string) {
         };
         
         video.onloadedmetadata = () => {
-          // Ensure timestamp is within video duration
           const targetTime = Math.min(timestamp, video.duration - 0.1);
           video.currentTime = Math.max(0, targetTime);
         };
@@ -150,20 +141,20 @@ export function useThumbnailGeneration(matchId?: string) {
             
             // Badge colors based on event type
             const badgeColors: Record<string, { bg: string; text: string }> = {
-              goal: { bg: '#10b981', text: '#ffffff' }, // Green
-              shot: { bg: '#f59e0b', text: '#ffffff' }, // Amber
+              goal: { bg: '#10b981', text: '#ffffff' },
+              shot: { bg: '#f59e0b', text: '#ffffff' },
               shot_on_target: { bg: '#f59e0b', text: '#ffffff' },
-              save: { bg: '#3b82f6', text: '#ffffff' }, // Blue
-              foul: { bg: '#ef4444', text: '#ffffff' }, // Red
-              yellow_card: { bg: '#eab308', text: '#000000' }, // Yellow
-              red_card: { bg: '#dc2626', text: '#ffffff' }, // Red
-              corner: { bg: '#8b5cf6', text: '#ffffff' }, // Purple
-              penalty: { bg: '#ec4899', text: '#ffffff' }, // Pink
-              offside: { bg: '#6366f1', text: '#ffffff' }, // Indigo
+              save: { bg: '#3b82f6', text: '#ffffff' },
+              foul: { bg: '#ef4444', text: '#ffffff' },
+              yellow_card: { bg: '#eab308', text: '#000000' },
+              red_card: { bg: '#dc2626', text: '#ffffff' },
+              corner: { bg: '#8b5cf6', text: '#ffffff' },
+              penalty: { bg: '#ec4899', text: '#ffffff' },
+              offside: { bg: '#6366f1', text: '#ffffff' },
             };
             const colors = badgeColors[eventType] || { bg: '#10b981', text: '#ffffff' };
             
-            const scale = canvas.width / 1280; // Scale based on video width
+            const scale = canvas.width / 1280;
             const padding = 20 * scale;
             const badgeHeight = 50 * scale;
             const fontSize = 28 * scale;
@@ -213,7 +204,7 @@ export function useThumbnailGeneration(matchId?: string) {
             const minuteBadgeWidth = minuteMetrics.width + 30 * scale;
             const minuteBadgeX = canvas.width - padding - minuteBadgeWidth;
             
-            // Minute badge background (dark with green accent)
+            // Minute badge background
             ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
             ctx.beginPath();
             ctx.moveTo(minuteBadgeX + radius, badgeY);
@@ -228,7 +219,7 @@ export function useThumbnailGeneration(matchId?: string) {
             ctx.closePath();
             ctx.fill();
             
-            // Green accent line on left of minute badge
+            // Green accent line
             ctx.fillStyle = '#10b981';
             ctx.fillRect(minuteBadgeX, badgeY + 5 * scale, 4 * scale, badgeHeight - 10 * scale);
             
@@ -246,44 +237,21 @@ export function useThumbnailGeneration(matchId?: string) {
               throw new Error('Failed to create image blob');
             }
             
-            // Upload to Supabase Storage
-            const fileName = `${eventMatchId}/${eventId}-frame.jpg`;
-            const { data: uploadData, error: uploadError } = await supabase.storage
-              .from('thumbnails')
-              .upload(fileName, blob, {
-                contentType: 'image/jpeg',
-                upsert: true
-              });
+            // Upload to local storage
+            const fileName = `${eventId}-frame.jpg`;
+            const uploadResult = await apiClient.uploadBlob(eventMatchId, 'images', blob, fileName);
             
-            if (uploadError) {
-              console.error('Storage upload error:', uploadError);
-              throw new Error('Erro ao salvar frame no storage');
-            }
-            
-            // Get public URL
-            const { data: urlData } = supabase.storage
-              .from('thumbnails')
-              .getPublicUrl(fileName);
-            
-            const imageUrl = urlData.publicUrl;
-            
-            // Generate title (reuse eventLabel and minute from overlay)
+            const imageUrl = uploadResult.url;
             const title = `${eventLabel} - ${minute}'`;
             
             // Save to database
-            const { error: dbError } = await supabase
-              .from('thumbnails')
-              .upsert({
-                event_id: eventId,
-                match_id: eventMatchId,
-                image_url: imageUrl,
-                event_type: eventType,
-                title
-              }, { onConflict: 'event_id' });
-            
-            if (dbError) {
-              console.error('Error saving thumbnail to DB:', dbError);
-            }
+            await apiClient.createThumbnail({
+              event_id: eventId,
+              match_id: eventMatchId,
+              image_url: imageUrl,
+              event_type: eventType,
+              title
+            });
             
             const thumbnailData: ThumbnailData = {
               eventId,
@@ -312,7 +280,6 @@ export function useThumbnailGeneration(matchId?: string) {
           handleError('Falha ao carregar vídeo (CORS ou URL inválida)');
         };
 
-        // Set timeout for loading
         timeoutId = window.setTimeout(() => {
           if (!resolved) {
             handleError('Timeout ao carregar vídeo');
@@ -368,17 +335,12 @@ Generate ONLY a visual scene without any text overlay.
 
 Style: Professional sports broadcast graphics, dramatic lighting, soccer field background, energy and motion effects. Use green and teal/turquoise color scheme. 16:9 aspect ratio. Modern clean design with dynamic action feel. Show players in motion, ball, stadium atmosphere. NO TEXT AT ALL.`;
 
-      const { data, error } = await supabase.functions.invoke('generate-thumbnail', {
-        body: { 
-          prompt, 
-          eventType, 
-          matchInfo: `${homeTeam} vs ${awayTeam}`,
-          eventId,
-          matchId: eventMatchId
-        }
+      const data = await apiClient.generateThumbnailAI({
+        prompt, 
+        eventId,
+        matchId: eventMatchId,
+        eventType
       });
-
-      if (error) throw error;
 
       if (data?.imageUrl) {
         const thumbnailData: ThumbnailData = {
@@ -408,50 +370,69 @@ Style: Professional sports broadcast graphics, dramatic lighting, soccer field b
     }
   };
 
-  const generateAllThumbnails = async (events: GenerateThumbnailParams[]) => {
-    toast.info(`Gerando ${events.length} thumbnails...`);
+  const generateAllThumbnails = async (events: Array<{
+    id: string;
+    event_type: string;
+    minute: number | null;
+    description?: string | null;
+  }>, homeTeam: string, awayTeam: string, homeScore: number, awayScore: number, eventMatchId: string) => {
+    const eventsToGenerate = events.filter(e => !thumbnails[e.id] && !generatingIds.has(e.id));
     
-    for (const event of events) {
-      if (!thumbnails[event.eventId]) {
-        await generateThumbnail(event);
-        await new Promise(resolve => setTimeout(resolve, 1000));
-      }
+    for (const event of eventsToGenerate) {
+      await generateThumbnail({
+        eventId: event.id,
+        eventType: event.event_type,
+        minute: event.minute || 0,
+        homeTeam,
+        awayTeam,
+        homeScore,
+        awayScore,
+        matchId: eventMatchId,
+        description: event.description || undefined
+      });
+      // Small delay between generations
+      await new Promise(resolve => setTimeout(resolve, 1000));
     }
-    
-    toast.success('Todas as thumbnails foram geradas!');
   };
 
-  const extractAllFrames = async (events: ExtractFrameParams[]) => {
-    toast.info(`Extraindo ${events.length} frames do vídeo...`);
+  const extractAllFrames = async (events: Array<{
+    id: string;
+    event_type: string;
+    minute: number | null;
+    second?: number | null;
+  }>, videoUrl: string, eventMatchId: string, videoStartMinute: number = 0) => {
+    const eventsToExtract = events.filter(e => !thumbnails[e.id] && !extractingIds.has(e.id));
     
-    for (const event of events) {
-      if (!thumbnails[event.eventId]) {
-        await extractFrameFromVideo(event);
-        await new Promise(resolve => setTimeout(resolve, 500));
-      }
+    for (const event of eventsToExtract) {
+      const eventMinute = event.minute || 0;
+      const eventSecond = event.second || 0;
+      const timestamp = ((eventMinute - videoStartMinute) * 60) + eventSecond;
+      
+      await extractFrameFromVideo({
+        eventId: event.id,
+        eventType: event.event_type,
+        videoUrl,
+        timestamp: Math.max(0, timestamp),
+        matchId: eventMatchId
+      });
+      // Small delay between extractions
+      await new Promise(resolve => setTimeout(resolve, 500));
     }
-    
-    toast.success('Todos os frames foram extraídos!');
   };
-
-  const isGenerating = (eventId: string) => generatingIds.has(eventId);
-  const isExtracting = (eventId: string) => extractingIds.has(eventId);
-  const hasThumbnail = (eventId: string) => !!thumbnails[eventId];
-  const getThumbnail = (eventId: string) => thumbnails[eventId];
 
   return {
     thumbnails,
-    generateThumbnail,
-    generateAllThumbnails,
-    extractFrameFromVideo,
-    extractAllFrames,
-    isGenerating,
-    isExtracting,
-    hasThumbnail,
-    getThumbnail,
+    isLoading,
     generatingIds,
     extractingIds,
-    isLoading,
-    reload: loadThumbnails
+    loadThumbnails,
+    generateThumbnail,
+    extractFrameFromVideo,
+    generateAllThumbnails,
+    extractAllFrames,
+    getThumbnail: (eventId: string) => thumbnails[eventId] || null,
+    hasThumbnail: (eventId: string) => !!thumbnails[eventId],
+    isGenerating: (eventId: string) => generatingIds.has(eventId),
+    isExtracting: (eventId: string) => extractingIds.has(eventId)
   };
 }
