@@ -43,7 +43,7 @@ interface ReprocessOptionsDialogProps {
   } | null;
   onReprocess: (options: {
     useExistingTranscription: { first: boolean; second: boolean };
-    manualTranscription: { first: string; second: string };
+    manualTranscription: { first: string; second: string; full: string };
     reTranscribe: { first: boolean; second: boolean };
   }) => Promise<void>;
   isReprocessing: boolean;
@@ -63,9 +63,9 @@ export function ReprocessOptionsDialog({
   
   // Options state
   const [useExisting, setUseExisting] = useState({ first: true, second: true });
-  const [manualText, setManualText] = useState({ first: '', second: '' });
+  const [manualText, setManualText] = useState({ first: '', second: '', full: '' });
   const [selectedTab, setSelectedTab] = useState('existing');
-  const [activeHalf, setActiveHalf] = useState<'first' | 'second'>('first');
+  const [activeHalf, setActiveHalf] = useState<'first' | 'second' | 'full'>('full');
 
   // Load existing transcriptions when dialog opens
   useEffect(() => {
@@ -131,14 +131,15 @@ export function ReprocessOptionsDialog({
     }
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, half: 'first' | 'second') => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, half: 'first' | 'second' | 'full') => {
     const file = e.target.files?.[0];
     if (!file) return;
     
     try {
       const content = await file.text();
       setManualText(prev => ({ ...prev, [half]: content }));
-      toast.success(`Arquivo ${file.name} carregado para ${half === 'first' ? '1º' : '2º'} tempo`);
+      const label = half === 'first' ? '1º Tempo' : half === 'second' ? '2º Tempo' : 'Jogo Completo';
+      toast.success(`Arquivo ${file.name} carregado para ${label}`);
     } catch (error) {
       toast.error('Erro ao ler arquivo');
     }
@@ -342,7 +343,15 @@ export function ReprocessOptionsDialog({
                 Envie um arquivo SRT ou TXT com a transcrição
               </div>
 
-              <div className="flex gap-2 mb-4">
+              <div className="flex flex-wrap gap-2 mb-4">
+                <Button
+                  variant={activeHalf === 'full' ? 'arena' : 'outline'}
+                  size="sm"
+                  onClick={() => setActiveHalf('full')}
+                >
+                  Jogo Completo
+                  {manualText.full && <CheckCircle className="ml-2 h-3 w-3" />}
+                </Button>
                 <Button
                   variant={activeHalf === 'first' ? 'arena' : 'outline'}
                   size="sm"
@@ -359,6 +368,12 @@ export function ReprocessOptionsDialog({
                   2º Tempo
                   {manualText.second && <CheckCircle className="ml-2 h-3 w-3" />}
                 </Button>
+              </div>
+
+              <div className="p-3 rounded-lg bg-primary/5 border border-primary/20 mb-3">
+                <p className="text-sm text-primary">
+                  💡 <strong>Dica:</strong> Use "Jogo Completo" se você tem um único arquivo SRT para toda a partida.
+                </p>
               </div>
 
               <div className="space-y-3">
@@ -385,7 +400,7 @@ export function ReprocessOptionsDialog({
                 </div>
 
                 <Textarea
-                  placeholder={`Cole ou carregue a transcrição do ${activeHalf === 'first' ? '1º' : '2º'} tempo aqui...`}
+                  placeholder={`Cole ou carregue a transcrição ${activeHalf === 'full' ? 'do jogo completo' : activeHalf === 'first' ? 'do 1º tempo' : 'do 2º tempo'} aqui...`}
                   value={manualText[activeHalf]}
                   onChange={(e) => setManualText(prev => ({ ...prev, [activeHalf]: e.target.value }))}
                   rows={8}
