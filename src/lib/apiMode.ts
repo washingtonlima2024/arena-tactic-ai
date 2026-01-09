@@ -16,8 +16,12 @@ export const isLocalMode = (): boolean => {
 
 export const checkLocalServerAvailable = async (): Promise<boolean> => {
   try {
-    const response = await fetch('http://localhost:5000/health', {
-      signal: AbortSignal.timeout(2000)
+    const apiUrl = localStorage.getItem('arenaApiUrl') || 'https://75c7a7f57d85.ngrok-free.app';
+    const response = await fetch(`${apiUrl}/health`, {
+      signal: AbortSignal.timeout(3000),
+      headers: {
+        'ngrok-skip-browser-warning': 'true'
+      }
     });
     return response.ok;
   } catch {
