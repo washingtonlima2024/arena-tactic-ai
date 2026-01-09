@@ -32,7 +32,9 @@ import {
   EyeOff,
   Sparkles,
   Brain,
-  Mic
+  Mic,
+  Trash2,
+  HardDrive
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getApiMode, setApiMode, type ApiMode } from '@/lib/apiMode';
@@ -76,6 +78,11 @@ export default function Settings() {
   const [ollamaEnabled, setOllamaEnabled] = useState(false);
 
   const [showGeminiKey, setShowGeminiKey] = useState(false);
+  
+  // Storage cleanup state
+  const [tempFolders, setTempFolders] = useState<{name: string; size_bytes: number}[]>([]);
+  const [loadingTempFolders, setLoadingTempFolders] = useState(false);
+  const [cleaningStorage, setCleaningStorage] = useState(false);
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [showElevenlabsKey, setShowElevenlabsKey] = useState(false);
 
@@ -203,6 +210,59 @@ export default function Settings() {
       toast.error('Erro ao remover time');
     }
   };
+
+  // Storage cleanup functions
+  const fetchTempFolders = async () => {
+    setLoadingTempFolders(true);
+    try {
+      const baseUrl = localStorage.getItem('arenaApiUrl') || 
+        (window.location.hostname === 'localhost' ? 'http://localhost:5000' : 'https://75c7a7f57d85.ngrok-free.app');
+      const response = await fetch(`${baseUrl}/api/storage/temp-folders`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setTempFolders(data.folders || []);
+      }
+    } catch (error) {
+      console.error('Failed to fetch temp folders:', error);
+    } finally {
+      setLoadingTempFolders(false);
+    }
+  };
+
+  const handleCleanupStorage = async () => {
+    setCleaningStorage(true);
+    try {
+      const baseUrl = localStorage.getItem('arenaApiUrl') || 
+        (window.location.hostname === 'localhost' ? 'http://localhost:5000' : 'https://75c7a7f57d85.ngrok-free.app');
+      const response = await fetch(`${baseUrl}/api/storage/cleanup-temp`, {
+        method: 'DELETE',
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+      });
+      if (response.ok) {
+        const data = await response.json();
+        toast.success(`Limpeza concluída! ${data.deleted_count || 0} pastas removidas, ${formatBytes(data.freed_bytes || 0)} liberados.`);
+        setTempFolders([]);
+      } else {
+        toast.error('Erro ao limpar storage');
+      }
+    } catch (error) {
+      toast.error('Servidor não disponível');
+    } finally {
+      setCleaningStorage(false);
+    }
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const totalTempSize = tempFolders.reduce((sum, f) => sum + (f.size_bytes || 0), 0);
 
   return (
     <AppLayout>
@@ -809,6 +869,81 @@ export default function Settings() {
                     Funciona sem servidor local.
                   </p>
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Storage Maintenance */}
+            <Card variant="glass">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <HardDrive className="h-5 w-5 text-orange-500" />
+                  Manutenção de Storage
+                </CardTitle>
+                <CardDescription>
+                  Limpe arquivos temporários para liberar espaço em disco
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Pastas Temporárias (temp-*)</p>
+                    <p className="text-sm text-muted-foreground">
+                      {tempFolders.length > 0 
+                        ? `${tempFolders.length} pastas ocupando ${formatBytes(totalTempSize)}`
+                        : 'Clique em verificar para escanear'}
+                    </p>
+                  </div>
+                  <div className="flex gap-2">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={fetchTempFolders}
+                      disabled={loadingTempFolders}
+                    >
+                      {loadingTempFolders ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        'Verificar'
+                      )}
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={handleCleanupStorage}
+                      disabled={cleaningStorage || tempFolders.length === 0}
+                    >
+                      {cleaningStorage ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Limpando...
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          Limpar
+                        </>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+
+                {tempFolders.length > 0 && (
+                  <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-3">
+                    <p className="text-sm text-orange-500 mb-2">Pastas a serem removidas:</p>
+                    <div className="max-h-32 overflow-y-auto space-y-1">
+                      {tempFolders.map((folder) => (
+                        <div key={folder.name} className="flex justify-between text-xs text-muted-foreground">
+                          <span>{folder.name}</span>
+                          <span>{formatBytes(folder.size_bytes)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <p className="text-xs text-muted-foreground">
+                  Pastas temp-* são criadas durante uploads interrompidos. É seguro removê-las.
+                </p>
               </CardContent>
             </Card>
           </TabsContent>
