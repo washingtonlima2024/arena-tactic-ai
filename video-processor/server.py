@@ -682,22 +682,27 @@ def get_conversion_status(job_id: str):
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    """Verifica status do servidor."""
+    """Verifica status do servidor. Modo light=true para resposta rápida."""
+    light_mode = request.args.get('light', 'false').lower() == 'true'
+    
     try:
         result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, timeout=5)
         ffmpeg_ok = result.returncode == 0
     except:
         ffmpeg_ok = False
     
-    storage_stats = get_storage_stats()
-    
-    return jsonify({
+    response_data = {
         'status': 'ok',
         'ffmpeg': ffmpeg_ok,
         'database': 'arena_play.db',
-        'storage': storage_stats,
         'vignettes_dir': str(VIGNETTES_DIR)
-    })
+    }
+    
+    # Só inclui estatísticas completas do storage se não for modo light
+    if not light_mode:
+        response_data['storage'] = get_storage_stats()
+    
+    return jsonify(response_data)
 
 
 # ============================================================================
@@ -806,7 +811,7 @@ def link_local_file():
         result = subprocess.run([
             'ffprobe', '-v', 'quiet', '-print_format', 'json',
             '-show_format', str(file_path)
-        ], capture_output=True, text=True, timeout=30)
+        ], capture_output=True, text=True, timeout=10)
         
         if result.returncode == 0:
             import json
