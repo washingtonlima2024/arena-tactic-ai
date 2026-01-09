@@ -220,6 +220,18 @@ export default function Matches() {
         const gameEndMinute = video.end_minute ?? (isFirstHalf ? 45 : 90);
         const halfType = isFirstHalf ? 'first' : isSecondHalf ? 'second' : 'full';
         
+        // NOVO: Salvar transcrição manual no storage ANTES da análise
+        const usedManualTranscription = options.manualTranscription[halfKey as 'first' | 'second'] || options.manualTranscription.full;
+        if (transcriptionText && usedManualTranscription) {
+          try {
+            const srtHalfType = options.manualTranscription.full ? 'full' : halfKey as 'first' | 'second';
+            await apiClient.uploadSrt(matchId, transcriptionText, srtHalfType);
+            console.log(`[Reprocess] ✓ Transcrição manual salva em arquivo (${srtHalfType})`);
+          } catch (e) {
+            console.warn(`[Reprocess] Aviso: não salvou transcrição em arquivo:`, e);
+          }
+        }
+        
         setReprocessProgress({ 
           stage: `Analisando ${halfLabel} com IA...`, 
           progress: progressBase + 20 

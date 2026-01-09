@@ -1761,6 +1761,116 @@ def upsert_api_setting():
 # AI SERVICES ENDPOINTS
 # ============================================================================
 
+def _srt_to_plain_text(srt_content: str) -> str:
+    """Converte conteúdo SRT para texto plano removendo timestamps e numeração."""
+    lines = []
+    for line in srt_content.split('\n'):
+        line = line.strip()
+        # Pular linhas vazias, números de índice e timestamps
+        if not line or line.isdigit() or '-->' in line:
+            continue
+        lines.append(line)
+    return ' '.join(lines)
+
+
+@app.route('/api/matches/<match_id>/srt', methods=['POST'])
+def upload_match_srt(match_id: str):
+    """Upload de arquivo SRT para uma partida - salva .srt e .txt."""
+    print(f"\n{'='*60}")
+    print(f"[UPLOAD-SRT] Upload de SRT para match_id: {match_id}")
+    
+    # Aceita arquivo ou JSON com conteúdo
+    content = None
+    half_type = 'full'
+    
+    if request.content_type and 'multipart/form-data' in request.content_type:
+        if 'file' in request.files:
+            content = request.files['file'].read().decode('utf-8')
+        half_type = request.form.get('halfType', 'full')
+    else:
+        data = request.json or {}
+        content = data.get('content', '')
+        half_type = data.get('halfType', 'full')
+    
+    if not content:
+        return jsonify({'error': 'Arquivo ou conteúdo obrigatório'}), 400
+    
+    print(f"[UPLOAD-SRT] Half type: {half_type}")
+    print(f"[UPLOAD-SRT] Conteúdo: {len(content)} caracteres")
+    
+    try:
+        # Definir nomes de arquivo baseado no half_type
+        if half_type == 'full':
+            srt_filename = "full.srt"
+            txt_filename = "full_transcription.txt"
+        else:
+            srt_filename = f"{half_type}_half.srt"
+            txt_filename = f"{half_type}_half_transcription.txt"
+        
+        # Salvar arquivo SRT
+        srt_folder = get_subfolder_path(match_id, 'srt')
+        srt_path = srt_folder / srt_filename
+        with open(srt_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        print(f"[UPLOAD-SRT] ✓ SRT salvo: {srt_path}")
+        
+        # Converter para texto plano e salvar
+        plain_text = _srt_to_plain_text(content)
+        txt_folder = get_subfolder_path(match_id, 'texts')
+        txt_path = txt_folder / txt_filename
+        with open(txt_path, 'w', encoding='utf-8') as f:
+            f.write(plain_text)
+        print(f"[UPLOAD-SRT] ✓ TXT salvo: {txt_path}")
+        
+        return jsonify({
+            'success': True,
+            'srtPath': str(srt_path),
+            'txtPath': str(txt_path),
+            'srtUrl': f'/api/storage/{match_id}/srt/{srt_filename}',
+            'txtUrl': f'/api/storage/{match_id}/texts/{txt_filename}',
+            'textLength': len(plain_text)
+        })
+    except Exception as e:
+        print(f"[UPLOAD-SRT] ✗ Erro: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/matches/<match_id>/files', methods=['GET'])
+def list_match_files_endpoint(match_id: str):
+    """Lista todos os arquivos salvos para uma partida organizados por pasta."""
+    try:
+        stats = get_match_storage_stats(match_id)
+        files = list_match_files(match_id)
+        
+        # Organizar por subfolder
+        organized = {
+            'videos': [],
+            'clips': [],
+            'srt': [],
+            'texts': [],
+            'audio': [],
+            'images': [],
+            'json': []
+        }
+        
+        for f in files:
+            sf = f.get('subfolder', 'other')
+            if sf in organized:
+                organized[sf].append(f)
+            elif sf.startswith('clips/'):
+                organized['clips'].append(f)
+        
+        return jsonify({
+            'matchId': match_id,
+            'stats': stats,
+            'files': organized
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/analyze-match', methods=['POST'])
 def analyze_match():
     """Analisa uma partida a partir de transcrição e extrai clips automaticamente."""
@@ -1769,7 +1879,7 @@ def analyze_match():
     transcription = data.get('transcription')
     home_team = data.get('homeTeam', 'Time A')
     away_team = data.get('awayTeam', 'Time B')
-    half_type = data.get('halfType', 'first')  # 'first' or 'second'
+    half_type = data.get('halfType', 'first')  # 'first' or 'second' or 'full'
     game_start_minute = data.get('gameStartMinute', 0)
     game_end_minute = data.get('gameEndMinute', 45)
     auto_clip = data.get('autoClip', True)  # Corte automático de clips
@@ -1781,11 +1891,44 @@ def analyze_match():
     print(f"[ANALYZE-MATCH] Half Type: {half_type}")
     print(f"[ANALYZE-MATCH] Game Minutes: {game_start_minute} - {game_end_minute}")
     print(f"[ANALYZE-MATCH] Auto Clip: {auto_clip}")
-    print(f"[ANALYZE-MATCH] Transcription length: {len(transcription)} chars")
+    print(f"[ANALYZE-MATCH] Transcription length: {len(transcription) if transcription else 0} chars")
     print(f"{'='*60}")
     
     if not transcription:
         return jsonify({'error': 'Transcrição é obrigatória'}), 400
+    
+    # NOVO: Salvar transcrição recebida em arquivo para persistência
+    if match_id and transcription:
+        try:
+            # Definir nomes de arquivo baseado no half_type
+            if half_type == 'full':
+                txt_filename = "full_transcription.txt"
+            else:
+                txt_filename = f"{half_type}_half_transcription.txt"
+            
+            txt_folder = get_subfolder_path(match_id, 'texts')
+            txt_path = txt_folder / txt_filename
+            with open(txt_path, 'w', encoding='utf-8') as f:
+                f.write(transcription)
+            print(f"[ANALYZE-MATCH] ✓ Transcrição salva: {txt_path}")
+        except Exception as e:
+            print(f"[ANALYZE-MATCH] Aviso: não salvou transcrição: {e}")
+    
+    # Se a transcrição parece ser SRT (contém timestamps), salvar também como .srt
+    if match_id and transcription and '-->' in transcription:
+        try:
+            if half_type == 'full':
+                srt_filename = "full.srt"
+            else:
+                srt_filename = f"{half_type}_half.srt"
+            
+            srt_folder = get_subfolder_path(match_id, 'srt')
+            srt_path = srt_folder / srt_filename
+            with open(srt_path, 'w', encoding='utf-8') as f:
+                f.write(transcription)
+            print(f"[ANALYZE-MATCH] ✓ SRT salvo: {srt_path}")
+        except Exception as e:
+            print(f"[ANALYZE-MATCH] Aviso: não salvou SRT: {e}")
     
     try:
         events = ai_services.analyze_match_events(
