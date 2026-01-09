@@ -196,6 +196,7 @@ export default function VideoUpload() {
   // Analysis state
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
   const [createdMatchId, setCreatedMatchId] = useState<string | null>(null);
+  const [isCreatingMatch, setIsCreatingMatch] = useState(false);
   
   const { data: teams = [] } = useTeams();
   const createMatch = useCreateMatch();
@@ -569,9 +570,100 @@ export default function VideoUpload() {
   };
 
   // Helper function to get valid match ID from multiple sources
-  const getValidMatchId = () => {
+  const getValidMatchId = (): string | null => {
+    // Prioridade: createdMatchId > selectedExistingMatch > existingMatchId > URL param
     const urlMatchId = new URLSearchParams(window.location.search).get('match');
-    return selectedExistingMatch || existingMatchId || urlMatchId;
+    const matchId = createdMatchId || selectedExistingMatch || existingMatchId || urlMatchId;
+    
+    console.log('[getValidMatchId]', { createdMatchId, selectedExistingMatch, existingMatchId, urlMatchId, result: matchId });
+    
+    return matchId;
+  };
+
+  // Create match immediately when continuing from match setup
+  const handleMatchSetupContinue = async () => {
+    if (matchData.homeTeamId === matchData.awayTeamId) {
+      toast({ 
+        title: "Erro de validação", 
+        description: "Times não podem ser iguais", 
+        variant: "destructive" 
+      });
+      return;
+    }
+
+    if (!matchData.homeTeamId || !matchData.awayTeamId) {
+      toast({ 
+        title: "Times não selecionados", 
+        description: "Selecione ambos os times para continuar", 
+        variant: "destructive" 
+      });
+      return;
+    }
+
+    setIsCreatingMatch(true);
+    try {
+      const matchDateTime = matchData.matchDate 
+        ? new Date(`${matchData.matchDate}T${matchData.matchTime || '00:00'}`).toISOString()
+        : undefined;
+
+      const match = await createMatch.mutateAsync({
+        home_team_id: matchData.homeTeamId,
+        away_team_id: matchData.awayTeamId,
+        competition: matchData.competition || undefined,
+        match_date: matchDateTime,
+        venue: matchData.venue || undefined,
+      });
+
+      // Atualizar estados e URL
+      setCreatedMatchId(match.id);
+      setSelectedExistingMatch(match.id);
+      navigate(`/upload?match=${match.id}`, { replace: true });
+      setCurrentStep('videos');
+
+      const homeTeam = teams.find(t => t.id === matchData.homeTeamId);
+      const awayTeam = teams.find(t => t.id === matchData.awayTeamId);
+
+      toast({
+        title: "✓ Partida criada",
+        description: `${homeTeam?.name || 'Casa'} vs ${awayTeam?.name || 'Visitante'} - Agora adicione os vídeos`,
+      });
+    } catch (error: any) {
+      toast({
+        title: "Erro ao criar partida",
+        description: error.message,
+        variant: "destructive",
+      });
+    } finally {
+      setIsCreatingMatch(false);
+    }
+  };
+
+  // Verify server before opening LocalFileBrowser
+  const handleOpenLocalBrowser = async (half: 'first' | 'second' | null) => {
+    const matchId = getValidMatchId();
+    if (!matchId) {
+      toast({ 
+        title: "Partida não selecionada", 
+        description: "Crie ou selecione uma partida primeiro.", 
+        variant: "destructive" 
+      });
+      return;
+    }
+    
+    // Verificar servidor Python
+    try {
+      await apiClient.health();
+    } catch {
+      toast({
+        title: "Servidor Python offline",
+        description: "O modo 'Arquivo Local' requer o servidor Python em localhost:5000. Use a aba 'Upload' para enviar via nuvem.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setLocalBrowserHalf(half);
+    setShowLocalBrowser(true);
   };
 
   // Handle local file selection (no upload - just link the path)
@@ -982,8 +1074,19 @@ export default function VideoUpload() {
       let homeTeamName: string = '';
       let awayTeamName: string = '';
 
-      // If reimporting to existing match, use that match
-      if (existingMatchId && existingMatch) {
+      // PRIORIDADE 1: Partida criada no passo anterior (Nova Partida)
+      if (createdMatchId) {
+        matchId = createdMatchId;
+        homeTeamName = teams.find(t => t.id === matchData.homeTeamId)?.name || 'Time Casa';
+        awayTeamName = teams.find(t => t.id === matchData.awayTeamId)?.name || 'Time Visitante';
+        
+        console.log('=== USANDO PARTIDA JÁ CRIADA ===');
+        console.log('Match ID:', matchId);
+        console.log('Time Casa:', homeTeamName);
+        console.log('Time Visitante:', awayTeamName);
+      }
+      // PRIORIDADE 2: Reimportação de partida existente (da URL)
+      else if (existingMatchId && existingMatch) {
         matchId = existingMatchId;
         homeTeamName = existingMatch.home_team?.name || 'Time Casa';
         awayTeamName = existingMatch.away_team?.name || 'Time Visitante';
@@ -992,7 +1095,21 @@ export default function VideoUpload() {
         console.log('Match ID:', matchId);
         console.log('Time Casa:', homeTeamName);
         console.log('Time Visitante:', awayTeamName);
-      } else {
+      }
+      // PRIORIDADE 3: Partida selecionada no wizard
+      else if (selectedExistingMatch) {
+        matchId = selectedExistingMatch;
+        const match = allMatches.find(m => m.id === selectedExistingMatch);
+        homeTeamName = match?.home_team?.name || 'Time Casa';
+        awayTeamName = match?.away_team?.name || 'Time Visitante';
+        
+        console.log('=== USANDO PARTIDA SELECIONADA ===');
+        console.log('Match ID:', matchId);
+        console.log('Time Casa:', homeTeamName);
+        console.log('Time Visitante:', awayTeamName);
+      }
+      // FALLBACK: Criar partida aqui (não deveria chegar aqui no novo fluxo)
+      else {
         // VALIDATION: Check teams are different
         if (matchData.homeTeamId && matchData.awayTeamId && matchData.homeTeamId === matchData.awayTeamId) {
           setProcessingStage('idle');
@@ -1021,7 +1138,7 @@ export default function VideoUpload() {
         homeTeamName = homeTeam?.name || 'Time Casa';
         awayTeamName = awayTeam?.name || 'Time Visitante';
 
-        console.log('=== CRIANDO NOVA PARTIDA ===');
+        console.log('=== FALLBACK: CRIANDO NOVA PARTIDA ===');
         console.log('Time Casa:', homeTeamName);
         console.log('Time Visitante:', awayTeamName);
 
@@ -1912,7 +2029,8 @@ export default function VideoUpload() {
               <MatchSetupCard
                 data={matchData}
                 onChange={setMatchData}
-                onContinue={() => setCurrentStep('videos')}
+                onContinue={handleMatchSetupContinue}
+                isCreating={isCreatingMatch}
               />
             </div>
           )}
@@ -2036,15 +2154,7 @@ export default function VideoUpload() {
                   {/* Half Selection Buttons */}
                   <div className="grid grid-cols-2 gap-4">
                     <button
-                      onClick={() => {
-                        const matchId = getValidMatchId();
-                        if (!matchId) {
-                          toast({ title: "Partida não selecionada", description: "Selecione ou crie uma partida primeiro.", variant: "destructive" });
-                          return;
-                        }
-                        setLocalBrowserHalf('first');
-                        setShowLocalBrowser(true);
-                      }}
+                      onClick={() => handleOpenLocalBrowser('first')}
                       className="group relative p-6 rounded-lg border-2 border-dashed border-blue-500/30 bg-blue-500/5 hover:border-blue-400 hover:bg-blue-500/10 transition-all text-center"
                     >
                       <div className="flex flex-col items-center gap-2">
@@ -2060,15 +2170,7 @@ export default function VideoUpload() {
                     </button>
                     
                     <button
-                      onClick={() => {
-                        const matchId = getValidMatchId();
-                        if (!matchId) {
-                          toast({ title: "Partida não selecionada", description: "Selecione ou crie uma partida primeiro.", variant: "destructive" });
-                          return;
-                        }
-                        setLocalBrowserHalf('second');
-                        setShowLocalBrowser(true);
-                      }}
+                      onClick={() => handleOpenLocalBrowser('second')}
                       className="group relative p-6 rounded-lg border-2 border-dashed border-orange-500/30 bg-orange-500/5 hover:border-orange-400 hover:bg-orange-500/10 transition-all text-center"
                     >
                       <div className="flex flex-col items-center gap-2">
@@ -2086,15 +2188,7 @@ export default function VideoUpload() {
                   
                   {/* Full match button */}
                   <button
-                    onClick={() => {
-                      const matchId = getValidMatchId();
-                      if (!matchId) {
-                        toast({ title: "Partida não selecionada", description: "Selecione ou crie uma partida primeiro.", variant: "destructive" });
-                        return;
-                      }
-                      setLocalBrowserHalf(null);
-                      setShowLocalBrowser(true);
-                    }}
+                    onClick={() => handleOpenLocalBrowser(null)}
                     className="w-full group relative p-4 rounded-lg border-2 border-dashed border-emerald-500/30 bg-emerald-500/5 hover:border-emerald-400 hover:bg-emerald-500/10 transition-all"
                   >
                     <div className="flex items-center justify-center gap-3">

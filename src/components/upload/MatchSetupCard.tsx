@@ -4,7 +4,7 @@ import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { useTeams } from '@/hooks/useTeams';
-import { ArrowRight, Trophy, MapPin, Calendar, Clock } from 'lucide-react';
+import { ArrowRight, Trophy, MapPin, Calendar, Clock, Loader2 } from 'lucide-react';
 
 export interface MatchSetupData {
   homeTeamId: string;
@@ -18,10 +18,11 @@ export interface MatchSetupData {
 interface MatchSetupCardProps {
   data: MatchSetupData;
   onChange: (data: MatchSetupData) => void;
-  onContinue: () => void;
+  onContinue: () => Promise<void> | void;
+  isCreating?: boolean;
 }
 
-export function MatchSetupCard({ data, onChange, onContinue }: MatchSetupCardProps) {
+export function MatchSetupCard({ data, onChange, onContinue, isCreating }: MatchSetupCardProps) {
   const { data: teams, isLoading: teamsLoading } = useTeams();
 
   const updateField = (field: keyof MatchSetupData, value: string) => {
@@ -225,14 +226,23 @@ export function MatchSetupCard({ data, onChange, onContinue }: MatchSetupCardPro
         <div className="pt-4">
           <Button 
             onClick={onContinue}
-            disabled={!canContinue}
+            disabled={!canContinue || isCreating}
             className="w-full"
             size="lg"
           >
-            Continuar para Vídeos
-            <ArrowRight className="ml-2 h-5 w-5" />
+            {isCreating ? (
+              <>
+                <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+                Criando partida...
+              </>
+            ) : (
+              <>
+                Continuar para Vídeos
+                <ArrowRight className="ml-2 h-5 w-5" />
+              </>
+            )}
           </Button>
-          {!canContinue && (
+          {!canContinue && !isCreating && (
             <p className="text-xs text-muted-foreground text-center mt-2">
               Selecione os dois times para continuar
             </p>
