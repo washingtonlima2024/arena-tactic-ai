@@ -3790,6 +3790,109 @@ def cancel_async_job(job_id):
 
 
 # ============================================================================
+# STORAGE CLEANUP
+# ============================================================================
+
+@app.route('/api/storage/cleanup-temp', methods=['POST', 'DELETE'])
+def cleanup_temp_folders():
+    """Remove all temp-* folders from storage directory."""
+    try:
+        if not os.path.exists(STORAGE_DIR):
+            return jsonify({
+                'success': True,
+                'message': 'Storage directory does not exist',
+                'deleted': [],
+                'total_freed_mb': 0
+            })
+        
+        deleted_folders = []
+        total_freed_bytes = 0
+        
+        # Find all temp-* folders
+        for item in os.listdir(STORAGE_DIR):
+            if item.startswith('temp-') or item.startswith('temp_'):
+                folder_path = os.path.join(STORAGE_DIR, item)
+                if os.path.isdir(folder_path):
+                    # Calculate folder size before deletion
+                    folder_size = 0
+                    for root, dirs, files in os.walk(folder_path):
+                        for f in files:
+                            try:
+                                folder_size += os.path.getsize(os.path.join(root, f))
+                            except:
+                                pass
+                    
+                    # Delete the folder
+                    try:
+                        import shutil
+                        shutil.rmtree(folder_path)
+                        deleted_folders.append({
+                            'name': item,
+                            'size_mb': round(folder_size / (1024 * 1024), 2)
+                        })
+                        total_freed_bytes += folder_size
+                        print(f"[CLEANUP] ✓ Deleted: {item} ({folder_size / (1024 * 1024):.2f} MB)")
+                    except Exception as e:
+                        print(f"[CLEANUP] ✗ Failed to delete {item}: {e}")
+        
+        total_freed_mb = round(total_freed_bytes / (1024 * 1024), 2)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Deleted {len(deleted_folders)} temp folder(s)',
+            'deleted': deleted_folders,
+            'total_freed_mb': total_freed_mb
+        })
+    
+    except Exception as e:
+        print(f"[CLEANUP] Error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/storage/temp-folders', methods=['GET'])
+def list_temp_folders():
+    """List all temp-* folders in storage directory."""
+    try:
+        if not os.path.exists(STORAGE_DIR):
+            return jsonify({'folders': [], 'total_size_mb': 0})
+        
+        temp_folders = []
+        total_size = 0
+        
+        for item in os.listdir(STORAGE_DIR):
+            if item.startswith('temp-') or item.startswith('temp_'):
+                folder_path = os.path.join(STORAGE_DIR, item)
+                if os.path.isdir(folder_path):
+                    # Calculate folder size
+                    folder_size = 0
+                    file_count = 0
+                    for root, dirs, files in os.walk(folder_path):
+                        for f in files:
+                            try:
+                                folder_size += os.path.getsize(os.path.join(root, f))
+                                file_count += 1
+                            except:
+                                pass
+                    
+                    temp_folders.append({
+                        'name': item,
+                        'path': folder_path,
+                        'size_mb': round(folder_size / (1024 * 1024), 2),
+                        'file_count': file_count
+                    })
+                    total_size += folder_size
+        
+        return jsonify({
+            'folders': temp_folders,
+            'total_size_mb': round(total_size / (1024 * 1024), 2),
+            'count': len(temp_folders)
+        })
+    
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
