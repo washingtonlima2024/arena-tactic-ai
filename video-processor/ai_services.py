@@ -403,6 +403,108 @@ def transcribe_audio(audio_path: str, language: str = 'pt') -> Optional[str]:
     return data.get('text')
 
 
+def _transcribe_with_elevenlabs(audio_path: str, match_id: str = None) -> Dict[str, Any]:
+    """
+    Transcribe audio using ElevenLabs Scribe API (scribe_v1).
+    
+    Supports files up to ~1GB, better quality for Portuguese.
+    
+    Args:
+        audio_path: Path to audio file
+        match_id: Optional match ID for metadata
+    
+    Returns:
+        Dict with 'success', 'text', 'srtContent', 'segments'
+    """
+    if not ELEVENLABS_API_KEY:
+        return {"error": "ELEVENLABS_API_KEY not configured", "success": False}
+    
+    try:
+        audio_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
+        print(f"[ElevenLabs] Transcrevendo {audio_size_mb:.1f}MB com Scribe v1...")
+        
+        with open(audio_path, 'rb') as audio_file:
+            response = requests.post(
+                'https://api.elevenlabs.io/v1/speech-to-text',
+                headers={
+                    'xi-api-key': ELEVENLABS_API_KEY
+                },
+                files={
+                    'file': ('audio.mp3', audio_file, 'audio/mpeg')
+                },
+                data={
+                    'model_id': 'scribe_v1',
+                    'language_code': 'por',
+                    'diarize': 'false',
+                    'tag_audio_events': 'false'
+                },
+                timeout=900  # 15 minutes for large files
+            )
+        
+        if not response.ok:
+            error_text = response.text[:500] if response.text else 'Unknown error'
+            print(f"[ElevenLabs] Erro {response.status_code}: {error_text}")
+            return {"error": f"ElevenLabs error: {response.status_code}", "success": False}
+        
+        data = response.json()
+        text = data.get('text', '')
+        words = data.get('words', [])
+        
+        if not text:
+            return {"error": "ElevenLabs returned empty transcription", "success": False}
+        
+        # Convert words to SRT format
+        srt_lines = []
+        segment_size = 10  # Words per subtitle line
+        
+        for i in range(0, len(words), segment_size):
+            chunk_words = words[i:i+segment_size]
+            if not chunk_words:
+                continue
+            
+            start_time = chunk_words[0].get('start', 0)
+            end_time = chunk_words[-1].get('end', start_time + 1)
+            chunk_text = ' '.join(w.get('text', '') for w in chunk_words).strip()
+            
+            if chunk_text:
+                idx = (i // segment_size) + 1
+                start_str = _format_srt_time(start_time)
+                end_str = _format_srt_time(end_time)
+                srt_lines.append(f"{idx}\n{start_str} --> {end_str}\n{chunk_text}\n")
+        
+        srt_content = '\n'.join(srt_lines)
+        
+        # Build segments array for compatibility
+        segments = []
+        for i in range(0, len(words), segment_size):
+            chunk_words = words[i:i+segment_size]
+            if not chunk_words:
+                continue
+            segments.append({
+                'start': chunk_words[0].get('start', 0),
+                'end': chunk_words[-1].get('end', 0),
+                'text': ' '.join(w.get('text', '') for w in chunk_words).strip()
+            })
+        
+        print(f"[ElevenLabs] ✓ Transcrição completa: {len(text)} chars, {len(segments)} segmentos")
+        
+        return {
+            "success": True,
+            "text": text,
+            "srtContent": srt_content,
+            "segments": segments,
+            "matchId": match_id,
+            "provider": "elevenlabs"
+        }
+        
+    except requests.exceptions.Timeout:
+        print(f"[ElevenLabs] Timeout na transcrição")
+        return {"error": "ElevenLabs timeout", "success": False}
+    except Exception as e:
+        print(f"[ElevenLabs] Erro: {e}")
+        return {"error": f"ElevenLabs error: {str(e)}", "success": False}
+
+
 def analyze_match_events(
     transcription: str,
     home_team: str,
@@ -1281,10 +1383,12 @@ def transcribe_large_video(
     import math
     from storage import get_file_path, STORAGE_DIR
     
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY not configured")
+    # Check if any transcription API is available
+    if not ELEVENLABS_API_KEY and not OPENAI_API_KEY:
+        raise ValueError("Nenhuma API de transcrição configurada. Configure ElevenLabs ou OpenAI em Configurações > API.")
     
     print(f"[Transcribe] Iniciando transcrição para: {video_url}")
+    print(f"[Transcribe] APIs disponíveis: ElevenLabs={'✓' if ELEVENLABS_API_KEY else '✗'}, Whisper={'✓' if OPENAI_API_KEY else '✗'}")
     
     with tempfile.TemporaryDirectory() as tmpdir:
         video_path = os.path.join(tmpdir, 'video.mp4')
@@ -1340,6 +1444,22 @@ def transcribe_large_video(
         audio_size_bytes = os.path.getsize(audio_path)
         audio_size_mb = audio_size_bytes / (1024 * 1024)
         print(f"[Transcribe] Tamanho do áudio: {audio_size_mb:.2f} MB")
+        
+        # Try ElevenLabs first (supports larger files)
+        if ELEVENLABS_API_KEY:
+            print(f"[Transcribe] Tentando ElevenLabs Scribe...")
+            result = _transcribe_with_elevenlabs(audio_path, match_id)
+            if result.get('success'):
+                print(f"[Transcribe] ✓ ElevenLabs sucesso!")
+                return result
+            else:
+                print(f"[Transcribe] ⚠ ElevenLabs falhou: {result.get('error', 'Unknown')}")
+        
+        # Fallback to Whisper
+        if not OPENAI_API_KEY:
+            return {"error": "ElevenLabs falhou e OpenAI não está configurado"}
+        
+        print(f"[Transcribe] Usando Whisper como fallback...")
         
         # Whisper API limit is ~25MB, use 24MB as safe threshold
         if audio_size_mb <= 24:

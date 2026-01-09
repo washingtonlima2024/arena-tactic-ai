@@ -61,6 +61,9 @@ def load_api_keys_from_db():
             elif s.setting_key == 'gemini_api_key' and s.setting_value:
                 ai_services.set_api_keys(google_key=s.setting_value)
                 keys_loaded.append('GOOGLE')
+            elif s.setting_key == 'elevenlabs_api_key' and s.setting_value:
+                ai_services.set_api_keys(elevenlabs_key=s.setting_value)
+                keys_loaded.append('ELEVENLABS')
             elif s.setting_key == 'LOVABLE_API_KEY' and s.setting_value:
                 ai_services.set_api_keys(lovable_key=s.setting_value)
                 keys_loaded.append('LOVABLE')
