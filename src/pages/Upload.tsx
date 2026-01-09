@@ -330,9 +330,12 @@ export default function VideoUpload() {
         );
       }, 1000);
 
-      // Upload para storage local - matchId temporário se ainda não existir
-      const tempMatchId = selectedExistingMatch || 'temp-' + Date.now();
-      const result = await apiClient.uploadFile(tempMatchId, 'videos', file, fileName);
+      // Validar que temos uma partida selecionada ANTES de fazer upload
+      const matchId = selectedExistingMatch || existingMatchId;
+      if (!matchId) {
+        throw new Error('Selecione uma partida primeiro antes de fazer upload.');
+      }
+      const result = await apiClient.uploadFile(matchId, 'videos', file, fileName);
 
       clearInterval(progressInterval);
 
@@ -562,7 +565,15 @@ export default function VideoUpload() {
 
   // Handle local file selection (no upload - just link the path)
   const handleLocalFileSelect = async (file: { path: string; name: string; size_mb: number }) => {
-    const matchId = selectedExistingMatch || existingMatchId || 'temp-' + Date.now();
+    const matchId = selectedExistingMatch || existingMatchId;
+    if (!matchId) {
+      toast({
+        title: "Partida não selecionada",
+        description: "Selecione ou crie uma partida primeiro.",
+        variant: "destructive",
+      });
+      return;
+    }
     const videoType = localBrowserHalf === 'first' ? 'first_half' : 
                       localBrowserHalf === 'second' ? 'second_half' : 'full';
     
