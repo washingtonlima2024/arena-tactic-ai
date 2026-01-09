@@ -24,7 +24,8 @@ export async function isLocalServerAvailable(): Promise<boolean> {
     const timeout = setTimeout(() => controller.abort(), 3000);
     
     const response = await fetch(`${getApiBase()}/health`, { 
-      signal: controller.signal 
+      signal: controller.signal,
+      headers: { 'ngrok-skip-browser-warning': 'true' }
     });
     clearTimeout(timeout);
     
@@ -46,6 +47,7 @@ async function apiRequest<T>(
     ...options,
     headers: {
       'Content-Type': 'application/json',
+      'ngrok-skip-browser-warning': 'true', // Bypass ngrok warning page
       ...options.headers,
     },
   });
