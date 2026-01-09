@@ -500,7 +500,24 @@ export const apiClient = {
   transcribeAudio: (data: { audio: string; language?: string }) =>
     apiRequest<{ text: string }>('/api/transcribe-audio', { method: 'POST', body: JSON.stringify(data) }),
 
-  transcribeLargeVideo: async (data: { videoUrl: string; matchId?: string; language?: string }): Promise<{ success: boolean; text: string; srtContent?: string; requiresLocalServer?: boolean; suggestion?: string }> => {
+  transcribeLargeVideo: async (data: { videoUrl: string; matchId?: string; language?: string; sizeBytes?: number }): Promise<{ success: boolean; text: string; srtContent?: string; requiresLocalServer?: boolean; suggestion?: string }> => {
+    const serverUp = await isLocalServerAvailable();
+    const sizeMB = (data.sizeBytes || 0) / (1024 * 1024);
+    
+    // Vídeos > 500MB EXIGEM servidor local
+    if (sizeMB > 500 && !serverUp) {
+      console.warn(`[apiClient] Vídeo de ${sizeMB.toFixed(0)}MB requer servidor local`);
+      return {
+        success: false,
+        text: '',
+        requiresLocalServer: true,
+        suggestion: `Vídeo de ${sizeMB.toFixed(0)}MB detectado. Para processar:\n` +
+          `1. Abra o terminal na pasta video-processor\n` +
+          `2. Execute: python server.py\n` +
+          `3. Use o modo "Arquivo Local" na interface`
+      };
+    }
+    
     return apiRequestWithFallback<{ success: boolean; text: string; srtContent?: string; requiresLocalServer?: boolean; suggestion?: string }>(
       '/api/transcribe-large-video',
       'transcription',

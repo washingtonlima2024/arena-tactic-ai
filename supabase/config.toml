@@ -3,41 +3,8 @@ project_id = "wtpvajxekyfekdmypcok"
 [functions.analyze-match]
 verify_jwt = false
 
-[functions.arena-chatbot]
-verify_jwt = false
-
-[functions.arena-tts]
+[functions.transcribe-large-video]
 verify_jwt = false
 
 [functions.elevenlabs-scribe-token]
-verify_jwt = false
-
-[functions.extract-live-events]
-verify_jwt = false
-
-[functions.finalize-match-analysis]
-verify_jwt = false
-
-[functions.generate-live-analysis]
-verify_jwt = false
-
-[functions.generate-narration]
-verify_jwt = false
-
-[functions.generate-podcast]
-verify_jwt = false
-
-[functions.generate-thumbnail]
-verify_jwt = false
-
-[functions.team-chatbot]
-verify_jwt = false
-
-[functions.transcribe-audio]
-verify_jwt = false
-
-[functions.transcribe-audio-whisper]
-verify_jwt = false
-
-[functions.transcribe-large-video]
 verify_jwt = false

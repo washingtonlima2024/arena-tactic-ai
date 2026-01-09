@@ -1174,28 +1174,60 @@ export default function VideoUpload() {
       console.log('Transcrição 2º Tempo:', secondHalfTranscription ? `${secondHalfTranscription.length} chars` : 'N/A');
 
       if (isFullMatchAnalysis && firstHalfTranscription) {
-        // ANÁLISE DE PARTIDA COMPLETA (0-90 min)
-        console.log('Iniciando análise da PARTIDA COMPLETA (0-90 min)...');
-        setProcessingMessage('Detectando eventos em partida completa (0-90 min)...');
+        // ANÁLISE DE PARTIDA COMPLETA EM 2 FASES (0-45 e 45-90)
+        // Dividir em 2 análises melhora significativamente a detecção de gols
+        console.log('Iniciando análise da PARTIDA COMPLETA em 2 fases...');
+        
+        // FASE 1: Primeiro Tempo (0-45 min)
+        setProcessingMessage('Detectando eventos do 1º tempo (0-45 min)...');
         
         try {
-          const result = await startAnalysis({
+          const result1 = await startAnalysis({
             matchId,
             transcription: firstHalfTranscription,
             homeTeam: homeTeamName,
             awayTeam: awayTeamName,
             gameStartMinute: 0,
-            gameEndMinute: 90, // Partida completa
+            gameEndMinute: 45,
+            halfType: 'first',
           });
           
-          totalEventsDetected += result.eventsDetected || 0;
-          setProcessingProgress(90);
-          setProcessingMessage(`✓ ${result.eventsDetected} eventos detectados`);
+          totalEventsDetected += result1.eventsDetected || 0;
+          setProcessingProgress(70);
+          setProcessingMessage(`✓ 1º tempo: ${result1.eventsDetected} eventos`);
+          console.log(`1º tempo: ${result1.eventsDetected} eventos detectados`);
         } catch (error) {
-          console.error('Erro na análise da partida completa:', error);
+          console.error('Erro na análise do 1º tempo (full):', error);
           toast({
-            title: "⚠️ Erro na análise",
-            description: "Não foi possível analisar a partida",
+            title: "⚠️ Erro na análise do 1º tempo",
+            description: "Continuando com 2º tempo...",
+            variant: "destructive",
+          });
+        }
+        
+        // FASE 2: Segundo Tempo (45-90 min)
+        setProcessingMessage('Detectando eventos do 2º tempo (45-90 min)...');
+        
+        try {
+          const result2 = await startAnalysis({
+            matchId,
+            transcription: firstHalfTranscription,
+            homeTeam: homeTeamName,
+            awayTeam: awayTeamName,
+            gameStartMinute: 45,
+            gameEndMinute: 90,
+            halfType: 'second',
+          });
+          
+          totalEventsDetected += result2.eventsDetected || 0;
+          setProcessingProgress(90);
+          setProcessingMessage(`✓ 2º tempo: ${result2.eventsDetected} eventos`);
+          console.log(`2º tempo: ${result2.eventsDetected} eventos detectados`);
+        } catch (error) {
+          console.error('Erro na análise do 2º tempo (full):', error);
+          toast({
+            title: "⚠️ Erro na análise do 2º tempo",
+            description: "Alguns eventos podem não ter sido detectados",
             variant: "destructive",
           });
         }
@@ -1272,6 +1304,19 @@ export default function VideoUpload() {
       setProcessingStage('saving');
       setProcessingProgress(95);
       setProcessingMessage('Salvando eventos...');
+
+      // Atualizar status dos vídeos para 'analyzed'
+      const processedSegments = segments.filter(s => s.status === 'complete' || s.status === 'ready');
+      for (const segment of processedSegments) {
+        if (segment.id) {
+          try {
+            await apiClient.updateVideo(segment.id, { status: 'analyzed' });
+            console.log(`[Upload] Vídeo ${segment.id} status atualizado para 'analyzed'`);
+          } catch (err) {
+            console.warn(`[Upload] Falha ao atualizar status do vídeo ${segment.id}:`, err);
+          }
+        }
+      }
 
       // Complete!
       setProcessingStage('complete');
