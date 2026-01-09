@@ -1,8 +1,9 @@
 // Simplified context for clip status monitoring
 // Server-side processing handles clip generation automatically
+// 100% Local Mode - Uses apiClient instead of Supabase
 
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient, isLocalServerAvailable } from '@/lib/apiClient';
 
 interface ClipStatus {
   eventId: string;
@@ -51,30 +52,32 @@ interface ClipSyncProviderProps {
 export function ClipSyncProvider({ children, matchId }: ClipSyncProviderProps) {
   const [clipStatuses, setClipStatuses] = useState<ClipStatus[]>([]);
 
-  // Fetch clip statuses from database
+  // Fetch clip statuses from local API
   const refreshStatuses = useCallback(async () => {
     if (!matchId) {
       setClipStatuses([]);
       return;
     }
 
-    const { data, error } = await supabase
-      .from('match_events')
-      .select('id, clip_url, clip_pending')
-      .eq('match_id', matchId);
-
-    if (error) {
-      console.error('[ClipSync] Error fetching statuses:', error);
+    const serverUp = await isLocalServerAvailable();
+    if (!serverUp) {
+      console.warn('[ClipSync] Servidor local indisponível');
       return;
     }
 
-    const statuses: ClipStatus[] = (data || []).map(event => ({
-      eventId: event.id,
-      hasClip: !!event.clip_url,
-      isPending: event.clip_pending ?? false
-    }));
+    try {
+      const events = await apiClient.getMatchEvents(matchId);
+      
+      const statuses: ClipStatus[] = (events || []).map((event: any) => ({
+        eventId: event.id,
+        hasClip: !!event.clip_url,
+        isPending: event.clip_pending ?? false
+      }));
 
-    setClipStatuses(statuses);
+      setClipStatuses(statuses);
+    } catch (error) {
+      console.error('[ClipSync] Error fetching statuses:', error);
+    }
   }, [matchId]);
 
   // Initial fetch
@@ -82,50 +85,16 @@ export function ClipSyncProvider({ children, matchId }: ClipSyncProviderProps) {
     refreshStatuses();
   }, [refreshStatuses]);
 
-  // Listen to realtime changes
+  // Polling for updates (every 10 seconds when match is active)
   useEffect(() => {
     if (!matchId) return;
 
-    const channel = supabase
-      .channel(`clip-status-${matchId}`)
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'public',
-          table: 'match_events',
-          filter: `match_id=eq.${matchId}`
-        },
-        (payload) => {
-          if (payload.eventType === 'INSERT' || payload.eventType === 'UPDATE') {
-            const event = payload.new as { id: string; clip_url?: string; clip_pending?: boolean };
-            setClipStatuses(prev => {
-              const existing = prev.findIndex(s => s.eventId === event.id);
-              const newStatus: ClipStatus = {
-                eventId: event.id,
-                hasClip: !!event.clip_url,
-                isPending: event.clip_pending ?? false
-              };
-              
-              if (existing >= 0) {
-                const updated = [...prev];
-                updated[existing] = newStatus;
-                return updated;
-              }
-              return [...prev, newStatus];
-            });
-          } else if (payload.eventType === 'DELETE') {
-            const event = payload.old as { id: string };
-            setClipStatuses(prev => prev.filter(s => s.eventId !== event.id));
-          }
-        }
-      )
-      .subscribe();
+    const interval = setInterval(() => {
+      refreshStatuses();
+    }, 10000);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [matchId]);
+    return () => clearInterval(interval);
+  }, [matchId, refreshStatuses]);
 
   // Computed values
   const pendingCount = clipStatuses.filter(s => s.isPending).length;

@@ -1,10 +1,7 @@
 /**
  * Arena Play - API Client para servidor Python local
- * Substitui as chamadas Supabase por chamadas HTTP ao servidor local
- * Com fallback para Supabase quando servidor local indisponível
+ * Modo 100% Local - Sem dependências de Supabase
  */
-
-import { supabase } from '@/integrations/supabase/client';
 
 // Prioriza localhost quando disponível, fallback para ngrok
 const getApiBase = () => {
@@ -50,6 +47,26 @@ export async function isLocalServerAvailable(): Promise<boolean> {
     serverAvailable = false;
     lastServerCheck = now;
     return false;
+  }
+}
+
+// Reset server availability cache (para forçar nova verificação)
+export function resetServerAvailability(): void {
+  serverAvailable = null;
+  lastServerCheck = 0;
+}
+
+// Erro customizado para servidor offline
+class LocalServerOfflineError extends Error {
+  constructor() {
+    super(
+      'Servidor Python não disponível.\n\n' +
+      'Para usar o Arena Play:\n' +
+      '1. Abra o terminal na pasta video-processor\n' +
+      '2. Execute: python server.py\n' +
+      '3. Aguarde "Running on http://localhost:5000"'
+    );
+    this.name = 'LocalServerOfflineError';
   }
 }
 
@@ -149,66 +166,20 @@ export interface VideoInfo {
   estimated_size_480p_mb: number;
 }
 
-// Fallback API request with Supabase
-async function apiRequestWithFallback<T>(
-  endpoint: string,
-  tableName: string,
-  options: RequestInit = {},
-  supabaseFallback?: () => Promise<T>
-): Promise<T> {
-  const serverUp = await isLocalServerAvailable();
-  
-  if (serverUp) {
-    return apiRequest<T>(endpoint, options);
+// Wrapper para verificar servidor antes de requisição
+async function ensureServerAvailable(): Promise<void> {
+  const available = await isLocalServerAvailable();
+  if (!available) {
+    throw new LocalServerOfflineError();
   }
-  
-  // Fallback to Supabase
-  if (supabaseFallback) {
-    console.log(`[apiClient] Local server unavailable, using Supabase fallback for ${tableName}`);
-    return supabaseFallback();
-  }
-  
-  throw new Error(`Local server unavailable and no fallback for ${endpoint}`);
-}
-// Upload to Supabase Storage as fallback
-async function uploadToSupabase(
-  matchId: string, 
-  subfolder: string, 
-  file: File, 
-  filename?: string
-): Promise<{ url: string; filename: string; match_id: string; subfolder: string }> {
-  const sanitizedFilename = filename || `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`;
-  const path = `${matchId}/${subfolder}/${sanitizedFilename}`;
-  
-  // Upload to match-videos bucket
-  const { data, error } = await supabase.storage
-    .from('match-videos')
-    .upload(path, file, { 
-      cacheControl: '3600',
-      upsert: true 
-    });
-
-  if (error) {
-    throw new Error(`Supabase upload failed: ${error.message}`);
-  }
-
-  // Get public URL
-  const { data: urlData } = supabase.storage
-    .from('match-videos')
-    .getPublicUrl(path);
-
-  return {
-    url: urlData.publicUrl,
-    filename: sanitizedFilename,
-    match_id: matchId,
-    subfolder
-  };
 }
 
 export const apiClient = {
   // ============== Configuration ==============
   setApiUrl: (url: string) => localStorage.setItem('arenaApiUrl', url),
   getApiUrl: () => getApiBase(),
+  isServerAvailable: isLocalServerAvailable,
+  resetServerCache: resetServerAvailability,
 
   // ============== Health ==============
   health: () => apiRequest<{ status: string; ffmpeg: boolean }>('/health'),
@@ -220,170 +191,19 @@ export const apiClient = {
   updateTeam: (id: string, team: any) => apiRequest<any>(`/api/teams/${id}`, { method: 'PUT', body: JSON.stringify(team) }),
   deleteTeam: (id: string) => apiRequest<any>(`/api/teams/${id}`, { method: 'DELETE' }),
 
-  // ============== Matches (with Supabase fallback) ==============
-  getMatches: async () => {
-    return apiRequestWithFallback<any[]>(
-      '/api/matches',
-      'matches',
-      {},
-      async () => {
-        const { data, error } = await supabase
-          .from('matches')
-          .select('*, home_team:teams!matches_home_team_id_fkey(*), away_team:teams!matches_away_team_id_fkey(*)')
-          .order('match_date', { ascending: false });
-        if (error) throw new Error(error.message);
-        return data || [];
-      }
-    );
-  },
-  
-  getMatch: async (id: string) => {
-    return apiRequestWithFallback<any>(
-      `/api/matches/${id}`,
-      'matches',
-      {},
-      async () => {
-        const { data, error } = await supabase
-          .from('matches')
-          .select('*, home_team:teams!matches_home_team_id_fkey(*), away_team:teams!matches_away_team_id_fkey(*)')
-          .eq('id', id)
-          .maybeSingle();
-        if (error) throw new Error(error.message);
-        return data;
-      }
-    );
-  },
-  
-  createMatch: async (match: any) => {
-    return apiRequestWithFallback<any>(
-      '/api/matches',
-      'matches',
-      { method: 'POST', body: JSON.stringify(match) },
-      async () => {
-        const { data, error } = await supabase
-          .from('matches')
-          .insert(match)
-          .select()
-          .single();
-        if (error) throw new Error(error.message);
-        return data;
-      }
-    );
-  },
-  
-  updateMatch: async (id: string, match: any) => {
-    return apiRequestWithFallback<any>(
-      `/api/matches/${id}`,
-      'matches',
-      { method: 'PUT', body: JSON.stringify(match) },
-      async () => {
-        const { data, error } = await supabase
-          .from('matches')
-          .update({ ...match, updated_at: new Date().toISOString() })
-          .eq('id', id)
-          .select()
-          .single();
-        if (error) throw new Error(error.message);
-        return data;
-      }
-    );
-  },
-  deleteMatch: async (id: string) => {
-    return apiRequestWithFallback<any>(
-      `/api/matches/${id}`,
-      'matches',
-      { method: 'DELETE' },
-      async () => {
-        // Cascade delete all related data
-        await supabase.from('analysis_jobs').delete().eq('match_id', id);
-        await supabase.from('match_events').delete().eq('match_id', id);
-        await supabase.from('videos').delete().eq('match_id', id);
-        await supabase.from('generated_audio').delete().eq('match_id', id);
-        await supabase.from('thumbnails').delete().eq('match_id', id);
-        await supabase.from('chatbot_conversations').delete().eq('match_id', id);
-        
-        const { error } = await supabase.from('matches').delete().eq('id', id);
-        if (error) throw new Error(error.message);
-        return { success: true };
-      }
-    );
-  },
+  // ============== Matches ==============
+  getMatches: () => apiRequest<any[]>('/api/matches'),
+  getMatch: (id: string) => apiRequest<any>(`/api/matches/${id}`),
+  createMatch: (match: any) => apiRequest<any>('/api/matches', { method: 'POST', body: JSON.stringify(match) }),
+  updateMatch: (id: string, match: any) => apiRequest<any>(`/api/matches/${id}`, { method: 'PUT', body: JSON.stringify(match) }),
+  deleteMatch: (id: string) => apiRequest<any>(`/api/matches/${id}`, { method: 'DELETE' }),
 
-  // ============== Events (with Supabase fallback) ==============
-  getMatchEvents: async (matchId: string) => {
-    return apiRequestWithFallback<any[]>(
-      `/api/matches/${matchId}/events`,
-      'match_events',
-      {},
-      async () => {
-        const { data, error } = await supabase
-          .from('match_events')
-          .select('*')
-          .eq('match_id', matchId)
-          .order('minute', { ascending: true });
-        if (error) throw new Error(error.message);
-        return data || [];
-      }
-    );
-  },
+  // ============== Events ==============
+  getMatchEvents: (matchId: string) => apiRequest<any[]>(`/api/matches/${matchId}/events`),
   getEvent: (id: string) => apiRequest<any>(`/api/events/${id}`),
-  
-  createEvent: async (matchId: string, event: any) => {
-    return apiRequestWithFallback<any>(
-      `/api/matches/${matchId}/events`,
-      'match_events',
-      { method: 'POST', body: JSON.stringify(event) },
-      async () => {
-        const { data, error } = await supabase
-          .from('match_events')
-          .insert({ ...event, match_id: matchId, clip_pending: true })
-          .select()
-          .single();
-        if (error) throw new Error(error.message);
-        return data;
-      }
-    );
-  },
-  
-  updateEvent: async (id: string, event: any) => {
-    return apiRequestWithFallback<any>(
-      `/api/events/${id}`,
-      'match_events',
-      { method: 'PUT', body: JSON.stringify(event) },
-      async () => {
-        // If time or type changed, mark clip as pending
-        const updateData = { ...event };
-        if (event.minute !== undefined || event.second !== undefined || event.event_type !== undefined || event.description !== undefined) {
-          updateData.clip_pending = true;
-        }
-        
-        const { data, error } = await supabase
-          .from('match_events')
-          .update(updateData)
-          .eq('id', id)
-          .select()
-          .single();
-        if (error) throw new Error(error.message);
-        return data;
-      }
-    );
-  },
-  
-  deleteEvent: async (id: string) => {
-    return apiRequestWithFallback<any>(
-      `/api/events/${id}`,
-      'match_events',
-      { method: 'DELETE' },
-      async () => {
-        const { error } = await supabase
-          .from('match_events')
-          .delete()
-          .eq('id', id);
-        if (error) throw new Error(error.message);
-        return { success: true };
-      }
-    );
-  },
+  createEvent: (matchId: string, event: any) => apiRequest<any>(`/api/matches/${matchId}/events`, { method: 'POST', body: JSON.stringify(event) }),
+  updateEvent: (id: string, event: any) => apiRequest<any>(`/api/events/${id}`, { method: 'PUT', body: JSON.stringify(event) }),
+  deleteEvent: (id: string) => apiRequest<any>(`/api/events/${id}`, { method: 'DELETE' }),
 
   // ============== Players ==============
   getPlayers: (teamId?: string) => apiRequest<any[]>(`/api/players${teamId ? `?team_id=${teamId}` : ''}`),
@@ -391,39 +211,8 @@ export const apiClient = {
   updatePlayer: (id: string, player: any) => apiRequest<any>(`/api/players/${id}`, { method: 'PUT', body: JSON.stringify(player) }),
   deletePlayer: (id: string) => apiRequest<any>(`/api/players/${id}`, { method: 'DELETE' }),
 
-  // ============== Videos (with Supabase fallback) ==============
-  getVideos: async (matchId?: string) => {
-    return apiRequestWithFallback<any[]>(
-      `/api/videos${matchId ? `?match_id=${matchId}` : ''}`,
-      'videos',
-      {},
-      async () => {
-        let query = supabase.from('videos').select('*');
-        if (matchId) {
-          query = query.eq('match_id', matchId);
-        }
-        const { data, error } = await query.order('created_at', { ascending: false });
-        if (error) throw new Error(error.message);
-        return data || [];
-      }
-    );
-  },
-  createVideo: async (video: any) => {
-    return apiRequestWithFallback<any>(
-      '/api/videos',
-      'videos',
-      { method: 'POST', body: JSON.stringify(video) },
-      async () => {
-        const { data, error } = await supabase
-          .from('videos')
-          .insert(video)
-          .select()
-          .single();
-        if (error) throw new Error(error.message);
-        return data;
-      }
-    );
-  },
+  // ============== Videos ==============
+  getVideos: (matchId?: string) => apiRequest<any[]>(`/api/videos${matchId ? `?match_id=${matchId}` : ''}`),
   getVideo: async (videoId: string): Promise<any | null> => {
     try {
       return await apiRequest<any>(`/api/videos/${videoId}`, { method: 'GET' });
@@ -431,6 +220,7 @@ export const apiClient = {
       return null;
     }
   },
+  createVideo: (video: any) => apiRequest<any>('/api/videos', { method: 'POST', body: JSON.stringify(video) }),
   updateVideo: (id: string, video: any) => apiRequest<any>(`/api/videos/${id}`, { method: 'PUT', body: JSON.stringify(video) }),
   deleteVideo: (id: string) => apiRequest<any>(`/api/videos/${id}`, { method: 'DELETE' }),
   
@@ -444,25 +234,10 @@ export const apiClient = {
     return apiRequest(`/api/videos/sync/${matchId}`, { method: 'POST' });
   },
 
-  // ============== Analysis Jobs (with Supabase fallback) ==============
+  // ============== Analysis Jobs ==============
   getAnalysisJobs: (matchId?: string) => apiRequest<any[]>(`/api/analysis-jobs${matchId ? `?match_id=${matchId}` : ''}`),
   getAnalysisJob: (id: string) => apiRequest<any>(`/api/analysis-jobs/${id}`),
-  createAnalysisJob: async (job: any) => {
-    return apiRequestWithFallback<any>(
-      '/api/analysis-jobs',
-      'analysis_jobs',
-      { method: 'POST', body: JSON.stringify(job) },
-      async () => {
-        const { data, error } = await supabase
-          .from('analysis_jobs')
-          .insert(job)
-          .select()
-          .single();
-        if (error) throw new Error(error.message);
-        return data;
-      }
-    );
-  },
+  createAnalysisJob: (job: any) => apiRequest<any>('/api/analysis-jobs', { method: 'POST', body: JSON.stringify(job) }),
   updateAnalysisJob: (id: string, job: any) => apiRequest<any>(`/api/analysis-jobs/${id}`, { method: 'PUT', body: JSON.stringify(job) }),
 
   // ============== Audio ==============
@@ -479,48 +254,12 @@ export const apiClient = {
   getThumbnails: (matchId?: string) => apiRequest<any[]>(`/api/thumbnails${matchId ? `?match_id=${matchId}` : ''}`),
   createThumbnail: (thumbnail: any) => apiRequest<any>('/api/thumbnails', { method: 'POST', body: JSON.stringify(thumbnail) }),
 
-  // ============== Settings (with Supabase fallback) ==============
-  getSettings: async () => {
-    return apiRequestWithFallback<any[]>(
-      '/api/settings',
-      'api_settings',
-      {},
-      async () => {
-        const { data, error } = await supabase
-          .from('api_settings')
-          .select('*')
-          .order('setting_key');
-        if (error) throw new Error(error.message);
-        return data || [];
-      }
-    );
-  },
-  
-  upsertSetting: async (setting: { setting_key: string; setting_value: string }) => {
-    return apiRequestWithFallback<any>(
-      '/api/settings',
-      'api_settings',
-      { method: 'POST', body: JSON.stringify(setting) },
-      async () => {
-        const { data, error } = await supabase
-          .from('api_settings')
-          .upsert(
-            { 
-              setting_key: setting.setting_key, 
-              setting_value: setting.setting_value,
-              updated_at: new Date().toISOString()
-            },
-            { onConflict: 'setting_key' }
-          )
-          .select()
-          .single();
-        if (error) throw new Error(error.message);
-        return data;
-      }
-    );
-  },
+  // ============== Settings ==============
+  getSettings: () => apiRequest<any[]>('/api/settings'),
+  upsertSetting: (setting: { setting_key: string; setting_value: string }) => 
+    apiRequest<any>('/api/settings', { method: 'POST', body: JSON.stringify(setting) }),
 
-  // ============== AI Services (com fallback para Edge Functions) ==============
+  // ============== AI Services ==============
   analyzeMatch: async (data: { 
     matchId: string; 
     transcription: string; 
@@ -532,6 +271,8 @@ export const apiClient = {
     autoClip?: boolean;
     includeSubtitles?: boolean;
   }) => {
+    await ensureServerAvailable();
+    
     const body = {
       matchId: data.matchId,
       transcription: data.transcription,
@@ -544,26 +285,11 @@ export const apiClient = {
       includeSubtitles: data.includeSubtitles ?? true,
     };
 
-    const serverUp = await isLocalServerAvailable();
-    
-    if (serverUp) {
-      // Usar timeout longo (10 minutos) para análise de IA
-      return apiRequestLongRunning<any>('/api/analyze-match', { 
-        method: 'POST', 
-        body: JSON.stringify(body)
-      }, 600000); // 10 minutos
-    }
-    
-    // Fallback para Edge Function do Lovable Cloud
-    console.log('[apiClient] Servidor local indisponível, usando Edge Function analyze-match...');
-    const { data: result, error } = await supabase.functions.invoke('analyze-match', { body });
-    
-    if (error) {
-      console.error('[apiClient] Edge Function analyze-match error:', error);
-      throw new Error(error.message || 'Falha na análise via cloud');
-    }
-    
-    return result;
+    // Usar timeout longo (10 minutos) para análise de IA
+    return apiRequestLongRunning<any>('/api/analyze-match', { 
+      method: 'POST', 
+      body: JSON.stringify(body)
+    }, 600000); // 10 minutos
   },
 
   generateNarration: (data: any) =>
@@ -584,72 +310,19 @@ export const apiClient = {
   analyzeGoalPlay: (data: { description: string; scorer?: string; assister?: string; team?: string }) =>
     apiRequest<any>('/api/analyze-goal-play', { method: 'POST', body: JSON.stringify(data) }),
 
-  // ============== Transcription & Live Events (with Supabase fallback) ==============
+  // ============== Transcription ==============
   transcribeAudio: (data: { audio: string; language?: string }) =>
     apiRequest<{ text: string }>('/api/transcribe-audio', { method: 'POST', body: JSON.stringify(data) }),
 
   transcribeLargeVideo: async (data: { videoUrl: string; matchId?: string; language?: string; sizeBytes?: number }): Promise<{ success: boolean; text: string; srtContent?: string; requiresLocalServer?: boolean; suggestion?: string }> => {
-    const sizeMB = (data.sizeBytes || 0) / (1024 * 1024);
-    const serverUp = await isLocalServerAvailable();
-    
-    // Vídeos > 500MB EXIGEM servidor local
-    if (sizeMB > 500 && !serverUp) {
-      console.warn(`[apiClient] Vídeo de ${sizeMB.toFixed(0)}MB requer servidor local`);
-      return {
-        success: false,
-        text: '',
-        requiresLocalServer: true,
-        suggestion: `Vídeo de ${sizeMB.toFixed(0)}MB detectado. Para processar:\n` +
-          `1. Abra o terminal na pasta video-processor\n` +
-          `2. Execute: python server.py\n` +
-          `3. Use o modo "Arquivo Local" na interface`
-      };
-    }
+    await ensureServerAvailable();
     
     // Usar timeout longo (30 minutos) para transcrição via servidor local
-    if (serverUp) {
-      return apiRequestLongRunning<{ success: boolean; text: string; srtContent?: string; requiresLocalServer?: boolean; suggestion?: string }>(
-        '/api/transcribe-large-video',
-        { method: 'POST', body: JSON.stringify(data) },
-        1800000 // 30 minutos
-      );
-    }
-    
-    // Fallback to Supabase Edge Function
-    console.log('[apiClient] Using Supabase Edge Function for transcription');
-    const { data: result, error } = await supabase.functions.invoke('transcribe-large-video', {
-      body: { 
-        videoUrl: data.videoUrl, 
-        matchId: data.matchId,
-        language: data.language || 'pt'
-      }
-    });
-    
-    if (error) {
-      console.error('[apiClient] Edge Function error:', error);
-      throw new Error(error.message || 'Falha na transcrição via cloud');
-    }
-    
-    // Check if video is too large and requires local server
-    if (result?.requiresLocalServer) {
-      console.warn('[apiClient] Video requires local server:', result.suggestion);
-      return {
-        success: false,
-        text: '',
-        requiresLocalServer: true,
-        suggestion: result.suggestion || 'Use o servidor Python local para processar este vídeo.'
-      };
-    }
-    
-    if (!result?.success || !result?.text) {
-      throw new Error(result?.error || 'Resposta inválida da transcrição');
-    }
-    
-    return {
-      success: true,
-      text: result.text,
-      srtContent: result.srtContent || ''
-    };
+    return apiRequestLongRunning<{ success: boolean; text: string; srtContent?: string; requiresLocalServer?: boolean; suggestion?: string }>(
+      '/api/transcribe-large-video',
+      { method: 'POST', body: JSON.stringify(data) },
+      1800000 // 30 minutos
+    );
   },
 
   /**
@@ -670,11 +343,7 @@ export const apiClient = {
     totalParts?: number;
     parts?: Array<{ part: number; text: string; startMinute: number }>;
   }> => {
-    const serverUp = await isLocalServerAvailable();
-    
-    if (!serverUp) {
-      throw new Error('Transcrição com divisão só está disponível com o servidor Python local. Inicie com: cd video-processor && python server.py');
-    }
+    await ensureServerAvailable();
     
     // Usar timeout longo (30 minutos) para transcrição com divisão
     return apiRequestLongRunning('/api/transcribe-split-video', { 
@@ -697,18 +366,8 @@ export const apiClient = {
     apiRequest<any>('/api/detect-players', { method: 'POST', body: JSON.stringify(data) }),
 
   generateThumbnailAI: async (data: { prompt: string; eventId: string; matchId: string; eventType: string }) => {
-    const serverUp = await isLocalServerAvailable();
-    
-    if (serverUp) {
-      return apiRequest<{ imageUrl: string }>('/api/generate-thumbnail', { method: 'POST', body: JSON.stringify(data) });
-    }
-    
-    // Fallback to Supabase Edge Function
-    console.log('[apiClient] Using Supabase Edge Function for thumbnail generation');
-    const { data: result, error } = await supabase.functions.invoke('generate-thumbnail', { body: data });
-    
-    if (error) throw error;
-    return result as { imageUrl: string };
+    await ensureServerAvailable();
+    return apiRequest<{ imageUrl: string }>('/api/generate-thumbnail', { method: 'POST', body: JSON.stringify(data) });
   },
 
   // ============== Search ==============
@@ -761,36 +420,29 @@ export const apiClient = {
   getAllStorageStats: () => apiRequest<any>('/api/storage'),
 
   uploadFile: async (matchId: string, subfolder: string, file: File, filename?: string): Promise<{ url: string; filename: string; match_id: string; subfolder: string }> => {
-    // Try local server first, fallback to Supabase
-    const serverUp = await isLocalServerAvailable();
+    await ensureServerAvailable();
     
-    if (serverUp) {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutos
-      
-      try {
-        const formData = new FormData();
-        formData.append('file', file);
-        if (filename) formData.append('filename', filename);
-        const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal,
-        });
-        clearTimeout(timeoutId);
-        if (!response.ok) throw new Error('Upload failed');
-        return response.json();
-      } catch (error: any) {
-        clearTimeout(timeoutId);
-        if (error.name === 'AbortError') {
-          throw new Error('Upload expirou - arquivo muito grande ou conexão lenta');
-        }
-        throw error;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutos
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      if (filename) formData.append('filename', filename);
+      const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      clearTimeout(timeoutId);
+      if (!response.ok) throw new Error('Upload failed');
+      return response.json();
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('Upload expirou - arquivo muito grande ou conexão lenta');
       }
-    } else {
-      // Fallback to Supabase Storage
-      console.log('[apiClient] Local server unavailable, using Supabase Storage fallback');
-      return uploadToSupabase(matchId, subfolder, file, filename);
+      throw error;
     }
   },
 
@@ -828,10 +480,7 @@ export const apiClient = {
     duration_seconds: number | null;
     symlink_created: boolean;
   }> => {
-    const serverUp = await isLocalServerAvailable();
-    if (!serverUp) {
-      throw new Error('Servidor Python não disponível. O modo "Arquivo Local" requer o servidor rodando em localhost:5000');
-    }
+    await ensureServerAvailable();
     return apiRequest('/api/storage/link-local', { 
       method: 'POST', 
       body: JSON.stringify(data) 
@@ -856,34 +505,16 @@ export const apiClient = {
     includeVignettes?: boolean;
     openingVignette?: string;
     closingVignette?: string;
-  }): Promise<Blob | { clipUrl: string; success: boolean }> => {
-    const isLocalAvailable = await isLocalServerAvailable();
+  }): Promise<Blob> => {
+    await ensureServerAvailable();
     
-    if (isLocalAvailable) {
-      // Usar servidor local (retorna Blob)
-      const response = await fetch(`${getApiBase()}/extract-clip`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data),
-      });
-      if (!response.ok) throw new Error('Extract clip failed');
-      return response.blob();
-    }
-    
-    // Fallback: usar Edge Function
-    console.log('[extractClip] Servidor local indisponível, usando Edge Function...');
-    const { data: result, error } = await supabase.functions.invoke('extract-clip', {
-      body: {
-        eventId: data.eventId,
-        matchId: data.matchId,
-        videoUrl: data.videoUrl,
-        startSeconds: data.startSeconds,
-        durationSeconds: data.durationSeconds
-      }
+    const response = await fetch(`${getApiBase()}/extract-clip`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
     });
-    
-    if (error) throw error;
-    return result as { clipUrl: string; success: boolean };
+    if (!response.ok) throw new Error('Extract clip failed');
+    return response.blob();
   },
 
   extractBatch: async (data: {
@@ -1041,11 +672,7 @@ export const apiClient = {
     autoClip?: boolean;
     autoAnalysis?: boolean;
   }) => {
-    const serverUp = await isLocalServerAvailable();
-    
-    if (!serverUp) {
-      throw new Error('Processamento assíncrono só está disponível com o servidor Python local. Inicie com: cd video-processor && python server.py');
-    }
+    await ensureServerAvailable();
     
     return apiRequest<{ jobId: string; status: string }>('/api/process-match-async', {
       method: 'POST',
