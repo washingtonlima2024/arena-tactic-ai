@@ -1,7 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
 import { apiClient } from '@/lib/apiClient';
-import { getApiMode } from '@/lib/apiMode';
 
 export interface Team {
   id: string;
@@ -35,19 +33,7 @@ export function useTeams() {
   return useQuery({
     queryKey: ['teams'],
     queryFn: async () => {
-      const mode = getApiMode();
-      
-      if (mode === 'local') {
-        try {
-          return await apiClient.getTeams() as Team[];
-        } catch (error) {
-          console.warn('Local API failed, falling back to Supabase:', error);
-        }
-      }
-      
-      const { data, error } = await supabase.from('teams').select('*');
-      if (error) throw error;
-      return data as Team[];
+      return await apiClient.getTeams() as Team[];
     },
   });
 }
@@ -57,19 +43,7 @@ export function useCreateTeam() {
 
   return useMutation({
     mutationFn: async (team: TeamInsert) => {
-      const mode = getApiMode();
-      
-      if (mode === 'local') {
-        try {
-          return await apiClient.createTeam(team);
-        } catch (error) {
-          console.warn('Local API failed, falling back to Supabase:', error);
-        }
-      }
-      
-      const { data, error } = await supabase.from('teams').insert(team).select().single();
-      if (error) throw error;
-      return data;
+      return await apiClient.createTeam(team);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
@@ -82,19 +56,7 @@ export function useUpdateTeam() {
 
   return useMutation({
     mutationFn: async ({ id, ...team }: TeamUpdate & { id: string }) => {
-      const mode = getApiMode();
-      
-      if (mode === 'local') {
-        try {
-          return await apiClient.updateTeam(id, team);
-        } catch (error) {
-          console.warn('Local API failed, falling back to Supabase:', error);
-        }
-      }
-      
-      const { data, error } = await supabase.from('teams').update(team).eq('id', id).select().single();
-      if (error) throw error;
-      return data;
+      return await apiClient.updateTeam(id, team);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
@@ -107,19 +69,7 @@ export function useDeleteTeam() {
 
   return useMutation({
     mutationFn: async (id: string) => {
-      const mode = getApiMode();
-      
-      if (mode === 'local') {
-        try {
-          await apiClient.deleteTeam(id);
-          return;
-        } catch (error) {
-          console.warn('Local API failed, falling back to Supabase:', error);
-        }
-      }
-      
-      const { error } = await supabase.from('teams').delete().eq('id', id);
-      if (error) throw error;
+      await apiClient.deleteTeam(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });

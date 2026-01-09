@@ -86,17 +86,8 @@ export default function Settings() {
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [showElevenlabsKey, setShowElevenlabsKey] = useState(false);
 
-  // API Mode
-  const [apiMode, setApiModeState] = useState<ApiMode>(getApiMode());
-
-  const handleApiModeChange = (useLocal: boolean) => {
-    const newMode: ApiMode = useLocal ? 'local' : 'supabase';
-    setApiMode(newMode);
-    setApiModeState(newMode);
-    toast.success(`Modo alterado para ${useLocal ? 'Local (Python)' : 'Supabase Cloud'}`);
-    // Reload to apply changes
-    setTimeout(() => window.location.reload(), 500);
-  };
+  // API Mode - Sempre local
+  const apiMode: ApiMode = 'local';
 
   // Teams
   const { data: teams, isLoading: teamsLoading } = useTeams();
@@ -857,16 +848,13 @@ export default function Settings() {
                   </p>
                 </div>
 
-                <div className={`rounded-lg border p-4 ${apiMode === 'supabase' ? 'border-primary/30 bg-primary/5' : 'border-muted bg-muted/30'}`}>
+                <div className="rounded-lg border p-4 border-green-500/30 bg-green-500/5">
                   <div className="flex items-center gap-3 mb-2">
-                    <Cloud className={`h-5 w-5 ${apiMode === 'supabase' ? 'text-primary' : 'text-muted-foreground'}`} />
-                    <p className={`font-medium ${apiMode === 'supabase' ? 'text-primary' : 'text-muted-foreground'}`}>
-                      Modo Supabase {apiMode === 'supabase' && '(Ativo)'}
-                    </p>
+                    <CheckCircle2 className="h-5 w-5 text-green-500" />
+                    <p className="font-medium text-green-600">Modo 100% Local Ativo</p>
                   </div>
                   <p className="text-sm text-muted-foreground">
-                    Banco PostgreSQL na nuvem, storage em buckets, Edge Functions para processamento.
-                    Funciona sem servidor local.
+                    Todos os dados são armazenados localmente. Nenhuma dependência de serviços externos.
                   </p>
                 </div>
               </CardContent>

@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
-import { Server, Cloud, Wifi, WifiOff } from 'lucide-react';
+import { Server, Wifi, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { getApiMode } from '@/lib/apiMode';
 import { checkLocalServerAvailable } from '@/lib/apiMode';
 import {
   Tooltip,
@@ -16,16 +15,9 @@ interface ServerStatusIndicatorProps {
 export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps) {
   const [isOnline, setIsOnline] = useState<boolean | null>(null);
   const [checking, setChecking] = useState(true);
-  const apiMode = getApiMode();
 
   useEffect(() => {
     const checkStatus = async () => {
-      if (apiMode === 'supabase') {
-        setIsOnline(true);
-        setChecking(false);
-        return;
-      }
-
       setChecking(true);
       const available = await checkLocalServerAvailable();
       setIsOnline(available);
@@ -33,42 +25,26 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
     };
 
     checkStatus();
-    const interval = setInterval(checkStatus, 10000); // Check every 10 seconds
+    const interval = setInterval(checkStatus, 10000);
 
     return () => clearInterval(interval);
-  }, [apiMode]);
-
-  const isLocal = apiMode === 'local';
-  const Icon = isLocal ? Server : Cloud;
-  const StatusIcon = isOnline ? Wifi : WifiOff;
+  }, []);
 
   const statusColor = checking 
     ? 'bg-yellow-500' 
-    : isLocal
-      ? isOnline 
-        ? 'bg-green-500' 
-        : 'bg-orange-500'
-      : 'bg-blue-500';
+    : isOnline 
+      ? 'bg-green-500' 
+      : 'bg-red-500';
 
-  const statusLabel = isLocal
-    ? isOnline 
-      ? 'Conectado'
-      : 'Usando Cloud'
-    : 'Cloud Ativo';
+  const statusLabel = isOnline ? 'Online' : 'Offline';
 
-  const textColor = isLocal
-    ? isOnline 
-      ? 'text-green-500'
-      : 'text-orange-500'
-    : 'text-blue-500';
+  const textColor = isOnline ? 'text-green-500' : 'text-red-500';
 
-  const statusText = isLocal
-    ? checking
-      ? 'Verificando servidor local...'
-      : isOnline
-        ? 'Servidor Python online'
-        : 'Servidor Python não detectado. Usando processamento na nuvem.'
-    : 'Lovable Cloud conectado';
+  const statusText = checking
+    ? 'Verificando servidor local...'
+    : isOnline
+      ? 'Servidor Python online'
+      : 'Servidor Python offline - inicie com: python server.py';
 
   const content = (
     <div
@@ -79,7 +55,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
       )}
     >
       <div className="relative">
-        <Icon className={cn("h-4 w-4", isOnline ? "text-primary" : "text-muted-foreground")} />
+        <Server className={cn("h-4 w-4", isOnline ? "text-primary" : "text-muted-foreground")} />
         <span 
           className={cn(
             "absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full",
@@ -90,12 +66,8 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
       </div>
       {!collapsed && (
         <div className="flex flex-col">
-          <span className="font-medium text-foreground">
-            {isLocal ? 'Local' : 'Cloud'}
-          </span>
-          <span className={cn("text-[10px]", textColor)}>
-            {statusLabel}
-          </span>
+          <span className="font-medium text-foreground">Local</span>
+          <span className={cn("text-[10px]", textColor)}>{statusLabel}</span>
         </div>
       )}
     </div>
