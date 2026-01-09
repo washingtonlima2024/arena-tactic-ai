@@ -6,7 +6,7 @@
 
 import { supabase } from '@/integrations/supabase/client';
 
-const getApiBase = () => localStorage.getItem('arenaApiUrl') || 'https://57c0f466747f.ngrok-free.app';
+const getApiBase = () => localStorage.getItem('arenaApiUrl') || 'https://45b3b2ba7284.ngrok-free.app';
 
 // Check if local server is available
 let serverAvailable: boolean | null = null;
