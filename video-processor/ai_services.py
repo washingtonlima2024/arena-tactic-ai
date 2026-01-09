@@ -428,109 +428,111 @@ def analyze_match_events(
     import time
     
     half_desc = "1º Tempo (0-45 min)" if game_start_minute < 45 else "2º Tempo (45-90 min)"
+    match_half = 'first' if game_start_minute < 45 else 'second'
     
-    # Advanced system prompt with few-shot examples (matching Edge Function quality)
-    system_prompt = f"""Você é um ANALISTA ESPECIALIZADO em futebol brasileiro com anos de experiência.
+    # System prompt SYNCHRONIZED with Edge Function (analyze-match/index.ts)
+    system_prompt = f"""Você é um NARRADOR VETERANO de futebol brasileiro com 30 anos de experiência.
+Sua missão CRÍTICA é extrair ABSOLUTAMENTE TODOS os eventos da narração, especialmente GOLS.
 
-PARTIDA: {home_team} (mandante) vs {away_team} (visitante)
-PERÍODO: {half_desc} (minutos {game_start_minute} a {game_end_minute})
+⚽⚽⚽ REGRA NÚMERO 1 - NUNCA PERCA UM GOL! ⚽⚽⚽
 
-INSTRUÇÕES CRÍTICAS:
-1. Leia TODA a transcrição com atenção
-2. Identifique CADA evento mencionado pelo narrador
-3. Para GOLS, preste atenção especial em:
-   - Qual time marcou (mandante ou visitante)
-   - Se foi GOL CONTRA (o jogador marcou contra seu próprio time)
-   - Nome do jogador que marcou
-4. Retorne eventos em ordem cronológica
+Quando o narrador gritar "GOOOL!", "GOLAÇO!", "É GOL!", "PRA DENTRO!" ou qualquer variação:
+→ VOCÊ DEVE CRIAR UM EVENTO DE GOL IMEDIATAMENTE!
+
+═══════════════════════════════════════════════════════════════
+PALAVRAS-CHAVE PARA GOLS (NUNCA IGNORE):
+═══════════════════════════════════════════════════════════════
+- "GOOOL", "GOOOOL", "GOL", "GOLAÇO" → É GOL!
+- "PRA DENTRO", "ENTROU", "MANDOU PRA REDE" → É GOL!
+- "BOLA NO FUNDO DA REDE", "ESTUFOU A REDE" → É GOL!
+- "ABRE O PLACAR", "AMPLIA", "EMPATA", "VIRA O JOGO" → É GOL!
+- "PRIMEIRO GOL", "SEGUNDO GOL", "TERCEIRO GOL" → É GOL!
+- "GOL CONTRA", "PRÓPRIO GOL" → É GOL COM isOwnGoal: true!
 
 ═══════════════════════════════════════════════════════════════
 EXEMPLOS DE EXTRAÇÃO (FEW-SHOT LEARNING):
 ═══════════════════════════════════════════════════════════════
 
 EXEMPLO 1 - GOL NORMAL:
-Narração: "GOOOOOOL! É gol do Flamengo! Gabigol recebe na área e chuta forte!"
-→ Evento: {{ "minute": 23, "event_type": "goal", "team": "home", "description": "Gol de Gabigol! Chutou forte na área.", "player": "Gabigol", "isOwnGoal": false, "is_highlight": true }}
+Narração: "GOOOOOL do Brasil! Neymar chuta e a bola entra!"
+→ {{"minute": 23, "event_type": "goal", "team": "home", "description": "GOOOOL! Neymar marca!", "isOwnGoal": false, "is_highlight": true}}
 
-EXEMPLO 2 - GOL CONTRA:
-Narração: "Ih, que azar! O zagueiro do Flamengo desvia e manda contra o próprio gol!"
-(Flamengo é mandante)
-→ Evento: {{ "minute": 35, "event_type": "goal", "team": "home", "description": "GOL CONTRA! Zagueiro desviou para o próprio gol.", "player": null, "isOwnGoal": true, "is_highlight": true }}
-NOTA: isOwnGoal=true significa que o ponto vai para o ADVERSÁRIO!
+EXEMPLO 2 - GOL COM EMOÇÃO:
+Narração: "PRA DENTRO! É GOLAÇO! Que pintura!"
+→ {{"minute": 35, "event_type": "goal", "team": "home", "description": "GOLAÇO! Pintura de gol!", "isOwnGoal": false, "is_highlight": true}}
 
-EXEMPLO 3 - CARTÃO AMARELO:
-Narração: "Cartão amarelo para o jogador do Vasco que fez falta dura"
-→ Evento: {{ "minute": 40, "event_type": "yellow_card", "team": "away", "description": "Cartão amarelo por falta dura", "is_highlight": true }}
+EXEMPLO 3 - GOL CONTRA:
+Narração: "Que azar! Gol contra! O zagueiro mandou contra!"
+→ {{"minute": 40, "event_type": "goal", "team": "home", "description": "GOL CONTRA! Zagueiro falha!", "isOwnGoal": true, "is_highlight": true}}
 
-EXEMPLO 4 - CHANCE CLARA:
-Narração: "Quase! O atacante chutou forte, o goleiro espalmou!"
-→ Evento: {{ "minute": 15, "event_type": "shot_on_target", "team": "home", "description": "Chute forte espalmado pelo goleiro!", "is_highlight": true }}
+EXEMPLO 4 - CARTÃO AMARELO:
+Narração: "Cartão amarelo para o lateral"
+→ {{"minute": 28, "event_type": "yellow_card", "team": "away", "description": "Amarelo para o lateral", "is_highlight": true}}
 
-EXEMPLO 5 - ESCANTEIO:
-Narração: "Escanteio para o time da casa"
-→ Evento: {{ "minute": 12, "event_type": "corner", "team": "home", "description": "Escanteio cobrado", "is_highlight": false }}
+EXEMPLO 5 - DEFESA DIFÍCIL:
+Narração: "Que defesa! O goleiro salva!"
+→ {{"minute": 15, "event_type": "save", "team": "away", "description": "Defesa espetacular!", "is_highlight": false}}
 
-EXEMPLO 6 - FALTA:
-Narração: "Falta dura no meio-campo"
-→ Evento: {{ "minute": 28, "event_type": "foul", "team": "away", "description": "Falta no meio-campo", "is_highlight": false }}
+EXEMPLO 6 - CHANCE PERDIDA:
+Narração: "Quase! Passou perto da trave!"
+→ {{"minute": 32, "event_type": "chance", "team": "home", "description": "Bola raspando a trave!", "is_highlight": true}}
 
 ═══════════════════════════════════════════════════════════════
-TIPOS DE EVENTOS VÁLIDOS:
+REGRAS CRÍTICAS:
 ═══════════════════════════════════════════════════════════════
-- goal (GOL - SEMPRE detectar, incluir isOwnGoal)
-- shot_on_target (chute no gol)
-- shot (chute para fora)
-- save (defesa do goleiro)
-- foul (falta)
-- yellow_card (cartão amarelo)
-- red_card (cartão vermelho)
-- corner (escanteio)
-- offside (impedimento)
-- free_kick (falta perigosa)
-- penalty (pênalti)
-- substitution (substituição)
-- chance (chance clara)
-- defense (defesa/corte)
-- pressure (pressão alta)
 
-═══════════════════════════════════════════════════════════════
-REGRAS OBRIGATÓRIAS:
-═══════════════════════════════════════════════════════════════
-1. TODOS os gols DEVEM ser detectados
-2. Para gols: identifique corretamente o time que marcou
-3. Para gols contra: team = time do jogador que fez o gol contra, isOwnGoal = true
-4. Minutos devem estar entre {game_start_minute} e {game_end_minute}
-5. is_highlight = true para: gols, cartões, pênaltis, chances claras
-6. Retorne APENAS um array JSON válido, sem explicações
+1. ⚽ GOLS SÃO PRIORIDADE MÁXIMA - Se tem "GOL" na narração, CRIE O EVENTO!
+2. Cada vez que o narrador menciona um gol, CONTE COMO +1 NO PLACAR
+3. GOLS CONTRA: isOwnGoal=true quando marcam em seu próprio gol
+4. TIME CORRETO: Analise contexto para saber quem atacava
+5. MINUTOS: Devem estar entre {game_start_minute} e {game_end_minute}
+6. DESCRIÇÕES: Máximo 60 caracteres, capture a EMOÇÃO!
 
-FORMATO DE SAÍDA:
-[
-  {{"minute": X, "event_type": "...", "team": "home|away", "description": "...", "player": "...", "is_highlight": true|false, "isOwnGoal": false}},
-  ...
-]"""
+TIPOS DE EVENTOS:
+goal, shot, save, foul, yellow_card, red_card, corner, offside, substitution, chance, penalty
 
-    user_prompt = f"""PASSO A PASSO PARA ANÁLISE:
+TIMES DA PARTIDA:
+- HOME (casa): {home_team}
+- AWAY (visitante): {away_team}
+- Período: {half_desc}
 
-PASSO 1 - LEITURA: Leia a transcrição COMPLETA abaixo
-PASSO 2 - IDENTIFICAÇÃO: Identifique CADA momento importante mencionado
-PASSO 3 - CLASSIFICAÇÃO: Para cada evento, determine:
-   - Minuto aproximado (baseado no contexto)
-   - Tipo do evento
-   - Time envolvido ({home_team} = "home", {away_team} = "away")
-   - Se é destaque (gol, cartão, pênalti = sempre highlight)
-PASSO 4 - GOLS: Conte TODOS os gols e verifique:
-   - Qual time marcou cada gol
-   - Se algum foi gol contra
-PASSO 5 - JSON: Retorne o array JSON com todos os eventos
+FORMATO DE SAÍDA: Retorne APENAS um array JSON válido, sem explicações."""
+
+    user_prompt = f"""⚽⚽⚽ MISSÃO CRÍTICA: ENCONTRAR TODOS OS GOLS! ⚽⚽⚽
 
 ═══════════════════════════════════════════════════════════════
-TRANSCRIÇÃO DA PARTIDA:
+PARTIDA: {home_team} (casa) vs {away_team} (visitante)
+PERÍODO: {half_desc} (minutos {game_start_minute}' a {game_end_minute}')
+═══════════════════════════════════════════════════════════════
+
+INSTRUÇÕES (SIGA EXATAMENTE):
+
+1️⃣ PRIMEIRO: Leia TODA a transcrição abaixo
+2️⃣ SEGUNDO: PROCURE por TODAS as palavras: GOL, GOOOL, GOLAÇO, ENTROU, PRA DENTRO
+3️⃣ TERCEIRO: Para CADA gol encontrado, crie um evento com event_type: "goal"
+4️⃣ QUARTO: Identifique cartões, faltas, chances, defesas
+5️⃣ QUINTO: Retorne o array JSON com todos os eventos
+
+═══════════════════════════════════════════════════════════════
+TRANSCRIÇÃO COMPLETA (LEIA COM ATENÇÃO):
 ═══════════════════════════════════════════════════════════════
 
 {transcription}
 
 ═══════════════════════════════════════════════════════════════
-IMPORTANTE: Retorne APENAS o array JSON, sem texto adicional.
+⚽ CHECKLIST DE VALIDAÇÃO (ANTES DE RESPONDER):
+═══════════════════════════════════════════════════════════════
+□ Quantas vezes aparece "GOL" na transcrição? → Deve haver o mesmo número de eventos de gol
+□ Cada gol tem team: "home" ou "away" correto?
+□ Gols contra têm isOwnGoal: true?
+
+LEMBRE-SE:
+- Gols de {home_team} → team: "home"
+- Gols de {away_team} → team: "away"
+- Gol contra de {home_team} → team: "home", isOwnGoal: true
+- Gol contra de {away_team} → team: "away", isOwnGoal: true
+
+RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL.
 ═══════════════════════════════════════════════════════════════"""
 
     events = []
@@ -540,10 +542,11 @@ IMPORTANTE: Retorne APENAS o array JSON, sem texto adicional.
         try:
             print(f"[AI] Análise tentativa {attempt + 1}/{max_retries}")
             
+            # Use gemini-2.5-flash (faster and consistent with Edge Function)
             response = call_ai([
                 {'role': 'system', 'content': system_prompt},
                 {'role': 'user', 'content': user_prompt}
-            ], model='google/gemini-2.5-pro', max_tokens=8192)
+            ], model='google/gemini-2.5-flash', max_tokens=8192)
             
             if not response:
                 last_error = "Empty response from AI"
