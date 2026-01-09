@@ -1064,8 +1064,8 @@ export default function VideoUpload() {
         transcriptionItems.push({ segment, halfType: 'first' });
       }
       
-      // Adicionar segundo tempo à fila (se não tiver vídeo full)
-      if (!secondHalfTranscription && secondHalfSegments.length > 0 && !hasFullVideo) {
+      // Adicionar segundo tempo à fila (sempre processar se existir arquivo separado)
+      if (!secondHalfTranscription && secondHalfSegments.length > 0) {
         const segment = secondHalfSegments[0];
         transcriptionItems.push({ segment, halfType: 'second' });
       }
