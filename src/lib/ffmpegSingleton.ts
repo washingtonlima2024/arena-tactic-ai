@@ -29,11 +29,31 @@ export async function getFFmpeg(): Promise<FFmpeg> {
     
     const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
     
+    // Helper for timeout
+    const withTimeout = <T>(promise: Promise<T>, ms: number, msg: string): Promise<T> => {
+      return Promise.race([
+        promise,
+        new Promise<T>((_, reject) => 
+          setTimeout(() => reject(new Error(msg)), ms)
+        )
+      ]);
+    };
+    
     try {
-      const coreURL = await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript');
-      const wasmURL = await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm');
+      console.log('[FFmpeg Singleton] Downloading core files...');
+      const coreURL = await withTimeout(
+        toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
+        30000,
+        'FFmpeg core.js download timeout (30s)'
+      );
+      const wasmURL = await withTimeout(
+        toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
+        60000,
+        'FFmpeg WASM download timeout (60s)'
+      );
       
-      await ff.load({ coreURL, wasmURL });
+      console.log('[FFmpeg Singleton] Loading FFmpeg...');
+      await withTimeout(ff.load({ coreURL, wasmURL }), 30000, 'FFmpeg load timeout (30s)');
       console.log('[FFmpeg Singleton] Loaded successfully');
       
       ffmpeg = ff;

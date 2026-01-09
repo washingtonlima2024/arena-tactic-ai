@@ -56,7 +56,7 @@ import { AnalysisSummary } from '@/components/upload/AnalysisSummary';
 import { MatchTimesConfig, defaultMatchTimes, MatchTimes } from '@/components/upload/MatchTimesConfig';
 import { HalfDropzone, getDefaultVideoType, getDefaultMinutes } from '@/components/upload/HalfDropzone';
 import { LocalFileBrowser } from '@/components/upload/LocalFileBrowser';
-import { splitVideoInBrowser, calculateOptimalParts, shouldSplitInBrowser } from '@/lib/videoSplitter';
+import { splitVideoInBrowser, calculateOptimalParts, shouldSplitInBrowser, downloadVideoWithProgress } from '@/lib/videoSplitter';
 import { cn } from '@/lib/utils';
 
 // Helper to extract embed URL from various formats
@@ -722,12 +722,12 @@ export default function VideoUpload() {
         const numParts = calculateOptimalParts(sizeMB);
         console.log(`[Browser Split] Will split into ${numParts} parts`);
         
-        setTranscriptionProgress(`Baixando vídeo para divisão...`);
+        setTranscriptionProgress(`Baixando vídeo (0%)...`);
         
-        // Fetch video blob
-        const response = await fetch(segment.url);
-        if (!response.ok) throw new Error(`Failed to fetch video: ${response.status}`);
-        const videoBlob = await response.blob();
+        // Fetch video blob with progress
+        const videoBlob = await downloadVideoWithProgress(segment.url, (percent) => {
+          setTranscriptionProgress(`Baixando vídeo (${percent}%)...`);
+        });
         
         console.log(`[Browser Split] Video blob size: ${(videoBlob.size / 1024 / 1024).toFixed(1)}MB`);
         
