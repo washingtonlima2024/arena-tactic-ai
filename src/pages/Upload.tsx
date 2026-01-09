@@ -568,6 +568,12 @@ export default function VideoUpload() {
     }
   };
 
+  // Helper function to get valid match ID from multiple sources
+  const getValidMatchId = () => {
+    const urlMatchId = new URLSearchParams(window.location.search).get('match');
+    return selectedExistingMatch || existingMatchId || urlMatchId;
+  };
+
   // Handle local file selection (no upload - just link the path)
   const handleLocalFileSelect = async (file: { path: string; name: string; size_mb: number }) => {
     // Fallback: ler diretamente da URL caso o estado ainda não esteja sincronizado
@@ -2024,6 +2030,11 @@ export default function VideoUpload() {
                   <div className="grid grid-cols-2 gap-4">
                     <button
                       onClick={() => {
+                        const matchId = getValidMatchId();
+                        if (!matchId) {
+                          toast({ title: "Partida não selecionada", description: "Selecione ou crie uma partida primeiro.", variant: "destructive" });
+                          return;
+                        }
                         setLocalBrowserHalf('first');
                         setShowLocalBrowser(true);
                       }}
@@ -2043,6 +2054,11 @@ export default function VideoUpload() {
                     
                     <button
                       onClick={() => {
+                        const matchId = getValidMatchId();
+                        if (!matchId) {
+                          toast({ title: "Partida não selecionada", description: "Selecione ou crie uma partida primeiro.", variant: "destructive" });
+                          return;
+                        }
                         setLocalBrowserHalf('second');
                         setShowLocalBrowser(true);
                       }}
@@ -2064,6 +2080,11 @@ export default function VideoUpload() {
                   {/* Full match button */}
                   <button
                     onClick={() => {
+                      const matchId = getValidMatchId();
+                      if (!matchId) {
+                        toast({ title: "Partida não selecionada", description: "Selecione ou crie uma partida primeiro.", variant: "destructive" });
+                        return;
+                      }
                       setLocalBrowserHalf(null);
                       setShowLocalBrowser(true);
                     }}
@@ -2361,7 +2382,7 @@ export default function VideoUpload() {
         open={showLocalBrowser}
         onOpenChange={setShowLocalBrowser}
         onSelectFile={handleLocalFileSelect}
-        matchId={selectedExistingMatch || existingMatchId || 'temp'}
+        matchId={getValidMatchId() || ''}
       />
     </AppLayout>
   );
