@@ -156,8 +156,53 @@ export function shouldSplitInBrowser(
   // Too small, no need to split
   if (sizeMB <= 200) return false;
   
-  // Too large for browser memory (>1GB)
-  if (sizeMB > 1000) return false;
+  // Too large for browser memory (>400MB is risky)
+  if (sizeMB > 400) return false;
   
   return true;
+}
+
+/**
+ * Download a video blob with progress tracking
+ */
+export async function downloadVideoWithProgress(
+  url: string,
+  onProgress?: (percent: number) => void
+): Promise<Blob> {
+  const response = await fetch(url);
+  
+  if (!response.body) {
+    // Fallback for browsers without streaming support
+    return await response.blob();
+  }
+  
+  const reader = response.body.getReader();
+  const contentLength = parseInt(response.headers.get('Content-Length') || '0');
+  
+  if (contentLength === 0) {
+    // If content-length unknown, fallback to simple fetch
+    const blob = await response.blob();
+    onProgress?.(100);
+    return blob;
+  }
+  
+  let receivedLength = 0;
+  const chunks: ArrayBuffer[] = [];
+  
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    
+    // Convert Uint8Array to ArrayBuffer for compatibility
+    chunks.push(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+    receivedLength += value.length;
+    
+    const percent = Math.round((receivedLength / contentLength) * 100);
+    onProgress?.(percent);
+  }
+  
+  // Combine chunks into blob
+  const blob = new Blob(chunks, { type: 'video/mp4' });
+  console.log('[VideoSplitter] Download complete:', (blob.size / (1024 * 1024)).toFixed(1), 'MB');
+  return blob;
 }
