@@ -53,6 +53,7 @@ export async function isLocalServerAvailable(): Promise<boolean> {
   }
 }
 
+// Timeout padrão (60s) para operações normais
 async function apiRequest<T>(
   endpoint: string,
   options: RequestInit = {},
@@ -84,6 +85,44 @@ async function apiRequest<T>(
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
       throw new Error('Requisição expirou - o servidor demorou muito para responder');
+    }
+    throw error;
+  }
+}
+
+// Timeout longo (30 minutos) para operações de transcrição/análise
+async function apiRequestLongRunning<T>(
+  endpoint: string,
+  options: RequestInit = {},
+  timeoutMs: number = 1800000 // 30 minutos padrão
+): Promise<T> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(`${getApiBase()}${endpoint}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+        ...options.headers,
+      },
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      const mins = Math.round(timeoutMs / 60000);
+      throw new Error(`Operação expirou após ${mins} minutos - verifique o servidor ou tente com arquivo menor`);
     }
     throw error;
   }
@@ -491,10 +530,11 @@ export const apiClient = {
     const serverUp = await isLocalServerAvailable();
     
     if (serverUp) {
-      return apiRequest<any>('/api/analyze-match', { 
+      // Usar timeout longo (10 minutos) para análise de IA
+      return apiRequestLongRunning<any>('/api/analyze-match', { 
         method: 'POST', 
         body: JSON.stringify(body)
-      });
+      }, 600000); // 10 minutos
     }
     
     // Fallback para Edge Function do Lovable Cloud
@@ -532,8 +572,8 @@ export const apiClient = {
     apiRequest<{ text: string }>('/api/transcribe-audio', { method: 'POST', body: JSON.stringify(data) }),
 
   transcribeLargeVideo: async (data: { videoUrl: string; matchId?: string; language?: string; sizeBytes?: number }): Promise<{ success: boolean; text: string; srtContent?: string; requiresLocalServer?: boolean; suggestion?: string }> => {
-    const serverUp = await isLocalServerAvailable();
     const sizeMB = (data.sizeBytes || 0) / (1024 * 1024);
+    const serverUp = await isLocalServerAvailable();
     
     // Vídeos > 500MB EXIGEM servidor local
     if (sizeMB > 500 && !serverUp) {
@@ -549,48 +589,50 @@ export const apiClient = {
       };
     }
     
-    return apiRequestWithFallback<{ success: boolean; text: string; srtContent?: string; requiresLocalServer?: boolean; suggestion?: string }>(
-      '/api/transcribe-large-video',
-      'transcription',
-      { method: 'POST', body: JSON.stringify(data) },
-      async () => {
-        // Fallback to Supabase Edge Function
-        console.log('[apiClient] Using Supabase Edge Function for transcription');
-        const { data: result, error } = await supabase.functions.invoke('transcribe-large-video', {
-          body: { 
-            videoUrl: data.videoUrl, 
-            matchId: data.matchId,
-            language: data.language || 'pt'
-          }
-        });
-        
-        if (error) {
-          console.error('[apiClient] Edge Function error:', error);
-          throw new Error(error.message || 'Falha na transcrição via cloud');
-        }
-        
-        // Check if video is too large and requires local server
-        if (result?.requiresLocalServer) {
-          console.warn('[apiClient] Video requires local server:', result.suggestion);
-          return {
-            success: false,
-            text: '',
-            requiresLocalServer: true,
-            suggestion: result.suggestion || 'Use o servidor Python local para processar este vídeo.'
-          };
-        }
-        
-        if (!result?.success || !result?.text) {
-          throw new Error(result?.error || 'Resposta inválida da transcrição');
-        }
-        
-        return {
-          success: true,
-          text: result.text,
-          srtContent: result.srtContent || ''
-        };
+    // Usar timeout longo (30 minutos) para transcrição via servidor local
+    if (serverUp) {
+      return apiRequestLongRunning<{ success: boolean; text: string; srtContent?: string; requiresLocalServer?: boolean; suggestion?: string }>(
+        '/api/transcribe-large-video',
+        { method: 'POST', body: JSON.stringify(data) },
+        1800000 // 30 minutos
+      );
+    }
+    
+    // Fallback to Supabase Edge Function
+    console.log('[apiClient] Using Supabase Edge Function for transcription');
+    const { data: result, error } = await supabase.functions.invoke('transcribe-large-video', {
+      body: { 
+        videoUrl: data.videoUrl, 
+        matchId: data.matchId,
+        language: data.language || 'pt'
       }
-    );
+    });
+    
+    if (error) {
+      console.error('[apiClient] Edge Function error:', error);
+      throw new Error(error.message || 'Falha na transcrição via cloud');
+    }
+    
+    // Check if video is too large and requires local server
+    if (result?.requiresLocalServer) {
+      console.warn('[apiClient] Video requires local server:', result.suggestion);
+      return {
+        success: false,
+        text: '',
+        requiresLocalServer: true,
+        suggestion: result.suggestion || 'Use o servidor Python local para processar este vídeo.'
+      };
+    }
+    
+    if (!result?.success || !result?.text) {
+      throw new Error(result?.error || 'Resposta inválida da transcrição');
+    }
+    
+    return {
+      success: true,
+      text: result.text,
+      srtContent: result.srtContent || ''
+    };
   },
 
   /**
@@ -617,7 +659,8 @@ export const apiClient = {
       throw new Error('Transcrição com divisão só está disponível com o servidor Python local. Inicie com: cd video-processor && python server.py');
     }
     
-    return apiRequest('/api/transcribe-split-video', { 
+    // Usar timeout longo (30 minutos) para transcrição com divisão
+    return apiRequestLongRunning('/api/transcribe-split-video', { 
       method: 'POST', 
       body: JSON.stringify({
         videoUrl: data.videoUrl,
@@ -626,7 +669,7 @@ export const apiClient = {
         halfType: data.halfType || 'first',
         halfDuration: data.halfDuration || 45
       })
-    });
+    }, 1800000); // 30 minutos
   },
 
   extractLiveEvents: (data: { transcript: string; homeTeam: string; awayTeam: string; currentScore: { home: number; away: number }; currentMinute: number }) =>

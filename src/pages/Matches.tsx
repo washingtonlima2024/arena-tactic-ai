@@ -21,7 +21,6 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
-import { Progress } from '@/components/ui/progress';
 import { Search, Filter, Plus, Calendar, Trophy, Loader2, Video, Trash2, RefreshCw, Mic, Radio } from 'lucide-react';
 import { useMatches, Match } from '@/hooks/useMatches';
 import { useDeleteMatch } from '@/hooks/useDeleteMatch';
@@ -32,6 +31,7 @@ import { TeamBadge } from '@/components/teams/TeamBadge';
 import { apiClient } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
+import { ReprocessOptionsDialog } from '@/components/matches/ReprocessOptionsDialog';
 
 export default function Matches() {
   const navigate = useNavigate();
@@ -39,6 +39,7 @@ export default function Matches() {
   const deleteMatch = useDeleteMatch();
   const [matchToDelete, setMatchToDelete] = useState<Match | null>(null);
   const [matchToReprocess, setMatchToReprocess] = useState<Match | null>(null);
+  const [showReprocessDialog, setShowReprocessDialog] = useState(false);
   const [isReprocessing, setIsReprocessing] = useState(false);
   const [reprocessProgress, setReprocessProgress] = useState({ stage: '', progress: 0 });
   const { toast } = useToast();
@@ -56,45 +57,34 @@ export default function Matches() {
     }
   };
 
-  const handleReprocess = async () => {
+  const handleOpenReprocessDialog = (match: Match) => {
+    setMatchToReprocess(match);
+    setShowReprocessDialog(true);
+  };
+
+  const handleReprocess = async (options: {
+    useExistingTranscription: { first: boolean; second: boolean };
+    manualTranscription: { first: string; second: string };
+    reTranscribe: { first: boolean; second: boolean };
+  }) => {
     if (!matchToReprocess) return;
     
     console.log('========================================');
     console.log('[Reprocess] INICIADO');
     console.log('[Reprocess] Match ID:', matchToReprocess.id);
-    console.log('[Reprocess] Times:', matchToReprocess.home_team?.name, 'vs', matchToReprocess.away_team?.name);
-    
-    // Feedback imediato para o usuário
-    toast({
-      title: "Iniciando reprocessamento...",
-      description: "Carregando processador de áudio"
-    });
+    console.log('[Reprocess] Options:', options);
     
     setIsReprocessing(true);
     const matchId = matchToReprocess.id;
     
-    // Timeout de segurança - alerta se demorar muito
-    const safetyTimeoutId = setTimeout(() => {
-      console.warn('[Reprocess] ⚠️ Processo está demorando mais de 45 segundos');
-      toast({
-        title: "Processo demorado",
-        description: "O carregamento está levando mais tempo que o esperado. Se travar, recarregue a página.",
-        variant: "destructive"
-      });
-    }, 45000);
-    
     try {
       // 1. Buscar vídeos do match
-      console.log('[Reprocess] PASSO 1: Buscando vídeos...');
       setReprocessProgress({ stage: 'Buscando vídeos...', progress: 5 });
-      
       const videos = await apiClient.getVideos(matchId);
       
       if (!videos?.length) {
         throw new Error('Nenhum vídeo encontrado para esta partida');
       }
-      
-      console.log('[Reprocess] ✓ Vídeos encontrados:', videos.length);
       
       // Ordenar vídeos: primeiro tempo primeiro, depois segundo tempo
       const sortedVideos = [...videos].sort((a, b) => {
@@ -102,16 +92,52 @@ export default function Matches() {
         return (order[a.video_type as keyof typeof order] || 99) - (order[b.video_type as keyof typeof order] || 99);
       });
       
+      // 2. Buscar transcrições existentes se necessário
+      let existingTranscriptions: { first_half: string | null; second_half: string | null; full: string | null } = {
+        first_half: null,
+        second_half: null,
+        full: null,
+      };
+      
+      if (options.useExistingTranscription.first || options.useExistingTranscription.second) {
+        setReprocessProgress({ stage: 'Carregando transcrições existentes...', progress: 10 });
+        try {
+          const files = await apiClient.listSubfolderFiles(matchId, 'texts').catch(() => ({ files: [] }));
+          
+          for (const file of files.files || []) {
+            const filename = file.filename || file.name || '';
+            const url = file.url || `${apiClient.getApiUrl()}/api/storage/${matchId}/texts/${filename}`;
+            
+            try {
+              const content = await fetch(url, { headers: { 'ngrok-skip-browser-warning': 'true' } }).then(r => r.text());
+              
+              if (filename.includes('first_half') && content.length > 50) {
+                existingTranscriptions.first_half = content;
+              } else if (filename.includes('second_half') && content.length > 50) {
+                existingTranscriptions.second_half = content;
+              } else if (filename.includes('full') && content.length > 50) {
+                existingTranscriptions.full = content;
+              }
+            } catch (e) {
+              console.warn(`[Reprocess] Could not load ${filename}:`, e);
+            }
+          }
+        } catch (e) {
+          console.warn('[Reprocess] Failed to load existing transcriptions:', e);
+        }
+      }
+      
       let totalEventsCreated = 0;
       let finalHomeScore = 0;
       let finalAwayScore = 0;
       
-      // 2. Processar cada vídeo separadamente
+      // 3. Processar cada vídeo
       for (let i = 0; i < sortedVideos.length; i++) {
         const video = sortedVideos[i];
         const videoUrl = video.file_url;
         const isFirstHalf = video.video_type === 'first_half';
         const isSecondHalf = video.video_type === 'second_half';
+        const halfKey = isFirstHalf ? 'first' : isSecondHalf ? 'second' : 'first';
         const halfLabel = isFirstHalf ? '1º Tempo' : isSecondHalf ? '2º Tempo' : 'Jogo Completo';
         
         if (!videoUrl) {
@@ -119,45 +145,53 @@ export default function Matches() {
           continue;
         }
         
-        console.log(`[Reprocess] PASSO 2.${i + 1}: Transcrevendo ${halfLabel}...`);
-        console.log('[Reprocess] URL do vídeo:', videoUrl);
+        const progressBase = 20 + (i * 35);
         
-        const progressBase = 10 + (i * 40);
-        setReprocessProgress({ 
-          stage: `Transcrevendo ${halfLabel}...`, 
-          progress: progressBase 
-        });
+        // Determinar fonte da transcrição
+        let transcriptionText: string | null = null;
         
-        // Transcrição do vídeo atual
-        let transcriptionResult: { text: string; success?: boolean };
-        try {
-          transcriptionResult = await apiClient.transcribeLargeVideo({ 
-            videoUrl, 
-            matchId,
-            language: 'pt'
+        // Prioridade: 1) Manual, 2) Existente, 3) Transcrever
+        if (options.manualTranscription[halfKey as 'first' | 'second']) {
+          transcriptionText = options.manualTranscription[halfKey as 'first' | 'second'];
+          console.log(`[Reprocess] Usando transcrição manual para ${halfLabel}`);
+        } else if (options.useExistingTranscription[halfKey as 'first' | 'second']) {
+          transcriptionText = existingTranscriptions[`${halfKey}_half` as keyof typeof existingTranscriptions] 
+            || existingTranscriptions.full;
+          console.log(`[Reprocess] Usando transcrição existente para ${halfLabel}`);
+        }
+        
+        // Se não tem transcrição, precisa transcrever
+        if (!transcriptionText) {
+          setReprocessProgress({ 
+            stage: `Transcrevendo ${halfLabel}... (pode levar 10-30min)`, 
+            progress: progressBase 
           });
-        } catch (transcriptionError: any) {
-          console.error(`[Reprocess] ✗ Erro na transcrição do ${halfLabel}:`, transcriptionError);
-          // Continuar com próximo vídeo se houver
-          if (i < sortedVideos.length - 1) {
+          
+          try {
+            const result = await apiClient.transcribeLargeVideo({ 
+              videoUrl, 
+              matchId,
+              language: 'pt'
+            });
+            transcriptionText = result.text;
+            console.log(`[Reprocess] ✓ Transcrição ${halfLabel}:`, transcriptionText?.length || 0, 'caracteres');
+          } catch (transcriptionError: any) {
+            console.error(`[Reprocess] ✗ Erro na transcrição do ${halfLabel}:`, transcriptionError);
             toast({
               title: `Erro no ${halfLabel}`,
-              description: "Continuando com próximo vídeo...",
+              description: transcriptionError.message || 'Erro na transcrição',
               variant: "destructive"
             });
             continue;
           }
-          throw new Error(transcriptionError.message || 'Erro na transcrição do vídeo');
         }
         
-        if (!transcriptionResult?.text || transcriptionResult.text.length < 50) {
+        if (!transcriptionText || transcriptionText.length < 50) {
           console.warn(`[Reprocess] Transcrição do ${halfLabel} muito curta, pulando análise...`);
           continue;
         }
         
-        console.log(`[Reprocess] ✓ Transcrição ${halfLabel}:`, transcriptionResult.text.length, 'caracteres');
-        
-        // Determinar período do jogo
+        // Análise com IA
         const gameStartMinute = video.start_minute ?? (isFirstHalf ? 0 : 45);
         const gameEndMinute = video.end_minute ?? (isFirstHalf ? 45 : 90);
         const halfType = isFirstHalf ? 'first' : isSecondHalf ? 'second' : 'full';
@@ -167,21 +201,31 @@ export default function Matches() {
           progress: progressBase + 20 
         });
         
-        console.log(`[Reprocess] PASSO 3.${i + 1}: Analisando ${halfLabel} (${gameStartMinute}'-${gameEndMinute}')...`);
-        
-        // Análise com IA - com tratamento de erro
-        let analysisResult: any = null;
         try {
-          analysisResult = await apiClient.analyzeMatch({
+          const analysisResult = await apiClient.analyzeMatch({
             matchId,
-            transcription: transcriptionResult.text,
+            transcription: transcriptionText,
             homeTeam: matchToReprocess.home_team?.name || 'Time Casa',
             awayTeam: matchToReprocess.away_team?.name || 'Time Visitante',
             gameStartMinute,
             gameEndMinute,
             halfType
           });
-          console.log(`[Reprocess] ✓ Resultado ${halfLabel}:`, analysisResult);
+          
+          const eventsCount = analysisResult?.eventsDetected || analysisResult?.eventsCreated || 0;
+          totalEventsCreated += eventsCount;
+          
+          if (analysisResult?.homeScore !== undefined) {
+            finalHomeScore = analysisResult.homeScore;
+          }
+          if (analysisResult?.awayScore !== undefined) {
+            finalAwayScore = analysisResult.awayScore;
+          }
+          
+          toast({
+            title: `${halfLabel} analisado`,
+            description: `${eventsCount} eventos detectados`
+          });
         } catch (analysisError: any) {
           console.error(`[Reprocess] ✗ Erro na análise do ${halfLabel}:`, analysisError);
           toast({
@@ -189,38 +233,10 @@ export default function Matches() {
             description: analysisError.message || 'Erro desconhecido',
             variant: "destructive"
           });
-          // Continuar com próximo vídeo
-          continue;
         }
-        
-        // Acumular resultados (eventsDetected é o campo correto retornado pela API)
-        const eventsCount = analysisResult?.eventsDetected || analysisResult?.eventsCreated || 0;
-        totalEventsCreated += eventsCount;
-        
-        // NÃO acumular placar aqui - a Edge Function já acumula no banco
-        // Apenas guardar o último valor (que já é o acumulado)
-        if (analysisResult?.homeScore !== undefined) {
-          finalHomeScore = analysisResult.homeScore;
-        }
-        if (analysisResult?.awayScore !== undefined) {
-          finalAwayScore = analysisResult.awayScore;
-        }
-        
-        console.log(`[Reprocess] Progresso: vídeo ${i + 1}/${sortedVideos.length} - ${eventsCount} eventos`);
-        
-        toast({
-          title: `${halfLabel} analisado`,
-          description: `${eventsCount} eventos detectados`
-        });
       }
       
-      console.log(`[Reprocess] Loop completo. Total vídeos processados: ${sortedVideos.length}`);
-      
-      // Limpar timeout de segurança
-      clearTimeout(safetyTimeoutId);
-      
-      // 4. Atualizar status do match
-      console.log('[Reprocess] PASSO 4: Finalizando...');
+      // 4. Finalizar
       setReprocessProgress({ stage: 'Finalizando...', progress: 95 });
       
       await apiClient.updateMatch(matchId, { 
@@ -231,46 +247,29 @@ export default function Matches() {
       
       setReprocessProgress({ stage: 'Concluído!', progress: 100 });
       
-      console.log('[Reprocess] ✓ CONCLUÍDO!');
-      console.log('[Reprocess] Total de eventos:', totalEventsCreated);
-      console.log('[Reprocess] Placar final:', finalHomeScore, 'x', finalAwayScore);
-      console.log('========================================');
-      
       toast({
         title: "Análise completa!",
         description: `${totalEventsCreated} eventos detectados. Placar: ${finalHomeScore} x ${finalAwayScore}`
       });
       
-      // Invalidar todas as queries relacionadas à partida
-      const reprocessedMatchId = matchToReprocess.id;
       queryClient.invalidateQueries({ queryKey: ['matches'] });
-      queryClient.invalidateQueries({ queryKey: ['match-events', reprocessedMatchId] });
-      queryClient.invalidateQueries({ queryKey: ['match-details', reprocessedMatchId] });
-      queryClient.invalidateQueries({ queryKey: ['match-analysis', reprocessedMatchId] });
-      queryClient.invalidateQueries({ queryKey: ['completed-matches'] });
+      queryClient.invalidateQueries({ queryKey: ['match-events', matchId] });
+      queryClient.invalidateQueries({ queryKey: ['match-details', matchId] });
       
       setTimeout(() => {
         const reprocessedId = matchToReprocess.id;
         setMatchToReprocess(null);
+        setShowReprocessDialog(false);
         setIsReprocessing(false);
         setReprocessProgress({ stage: '', progress: 0 });
-        // Navegar para a página de eventos após o sucesso
         navigate(`/events?match=${reprocessedId}`);
       }, 1500);
       
     } catch (error: any) {
-      clearTimeout(safetyTimeoutId);
       console.error('[Reprocess] ✗ ERRO:', error);
-      console.error('[Reprocess] Stack:', error.stack);
-      
-      const errorMessage = error.message || 'Erro desconhecido';
-      const isFileTooLarge = errorMessage.includes('muito grande') || errorMessage.includes('Máximo:');
-      
       toast({
-        title: isFileTooLarge ? "Vídeo muito grande" : "Erro no reprocessamento",
-        description: isFileTooLarge 
-          ? "O vídeo excede 24MB. Use a página de Upload para importar um arquivo SRT manualmente."
-          : errorMessage,
+        title: "Erro no reprocessamento",
+        description: error.message || 'Erro desconhecido',
         variant: "destructive"
       });
       setIsReprocessing(false);
@@ -479,7 +478,7 @@ export default function Matches() {
                         variant="arena-outline" 
                         size="sm" 
                         className="flex-1"
-                        onClick={() => setMatchToReprocess(match)}
+                        onClick={() => handleOpenReprocessDialog(match)}
                       >
                         <RefreshCw className="mr-2 h-4 w-4" />
                         Reprocessar
@@ -538,64 +537,20 @@ export default function Matches() {
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Reprocess Dialog */}
-        <AlertDialog open={!!matchToReprocess} onOpenChange={(open) => !open && !isReprocessing && setMatchToReprocess(null)}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle className="flex items-center gap-2">
-                <Mic className="h-5 w-5 text-primary" />
-                Reprocessar Partida
-              </AlertDialogTitle>
-              <AlertDialogDescription asChild>
-                <div>
-                  <p className="mb-4">
-                    Extrair áudio e transcrever automaticamente a partida 
-                    <strong> {matchToReprocess?.home_team?.name || 'Time Casa'} vs {matchToReprocess?.away_team?.name || 'Time Visitante'}</strong>?
-                  </p>
-                  
-                  {isReprocessing && (
-                    <div className="space-y-3 mt-4 p-4 rounded-lg bg-muted/50">
-                      <div className="flex items-center gap-2">
-                        <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                        <span className="text-sm font-medium">{reprocessProgress.stage}</span>
-                      </div>
-                      <Progress value={reprocessProgress.progress} className="h-2" />
-                    </div>
-                  )}
-                  
-                  {!isReprocessing && (
-                    <ul className="list-disc list-inside mt-2 space-y-1 text-left text-sm text-muted-foreground">
-                      <li>Extração do áudio do vídeo</li>
-                      <li>Transcrição automática com Whisper</li>
-                      <li>Detecção de eventos com IA</li>
-                      <li>Atualização do placar final</li>
-                    </ul>
-                  )}
-                </div>
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel disabled={isReprocessing}>Cancelar</AlertDialogCancel>
-              <AlertDialogAction
-                onClick={handleReprocess}
-                disabled={isReprocessing}
-                className="bg-primary text-primary-foreground hover:bg-primary/90"
-              >
-                {isReprocessing ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Processando...
-                  </>
-                ) : (
-                  <>
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                    Iniciar
-                  </>
-                )}
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
+        {/* Reprocess Options Dialog */}
+        <ReprocessOptionsDialog
+          open={showReprocessDialog}
+          onOpenChange={(open) => {
+            if (!isReprocessing) {
+              setShowReprocessDialog(open);
+              if (!open) setMatchToReprocess(null);
+            }
+          }}
+          match={matchToReprocess}
+          onReprocess={handleReprocess}
+          isReprocessing={isReprocessing}
+          progress={reprocessProgress}
+        />
       </div>
     </AppLayout>
   );
