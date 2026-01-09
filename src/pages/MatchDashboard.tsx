@@ -8,6 +8,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SoccerBallLoader } from "@/components/ui/SoccerBallLoader";
+import { Progress } from "@/components/ui/progress";
 import {
   LineChart,
   Line,
@@ -39,9 +40,229 @@ import {
   MapPin,
   ArrowLeft,
   X,
+  CheckCircle2,
+  XCircle,
+  FileText,
 } from "lucide-react";
 import { useAllCompletedMatches, useMatchEvents, useMatchDetails, useMatchAnalysis } from "@/hooks/useMatchDetails";
 import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/apiClient";
+
+// Goal Validation Types
+interface GoalValidation {
+  keywordsFound: number;
+  estimatedGoals: number;
+  detectedGoals: number;
+  discrepancy: number;
+  keywords: { keyword: string; count: number }[];
+  status: 'success' | 'warning' | 'error';
+}
+
+// Goal Validation Component
+function GoalValidationCard({
+  matchId,
+  events,
+  homeScore,
+  awayScore,
+}: {
+  matchId: string | null;
+  events: MatchEvent[];
+  homeScore: number;
+  awayScore: number;
+}) {
+  const [validation, setValidation] = useState<GoalValidation | null>(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [transcription, setTranscription] = useState<string | null>(null);
+
+  // Calculate detected goals from events
+  const detectedGoals = useMemo(() => {
+    return events.filter(e => e.event_type === 'goal').length;
+  }, [events]);
+
+  // Fetch transcription and validate
+  useEffect(() => {
+    if (!matchId) return;
+
+    const fetchAndValidate = async () => {
+      setIsLoading(true);
+      try {
+        // Get analysis job to retrieve transcription
+        const jobs = await apiClient.getAnalysisJobs(matchId);
+        const completedJob = jobs.find((j: any) => j.status === 'completed');
+        
+        if (completedJob?.result) {
+          const result = completedJob.result as any;
+          const transcriptionText = result?.transcription || result?.fullTranscription || '';
+          
+          if (transcriptionText) {
+            setTranscription(transcriptionText);
+            
+            // Goal keywords to search
+            const goalKeywords = [
+              'GOOOL', 'GOLAÇO', 'GOL!', 'É GOL', 'PRA DENTRO', 'ENTROU',
+              'PRIMEIRO GOL', 'SEGUNDO GOL', 'TERCEIRO GOL', 'QUARTO GOL',
+              'QUINTO GOL', 'GOL DE', 'GOL DO', 'GOOOOL', 'GOLAAAAÇO',
+              'ABRIU O PLACAR', 'EMPATA O JOGO', 'VIROU O JOGO', 'GOL CONTRA'
+            ];
+            
+            const transcriptionUpper = transcriptionText.toUpperCase();
+            let totalMentions = 0;
+            const keywordCounts: { keyword: string; count: number }[] = [];
+            
+            goalKeywords.forEach(kw => {
+              const regex = new RegExp(kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+              const matches = transcriptionText.match(regex);
+              const count = matches ? matches.length : 0;
+              if (count > 0) {
+                keywordCounts.push({ keyword: kw, count });
+                totalMentions += count;
+              }
+            });
+            
+            // Estimate expected goals (cap at 10 to avoid false positives)
+            const estimatedGoals = Math.min(totalMentions, 10);
+            const discrepancy = estimatedGoals - detectedGoals;
+            
+            setValidation({
+              keywordsFound: totalMentions,
+              estimatedGoals,
+              detectedGoals,
+              discrepancy: discrepancy > 0 ? discrepancy : 0,
+              keywords: keywordCounts.sort((a, b) => b.count - a.count),
+              status: discrepancy <= 0 ? 'success' : discrepancy === 1 ? 'warning' : 'error'
+            });
+          } else {
+            // No transcription available
+            setValidation({
+              keywordsFound: 0,
+              estimatedGoals: 0,
+              detectedGoals,
+              discrepancy: 0,
+              keywords: [],
+              status: 'success'
+            });
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching validation data:', error);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchAndValidate();
+  }, [matchId, detectedGoals]);
+
+  if (!matchId) return null;
+
+  const scoreTotal = homeScore + awayScore;
+  const scoreMatch = detectedGoals === scoreTotal;
+
+  return (
+    <Card className={`border-l-4 ${
+      validation?.status === 'success' ? 'border-l-green-500' :
+      validation?.status === 'warning' ? 'border-l-yellow-500' :
+      validation?.status === 'error' ? 'border-l-red-500' :
+      'border-l-muted'
+    }`}>
+      <CardHeader className="pb-2">
+        <CardTitle className="text-sm flex items-center gap-2">
+          <FileText className="h-4 w-4" />
+          Validação de Gols
+          {isLoading && <span className="text-xs text-muted-foreground">(carregando...)</span>}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {/* Score vs Events Comparison */}
+        <div className="flex items-center justify-between">
+          <span className="text-sm">Placar registrado</span>
+          <Badge variant={scoreMatch ? "default" : "destructive"}>
+            {homeScore} + {awayScore} = {scoreTotal} gols
+          </Badge>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-sm">Eventos de gol</span>
+          <Badge variant={scoreMatch ? "default" : "destructive"}>
+            {detectedGoals} detectados
+          </Badge>
+        </div>
+
+        {/* Validation Status */}
+        {validation && (
+          <>
+            <div className="border-t pt-3 mt-3">
+              <div className="flex items-center gap-2 mb-2">
+                {validation.status === 'success' ? (
+                  <CheckCircle2 className="h-4 w-4 text-green-500" />
+                ) : validation.status === 'warning' ? (
+                  <AlertTriangle className="h-4 w-4 text-yellow-500" />
+                ) : (
+                  <XCircle className="h-4 w-4 text-red-500" />
+                )}
+                <span className="text-sm font-medium">
+                  {validation.status === 'success' ? 'Validação OK' :
+                   validation.status === 'warning' ? 'Possível discrepância' :
+                   `⚠️ ${validation.discrepancy} gol(s) podem ter sido perdidos`}
+                </span>
+              </div>
+
+              {/* Keywords Found */}
+              {validation.keywords.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs text-muted-foreground">
+                    Menções na transcrição: {validation.keywordsFound}
+                  </p>
+                  <div className="flex flex-wrap gap-1">
+                    {validation.keywords.slice(0, 5).map((kw, idx) => (
+                      <Badge key={idx} variant="outline" className="text-xs">
+                        {kw.keyword} ({kw.count}x)
+                      </Badge>
+                    ))}
+                    {validation.keywords.length > 5 && (
+                      <Badge variant="outline" className="text-xs">
+                        +{validation.keywords.length - 5} mais
+                      </Badge>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Confidence Bar */}
+              <div className="mt-3">
+                <div className="flex items-center justify-between text-xs mb-1">
+                  <span className="text-muted-foreground">Confiança da detecção</span>
+                  <span className={
+                    validation.status === 'success' ? 'text-green-500' :
+                    validation.status === 'warning' ? 'text-yellow-500' :
+                    'text-red-500'
+                  }>
+                    {validation.discrepancy === 0 ? '100%' :
+                     validation.discrepancy === 1 ? '~85%' :
+                     `~${Math.max(50, 100 - validation.discrepancy * 20)}%`}
+                  </span>
+                </div>
+                <Progress 
+                  value={validation.discrepancy === 0 ? 100 : Math.max(50, 100 - validation.discrepancy * 20)} 
+                  className={`h-2 ${
+                    validation.status === 'success' ? '[&>div]:bg-green-500' :
+                    validation.status === 'warning' ? '[&>div]:bg-yellow-500' :
+                    '[&>div]:bg-red-500'
+                  }`}
+                />
+              </div>
+            </div>
+          </>
+        )}
+
+        {!validation && !isLoading && (
+          <p className="text-xs text-muted-foreground">
+            Sem dados de transcrição disponíveis
+          </p>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
 
 type PeriodKey = "H1" | "H2" | "ALL";
 type AnalysisLevel = 1 | 2 | 3 | 4;
@@ -942,8 +1163,16 @@ export default function MatchDashboard() {
             </div>
           </div>
 
-          {/* Timeline (1 column) */}
-          <div className="lg:col-span-1">
+          {/* Timeline and Validation (1 column) */}
+          <div className="lg:col-span-1 space-y-4">
+            {/* Goal Validation Card */}
+            <GoalValidationCard
+              matchId={selectedMatchId}
+              events={filteredEvents}
+              homeScore={homeScore}
+              awayScore={awayScore}
+            />
+            
             <Timeline
               events={filteredEvents}
               selectedEventId={selectedEvent?.id}
