@@ -43,6 +43,10 @@ CORS(app)
 # Initialize database
 init_db()
 
+# Run automatic migrations
+from migrate_db import run_migrations
+run_migrations()
+
 
 def load_api_keys_from_db():
     """Load API keys from database on server startup."""
