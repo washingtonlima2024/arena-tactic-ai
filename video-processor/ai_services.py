@@ -1503,6 +1503,7 @@ Se houver múltiplos falantes, separe as falas com quebras de linha.'''
         return {"error": f"Gemini transcription exception: {str(e)}", "success": False}
 
 
+def transcribe_large_video(
     video_url: str,
     match_id: str = None,
     max_chunk_size_mb: int = 20
