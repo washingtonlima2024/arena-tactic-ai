@@ -56,6 +56,7 @@ import { AnalysisSummary } from '@/components/upload/AnalysisSummary';
 import { MatchTimesConfig, defaultMatchTimes, MatchTimes } from '@/components/upload/MatchTimesConfig';
 import { HalfDropzone, getDefaultVideoType, getDefaultMinutes } from '@/components/upload/HalfDropzone';
 import { LocalFileBrowser } from '@/components/upload/LocalFileBrowser';
+import { splitVideoInBrowser, calculateOptimalParts, shouldSplitInBrowser } from '@/lib/videoSplitter';
 import { cn } from '@/lib/utils';
 
 // Helper to extract embed URL from various formats
@@ -696,6 +697,7 @@ export default function VideoUpload() {
   const [processingError, setProcessingError] = useState<string | undefined>();
 
   // Transcribe video/embed using Whisper API with FFmpeg audio extraction - WITH RETRIES AND FALLBACK
+  // Now supports in-browser video splitting for large files when local server is offline
   const transcribeWithWhisper = async (segment: VideoSegment, matchId: string): Promise<string | null> => {
     const MAX_RETRIES = 2;
     
@@ -705,8 +707,98 @@ export default function VideoUpload() {
     console.log('URL:', segment.url);
     console.log('isLink:', segment.isLink);
     console.log('Match ID:', matchId);
+    console.log('Server Online:', isLocalServerOnline);
     console.log('========================================');
     
+    // Check if we need to split video in browser
+    const sizeMB = (segment.size || 0) / (1024 * 1024);
+    const needsBrowserSplit = shouldSplitInBrowser(sizeMB, !!isLocalServerOnline);
+    
+    if (needsBrowserSplit && segment.url && !segment.isLink) {
+      console.log(`[Browser Split] Video is ${sizeMB.toFixed(0)}MB, server offline - splitting in browser`);
+      
+      try {
+        // Calculate optimal parts
+        const numParts = calculateOptimalParts(sizeMB);
+        console.log(`[Browser Split] Will split into ${numParts} parts`);
+        
+        setTranscriptionProgress(`Baixando vídeo para divisão...`);
+        
+        // Fetch video blob
+        const response = await fetch(segment.url);
+        if (!response.ok) throw new Error(`Failed to fetch video: ${response.status}`);
+        const videoBlob = await response.blob();
+        
+        console.log(`[Browser Split] Video blob size: ${(videoBlob.size / 1024 / 1024).toFixed(1)}MB`);
+        
+        // Split video in browser
+        const parts = await splitVideoInBrowser(videoBlob, numParts, (progress) => {
+          setTranscriptionProgress(`${progress.message}`);
+        });
+        
+        console.log(`[Browser Split] Split into ${parts.length} parts`);
+        
+        // Transcribe each part and combine
+        let combinedTranscription = '';
+        
+        for (let i = 0; i < parts.length; i++) {
+          const part = parts[i];
+          const partSizeMB = (part.size / 1024 / 1024).toFixed(1);
+          
+          setTranscriptionProgress(`Transcrevendo parte ${i + 1}/${parts.length} (${partSizeMB}MB)...`);
+          console.log(`[Browser Split] Transcribing part ${i + 1}/${parts.length} (${partSizeMB}MB)`);
+          
+          // Upload part to temporary storage
+          const partFileName = `temp_part_${i + 1}_${Date.now()}.mp4`;
+          const partFile = new File([part], partFileName, { type: 'video/mp4' });
+          
+          try {
+            // Upload part
+            const uploadResult = await apiClient.uploadFile(matchId, 'temp', partFile, partFileName);
+            
+            // Transcribe part
+            const transcriptionResult = await apiClient.transcribeLargeVideo({
+              videoUrl: uploadResult.url
+            });
+            
+            if (transcriptionResult?.text) {
+              combinedTranscription += transcriptionResult.text + '\n\n';
+              console.log(`[Browser Split] Part ${i + 1} transcribed: ${transcriptionResult.text.length} chars`);
+            } else if (transcriptionResult?.requiresLocalServer) {
+              // Part is still too big - shouldn't happen but handle it
+              console.warn(`[Browser Split] Part ${i + 1} still too large, skipping`);
+              toast({
+                title: `⚠️ Parte ${i + 1} muito grande`,
+                description: "Algumas partes não puderam ser transcritas.",
+                variant: "destructive",
+              });
+            }
+          } catch (partError) {
+            console.error(`[Browser Split] Error transcribing part ${i + 1}:`, partError);
+            // Continue with other parts
+          }
+        }
+        
+        if (combinedTranscription.trim()) {
+          console.log(`[Browser Split] Combined transcription: ${combinedTranscription.length} chars`);
+          return combinedTranscription.trim();
+        } else {
+          console.error('[Browser Split] No transcription obtained from any parts');
+          return null;
+        }
+        
+      } catch (splitError) {
+        console.error('[Browser Split] Error during browser split:', splitError);
+        toast({
+          title: "Erro na divisão do vídeo",
+          description: splitError instanceof Error ? splitError.message : "Falha ao dividir vídeo no navegador",
+          variant: "destructive",
+        });
+        return null;
+      }
+    }
+    
+    // Original transcription logic for smaller files or when server is online
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       try {
         console.log(`[Tentativa ${attempt}/${MAX_RETRIES}] Iniciando transcrição Whisper para: ${segment.name}`);
