@@ -173,6 +173,7 @@ def concatenate_videos(segments: list, output_path: str, tmpdir: str) -> bool:
 def split_video(input_path: str, num_parts: int, output_dir: str) -> list:
     """
     Divide um vídeo em N partes iguais.
+    Usa stream copy (sem re-codificação) para velocidade máxima.
     
     Args:
         input_path: Caminho do vídeo original
@@ -206,7 +207,7 @@ def split_video(input_path: str, num_parts: int, output_dir: str) -> list:
         part_duration = total_duration / num_parts
         parts = []
         
-        print(f"[SPLIT] Dividindo vídeo de {total_duration:.1f}s em {num_parts} partes de ~{part_duration:.1f}s")
+        print(f"[SPLIT] Dividindo vídeo de {total_duration:.1f}s em {num_parts} partes de ~{part_duration:.1f}s (stream copy)")
         
         for i in range(num_parts):
             start_time = i * part_duration
@@ -214,21 +215,22 @@ def split_video(input_path: str, num_parts: int, output_dir: str) -> list:
             part_filename = f"part_{i+1}_of_{num_parts}.mp4"
             part_path = os.path.join(output_dir, part_filename)
             
-            # Extract part with ffmpeg
+            # Use stream copy (MUITO mais rápido - sem re-codificação)
+            # -c copy copia os streams sem processar
+            # -avoid_negative_ts make_zero corrige timestamps negativos
             cmd = [
                 'ffmpeg', '-y',
                 '-ss', str(start_time),
                 '-i', input_path,
                 '-t', str(part_duration),
-                '-c:v', 'libx264',
-                '-c:a', 'aac',
-                '-preset', 'fast',
-                '-crf', '23',
+                '-c', 'copy',  # Stream copy - sem re-codificação!
+                '-avoid_negative_ts', 'make_zero',
                 '-movflags', '+faststart',
                 part_path
             ]
             
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            print(f"[SPLIT] Processando parte {i+1}/{num_parts}...")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=180)
             
             if result.returncode == 0 and os.path.exists(part_path):
                 part_size = os.path.getsize(part_path)
@@ -243,7 +245,36 @@ def split_video(input_path: str, num_parts: int, output_dir: str) -> list:
                 })
                 print(f"[SPLIT] ✓ Parte {i+1}/{num_parts}: {start_time:.1f}s - {end_time:.1f}s ({parts[-1]['size_mb']}MB)")
             else:
-                print(f"[SPLIT] ✗ Falha na parte {i+1}: {result.stderr[:200] if result.stderr else 'Unknown error'}")
+                # Fallback: se stream copy falhar, tenta re-codificar
+                print(f"[SPLIT] ⚠ Stream copy falhou para parte {i+1}, tentando re-codificação...")
+                cmd_reencode = [
+                    'ffmpeg', '-y',
+                    '-ss', str(start_time),
+                    '-i', input_path,
+                    '-t', str(part_duration),
+                    '-c:v', 'libx264',
+                    '-c:a', 'aac',
+                    '-preset', 'ultrafast',  # Preset mais rápido
+                    '-crf', '23',
+                    '-movflags', '+faststart',
+                    part_path
+                ]
+                result = subprocess.run(cmd_reencode, capture_output=True, text=True, timeout=600)
+                
+                if result.returncode == 0 and os.path.exists(part_path):
+                    part_size = os.path.getsize(part_path)
+                    parts.append({
+                        'path': part_path,
+                        'start': start_time,
+                        'end': end_time,
+                        'duration': end_time - start_time,
+                        'part': i + 1,
+                        'total_parts': num_parts,
+                        'size_mb': round(part_size / (1024 * 1024), 2)
+                    })
+                    print(f"[SPLIT] ✓ Parte {i+1}/{num_parts} (re-cod): {parts[-1]['size_mb']}MB")
+                else:
+                    print(f"[SPLIT] ✗ Falha na parte {i+1}: {result.stderr[:200] if result.stderr else 'Unknown error'}")
         
         return parts
     except Exception as e:
