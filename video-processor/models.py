@@ -135,6 +135,7 @@ class MatchEvent(Base):
     position_y = Column(Float)
     is_highlight = Column(Boolean, default=False)
     clip_url = Column(Text)
+    clip_pending = Column(Boolean, default=True)
     approval_status = Column(String(20), default='pending')
     approved_by = Column(String(36))
     approved_at = Column(DateTime)
@@ -161,6 +162,7 @@ class MatchEvent(Base):
             'position_y': self.position_y,
             'is_highlight': self.is_highlight,
             'clip_url': self.clip_url,
+            'clip_pending': self.clip_pending,
             'approval_status': self.approval_status,
             'approved_by': self.approved_by,
             'approved_at': self.approved_at.isoformat() if self.approved_at else None,
