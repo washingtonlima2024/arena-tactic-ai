@@ -1374,7 +1374,135 @@ def generate_thumbnail_image(
     return {"error": "No image generated"}
 
 
-def transcribe_large_video(
+def _transcribe_with_gemini(audio_path: str, match_id: str = None) -> Dict[str, Any]:
+    """
+    Transcribe audio using Google Gemini via Lovable AI Gateway.
+    
+    Works for files up to ~20MB. Converts audio to base64 and sends
+    to the Gemini model for transcription.
+    """
+    import base64
+    
+    # Use Lovable API or direct Google API
+    api_key = LOVABLE_API_KEY or GOOGLE_API_KEY
+    if not api_key:
+        return {"error": "Nenhuma chave de API Gemini configurada", "success": False}
+    
+    # Check file size (max 20MB for inline data)
+    audio_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
+    if audio_size_mb > 20:
+        return {"error": f"Arquivo muito grande para Gemini: {audio_size_mb:.1f}MB (máx 20MB)", "success": False}
+    
+    try:
+        # Read and encode audio
+        with open(audio_path, 'rb') as f:
+            audio_base64 = base64.b64encode(f.read()).decode('utf-8')
+        
+        # Determine file extension for mime type
+        ext = os.path.splitext(audio_path)[1].lower()
+        mime_types = {
+            '.mp3': 'audio/mpeg',
+            '.wav': 'audio/wav',
+            '.m4a': 'audio/mp4',
+            '.ogg': 'audio/ogg',
+            '.flac': 'audio/flac'
+        }
+        mime_type = mime_types.get(ext, 'audio/mpeg')
+        
+        # Use Lovable AI Gateway if available
+        if LOVABLE_API_KEY:
+            response = requests.post(
+                LOVABLE_API_URL,
+                headers={
+                    'Authorization': f'Bearer {LOVABLE_API_KEY}',
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'model': 'google/gemini-2.5-flash',
+                    'messages': [{
+                        'role': 'user',
+                        'content': [
+                            {
+                                'type': 'input_audio',
+                                'input_audio': {
+                                    'data': audio_base64,
+                                    'format': ext.replace('.', '') or 'mp3'
+                                }
+                            },
+                            {
+                                'type': 'text',
+                                'text': '''Transcreva este áudio em português brasileiro. 
+Retorne APENAS a transcrição completa do texto falado, sem comentários ou explicações adicionais.
+Se houver múltiplos falantes, separe as falas com quebras de linha.'''
+                            }
+                        ]
+                    }]
+                },
+                timeout=600
+            )
+        else:
+            # Use Google Generative AI API directly
+            response = requests.post(
+                f'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GOOGLE_API_KEY}',
+                headers={'Content-Type': 'application/json'},
+                json={
+                    'contents': [{
+                        'parts': [
+                            {
+                                'inline_data': {
+                                    'mime_type': mime_type,
+                                    'data': audio_base64
+                                }
+                            },
+                            {
+                                'text': '''Transcreva este áudio em português brasileiro.
+Retorne APENAS a transcrição completa do texto falado, sem comentários ou explicações adicionais.
+Se houver múltiplos falantes, separe as falas com quebras de linha.'''
+                            }
+                        ]
+                    }]
+                },
+                timeout=600
+            )
+        
+        if not response.ok:
+            return {"error": f"Gemini transcription error: {response.status_code} - {response.text[:200]}", "success": False}
+        
+        data = response.json()
+        
+        # Extract text based on API used
+        if LOVABLE_API_KEY:
+            text = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+        else:
+            text = data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+        
+        if not text:
+            return {"error": "Gemini não retornou transcrição", "success": False}
+        
+        # Generate simple SRT (without precise timestamps)
+        srt_lines = []
+        paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
+        for i, para in enumerate(paragraphs, 1):
+            start_sec = i * 5
+            end_sec = (i + 1) * 5
+            start = _format_srt_time(start_sec)
+            end = _format_srt_time(end_sec)
+            srt_lines.append(f"{i}\n{start} --> {end}\n{para}\n")
+        
+        srt_content = '\n'.join(srt_lines)
+        
+        return {
+            "success": True,
+            "text": text,
+            "srtContent": srt_content,
+            "matchId": match_id,
+            "provider": "gemini"
+        }
+        
+    except Exception as e:
+        return {"error": f"Gemini transcription exception: {str(e)}", "success": False}
+
+
     video_url: str,
     match_id: str = None,
     max_chunk_size_mb: int = 20
@@ -1401,12 +1529,13 @@ def transcribe_large_video(
     # Check if any transcription API is available and enabled
     elevenlabs_available = ELEVENLABS_API_KEY and ELEVENLABS_ENABLED
     openai_available = OPENAI_API_KEY and OPENAI_ENABLED
+    gemini_available = (GOOGLE_API_KEY or LOVABLE_API_KEY) and GEMINI_ENABLED
     
-    if not elevenlabs_available and not openai_available:
-        raise ValueError("Nenhuma API de transcrição ativa. Ative ElevenLabs ou OpenAI em Configurações > API.")
+    if not elevenlabs_available and not openai_available and not gemini_available:
+        raise ValueError("Nenhuma API de transcrição ativa. Ative ElevenLabs, OpenAI ou Gemini em Configurações > API.")
     
     print(f"[Transcribe] Iniciando transcrição para: {video_url}")
-    print(f"[Transcribe] APIs ativas: ElevenLabs={'✓' if elevenlabs_available else '✗'}, Whisper={'✓' if openai_available else '✗'}")
+    print(f"[Transcribe] APIs ativas: ElevenLabs={'✓' if elevenlabs_available else '✗'}, Whisper={'✓' if openai_available else '✗'}, Gemini={'✓' if gemini_available else '✗'}")
     
     with tempfile.TemporaryDirectory() as tmpdir:
         video_path = os.path.join(tmpdir, 'video.mp4')
@@ -1474,20 +1603,35 @@ def transcribe_large_video(
                 print(f"[Transcribe] ⚠ ElevenLabs falhou: {result.get('error', 'Unknown')}")
         
         # Fallback to Whisper - only if enabled
-        if not openai_available:
-            return {"error": "ElevenLabs falhou e OpenAI não está ativo"}
+        if openai_available:
+            print(f"[Transcribe] Usando Whisper como fallback...")
+            
+            # Whisper API limit is ~25MB, use 24MB as safe threshold
+            if audio_size_mb <= 24:
+                # Direct transcription for small files
+                print(f"[Transcribe] Arquivo pequeno, transcrição direta...")
+                result = _transcribe_audio_file(audio_path, match_id)
+                if result.get('success'):
+                    return result
+                print(f"[Transcribe] ⚠ Whisper falhou: {result.get('error', 'Unknown')}")
+            else:
+                # Multi-chunk transcription for large files
+                print(f"[Transcribe] Arquivo grande ({audio_size_mb:.2f} MB), usando multi-chunk...")
+                result = _transcribe_multi_chunk(audio_path, tmpdir, match_id, max_chunk_size_mb)
+                if result.get('success'):
+                    return result
+                print(f"[Transcribe] ⚠ Whisper multi-chunk falhou: {result.get('error', 'Unknown')}")
         
-        print(f"[Transcribe] Usando Whisper como fallback...")
+        # Fallback to Gemini - only if enabled and file is small enough
+        if gemini_available and audio_size_mb <= 20:
+            print(f"[Transcribe] Tentando Gemini como fallback...")
+            result = _transcribe_with_gemini(audio_path, match_id)
+            if result.get('success'):
+                print(f"[Transcribe] ✓ Gemini sucesso!")
+                return result
+            print(f"[Transcribe] ⚠ Gemini falhou: {result.get('error', 'Unknown')}")
         
-        # Whisper API limit is ~25MB, use 24MB as safe threshold
-        if audio_size_mb <= 24:
-            # Direct transcription for small files
-            print(f"[Transcribe] Arquivo pequeno, transcrição direta...")
-            return _transcribe_audio_file(audio_path, match_id)
-        else:
-            # Multi-chunk transcription for large files
-            print(f"[Transcribe] Arquivo grande ({audio_size_mb:.2f} MB), usando multi-chunk...")
-            return _transcribe_multi_chunk(audio_path, tmpdir, match_id, max_chunk_size_mb)
+        return {"error": "Todas as APIs de transcrição falharam"}
 
 
 def _transcribe_audio_file(audio_path: str, match_id: str = None) -> Dict[str, Any]:
