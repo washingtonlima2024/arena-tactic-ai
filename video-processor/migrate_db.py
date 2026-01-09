@@ -1,0 +1,119 @@
+"""
+Arena Play - Script de Migração Automática do SQLite
+Verifica e adiciona colunas faltantes ao banco de dados para manter
+sincronização com os modelos SQLAlchemy.
+"""
+import sqlite3
+import os
+
+DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'arena_play.db')
+
+# Lista de migrações pendentes
+# Cada migração define uma coluna que deve existir em uma tabela
+MIGRATIONS = [
+    {
+        'table': 'match_events',
+        'column': 'clip_pending',
+        'type': 'BOOLEAN',
+        'default': '1'
+    },
+    # Adicionar futuras migrações aqui conforme necessário
+]
+
+
+def run_migrations():
+    """
+    Executa migrações pendentes no banco SQLite.
+    Verifica se cada coluna existe e adiciona se necessário.
+    """
+    if not os.path.exists(DATABASE_PATH):
+        print("⚠ Banco de dados não existe ainda. Será criado na inicialização.")
+        return
+    
+    print("\n" + "=" * 50)
+    print("🔄 Verificando migrações do banco de dados...")
+    print("=" * 50)
+    
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    migrations_applied = 0
+    
+    for migration in MIGRATIONS:
+        table = migration['table']
+        column = migration['column']
+        col_type = migration['type']
+        default = migration.get('default', 'NULL')
+        
+        try:
+            # Verificar se a tabela existe
+            cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+            if not cursor.fetchone():
+                print(f"  ⚠ Tabela '{table}' não existe - pulando migração")
+                continue
+            
+            # Verificar colunas existentes
+            cursor.execute(f'PRAGMA table_info({table})')
+            columns = [col[1] for col in cursor.fetchall()]
+            
+            if column not in columns:
+                sql = f'ALTER TABLE {table} ADD COLUMN {column} {col_type} DEFAULT {default}'
+                cursor.execute(sql)
+                print(f"  ✓ Migração aplicada: {table}.{column} ({col_type})")
+                migrations_applied += 1
+            else:
+                print(f"  • Coluna já existe: {table}.{column}")
+                
+        except Exception as e:
+            print(f"  ✗ Erro na migração {table}.{column}: {e}")
+    
+    conn.commit()
+    conn.close()
+    
+    if migrations_applied > 0:
+        print(f"\n✓ {migrations_applied} migração(ões) aplicada(s) com sucesso!")
+    else:
+        print("\n✓ Banco de dados está atualizado.")
+    
+    print("=" * 50 + "\n")
+
+
+def check_schema():
+    """
+    Exibe o schema atual das tabelas principais para diagnóstico.
+    """
+    if not os.path.exists(DATABASE_PATH):
+        print("Banco de dados não encontrado.")
+        return
+    
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    tables = ['matches', 'match_events', 'videos', 'teams', 'players']
+    
+    print("\n" + "=" * 50)
+    print("📊 Schema atual do banco de dados")
+    print("=" * 50)
+    
+    for table in tables:
+        cursor.execute(f"SELECT name FROM sqlite_master WHERE type='table' AND name='{table}'")
+        if cursor.fetchone():
+            cursor.execute(f'PRAGMA table_info({table})')
+            columns = cursor.fetchall()
+            print(f"\n{table}:")
+            for col in columns:
+                print(f"  - {col[1]} ({col[2]}){' [PK]' if col[5] else ''}{' NOT NULL' if col[3] else ''}")
+        else:
+            print(f"\n{table}: (não existe)")
+    
+    conn.close()
+    print("\n" + "=" * 50)
+
+
+if __name__ == '__main__':
+    import sys
+    
+    if len(sys.argv) > 1 and sys.argv[1] == '--check':
+        check_schema()
+    else:
+        run_migrations()
