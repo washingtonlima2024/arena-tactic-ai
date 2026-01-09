@@ -54,6 +54,11 @@ def load_api_keys_from_db():
         ollama_model = None
         ollama_enabled = False
         
+        # Provider enabled flags (default True for backward compatibility)
+        gemini_enabled = True
+        openai_enabled = True
+        elevenlabs_enabled = True
+        
         for s in settings:
             if s.setting_key == 'openai_api_key' and s.setting_value:
                 ai_services.set_api_keys(openai_key=s.setting_value)
@@ -73,6 +78,12 @@ def load_api_keys_from_db():
                 ollama_model = s.setting_value
             elif s.setting_key == 'ollama_enabled':
                 ollama_enabled = s.setting_value == 'true'
+            elif s.setting_key == 'gemini_enabled':
+                gemini_enabled = s.setting_value != 'false'
+            elif s.setting_key == 'openai_enabled':
+                openai_enabled = s.setting_value != 'false'
+            elif s.setting_key == 'elevenlabs_enabled':
+                elevenlabs_enabled = s.setting_value != 'false'
         
         # Configure Ollama if settings exist
         if ollama_url or ollama_model or ollama_enabled:
@@ -84,8 +95,26 @@ def load_api_keys_from_db():
             if ollama_enabled:
                 keys_loaded.append(f'OLLAMA ({ollama_model or "llama3.2"})')
         
+        # Apply provider enabled flags
+        ai_services.set_api_keys(
+            gemini_enabled=gemini_enabled,
+            openai_enabled=openai_enabled,
+            elevenlabs_enabled=elevenlabs_enabled
+        )
+        
         if keys_loaded:
-            print(f"✓ AI providers loaded: {', '.join(keys_loaded)}")
+            # Build status with enabled/disabled indicators
+            status_parts = []
+            for k in keys_loaded:
+                if k == 'ELEVENLABS':
+                    status_parts.append(f"ELEVENLABS {'✓' if elevenlabs_enabled else '✗'}")
+                elif k == 'GOOGLE':
+                    status_parts.append(f"GEMINI {'✓' if gemini_enabled else '✗'}")
+                elif k == 'OPENAI':
+                    status_parts.append(f"OPENAI {'✓' if openai_enabled else '✗'}")
+                else:
+                    status_parts.append(k)
+            print(f"✓ AI providers: {', '.join(status_parts)}")
         else:
             print("⚠ No AI providers configured. Configure in Settings > API.")
     except Exception as e:
