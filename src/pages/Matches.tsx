@@ -64,7 +64,7 @@ export default function Matches() {
 
   const handleReprocess = async (options: {
     useExistingTranscription: { first: boolean; second: boolean };
-    manualTranscription: { first: string; second: string };
+    manualTranscription: { first: string; second: string; full: string };
     reTranscribe: { first: boolean; second: boolean };
   }) => {
     if (!matchToReprocess) return;
@@ -147,8 +147,14 @@ export default function Matches() {
         const videoUrl = video.file_url;
         const isFirstHalf = video.video_type === 'first_half';
         const isSecondHalf = video.video_type === 'second_half';
+        const isFull = video.video_type === 'full';
         const halfKey = isFirstHalf ? 'first' : isSecondHalf ? 'second' : 'first';
         const halfLabel = isFirstHalf ? '1º Tempo' : isSecondHalf ? '2º Tempo' : 'Jogo Completo';
+        
+        // Debug logs
+        console.log(`[Reprocess] Video ${i + 1}: type=${video.video_type}, halfKey=${halfKey}, isFull=${isFull}`);
+        console.log(`[Reprocess] Manual texts: first=${!!options.manualTranscription.first}, second=${!!options.manualTranscription.second}, full=${!!options.manualTranscription.full}`);
+        console.log(`[Reprocess] Use existing: first=${options.useExistingTranscription.first}, second=${options.useExistingTranscription.second}`);
         
         if (!videoUrl) {
           console.warn(`[Reprocess] Vídeo ${i + 1} sem URL, pulando...`);
@@ -160,14 +166,22 @@ export default function Matches() {
         // Determinar fonte da transcrição
         let transcriptionText: string | null = null;
         
-        // Prioridade: 1) Manual, 2) Existente, 3) Transcrever
+        // PRIORIDADE ATUALIZADA:
+        // 1) Manual específico do tempo (first/second)
+        // 2) Manual "full" como fallback universal
+        // 3) Existente específico do tempo
+        // 4) Transcrever
         if (options.manualTranscription[halfKey as 'first' | 'second']) {
           transcriptionText = options.manualTranscription[halfKey as 'first' | 'second'];
-          console.log(`[Reprocess] Usando transcrição manual para ${halfLabel}`);
+          console.log(`[Reprocess] ✓ Usando transcrição MANUAL específica para ${halfLabel}`);
+        } else if (options.manualTranscription.full) {
+          // NOVO: Fallback para transcrição "full" manual
+          transcriptionText = options.manualTranscription.full;
+          console.log(`[Reprocess] ✓ Usando transcrição MANUAL (full) para ${halfLabel}`);
         } else if (options.useExistingTranscription[halfKey as 'first' | 'second']) {
           transcriptionText = existingTranscriptions[`${halfKey}_half` as keyof typeof existingTranscriptions] 
             || existingTranscriptions.full;
-          console.log(`[Reprocess] Usando transcrição existente para ${halfLabel}`);
+          console.log(`[Reprocess] ✓ Usando transcrição EXISTENTE para ${halfLabel}`);
         }
         
         // Se não tem transcrição, precisa transcrever
