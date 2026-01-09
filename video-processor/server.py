@@ -3,6 +3,17 @@ Arena Play - Servidor API Local Completo
 Servidor Flask com SQLite para toda a funcionalidade do Arena Play.
 """
 
+import sys
+import os
+
+# Garantir que o diretório do script esteja no path do Python
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+if SCRIPT_DIR not in sys.path:
+    sys.path.insert(0, SCRIPT_DIR)
+
+# Mudar para o diretório do script (necessário para paths relativos)
+os.chdir(SCRIPT_DIR)
+
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 import subprocess
@@ -44,8 +55,14 @@ CORS(app)
 init_db()
 
 # Run automatic migrations
-from migrate_db import run_migrations
-run_migrations()
+try:
+    from migrate_db import run_migrations
+    run_migrations()
+except ImportError as e:
+    print(f"⚠ Aviso: migrate_db não encontrado: {e}")
+    print("  Execute o servidor a partir da pasta video-processor/")
+except Exception as e:
+    print(f"⚠ Aviso ao executar migrações: {e}")
 
 
 def load_api_keys_from_db():
