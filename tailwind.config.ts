@@ -90,6 +90,9 @@ export default {
         glow: "var(--shadow-glow)",
         card: "var(--shadow-card)",
       },
+      transitionDuration: {
+        '2500': '2500ms',
+      },
       backgroundImage: {
         'gradient-arena': 'var(--gradient-arena)',
         'gradient-dark': 'var(--gradient-dark)',
