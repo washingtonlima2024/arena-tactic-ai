@@ -424,6 +424,13 @@ export const apiClient = {
       }
     );
   },
+  getVideo: async (videoId: string): Promise<any | null> => {
+    try {
+      return await apiRequest<any>(`/api/videos/${videoId}`, { method: 'GET' });
+    } catch {
+      return null;
+    }
+  },
   updateVideo: (id: string, video: any) => apiRequest<any>(`/api/videos/${id}`, { method: 'PUT', body: JSON.stringify(video) }),
   deleteVideo: (id: string) => apiRequest<any>(`/api/videos/${id}`, { method: 'DELETE' }),
   

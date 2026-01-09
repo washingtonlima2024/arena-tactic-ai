@@ -1599,13 +1599,19 @@ export default function VideoUpload() {
       setProcessingProgress(95);
       setProcessingMessage('Salvando eventos...');
 
-      // Atualizar status dos vídeos para 'analyzed'
+      // Atualizar status dos vídeos para 'analyzed' (apenas se existirem no banco)
       const processedSegments = segments.filter(s => s.status === 'complete' || s.status === 'ready');
       for (const segment of processedSegments) {
         if (segment.id) {
           try {
-            await apiClient.updateVideo(segment.id, { status: 'analyzed' });
-            console.log(`[Upload] Vídeo ${segment.id} status atualizado para 'analyzed'`);
+            // Verificar se o vídeo existe antes de atualizar
+            const video = await apiClient.getVideo(segment.id);
+            if (video) {
+              await apiClient.updateVideo(segment.id, { status: 'analyzed' });
+              console.log(`[Upload] Vídeo ${segment.id} status atualizado para 'analyzed'`);
+            } else {
+              console.warn(`[Upload] Vídeo ${segment.id} não encontrado no banco, ignorando atualização`);
+            }
           } catch (err) {
             console.warn(`[Upload] Falha ao atualizar status do vídeo ${segment.id}:`, err);
           }

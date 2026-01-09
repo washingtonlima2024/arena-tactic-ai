@@ -1485,6 +1485,19 @@ def get_videos():
         session.close()
 
 
+@app.route('/api/videos/<video_id>', methods=['GET'])
+def get_video(video_id: str):
+    """Busca um vídeo por ID."""
+    session = get_session()
+    try:
+        video = session.query(Video).filter_by(id=video_id).first()
+        if not video:
+            return jsonify({'error': 'Vídeo não encontrado'}), 404
+        return jsonify(video.to_dict())
+    finally:
+        session.close()
+
+
 @app.route('/api/videos', methods=['POST'])
 def create_video():
     """Cria um registro de vídeo."""
