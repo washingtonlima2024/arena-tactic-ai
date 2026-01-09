@@ -253,7 +253,7 @@ export function ClipVignette({
           phase === 'enter' 
             ? 'scale-125 opacity-0 blur-sm duration-500' 
             : phase === 'hold' 
-            ? 'scale-110 opacity-100 blur-0 duration-[2500ms]' 
+            ? 'scale-110 opacity-100 blur-0 duration-2500' 
             : 'scale-100 opacity-0 blur-md duration-400'
         }`}
         style={{
