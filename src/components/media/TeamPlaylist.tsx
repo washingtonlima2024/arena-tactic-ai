@@ -333,12 +333,12 @@ export function TeamPlaylist({
             filename: `${clip.minute}min-${clip.type}.mp4`
           });
           
-          // Verificar se retornou Blob (servidor local) ou objeto (Edge Function)
+          // Verificar se retornou Blob (servidor local)
           if (result instanceof Blob) {
             const clipUrl = URL.createObjectURL(result);
             clipsComUrl.push({ ...clip, clipUrl });
-          } else if (result && 'clipUrl' in result) {
-            clipsComUrl.push({ ...clip, clipUrl: result.clipUrl });
+          } else if (result && typeof result === 'object' && 'clipUrl' in result) {
+            clipsComUrl.push({ ...clip, clipUrl: (result as { clipUrl: string }).clipUrl });
           }
         } catch (error) {
           console.error('Erro ao extrair clip:', error);

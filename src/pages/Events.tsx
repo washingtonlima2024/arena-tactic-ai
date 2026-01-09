@@ -50,7 +50,7 @@ import { EventEditDialog } from '@/components/events/EventEditDialog';
 import { ReanalyzeHalfDialog } from '@/components/events/ReanalyzeHalfDialog';
 import { ResetMatchDialog } from '@/components/events/ResetMatchDialog';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+// Modo 100% Local - sem dependências de Supabase
 import { useAuth } from '@/hooks/useAuth';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
 import { useMatchAnalysis } from '@/hooks/useMatchAnalysis';
@@ -225,49 +225,19 @@ export default function Events() {
   
   const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useMatchEvents(currentMatchId);
 
-  // Real-time subscription for live match events
+  // Polling para atualizar eventos durante live (modo local)
   useEffect(() => {
     if (!currentMatchId) return;
     
-    // Check if this is an active live match
     const isLiveMatch = isRecording && liveMatchId === currentMatchId;
+    if (!isLiveMatch) return;
     
-    const channel = supabase
-      .channel(`events-realtime-${currentMatchId}`)
-      .on('postgres_changes', {
-        event: 'INSERT',
-        schema: 'public',
-        table: 'match_events',
-        filter: `match_id=eq.${currentMatchId}`
-      }, (payload) => {
-        console.log('New event received in realtime:', payload);
-        refetchEvents();
-        if (isLiveMatch) {
-          toast.success('Novo evento detectado!', {
-            description: payload.new.description || payload.new.event_type
-          });
-        }
-      })
-      .on('postgres_changes', {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'match_events',
-        filter: `match_id=eq.${currentMatchId}`
-      }, (payload) => {
-        console.log('Event updated in realtime:', payload);
-        refetchEvents();
-        // Check if clip was added
-        if (payload.new.clip_url && !payload.old.clip_url) {
-          toast.success('Clip gerado!', {
-            description: `Clip do evento ${payload.new.event_type} está pronto`
-          });
-        }
-      })
-      .subscribe();
+    // Polling a cada 5 segundos durante transmissão ao vivo
+    const interval = setInterval(() => {
+      refetchEvents();
+    }, 5000);
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => clearInterval(interval);
   }, [currentMatchId, refetchEvents, isRecording, liveMatchId]);
 
   // Handle refine events - simplified
@@ -282,17 +252,17 @@ export default function Events() {
     toast.info('Use o diálogo "Analisar Transcrição" para re-analisar a partida com uma transcrição.');
   };
 
-  // Fetch match videos (may have multiple segments)
+  // Fetch match videos (may have multiple segments) - Modo Local
   const { data: matchVideos } = useQuery({
     queryKey: ['match-videos', currentMatchId],
     queryFn: async () => {
       if (!currentMatchId) return [];
-      const { data } = await supabase
-        .from('videos')
-        .select('*')
-        .eq('match_id', currentMatchId)
-        .order('start_minute', { ascending: true });
-      return data || [];
+      try {
+        const videos = await apiClient.getVideos(currentMatchId);
+        return videos || [];
+      } catch {
+        return [];
+      }
     },
     enabled: !!currentMatchId
   });
@@ -325,33 +295,35 @@ export default function Events() {
   // Use first video as fallback for general display
   const matchVideo = matchVideos?.[0] || null;
 
-  // Fetch thumbnails for events
+  // Fetch thumbnails for events - Modo Local
   const { data: thumbnails = [] } = useQuery({
     queryKey: ['event-thumbnails', currentMatchId],
     queryFn: async () => {
       if (!currentMatchId) return [];
-      const { data } = await supabase
-        .from('thumbnails')
-        .select('*')
-        .eq('match_id', currentMatchId);
-      return data || [];
+      try {
+        const data = await apiClient.getThumbnails(currentMatchId);
+        return data || [];
+      } catch {
+        return [];
+      }
     },
     enabled: !!currentMatchId
   });
 
-  // Check if match is from live recording (to hide VideoUploadCard)
+  // Check if match is from live recording (to hide VideoUploadCard) - Modo Local
   const { data: analysisJobSource } = useQuery({
     queryKey: ['analysis-job-source', currentMatchId],
     queryFn: async () => {
       if (!currentMatchId) return null;
-      const { data } = await supabase
-        .from('analysis_jobs')
-        .select('result')
-        .eq('match_id', currentMatchId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      return data;
+      try {
+        const jobs = await apiClient.getAnalysisJobs(currentMatchId);
+        if (jobs && jobs.length > 0) {
+          return jobs[0]; // Retorna o job mais recente
+        }
+        return null;
+      } catch {
+        return null;
+      }
     },
     enabled: !!currentMatchId
   });
