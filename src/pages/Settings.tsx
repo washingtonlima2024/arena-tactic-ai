@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Separator } from '@/components/ui/separator';
+import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { TeamFormDialog } from '@/components/teams/TeamFormDialog';
 import { TeamCard } from '@/components/teams/TeamCard';
@@ -818,19 +819,16 @@ export default function Settings() {
                     ) : (
                       <Cloud className="h-5 w-5 text-primary" />
                     )}
-                    <div>
+                  <div>
                       <p className="font-medium">Servidor Local (Python)</p>
                       <p className="text-sm text-muted-foreground">
-                        {apiMode === 'local' 
-                          ? 'Usando servidor Python local em localhost:5000' 
-                          : 'Usando Supabase Cloud'}
+                        Modo 100% Local - Usando servidor Python em localhost:5000
                       </p>
                     </div>
                   </div>
-                  <Switch 
-                    checked={apiMode === 'local'} 
-                    onCheckedChange={handleApiModeChange}
-                  />
+                  <Badge variant="default" className="bg-primary">
+                    Local Ativo
+                  </Badge>
                 </div>
                 
                 <Separator />
