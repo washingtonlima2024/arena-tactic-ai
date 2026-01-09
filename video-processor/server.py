@@ -746,17 +746,148 @@ def list_subfolder_files(match_id: str, subfolder: str):
 
 @app.route('/api/storage/<match_id>/<subfolder>', methods=['POST'])
 def upload_to_match(match_id: str, subfolder: str):
-    """Upload de arquivo para subfolder da partida."""
+    """Upload de arquivo para subfolder da partida. Se for vídeo, cria registro automático no banco."""
     if 'file' not in request.files:
         return jsonify({'error': 'Nenhum arquivo enviado'}), 400
     
     try:
         file = request.files['file']
         filename = request.form.get('filename')
+        video_type = request.form.get('video_type', 'full')
         result = save_uploaded_file(match_id, subfolder, file, filename)
+        
+        # SE subfolder é 'videos', criar registro automático no banco
+        if subfolder == 'videos':
+            session = get_session()
+            try:
+                # Verificar se já existe registro para este arquivo
+                existing = session.query(Video).filter_by(
+                    match_id=match_id, 
+                    file_name=result['filename']
+                ).first()
+                
+                if not existing:
+                    # Detectar duração do vídeo
+                    file_path = get_match_storage_path(match_id) / subfolder / result['filename']
+                    duration_seconds = None
+                    try:
+                        probe = subprocess.run([
+                            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+                            '-show_format', str(file_path)
+                        ], capture_output=True, text=True, timeout=30)
+                        if probe.returncode == 0:
+                            probe_data = json_module.loads(probe.stdout)
+                            duration_seconds = int(float(probe_data.get('format', {}).get('duration', 0)))
+                    except Exception as e:
+                        print(f"[upload] Aviso ao detectar duração: {e}")
+                    
+                    video = Video(
+                        match_id=match_id,
+                        file_url=result['url'],
+                        file_name=result['filename'],
+                        video_type=video_type,
+                        duration_seconds=duration_seconds,
+                        status='ready',
+                        start_minute=0 if video_type in ['first_half', 'full'] else 45,
+                        end_minute=45 if video_type == 'first_half' else 90
+                    )
+                    session.add(video)
+                    session.commit()
+                    result['video'] = video.to_dict()
+                    print(f"[upload] Registro de vídeo criado: {result['filename']}")
+                else:
+                    result['video'] = existing.to_dict()
+                    print(f"[upload] Vídeo já registrado: {result['filename']}")
+            except Exception as e:
+                session.rollback()
+                print(f"[upload] Aviso: não criou registro de vídeo: {e}")
+            finally:
+                session.close()
+        
         return jsonify(result)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
+
+
+@app.route('/api/videos/sync/<match_id>', methods=['POST'])
+def sync_videos_from_storage(match_id: str):
+    """
+    Sincroniza arquivos de vídeo existentes no storage com registros no banco.
+    Útil para recuperar vídeos que foram uploadados mas não registrados.
+    """
+    storage_path = get_match_storage_path(match_id) / 'videos'
+    
+    if not storage_path.exists():
+        return jsonify({'error': 'Pasta de vídeos não encontrada', 'synced': 0, 'videos': []}), 200
+    
+    session = get_session()
+    synced = []
+    
+    try:
+        # Listar vídeos existentes no banco
+        existing = session.query(Video).filter_by(match_id=match_id).all()
+        existing_files = {v.file_name for v in existing if v.file_name}
+        
+        # Verificar arquivos no disco
+        video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v'}
+        
+        for file_path in storage_path.iterdir():
+            if file_path.is_file() and file_path.suffix.lower() in video_extensions:
+                filename = file_path.name
+                
+                if filename not in existing_files:
+                    # Detectar tipo de vídeo pelo nome
+                    video_type = 'full'
+                    lower_name = filename.lower()
+                    if '1' in lower_name or 'first' in lower_name or 'primeiro' in lower_name:
+                        video_type = 'first_half'
+                    elif '2' in lower_name or 'second' in lower_name or 'segundo' in lower_name:
+                        video_type = 'second_half'
+                    
+                    # Detectar duração
+                    duration_seconds = None
+                    try:
+                        probe = subprocess.run([
+                            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+                            '-show_format', str(file_path)
+                        ], capture_output=True, text=True, timeout=30)
+                        if probe.returncode == 0:
+                            probe_data = json_module.loads(probe.stdout)
+                            duration_seconds = int(float(probe_data.get('format', {}).get('duration', 0)))
+                    except Exception:
+                        pass
+                    
+                    # Criar registro
+                    file_url = f"http://localhost:5000/api/storage/{match_id}/videos/{filename}"
+                    video = Video(
+                        match_id=match_id,
+                        file_url=file_url,
+                        file_name=filename,
+                        video_type=video_type,
+                        duration_seconds=duration_seconds,
+                        status='ready',
+                        start_minute=0 if video_type in ['first_half', 'full'] else 45,
+                        end_minute=45 if video_type == 'first_half' else 90
+                    )
+                    session.add(video)
+                    synced.append(video.to_dict())
+                    print(f"[sync] Vídeo sincronizado: {filename} ({video_type})")
+        
+        session.commit()
+        
+        return jsonify({
+            'success': True,
+            'synced': len(synced),
+            'videos': synced,
+            'message': f'{len(synced)} vídeo(s) sincronizado(s) com o banco de dados'
+        })
+        
+    except Exception as e:
+        session.rollback()
+        print(f"[sync] Erro: {e}")
+        return jsonify({'error': str(e), 'synced': 0, 'videos': []}), 500
+    finally:
+        session.close()
 
 
 @app.route('/api/storage/<match_id>/<subfolder>/<filename>', methods=['DELETE'])

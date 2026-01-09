@@ -426,6 +426,16 @@ export const apiClient = {
   },
   updateVideo: (id: string, video: any) => apiRequest<any>(`/api/videos/${id}`, { method: 'PUT', body: JSON.stringify(video) }),
   deleteVideo: (id: string) => apiRequest<any>(`/api/videos/${id}`, { method: 'DELETE' }),
+  
+  // Sincroniza vídeos do storage com o banco de dados
+  syncVideos: async (matchId: string): Promise<{
+    success: boolean;
+    synced: number;
+    videos: any[];
+    message: string;
+  }> => {
+    return apiRequest(`/api/videos/sync/${matchId}`, { method: 'POST' });
+  },
 
   // ============== Analysis Jobs (with Supabase fallback) ==============
   getAnalysisJobs: (matchId?: string) => apiRequest<any[]>(`/api/analysis-jobs${matchId ? `?match_id=${matchId}` : ''}`),
