@@ -44,17 +44,31 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
 
   const statusColor = checking 
     ? 'bg-yellow-500' 
-    : isOnline 
-      ? 'bg-green-500' 
-      : 'bg-red-500';
+    : isLocal
+      ? isOnline 
+        ? 'bg-green-500' 
+        : 'bg-orange-500'
+      : 'bg-blue-500';
+
+  const statusLabel = isLocal
+    ? isOnline 
+      ? 'Conectado'
+      : 'Usando Cloud'
+    : 'Cloud Ativo';
+
+  const textColor = isLocal
+    ? isOnline 
+      ? 'text-green-500'
+      : 'text-orange-500'
+    : 'text-blue-500';
 
   const statusText = isLocal
     ? checking
       ? 'Verificando servidor local...'
       : isOnline
         ? 'Servidor Python online'
-        : 'Servidor Python offline'
-    : 'Supabase Cloud conectado';
+        : 'Servidor Python não detectado. Usando processamento na nuvem.'
+    : 'Lovable Cloud conectado';
 
   const content = (
     <div
@@ -79,11 +93,8 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           <span className="font-medium text-foreground">
             {isLocal ? 'Local' : 'Cloud'}
           </span>
-          <span className={cn(
-            "text-[10px]",
-            isOnline ? "text-green-500" : "text-red-500"
-          )}>
-            {isOnline ? 'Online' : 'Offline'}
+          <span className={cn("text-[10px]", textColor)}>
+            {statusLabel}
           </span>
         </div>
       )}
