@@ -853,7 +853,7 @@ Retorne APENAS um JSON válido com a seguinte estrutura:
     }
 
 
-
+def analyze_goal_play_data(
     description: str,
     scorer: str = None,
     assister: str = None,
