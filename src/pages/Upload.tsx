@@ -331,7 +331,12 @@ export default function VideoUpload() {
       }, 1000);
 
       // Validar que temos uma partida selecionada ANTES de fazer upload
-      const matchId = selectedExistingMatch || existingMatchId;
+      // Fallback: ler diretamente da URL caso o estado ainda não esteja sincronizado
+      const urlMatchId = new URLSearchParams(window.location.search).get('match');
+      const matchId = selectedExistingMatch || existingMatchId || urlMatchId;
+      
+      console.log('[uploadFile] Match IDs:', { selectedExistingMatch, existingMatchId, urlMatchId, matchId });
+      
       if (!matchId) {
         throw new Error('Selecione uma partida primeiro antes de fazer upload.');
       }
@@ -565,7 +570,12 @@ export default function VideoUpload() {
 
   // Handle local file selection (no upload - just link the path)
   const handleLocalFileSelect = async (file: { path: string; name: string; size_mb: number }) => {
-    const matchId = selectedExistingMatch || existingMatchId;
+    // Fallback: ler diretamente da URL caso o estado ainda não esteja sincronizado
+    const urlMatchId = new URLSearchParams(window.location.search).get('match');
+    const matchId = selectedExistingMatch || existingMatchId || urlMatchId;
+    
+    console.log('[handleLocalFileSelect] Match IDs:', { selectedExistingMatch, existingMatchId, urlMatchId, matchId });
+    
     if (!matchId) {
       toast({
         title: "Partida não selecionada",
