@@ -1935,6 +1935,17 @@ def extract_event_clips_auto(
     extracted = []
     duration = pre_buffer + post_buffer
     
+    # Resolve symlink if video_path is a symlink
+    if os.path.islink(video_path):
+        resolved_path = os.path.realpath(video_path)
+        print(f"[CLIP] Resolved symlink: {video_path} -> {resolved_path}")
+        video_path = resolved_path
+    
+    # Verify video file exists
+    if not os.path.exists(video_path):
+        print(f"[CLIP] ⚠ Video file not found: {video_path}")
+        return extracted
+    
     for event in events:
         try:
             minute = event.get('minute', 0)
@@ -2001,7 +2012,8 @@ def extract_event_clips_auto(
                 half_normalized = 'first_half' if half_type == 'first' else 'second_half'
                 clip_url = f"http://localhost:5000/api/storage/{match_id}/clips/{half_normalized}/{filename}"
                 
-                extracted.append({
+                clip_info = {
+                    'event_id': event.get('id'),  # Include event ID for database update
                     'event_minute': minute,
                     'event_type': event_type,
                     'filename': filename,
@@ -2009,8 +2021,25 @@ def extract_event_clips_auto(
                     'url': clip_url,
                     'half_type': half_normalized,
                     'description': description
-                })
+                }
+                extracted.append(clip_info)
                 print(f"[CLIP] ✓ Extracted: {filename}")
+                
+                # Update event clip_url in database if event_id is present
+                event_id = event.get('id')
+                if event_id:
+                    session = get_session()
+                    try:
+                        db_event = session.query(MatchEvent).filter_by(id=event_id).first()
+                        if db_event:
+                            db_event.clip_url = clip_url
+                            db_event.clip_pending = False
+                            session.commit()
+                            print(f"[CLIP] ✓ Updated clip_url for event {event_id}")
+                    except Exception as db_err:
+                        print(f"[CLIP] ⚠ Error updating event: {db_err}")
+                    finally:
+                        session.close()
             else:
                 print(f"[CLIP] ✗ Failed to extract clip for minute {minute}")
                 
@@ -2150,6 +2179,14 @@ def process_match_complete():
                     with open(srt_path, 'w', encoding='utf-8') as f:
                         f.write(srt_content)
                     print(f"[PROCESS-MATCH] SRT salvo: {srt_path}")
+                
+                # Save transcription text file
+                if transcription:
+                    txt_filename = f"{video_type}_transcription.txt"
+                    txt_path = get_subfolder_path(match_id, 'texts') / txt_filename
+                    with open(txt_path, 'w', encoding='utf-8') as f:
+                        f.write(transcription)
+                    print(f"[PROCESS-MATCH] Transcrição TXT salva: {txt_path}")
                 
                 # Step 3: Analyze transcription with AI
                 print(f"[PROCESS-MATCH] Analisando transcrição com IA...")
@@ -3504,6 +3541,19 @@ def _process_match_pipeline(job_id: str, data: dict):
             
             if not first_half_text and not second_half_text:
                 raise Exception("Nenhuma transcrição foi gerada")
+            
+            # Save transcription text files
+            if first_half_text:
+                txt_path = get_subfolder_path(match_id, 'texts') / 'first_half_transcription.txt'
+                with open(txt_path, 'w', encoding='utf-8') as f:
+                    f.write(first_half_text)
+                print(f"[ASYNC-PIPELINE] ✓ Transcrição 1º tempo salva: {txt_path}")
+            
+            if second_half_text:
+                txt_path = get_subfolder_path(match_id, 'texts') / 'second_half_transcription.txt'
+                with open(txt_path, 'w', encoding='utf-8') as f:
+                    f.write(second_half_text)
+                print(f"[ASYNC-PIPELINE] ✓ Transcrição 2º tempo salva: {txt_path}")
             
             # ========== PHASE 4: AI ANALYSIS (10%) ==========
             _update_async_job(job_id, 'analyzing', 80, 'Analisando com IA...', 'analyzing')
