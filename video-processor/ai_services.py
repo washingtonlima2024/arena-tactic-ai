@@ -590,6 +590,58 @@ RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL.
     return []
 
 
+def validate_goal_detection(transcription: str, detected_events: List[Dict]) -> Dict:
+    """
+    Valida se todos os gols mencionados na transcrição foram detectados pela IA.
+    Retorna um relatório de validação com alertas se houver discrepâncias.
+    """
+    # Palavras-chave que indicam gols na transcrição
+    goal_keywords = [
+        'GOOOL', 'GOLAÇO', 'GOL!', 'É GOL', 'PRA DENTRO', 'ENTROU',
+        'PRIMEIRO GOL', 'SEGUNDO GOL', 'TERCEIRO GOL', 'QUARTO GOL',
+        'QUINTO GOL', 'GOL DE', 'GOL DO', 'GOOOOL', 'GOLAAAAÇO',
+        'ABRIU O PLACAR', 'EMPATA O JOGO', 'VIROU O JOGO', 'GOL CONTRA'
+    ]
+    
+    transcription_upper = transcription.upper()
+    
+    # Contar menções de gol (evitando contagem dupla)
+    goal_mentions = 0
+    for kw in goal_keywords:
+        count = transcription_upper.count(kw)
+        if count > 0:
+            goal_mentions += count
+            print(f"[VALIDATION] Keyword '{kw}' encontrada {count}x na transcrição")
+    
+    # Filtrar para evitar falsos positivos (algumas palavras aparecem juntas)
+    # Ex: "GOOOL" e "É GOL" podem se referir ao mesmo gol
+    estimated_goals = min(goal_mentions, 10)  # Cap em 10 para evitar falsos positivos extremos
+    
+    # Contar gols detectados pela IA
+    detected_goals = len([e for e in detected_events if e.get('event_type') == 'goal'])
+    
+    validation_result = {
+        'goal_keywords_found': goal_mentions,
+        'estimated_goals': estimated_goals,
+        'detected_goals': detected_goals,
+        'discrepancy': estimated_goals - detected_goals if estimated_goals > detected_goals else 0,
+        'warning': None
+    }
+    
+    # Alertar se houver discrepância significativa
+    if estimated_goals > detected_goals:
+        warning = f"⚠️ ALERTA DE VALIDAÇÃO: {goal_mentions} menções de gol na transcrição, " \
+                  f"mas apenas {detected_goals} gols detectados pela IA. " \
+                  f"Possível perda de {estimated_goals - detected_goals} gol(s)!"
+        print(warning)
+        validation_result['warning'] = warning
+    else:
+        print(f"[VALIDATION] ✓ Validação OK: {detected_goals} gols detectados, " \
+              f"{goal_mentions} menções na transcrição")
+    
+    return validation_result
+
+
 def generate_narration_script(
     events: List[Dict],
     home_team: str,
