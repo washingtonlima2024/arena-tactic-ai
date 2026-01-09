@@ -994,6 +994,37 @@ export const apiClient = {
     return linkResult;
   },
 
+  // ============== SRT Upload & File Listing ==============
+  uploadSrt: async (matchId: string, content: string, halfType: 'first' | 'second' | 'full' = 'full'): Promise<{
+    success: boolean;
+    srtPath: string;
+    txtPath: string;
+    srtUrl: string;
+    txtUrl: string;
+    textLength: number;
+  }> => {
+    return apiRequest(`/api/matches/${matchId}/srt`, {
+      method: 'POST',
+      body: JSON.stringify({ content, halfType })
+    });
+  },
+
+  listMatchFiles: async (matchId: string): Promise<{
+    matchId: string;
+    stats: { total_files: number; total_size: number; total_size_mb: number };
+    files: {
+      videos: any[];
+      clips: any[];
+      srt: any[];
+      texts: any[];
+      audio: any[];
+      images: any[];
+      json: any[];
+    };
+  }> => {
+    return apiRequest(`/api/matches/${matchId}/files`);
+  },
+
   // ============== Async Processing Pipeline ==============
   startAsyncProcessing: async (data: {
     matchId: string;
