@@ -1859,8 +1859,7 @@ def analyze_match():
                     second=event_data.get('second', 0),
                     match_half=match_half,
                     is_highlight=event_data.get('is_highlight', False),
-                    clip_pending=True,
-                    metadata={
+                    event_metadata={
                         'ai_generated': True, 
                         'original_minute': event_data.get('minute'),
                         'team': event_data.get('team'),
@@ -1869,6 +1868,8 @@ def analyze_match():
                         **event_data
                     }
                 )
+                # Set clip_pending after creation to avoid SQLAlchemy keyword arg issues
+                event.clip_pending = True
                 session.add(event)
                 session.flush()
                 

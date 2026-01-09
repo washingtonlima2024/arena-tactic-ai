@@ -17,8 +17,59 @@ MIGRATIONS = [
         'type': 'BOOLEAN',
         'default': '1'
     },
+    {
+        'table': 'match_events',
+        'column': 'event_metadata',
+        'type': 'TEXT',
+        'default': "'{}'"
+    },
     # Adicionar futuras migrações aqui conforme necessário
 ]
+
+
+def force_add_column_if_missing():
+    """
+    Força a adição de colunas críticas que podem estar faltando.
+    Executa antes do SQLAlchemy para evitar erros de inicialização.
+    """
+    if not os.path.exists(DATABASE_PATH):
+        return
+    
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    # Verificar se tabela match_events existe
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='match_events'")
+    if not cursor.fetchone():
+        conn.close()
+        return
+    
+    # Verificar colunas existentes
+    cursor.execute('PRAGMA table_info(match_events)')
+    columns = [col[1] for col in cursor.fetchall()]
+    
+    # Adicionar clip_pending se não existir
+    if 'clip_pending' not in columns:
+        try:
+            cursor.execute('ALTER TABLE match_events ADD COLUMN clip_pending BOOLEAN DEFAULT 1')
+            print("  ✓ Coluna clip_pending adicionada à tabela match_events")
+        except Exception as e:
+            print(f"  ⚠ Aviso ao adicionar clip_pending: {e}")
+    
+    # Adicionar event_metadata se não existir
+    if 'event_metadata' not in columns:
+        try:
+            cursor.execute("ALTER TABLE match_events ADD COLUMN event_metadata TEXT DEFAULT '{}'")
+            print("  ✓ Coluna event_metadata adicionada à tabela match_events")
+        except Exception as e:
+            print(f"  ⚠ Aviso ao adicionar event_metadata: {e}")
+    
+    conn.commit()
+    conn.close()
+
+
+# Executar migração forçada imediatamente ao importar o módulo
+force_add_column_if_missing()
 
 
 def run_migrations():
