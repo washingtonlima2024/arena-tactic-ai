@@ -645,9 +645,16 @@ export default function VideoUpload() {
       setSegments(prev => prev.map(s => 
         s.id === segmentId ? { ...s, status: 'error' as const } : s
       ));
+      
+      const isServerError = error.message?.includes('Servidor Python') || 
+                            error.message?.includes('expirou') ||
+                            error.message?.includes('timeout');
+      
       toast({
-        title: "Erro ao vincular arquivo",
-        description: error.message,
+        title: isServerError ? "Servidor indisponível" : "Erro ao vincular arquivo",
+        description: isServerError 
+          ? "Verifique se o servidor Python está rodando em localhost:5000 e tente novamente."
+          : error.message,
         variant: "destructive",
       });
     }

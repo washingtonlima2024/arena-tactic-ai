@@ -55,23 +55,38 @@ export async function isLocalServerAvailable(): Promise<boolean> {
 
 async function apiRequest<T>(
   endpoint: string,
-  options: RequestInit = {}
+  options: RequestInit = {},
+  timeoutMs: number = 60000 // 60 segundos padrão
 ): Promise<T> {
-  const response = await fetch(`${getApiBase()}${endpoint}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'ngrok-skip-browser-warning': 'true', // Bypass ngrok warning page
-      ...options.headers,
-    },
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
-  if (!response.ok) {
-    const error = await response.json().catch(() => ({ error: 'Request failed' }));
-    throw new Error(error.error || `HTTP ${response.status}`);
+  try {
+    const response = await fetch(`${getApiBase()}${endpoint}`, {
+      ...options,
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        'ngrok-skip-browser-warning': 'true',
+        ...options.headers,
+      },
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Request failed' }));
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
+
+    return response.json();
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error('Requisição expirou - o servidor demorou muito para responder');
+    }
+    throw error;
   }
-
-  return response.json();
 }
 
 // Video info interface
@@ -690,15 +705,28 @@ export const apiClient = {
     const serverUp = await isLocalServerAvailable();
     
     if (serverUp) {
-      const formData = new FormData();
-      formData.append('file', file);
-      if (filename) formData.append('filename', filename);
-      const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
-        method: 'POST',
-        body: formData,
-      });
-      if (!response.ok) throw new Error('Upload failed');
-      return response.json();
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutos
+      
+      try {
+        const formData = new FormData();
+        formData.append('file', file);
+        if (filename) formData.append('filename', filename);
+        const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+        });
+        clearTimeout(timeoutId);
+        if (!response.ok) throw new Error('Upload failed');
+        return response.json();
+      } catch (error: any) {
+        clearTimeout(timeoutId);
+        if (error.name === 'AbortError') {
+          throw new Error('Upload expirou - arquivo muito grande ou conexão lenta');
+        }
+        throw error;
+      }
     } else {
       // Fallback to Supabase Storage
       console.log('[apiClient] Local server unavailable, using Supabase Storage fallback');
@@ -726,12 +754,12 @@ export const apiClient = {
   // ============== Local File Linking (Optimized for Local Environment) ==============
   // Links a local file path directly without uploading - much faster for large files
   
-  linkLocalFile: (data: { 
+  linkLocalFile: async (data: { 
     local_path: string; 
     match_id: string; 
     subfolder?: string;
     video_type?: 'full' | 'first_half' | 'second_half' | 'clip';
-  }) => apiRequest<{
+  }): Promise<{
     success: boolean;
     video: any;
     local_path: string;
@@ -739,10 +767,16 @@ export const apiClient = {
     file_size_mb: number;
     duration_seconds: number | null;
     symlink_created: boolean;
-  }>('/api/storage/link-local', { 
-    method: 'POST', 
-    body: JSON.stringify(data) 
-  }),
+  }> => {
+    const serverUp = await isLocalServerAvailable();
+    if (!serverUp) {
+      throw new Error('Servidor Python não disponível. O modo "Arquivo Local" requer o servidor rodando em localhost:5000');
+    }
+    return apiRequest('/api/storage/link-local', { 
+      method: 'POST', 
+      body: JSON.stringify(data) 
+    }, 30000); // 30 segundos timeout
+  },
 
   browseLocalDirectory: (path?: string) => apiRequest<{
     current_path: string;
