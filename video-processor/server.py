@@ -1263,17 +1263,31 @@ def update_match(match_id: str):
 @app.route('/api/matches/<match_id>', methods=['DELETE'])
 def delete_match(match_id: str):
     """Remove uma partida e todos os dados relacionados."""
+    print(f"[delete_match] Iniciando deleção da partida: {match_id}")
     session = get_session()
     try:
         match = session.query(Match).filter_by(id=match_id).first()
         if not match:
+            print(f"[delete_match] Partida não encontrada no banco: {match_id}")
             return jsonify({'error': 'Partida não encontrada'}), 404
         
+        # Deletar o registro (cascade remove videos, events, etc.)
         session.delete(match)
         session.commit()
-        return jsonify({'success': True})
+        print(f"[delete_match] Registro deletado do banco: {match_id}")
+        
+        # Deletar arquivos do storage local
+        storage_deleted = False
+        try:
+            storage_deleted = delete_match_storage(match_id)
+            print(f"[delete_match] Storage deletado: {storage_deleted}")
+        except Exception as storage_error:
+            print(f"[delete_match] Aviso: erro ao deletar storage: {storage_error}")
+        
+        return jsonify({'success': True, 'storage_deleted': storage_deleted})
     except Exception as e:
         session.rollback()
+        print(f"[delete_match] Erro ao deletar: {e}")
         return jsonify({'error': str(e)}), 400
     finally:
         session.close()
