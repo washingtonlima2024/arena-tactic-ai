@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
-import { apiClient } from '@/lib/apiClient';
+import { apiClient, isLocalServerAvailable } from '@/lib/apiClient';
 import { getEventHalf } from '@/lib/eventHelpers';
+import { supabase } from '@/integrations/supabase/client';
 
 export interface MatchWithDetails {
   id: string;
@@ -96,15 +97,64 @@ export function useMatchEvents(matchId: string | null) {
     queryFn: async () => {
       if (!matchId) return [];
 
-      // Get videos for time range filtering
-      const videos = await apiClient.getVideos(matchId);
-      const validVideos = videos.filter((v: any) => v.start_minute != null && v.end_minute != null);
+      console.log('[useMatchEvents] Buscando eventos para matchId:', matchId);
 
-      // Get all events for this match
-      const events = await apiClient.getMatchEvents(matchId);
+      let events: MatchEvent[] = [];
+      let source = 'none';
+
+      // Try local server first
+      const serverUp = await isLocalServerAvailable();
+      console.log('[useMatchEvents] Servidor local disponível:', serverUp);
+
+      if (serverUp) {
+        try {
+          const localEvents = await apiClient.getMatchEvents(matchId);
+          console.log('[useMatchEvents] Eventos do servidor local:', localEvents.length);
+          
+          if (localEvents.length > 0) {
+            events = localEvents as MatchEvent[];
+            source = 'local';
+          }
+        } catch (localError) {
+          console.warn('[useMatchEvents] Erro no servidor local:', localError);
+        }
+      }
+
+      // Fallback: Supabase Cloud (sempre tenta se local não retornou eventos)
+      if (events.length === 0) {
+        console.log('[useMatchEvents] Tentando Supabase Cloud diretamente...');
+        try {
+          const { data, error } = await supabase
+            .from('match_events')
+            .select('*')
+            .eq('match_id', matchId)
+            .order('minute', { ascending: true });
+          
+          if (error) {
+            console.error('[useMatchEvents] Supabase error:', error);
+          } else if (data && data.length > 0) {
+            events = data as MatchEvent[];
+            source = 'supabase';
+            console.log('[useMatchEvents] Eventos do Supabase Cloud:', data.length);
+          }
+        } catch (supabaseError) {
+          console.error('[useMatchEvents] Supabase exception:', supabaseError);
+        }
+      }
+
+      console.log(`[useMatchEvents] FONTE FINAL: ${source} | Total: ${events.length} eventos`);
+
+      // Get videos for time range filtering
+      let validVideos: any[] = [];
+      try {
+        const videos = await apiClient.getVideos(matchId);
+        validVideos = videos.filter((v: any) => v.start_minute != null && v.end_minute != null);
+      } catch {
+        // Ignore video fetch errors
+      }
 
       // Normalize match_half for 'full' type videos (infer from minute)
-      const normalizedEvents = (events as MatchEvent[]).map(event => ({
+      const normalizedEvents = events.map(event => ({
         ...event,
         computed_half: getEventHalf({ 
           minute: event.minute, 

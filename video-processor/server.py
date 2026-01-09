@@ -26,6 +26,14 @@ import base64
 from pathlib import Path
 from datetime import datetime
 
+# Carregar variáveis de ambiente do .env (se existir)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+    print("[STARTUP] ✓ Variáveis de ambiente carregadas de .env")
+except ImportError:
+    print("[STARTUP] dotenv não instalado - usando variáveis do sistema")
+
 # Import local modules
 from database import init_db, get_session, Session
 from models import (
@@ -2073,6 +2081,61 @@ def analyze_match():
             print(f"[ANALYZE-MATCH] Saved {len(events)} events with match_half={match_half}")
         finally:
             session.close()
+        
+        # SYNC TO SUPABASE CLOUD: Garantir eventos apareçam no preview/cloud
+        supabase_url = os.getenv('SUPABASE_URL') or os.getenv('VITE_SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_SERVICE_KEY') or os.getenv('SUPABASE_SERVICE_ROLE_KEY')
+        
+        if supabase_url and supabase_key:
+            print(f"[ANALYZE-MATCH] Sincronizando {len(saved_events)} eventos com Supabase Cloud...")
+            sync_success = 0
+            sync_errors = 0
+            
+            for saved_event in saved_events:
+                try:
+                    supabase_event = {
+                        'id': saved_event['id'],
+                        'match_id': match_id,
+                        'event_type': saved_event['event_type'],
+                        'minute': saved_event['minute'],
+                        'second': saved_event.get('second', 0),
+                        'description': saved_event.get('description', ''),
+                        'match_half': match_half,
+                        'clip_pending': True,
+                        'is_highlight': saved_event.get('event_type') == 'goal',
+                        'metadata': json_module.dumps({
+                            'ai_generated': True,
+                            'team': saved_event.get('team'),
+                            'synced_from_local': True
+                        })
+                    }
+                    
+                    headers = {
+                        'apikey': supabase_key,
+                        'Authorization': f'Bearer {supabase_key}',
+                        'Content-Type': 'application/json',
+                        'Prefer': 'resolution=merge-duplicates'
+                    }
+                    
+                    resp = requests.post(
+                        f"{supabase_url}/rest/v1/match_events",
+                        json=supabase_event,
+                        headers=headers,
+                        timeout=10
+                    )
+                    
+                    if resp.status_code in [200, 201]:
+                        sync_success += 1
+                    else:
+                        print(f"[ANALYZE-MATCH] Sync error for event {saved_event['id']}: {resp.status_code} - {resp.text[:200]}")
+                        sync_errors += 1
+                except Exception as sync_err:
+                    print(f"[ANALYZE-MATCH] Sync exception: {sync_err}")
+                    sync_errors += 1
+            
+            print(f"[ANALYZE-MATCH] ✓ Sincronização Cloud: {sync_success} ok, {sync_errors} erros")
+        else:
+            print(f"[ANALYZE-MATCH] Supabase sync skipped (no credentials configured)")
         
         # Auto clip extraction
         clips_extracted = []
