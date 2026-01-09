@@ -78,6 +78,10 @@ export default function Settings() {
   const [ollamaModel, setOllamaModel] = useState('llama3.2');
   const [ollamaEnabled, setOllamaEnabled] = useState(false);
 
+  // Lovable API Key (para geração de thumbnails)
+  const [lovableApiKey, setLovableApiKey] = useState('');
+  const [showLovableKey, setShowLovableKey] = useState(false);
+
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   
   // Storage cleanup state
@@ -130,6 +134,9 @@ export default function Settings() {
       setOllamaUrl(apiSettings.find(s => s.setting_key === 'ollama_url')?.setting_value || 'http://localhost:11434');
       setOllamaModel(apiSettings.find(s => s.setting_key === 'ollama_model')?.setting_value || 'llama3.2');
       setOllamaEnabled(apiSettings.find(s => s.setting_key === 'ollama_enabled')?.setting_value === 'true');
+      
+      // Lovable API Key
+      setLovableApiKey(apiSettings.find(s => s.setting_key === 'LOVABLE_API_KEY')?.setting_value || '');
     }
   }, [apiSettings]);
 
@@ -163,6 +170,7 @@ export default function Settings() {
         ...(geminiApiKey ? [upsertApiSetting.mutateAsync({ key: 'GOOGLE_GENERATIVE_AI_API_KEY', value: geminiApiKey })] : []),
         ...(openaiApiKey ? [upsertApiSetting.mutateAsync({ key: 'OPENAI_API_KEY', value: openaiApiKey })] : []),
         ...(elevenlabsApiKey ? [upsertApiSetting.mutateAsync({ key: 'ELEVENLABS_API_KEY', value: elevenlabsApiKey })] : []),
+        ...(lovableApiKey ? [upsertApiSetting.mutateAsync({ key: 'LOVABLE_API_KEY', value: lovableApiKey })] : []),
         upsertApiSetting.mutateAsync({ key: 'OLLAMA_URL', value: ollamaUrl }),
         upsertApiSetting.mutateAsync({ key: 'OLLAMA_MODEL', value: ollamaModel }),
       ]);
@@ -694,6 +702,60 @@ export default function Settings() {
                         <span className="text-sm text-muted-foreground">
                           {!elevenlabsEnabled ? 'Desativado' : 'Aguardando chave de API'}
                         </span>
+                      </>
+                    )}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Lovable API Key Configuration (for thumbnail generation) */}
+            <Card variant="glow">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Sparkles className="h-5 w-5 text-pink-500" />
+                  Lovable AI (Thumbnails)
+                </CardTitle>
+                <CardDescription>
+                  Geração de capas e imagens via IA do Lovable
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Chave de API Lovable</Label>
+                  <div className="relative">
+                    <Input 
+                      type={showLovableKey ? 'text' : 'password'}
+                      value={lovableApiKey}
+                      onChange={(e) => setLovableApiKey(e.target.value)}
+                      placeholder="lv_..."
+                      className="pr-10"
+                    />
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="absolute right-0 top-0 h-full px-3"
+                      onClick={() => setShowLovableKey(!showLovableKey)}
+                    >
+                      {showLovableKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Necessária para gerar capas de eventos automaticamente. Obtenha em <a href="https://lovable.dev/settings" target="_blank" className="text-primary hover:underline">lovable.dev/settings</a>
+                  </p>
+                </div>
+                <div className={`rounded-lg border p-3 ${lovableApiKey ? 'border-green-500/30 bg-green-500/5' : 'border-muted bg-muted/30'}`}>
+                  <div className="flex items-center gap-2">
+                    {lovableApiKey ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                        <span className="text-sm text-green-500">Configurado e ativo</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">Aguardando chave de API</span>
                       </>
                     )}
                   </div>
