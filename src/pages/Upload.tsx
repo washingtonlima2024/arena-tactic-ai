@@ -223,6 +223,52 @@ export default function VideoUpload() {
     staleTime: 5000,
   });
 
+  // Fetch existing videos when reimporting a match
+  const { data: existingVideos } = useQuery({
+    queryKey: ['existing-videos', existingMatchId],
+    queryFn: async () => {
+      if (!existingMatchId) return [];
+      try {
+        const videos = await apiClient.getVideos(existingMatchId);
+        return videos || [];
+      } catch {
+        return [];
+      }
+    },
+    enabled: !!existingMatchId
+  });
+
+  // Auto-load existing videos as segments when page loads with a match ID
+  useEffect(() => {
+    if (existingVideos && existingVideos.length > 0 && segments.length === 0) {
+      console.log('[Upload] Carregando vídeos existentes:', existingVideos.length);
+      
+      const loadedSegments: VideoSegment[] = existingVideos.map((video: any) => ({
+        id: video.id,
+        name: video.file_name || 'Vídeo',
+        url: video.file_url,
+        size: 0, // Unknown for existing videos
+        videoType: (video.video_type || 'full') as VideoType,
+        title: video.file_name?.replace(/\.[^/.]+$/, '') || 'Vídeo',
+        durationSeconds: video.duration_seconds,
+        startMinute: video.start_minute ?? 0,
+        endMinute: video.end_minute ?? 90,
+        progress: 100,
+        status: 'complete' as const,
+        isLink: false,
+        half: video.video_type === 'second_half' ? 'second' : 
+              video.video_type === 'first_half' ? 'first' : undefined,
+      }));
+      
+      setSegments(loadedSegments);
+      
+      toast({
+        title: `${loadedSegments.length} vídeo(s) carregado(s)`,
+        description: "Clique em 'Iniciar Análise' para processar.",
+      });
+    }
+  }, [existingVideos, segments.length]);
+
   // Detect video duration using HTML5 video element
   const detectVideoDuration = (file: File): Promise<number> => {
     return new Promise((resolve) => {
