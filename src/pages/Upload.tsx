@@ -229,6 +229,11 @@ export default function VideoUpload() {
     queryFn: async () => {
       if (!existingMatchId) return [];
       try {
+        // Sincronizar vídeos do storage primeiro (recupera vídeos órfãos)
+        await apiClient.syncVideos(existingMatchId).catch((e) => {
+          console.warn('[Upload] Sincronização de vídeos falhou:', e);
+        });
+        
         const videos = await apiClient.getVideos(existingMatchId);
         return videos || [];
       } catch {

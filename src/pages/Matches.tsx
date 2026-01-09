@@ -78,7 +78,17 @@ export default function Matches() {
     const matchId = matchToReprocess.id;
     
     try {
-      // 1. Buscar vídeos do match
+      // 1. Sincronizar e buscar vídeos do match
+      setReprocessProgress({ stage: 'Sincronizando vídeos do storage...', progress: 3 });
+      try {
+        const syncResult = await apiClient.syncVideos(matchId);
+        if (syncResult.synced > 0) {
+          console.log(`[Reprocess] Sincronizados ${syncResult.synced} vídeos do storage`);
+        }
+      } catch (e) {
+        console.warn('[Reprocess] Sincronização falhou:', e);
+      }
+
       setReprocessProgress({ stage: 'Buscando vídeos...', progress: 5 });
       const videos = await apiClient.getVideos(matchId);
       
