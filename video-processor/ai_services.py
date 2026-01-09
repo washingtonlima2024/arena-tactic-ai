@@ -18,6 +18,11 @@ OLLAMA_URL = os.environ.get('OLLAMA_URL', 'http://localhost:11434')
 OLLAMA_MODEL = os.environ.get('OLLAMA_MODEL', 'llama3.2')
 OLLAMA_ENABLED = os.environ.get('OLLAMA_ENABLED', 'false').lower() == 'true'
 
+# Provider enabled flags (default all enabled if key exists)
+GEMINI_ENABLED = True
+OPENAI_ENABLED = True
+ELEVENLABS_ENABLED = True
+
 LOVABLE_API_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions'
 OPENAI_API_URL = 'https://api.openai.com/v1'
 GOOGLE_API_URL = 'https://generativelanguage.googleapis.com/v1beta'
@@ -30,11 +35,15 @@ def set_api_keys(
     google_key: str = None,
     ollama_url: str = None,
     ollama_model: str = None,
-    ollama_enabled: bool = None
+    ollama_enabled: bool = None,
+    gemini_enabled: bool = None,
+    openai_enabled: bool = None,
+    elevenlabs_enabled: bool = None
 ):
     """Set API keys programmatically."""
     global LOVABLE_API_KEY, OPENAI_API_KEY, ELEVENLABS_API_KEY, GOOGLE_API_KEY
     global OLLAMA_URL, OLLAMA_MODEL, OLLAMA_ENABLED
+    global GEMINI_ENABLED, OPENAI_ENABLED, ELEVENLABS_ENABLED
     if lovable_key:
         LOVABLE_API_KEY = lovable_key
     if openai_key:
@@ -49,6 +58,12 @@ def set_api_keys(
         OLLAMA_MODEL = ollama_model
     if ollama_enabled is not None:
         OLLAMA_ENABLED = ollama_enabled
+    if gemini_enabled is not None:
+        GEMINI_ENABLED = gemini_enabled
+    if openai_enabled is not None:
+        OPENAI_ENABLED = openai_enabled
+    if elevenlabs_enabled is not None:
+        ELEVENLABS_ENABLED = elevenlabs_enabled
 
 
 def call_ollama(
@@ -218,8 +233,8 @@ def call_ai(
         except Exception as e:
             print(f"Lovable AI failed, trying fallback: {e}")
     
-    # Try Google Gemini directly
-    if GOOGLE_API_KEY:
+    # Try Google Gemini directly (if enabled)
+    if GEMINI_ENABLED and GOOGLE_API_KEY:
         try:
             result = call_google_gemini(messages, model, temperature, max_tokens)
             if result:
@@ -227,8 +242,8 @@ def call_ai(
         except Exception as e:
             print(f"Google Gemini failed, trying OpenAI: {e}")
     
-    # Fallback to OpenAI
-    if OPENAI_API_KEY:
+    # Fallback to OpenAI (if enabled)
+    if OPENAI_ENABLED and OPENAI_API_KEY:
         try:
             return call_openai(messages, 'gpt-4o-mini', temperature, max_tokens)
         except Exception as e:
@@ -1383,12 +1398,15 @@ def transcribe_large_video(
     import math
     from storage import get_file_path, STORAGE_DIR
     
-    # Check if any transcription API is available
-    if not ELEVENLABS_API_KEY and not OPENAI_API_KEY:
-        raise ValueError("Nenhuma API de transcrição configurada. Configure ElevenLabs ou OpenAI em Configurações > API.")
+    # Check if any transcription API is available and enabled
+    elevenlabs_available = ELEVENLABS_API_KEY and ELEVENLABS_ENABLED
+    openai_available = OPENAI_API_KEY and OPENAI_ENABLED
+    
+    if not elevenlabs_available and not openai_available:
+        raise ValueError("Nenhuma API de transcrição ativa. Ative ElevenLabs ou OpenAI em Configurações > API.")
     
     print(f"[Transcribe] Iniciando transcrição para: {video_url}")
-    print(f"[Transcribe] APIs disponíveis: ElevenLabs={'✓' if ELEVENLABS_API_KEY else '✗'}, Whisper={'✓' if OPENAI_API_KEY else '✗'}")
+    print(f"[Transcribe] APIs ativas: ElevenLabs={'✓' if elevenlabs_available else '✗'}, Whisper={'✓' if openai_available else '✗'}")
     
     with tempfile.TemporaryDirectory() as tmpdir:
         video_path = os.path.join(tmpdir, 'video.mp4')
@@ -1445,8 +1463,8 @@ def transcribe_large_video(
         audio_size_mb = audio_size_bytes / (1024 * 1024)
         print(f"[Transcribe] Tamanho do áudio: {audio_size_mb:.2f} MB")
         
-        # Try ElevenLabs first (supports larger files)
-        if ELEVENLABS_API_KEY:
+        # Try ElevenLabs first (supports larger files) - only if enabled
+        if elevenlabs_available:
             print(f"[Transcribe] Tentando ElevenLabs Scribe...")
             result = _transcribe_with_elevenlabs(audio_path, match_id)
             if result.get('success'):
@@ -1455,9 +1473,9 @@ def transcribe_large_video(
             else:
                 print(f"[Transcribe] ⚠ ElevenLabs falhou: {result.get('error', 'Unknown')}")
         
-        # Fallback to Whisper
-        if not OPENAI_API_KEY:
-            return {"error": "ElevenLabs falhou e OpenAI não está configurado"}
+        # Fallback to Whisper - only if enabled
+        if not openai_available:
+            return {"error": "ElevenLabs falhou e OpenAI não está ativo"}
         
         print(f"[Transcribe] Usando Whisper como fallback...")
         
