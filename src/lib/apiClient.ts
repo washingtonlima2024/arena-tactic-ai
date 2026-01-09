@@ -6,7 +6,20 @@
 
 import { supabase } from '@/integrations/supabase/client';
 
-const getApiBase = () => localStorage.getItem('arenaApiUrl') || 'https://75c7a7f57d85.ngrok-free.app';
+// Prioriza localhost quando disponível, fallback para ngrok
+const getApiBase = () => {
+  const stored = localStorage.getItem('arenaApiUrl');
+  if (stored) return stored;
+  
+  // Em ambiente local (localhost/127.0.0.1), usar servidor local diretamente
+  if (typeof window !== 'undefined' && 
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    return 'http://localhost:5000';
+  }
+  
+  // Fallback para ngrok (acesso remoto/preview)
+  return 'https://75c7a7f57d85.ngrok-free.app';
+};
 
 // Check if local server is available
 let serverAvailable: boolean | null = null;
@@ -23,7 +36,8 @@ export async function isLocalServerAvailable(): Promise<boolean> {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 3000);
     
-    const response = await fetch(`${getApiBase()}/health`, { 
+    // Usar health check light para resposta mais rápida
+    const response = await fetch(`${getApiBase()}/health?light=true`, { 
       signal: controller.signal,
       headers: { 'ngrok-skip-browser-warning': 'true' }
     });
