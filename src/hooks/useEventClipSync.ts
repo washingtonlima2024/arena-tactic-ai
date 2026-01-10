@@ -1,9 +1,10 @@
 // Hook for reactive clip synchronization with events
 // Automatically regenerates clips when events are created or modified
+// Migrated to use apiClient for 100% local mode
 
 import { useCallback, useRef } from 'react';
 import { fetchFile } from '@ffmpeg/util';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { getFFmpeg } from '@/lib/ffmpegSingleton';
 import { CLIP_BUFFER_BEFORE_MS, CLIP_BUFFER_AFTER_MS, toMs } from './useClipGeneration';
 
@@ -228,40 +229,27 @@ export function useEventClipSync() {
       await ffmpeg.deleteFile('input.mp4');
       await ffmpeg.deleteFile('output.mp4');
       
-      // Upload to Storage
+      // Upload to local server storage
       updateProgress(70, 'Enviando clip para armazenamento...');
       
-      const filePath = `${event.match_id}/${event.id}.mp4`;
-      const { error: uploadError } = await supabase.storage
-        .from('event-clips')
-        .upload(filePath, clipBlob, {
-          contentType: 'video/mp4',
-          upsert: true
-        });
+      const filename = `${event.id}.mp4`;
+      const uploadResult = await apiClient.uploadBlob(event.match_id, 'clips', clipBlob, filename);
       
-      if (uploadError) {
-        throw new Error(`Upload failed: ${uploadError.message}`);
+      if (!uploadResult?.url) {
+        throw new Error('Upload failed: no URL returned');
       }
       
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('event-clips')
-        .getPublicUrl(filePath);
+      const clipUrl = uploadResult.url;
       
-      const clipUrl = urlData.publicUrl;
-      
-      // Update event with clip_url and mark as not pending
+      // Update event with clip_url and mark as not pending via API
       updateProgress(90, 'Atualizando evento...');
       
-      const { error: updateError } = await supabase
-        .from('match_events')
-        .update({
+      try {
+        await apiClient.updateEvent(event.id, {
           clip_url: clipUrl,
           clip_pending: false
-        })
-        .eq('id', event.id);
-      
-      if (updateError) {
+        });
+      } catch (updateError) {
         console.error('[EventClipSync] Failed to update event:', updateError);
       }
       

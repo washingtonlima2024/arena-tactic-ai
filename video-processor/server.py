@@ -2297,6 +2297,26 @@ def analyze_match():
             finally:
                 session.close()
         
+        # ═══════════════════════════════════════════════════════════════════
+        # CRITICAL: Update match status to 'analyzed' and update scores
+        # ═══════════════════════════════════════════════════════════════════
+        session_update = get_session()
+        try:
+            match = session_update.query(Match).filter_by(id=match_id).first()
+            if match:
+                # Update scores
+                match.home_score = home_score
+                match.away_score = away_score
+                # Update status to 'analyzed' so it appears in the Events/Dashboard pages
+                match.status = 'analyzed'
+                session_update.commit()
+                print(f"[ANALYZE-MATCH] ✓ Match status updated to 'analyzed', score: {home_score}x{away_score}")
+        except Exception as status_err:
+            print(f"[ANALYZE-MATCH] ⚠️ Error updating match status: {status_err}")
+            session_update.rollback()
+        finally:
+            session_update.close()
+        
         return jsonify({
             'success': True, 
             'events': events,
@@ -2305,7 +2325,8 @@ def analyze_match():
             'awayScore': away_score,
             'matchHalf': match_half,
             'clipsExtracted': len(clips_extracted),
-            'clips': clips_extracted
+            'clips': clips_extracted,
+            'matchStatus': 'analyzed'
         })
     except Exception as e:
         print(f"[ANALYZE-MATCH] ERROR: {str(e)}")
