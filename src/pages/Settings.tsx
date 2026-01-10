@@ -191,22 +191,26 @@ export default function Settings() {
         ...(lovableApiKey ? [upsertApiSetting.mutateAsync({ key: 'LOVABLE_API_KEY', value: lovableApiKey })] : []),
         upsertApiSetting.mutateAsync({ key: 'OLLAMA_URL', value: ollamaUrl }),
         upsertApiSetting.mutateAsync({ key: 'OLLAMA_MODEL', value: ollamaModel }),
-        // Ngrok URL
-        ...(ngrokUrl ? [upsertApiSetting.mutateAsync({ key: 'ngrok_fallback_url', value: ngrokUrl })] : []),
-        // Cloudflare Tunnel URL
-        ...(cloudflareUrl ? [upsertApiSetting.mutateAsync({ key: 'cloudflare_tunnel_url', value: cloudflareUrl })] : []),
+        // Ngrok URL (trimmed)
+        ...(ngrokUrl.trim() ? [upsertApiSetting.mutateAsync({ key: 'ngrok_fallback_url', value: ngrokUrl.trim() })] : []),
+        // Cloudflare Tunnel URL (trimmed)
+        ...(cloudflareUrl.trim() ? [upsertApiSetting.mutateAsync({ key: 'cloudflare_tunnel_url', value: cloudflareUrl.trim() })] : []),
       ]);
       
-      // Also save ngrok URL to localStorage for immediate use
-      if (ngrokUrl) {
-        localStorage.setItem('ngrok_fallback_url', ngrokUrl);
+      // Also save ngrok URL to localStorage for immediate use (trimmed)
+      const trimmedNgrokUrl = ngrokUrl.trim();
+      if (trimmedNgrokUrl) {
+        localStorage.setItem('ngrok_fallback_url', trimmedNgrokUrl);
+        setNgrokUrl(trimmedNgrokUrl);
       } else {
         localStorage.removeItem('ngrok_fallback_url');
       }
       
-      // Also save Cloudflare URL to localStorage for immediate use
-      if (cloudflareUrl) {
-        localStorage.setItem('cloudflare_tunnel_url', cloudflareUrl);
+      // Also save Cloudflare URL to localStorage for immediate use (trimmed)
+      const trimmedCloudflareUrl = cloudflareUrl.trim();
+      if (trimmedCloudflareUrl) {
+        localStorage.setItem('cloudflare_tunnel_url', trimmedCloudflareUrl);
+        setCloudflareUrl(trimmedCloudflareUrl);
       } else {
         localStorage.removeItem('cloudflare_tunnel_url');
       }
