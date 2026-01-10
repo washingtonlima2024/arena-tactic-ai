@@ -582,6 +582,7 @@ export const apiClient = {
     file_size_mb: number;
     duration_seconds: number | null;
     symlink_created: boolean;
+    already_exists?: boolean;
   }> => {
     await ensureServerAvailable();
     return apiRequest('/api/storage/link-local', { 
