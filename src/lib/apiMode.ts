@@ -7,7 +7,7 @@
  */
 
 // URL padrão do túnel Cloudflare como fallback (pode ser sobrescrita via Settings)
-const DEFAULT_CLOUDFLARE_TUNNEL = 'https://wells-responded-documentary-responded.trycloudflare.com';
+const DEFAULT_CLOUDFLARE_TUNNEL = 'https://traveler-href-able-interval.trycloudflare.com';
 
 export type ApiMode = 'local';
 
