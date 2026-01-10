@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { X, Clock, Maximize2, Volume2, VolumeX, SkipBack, SkipForward, RotateCcw } from 'lucide-react';
 import { ClipVignette } from './ClipVignette';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
+import { normalizeStorageUrl } from '@/lib/apiClient';
 
 interface VideoPlayerModalProps {
   isOpen: boolean;
@@ -56,8 +57,12 @@ export function VideoPlayerModal({
   const [currentTimestamp, setCurrentTimestamp] = useState(0);
   const [iframeKey, setIframeKey] = useState(0);
 
-  const hasDirectClip = !!clip?.clipUrl;
-  const hasValidMatchVideo = !!matchVideo?.file_url && matchVideo.file_url.length > 0;
+  // Normalize URLs for tunnel compatibility
+  const normalizedClipUrl = normalizeStorageUrl(clip?.clipUrl);
+  const normalizedVideoUrl = normalizeStorageUrl(matchVideo?.file_url);
+  
+  const hasDirectClip = !!normalizedClipUrl;
+  const hasValidMatchVideo = !!normalizedVideoUrl && normalizedVideoUrl.length > 0;
 
   // Get video duration for validation
   const getVideoDuration = useCallback(() => {
@@ -161,7 +166,7 @@ export function VideoPlayerModal({
   if (!clip) return null;
   if (!hasDirectClip && !hasValidMatchVideo) return null;
 
-  const isEmbed = matchVideo ? (matchVideo.file_url.includes('xtream.tech') || matchVideo.file_url.includes('embed')) : false;
+  const isEmbed = normalizedVideoUrl ? (normalizedVideoUrl.includes('xtream.tech') || normalizedVideoUrl.includes('embed')) : false;
   
   // Note: Most embed players don't support timestamp URL params
   // So we show manual navigation instructions instead
@@ -285,7 +290,7 @@ export function VideoPlayerModal({
               <div className="relative w-full h-full">
                 <video 
                   ref={videoRef} 
-                  src={clip.clipUrl!}
+                  src={normalizedClipUrl!}
                   className="w-full h-full object-contain bg-black"
                   controls
                   autoPlay
@@ -299,17 +304,17 @@ export function VideoPlayerModal({
             ) : isEmbed ? (
               <iframe
                 key={iframeKey}
-                src={matchVideo.file_url}
+                src={normalizedVideoUrl!}
                 className="w-full h-full"
                 frameBorder="0"
                 allow="autoplay; fullscreen; picture-in-picture; clipboard-write"
                 title="Match Video"
               />
-            ) : matchVideo ? (
+            ) : normalizedVideoUrl ? (
               <div className="relative w-full h-full">
                 <video 
                   ref={videoRef} 
-                  src={matchVideo.file_url}
+                  src={normalizedVideoUrl}
                   className="w-full h-full object-contain bg-black"
                   controls
                   autoPlay

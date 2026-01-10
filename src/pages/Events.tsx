@@ -61,7 +61,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { getEventTeam, getEventTimeMs as getEventTimeMsHelper, formatEventTime } from '@/lib/eventHelpers';
 import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
 import { VideoUploadCard } from '@/components/events/VideoUploadCard';
-import { apiClient } from '@/lib/apiClient';
+import { apiClient, normalizeStorageUrl } from '@/lib/apiClient';
 
 // EventRow component for rendering individual events
 interface EventRowProps {
@@ -1491,7 +1491,7 @@ export default function Events() {
             minute: playingEvent.minute || 0,
             second: playingEvent.second || 0,
             description: playingEvent.description || '',
-            clipUrl: playingEvent.clip_url,
+            clipUrl: normalizeStorageUrl(playingEvent.clip_url),
             // Priority: use metadata.videoSecond for actual video position
             videoSecond: playingEvent.metadata?.videoSecond as number | undefined
           } : null}

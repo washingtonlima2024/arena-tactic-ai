@@ -44,7 +44,7 @@ import { SocialContentDialog } from '@/components/media/SocialContentDialog';
 import { ExportPreviewDialog } from '@/components/media/ExportPreviewDialog';
 import { LinkVideoDialog } from '@/components/media/LinkVideoDialog';
 import { toast } from '@/hooks/use-toast';
-import { apiClient } from '@/lib/apiClient';
+import { apiClient, normalizeStorageUrl } from '@/lib/apiClient';
 
 // Social platform icons
 import { 
@@ -193,7 +193,7 @@ export default function Media() {
       eventMs: eventMs ?? totalSeconds * 1000, // Store milliseconds
       minute: displayMinutes,
       second: displaySeconds,
-      clipUrl: (event as any).clip_url as string | null,
+      clipUrl: normalizeStorageUrl((event as any).clip_url as string | null),
       videoSecond: videoSecond ?? totalSeconds,
       matchHalf,
       canExtract, // Flag: can this clip be extracted?
