@@ -1718,11 +1718,14 @@ def transcribe_large_video(
                 audio_filename = f"{half_label}_audio.mp3"
                 with open(audio_path, 'rb') as af:
                     audio_data = af.read()
-                save_result = save_file(match_id, 'audio', audio_filename, audio_data)
+                # Ordem correta: (match_id, subfolder, file_data, filename)
+                save_result = save_file(match_id, 'audio', audio_data, audio_filename)
                 audio_saved_path = save_result.get('path')
-                print(f"[Transcribe] ✓ Áudio salvo: {audio_filename} ({audio_size_mb:.2f} MB)")
+                print(f"[Transcribe] ✓ Áudio salvo: {audio_saved_path} ({audio_size_mb:.2f} MB)")
             except Exception as save_err:
+                import traceback
                 print(f"[Transcribe] ⚠ Erro ao salvar áudio: {save_err}")
+                traceback.print_exc()
         
         # ========== TRANSCRIPTION ==========
         transcription_result = None
@@ -1779,22 +1782,28 @@ def transcribe_large_video(
             if srt_content:
                 try:
                     srt_filename = f"{half_label}_transcription.srt"
-                    save_file(match_id, 'srt', srt_filename, srt_content.encode('utf-8'))
-                    transcription_result['srtPath'] = f"/api/storage/{match_id}/srt/{srt_filename}"
-                    print(f"[Transcribe] ✓ SRT salvo: {srt_filename}")
+                    # Ordem correta: (match_id, subfolder, file_data, filename)
+                    srt_result = save_file(match_id, 'srt', srt_content.encode('utf-8'), srt_filename)
+                    transcription_result['srtPath'] = srt_result.get('url', f"/api/storage/{match_id}/srt/{srt_filename}")
+                    print(f"[Transcribe] ✓ SRT salvo: {srt_result.get('path')}")
                 except Exception as srt_err:
+                    import traceback
                     print(f"[Transcribe] ⚠ Erro ao salvar SRT: {srt_err}")
+                    traceback.print_exc()
             
             # Save TXT file (plain text)
             text_content = transcription_result.get('text', '')
             if text_content:
                 try:
                     txt_filename = f"{half_label}_transcription.txt"
-                    save_file(match_id, 'texts', txt_filename, text_content.encode('utf-8'))
-                    transcription_result['txtPath'] = f"/api/storage/{match_id}/texts/{txt_filename}"
-                    print(f"[Transcribe] ✓ TXT salvo: {txt_filename}")
+                    # Ordem correta: (match_id, subfolder, file_data, filename)
+                    txt_result = save_file(match_id, 'texts', text_content.encode('utf-8'), txt_filename)
+                    transcription_result['txtPath'] = txt_result.get('url', f"/api/storage/{match_id}/texts/{txt_filename}")
+                    print(f"[Transcribe] ✓ TXT salvo: {txt_result.get('path')}")
                 except Exception as txt_err:
+                    import traceback
                     print(f"[Transcribe] ⚠ Erro ao salvar TXT: {txt_err}")
+                    traceback.print_exc()
             
             # Add audio path to result
             if audio_saved_path:
