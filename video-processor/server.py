@@ -1836,11 +1836,40 @@ def upsert_api_setting():
             )
             session.add(setting)
         
-        # Update AI services keys if applicable
-        if data['setting_key'] == 'OPENAI_API_KEY':
-            ai_services.set_api_keys(openai_key=data.get('setting_value'))
-        elif data['setting_key'] == 'LOVABLE_API_KEY':
-            ai_services.set_api_keys(lovable_key=data.get('setting_value'))
+        # Update AI services keys if applicable - handle all API key types
+        key_lower = data['setting_key'].lower()
+        value = data.get('setting_value')
+        
+        if key_lower in ('openai_api_key', 'openai_key'):
+            ai_services.set_api_keys(openai_key=value)
+            print(f"[Settings] ✓ OpenAI API key atualizada")
+        elif key_lower in ('lovable_api_key', 'lovable_key'):
+            ai_services.set_api_keys(lovable_key=value)
+            print(f"[Settings] ✓ Lovable API key atualizada")
+        elif key_lower in ('gemini_api_key', 'google_generative_ai_api_key', 'google_api_key'):
+            ai_services.set_api_keys(google_key=value)
+            print(f"[Settings] ✓ Gemini API key atualizada")
+        elif key_lower in ('elevenlabs_api_key', 'elevenlabs_key'):
+            ai_services.set_api_keys(elevenlabs_key=value)
+            print(f"[Settings] ✓ ElevenLabs API key atualizada")
+        elif key_lower == 'gemini_enabled':
+            ai_services.set_api_keys(gemini_enabled=value == 'true')
+            print(f"[Settings] ✓ Gemini enabled: {value}")
+        elif key_lower == 'openai_enabled':
+            ai_services.set_api_keys(openai_enabled=value == 'true')
+            print(f"[Settings] ✓ OpenAI enabled: {value}")
+        elif key_lower == 'elevenlabs_enabled':
+            ai_services.set_api_keys(elevenlabs_enabled=value == 'true')
+            print(f"[Settings] ✓ ElevenLabs enabled: {value}")
+        elif key_lower == 'ollama_enabled':
+            ai_services.set_api_keys(ollama_enabled=value == 'true')
+            print(f"[Settings] ✓ Ollama enabled: {value}")
+        elif key_lower == 'ollama_url':
+            ai_services.set_api_keys(ollama_url=value)
+            print(f"[Settings] ✓ Ollama URL atualizada")
+        elif key_lower == 'ollama_model':
+            ai_services.set_api_keys(ollama_model=value)
+            print(f"[Settings] ✓ Ollama model atualizado")
         
         session.commit()
         return jsonify(setting.to_dict())
