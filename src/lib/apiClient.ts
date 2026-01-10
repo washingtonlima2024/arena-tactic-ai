@@ -15,7 +15,7 @@ const getApiBase = () => {
   }
   
   // Fallback para ngrok (acesso remoto/preview)
-  return 'https://75c7a7f57d85.ngrok-free.app';
+  return 'https://d84e2dee7780.ngrok-free.app';
 };
 
 // Check if local server is available
