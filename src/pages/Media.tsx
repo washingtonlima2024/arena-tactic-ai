@@ -772,10 +772,22 @@ export default function Media() {
                   };
 
                   const handleExtractFrame = () => {
+                    // Priorizar clip_url se existir - frame no momento ~3s (após buffer)
+                    if (clip.clipUrl) {
+                      extractFrameFromVideo({
+                        eventId: clip.id,
+                        eventType: clip.type,
+                        videoUrl: clip.clipUrl,
+                        timestamp: 3, // Momento do evento no clip (após buffer de 3s)
+                        matchId: matchId
+                      });
+                      return;
+                    }
+                    
                     if (!matchVideo) {
                       toast({
                         title: "Vídeo não disponível",
-                        description: "Faça upload do vídeo para extrair frames",
+                        description: "Faça upload do vídeo ou extraia o clip primeiro",
                         variant: "destructive"
                       });
                       return;
@@ -821,7 +833,7 @@ export default function Media() {
                           </div>
                         ) : (
                           <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-primary/5 flex flex-col items-center justify-center gap-2">
-                            {matchVideo ? (
+                            {(clip.clipUrl || matchVideo) ? (
                               <Button
                                 variant="outline"
                                 size="sm"
@@ -895,7 +907,7 @@ export default function Media() {
                           </p>
                         )}
                         <div className="mt-4 flex gap-2">
-                          {!thumbnail?.imageUrl && !isGeneratingThumbnail && matchVideo && (
+                          {!thumbnail?.imageUrl && !isGeneratingThumbnail && (clip.clipUrl || matchVideo) && (
                             <Button 
                               variant="outline" 
                               size="sm" 
