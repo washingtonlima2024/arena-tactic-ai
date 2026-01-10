@@ -698,6 +698,55 @@ export const apiClient = {
       method: 'DELETE'
     });
   },
+
+  // ============== Transfer Commands (Direct File Transfer) ==============
+  getTransferCommands: async (matchId: string): Promise<{
+    match_id: string;
+    destination_path: string;
+    hostname: string;
+    ip: string;
+    commands: {
+      scp: { description: string; single_file: string; multiple_files: string; folder: string };
+      rsync: { description: string; single_file: string; folder: string };
+      windows_network: { description: string; copy: string; xcopy: string };
+      curl: { description: string; command: string };
+      powershell: { description: string; command: string };
+    };
+    sync_after: string;
+    notes: string[];
+  }> => {
+    return apiRequest(`/api/storage/transfer-command/${matchId}`);
+  },
+
+  uploadVideoDirect: async (matchId: string, file: File, videoType: string = 'full'): Promise<{
+    success: boolean;
+    video: any;
+    file_path: string;
+    file_size: number;
+    file_size_mb: number;
+    duration_seconds: number | null;
+  }> => {
+    await ensureServerAvailable();
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('video_type', videoType);
+    
+    const response = await fetch(`${getApiBase()}/api/storage/${matchId}/videos/upload`, {
+      method: 'POST',
+      body: formData,
+      headers: {
+        'ngrok-skip-browser-warning': 'true'
+      }
+    });
+    
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Upload failed' }));
+      throw new Error(error.error || `HTTP ${response.status}`);
+    }
+    
+    return response.json();
+  },
 };
 
 export default apiClient;
