@@ -1888,37 +1888,60 @@ def upsert_api_setting():
 def ai_status():
     """Retorna status dos provedores de IA configurados."""
     lovable_configured = bool(ai_services.LOVABLE_API_KEY)
-    gemini_configured = bool(ai_services.GOOGLE_API_KEY) and ai_services.GEMINI_ENABLED
-    openai_configured = bool(ai_services.OPENAI_API_KEY) and ai_services.OPENAI_ENABLED
+    gemini_key_set = bool(ai_services.GOOGLE_API_KEY)
+    gemini_enabled = ai_services.GEMINI_ENABLED
+    gemini_configured = gemini_key_set and gemini_enabled
+    openai_key_set = bool(ai_services.OPENAI_API_KEY)
+    openai_enabled = ai_services.OPENAI_ENABLED
+    openai_configured = openai_key_set and openai_enabled
+    elevenlabs_key_set = bool(ai_services.ELEVENLABS_API_KEY)
+    elevenlabs_enabled = ai_services.ELEVENLABS_ENABLED
+    elevenlabs_configured = elevenlabs_key_set and elevenlabs_enabled
     ollama_configured = ai_services.OLLAMA_ENABLED
     
-    any_configured = lovable_configured or gemini_configured or openai_configured or ollama_configured
+    any_analysis = lovable_configured or gemini_configured or openai_configured or ollama_configured
+    any_transcription = elevenlabs_configured or openai_configured or gemini_configured or lovable_configured
+    
+    # Log para debug
+    print(f"[AI-STATUS] Lovable: {lovable_configured}, Gemini: {gemini_configured} (key:{gemini_key_set}, enabled:{gemini_enabled}), OpenAI: {openai_configured}, ElevenLabs: {elevenlabs_configured}, Ollama: {ollama_configured}")
     
     return jsonify({
         'lovable': lovable_configured,
         'gemini': gemini_configured,
         'openai': openai_configured,
+        'elevenlabs': elevenlabs_configured,
         'ollama': ollama_configured,
-        'anyConfigured': any_configured,
+        'anyConfigured': any_analysis,
+        'anyTranscription': any_transcription,
+        'anyAnalysis': any_analysis,
         'providers': {
             'lovable': {
                 'configured': lovable_configured,
-                'enabled': True  # Always enabled if key exists
+                'enabled': True,
+                'keySet': lovable_configured
             },
             'gemini': {
-                'configured': bool(ai_services.GOOGLE_API_KEY),
-                'enabled': ai_services.GEMINI_ENABLED
+                'configured': gemini_configured,
+                'enabled': gemini_enabled,
+                'keySet': gemini_key_set
             },
             'openai': {
-                'configured': bool(ai_services.OPENAI_API_KEY),
-                'enabled': ai_services.OPENAI_ENABLED
+                'configured': openai_configured,
+                'enabled': openai_enabled,
+                'keySet': openai_key_set
+            },
+            'elevenlabs': {
+                'configured': elevenlabs_configured,
+                'enabled': elevenlabs_enabled,
+                'keySet': elevenlabs_key_set
             },
             'ollama': {
-                'configured': ai_services.OLLAMA_ENABLED,
-                'url': ai_services.OLLAMA_URL if ai_services.OLLAMA_ENABLED else None,
-                'model': ai_services.OLLAMA_MODEL if ai_services.OLLAMA_ENABLED else None
+                'configured': ollama_configured,
+                'url': ai_services.OLLAMA_URL if ollama_configured else None,
+                'model': ai_services.OLLAMA_MODEL if ollama_configured else None
             }
-        }
+        },
+        'message': 'Nenhum provedor de IA configurado' if not any_analysis else f"Provedores ativos: {', '.join([p for p, v in [('Lovable', lovable_configured), ('Gemini', gemini_configured), ('OpenAI', openai_configured), ('Ollama', ollama_configured)] if v])}"
     })
 
 

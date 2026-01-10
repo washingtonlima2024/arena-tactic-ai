@@ -227,6 +227,21 @@ export default function VideoUpload() {
     staleTime: 5000,
   });
 
+  // Check AI provider status
+  const { data: aiStatus } = useQuery({
+    queryKey: ['ai-status'],
+    queryFn: async () => {
+      try {
+        const status = await apiClient.checkAiStatus();
+        return status;
+      } catch {
+        return null;
+      }
+    },
+    refetchInterval: 30000, // Check every 30 seconds
+    staleTime: 10000,
+  });
+
   // Fetch existing videos when reimporting a match
   const activeMatchId = selectedExistingMatch || existingMatchId;
   const { data: existingVideos, refetch: refetchVideos } = useQuery({
@@ -2203,6 +2218,22 @@ export default function VideoUpload() {
                         : 'Pipeline Cloud'}
                   </Badge>
                 </div>
+
+                {/* AI Provider Status Alert */}
+                {aiStatus && !aiStatus.anyTranscription && (
+                  <div className="mt-3 p-3 rounded-lg border bg-yellow-500/10 border-yellow-500/30 flex items-center gap-3">
+                    <Brain className="h-5 w-5 text-yellow-500 flex-shrink-0" />
+                    <div className="flex-1">
+                      <p className="text-sm font-medium text-yellow-400">Nenhuma IA de Transcrição Configurada</p>
+                      <p className="text-xs text-muted-foreground">
+                        Configure uma chave de API (Gemini, OpenAI ou ElevenLabs) em Configurações → APIs para transcrever e analisar partidas.
+                      </p>
+                    </div>
+                    <Button variant="outline" size="sm" asChild className="flex-shrink-0">
+                      <Link to="/settings">Configurar</Link>
+                    </Button>
+                  </div>
+                )}
 
                 {/* Transfer Commands Button - for large files */}
                 {isLocalServerOnline && (selectedExistingMatch || existingMatchId || createdMatchId) && (
