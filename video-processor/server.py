@@ -1984,7 +1984,8 @@ def ai_status():
     elevenlabs_configured = elevenlabs_key_set and elevenlabs_enabled
     ollama_configured = ai_services.OLLAMA_ENABLED
     
-    # Local Whisper (FREE transcription)
+# Local Whisper (FREE transcription) - auto-detect library
+    local_whisper_installed = ai_services._FASTER_WHISPER_AVAILABLE
     local_whisper_enabled = ai_services.LOCAL_WHISPER_ENABLED
     local_whisper_model = ai_services.LOCAL_WHISPER_MODEL
     
@@ -1997,11 +1998,14 @@ def ai_status():
         pass
     
     any_analysis = lovable_configured or gemini_configured or openai_configured or ollama_configured
-    # Local Whisper is now included in transcription options
-    any_transcription = local_whisper_enabled or elevenlabs_configured or openai_configured or gemini_configured or lovable_configured
+    # Local Whisper is the ONLY transcription method now
+    any_transcription = local_whisper_enabled
     
     # Log para debug
-    print(f"[AI-STATUS] Lovable: {lovable_configured}, Gemini: {gemini_configured} (key:{gemini_key_set}, enabled:{gemini_enabled}), OpenAI: {openai_configured}, ElevenLabs: {elevenlabs_configured}, Ollama: {ollama_configured}, LocalWhisper: {local_whisper_enabled} ({local_whisper_model})")
+    whisper_status = f"✓ Instalado ({local_whisper_model})" if local_whisper_installed else "✗ Não instalado"
+    print(f"[AI-STATUS] 🆓 Whisper Local: {whisper_status}, GPU: {gpu_available}")
+    if not local_whisper_installed:
+        print(f"[AI-STATUS] ⚠ Para transcrição, instale: pip install faster-whisper==1.1.0")
     
     return jsonify({
         'lovable': lovable_configured,
@@ -2040,14 +2044,20 @@ def ai_status():
                 'model': ai_services.OLLAMA_MODEL if ollama_configured else None
             },
             'localWhisper': {
+                'installed': local_whisper_installed,
                 'configured': local_whisper_enabled,
                 'enabled': local_whisper_enabled,
                 'model': local_whisper_model if local_whisper_enabled else None,
                 'gpuAvailable': gpu_available,
-                'free': True
+                'free': True,
+                'installCommand': 'pip install faster-whisper==1.1.0' if not local_whisper_installed else None
             }
         },
-        'message': 'Nenhum provedor de IA configurado' if not any_analysis else f"Provedores ativos: {', '.join([p for p, v in [('Lovable', lovable_configured), ('Gemini', gemini_configured), ('OpenAI', openai_configured), ('Ollama', ollama_configured), ('🆓 LocalWhisper', local_whisper_enabled)] if v])}"
+        'message': (
+            '⚠️ Instale o Whisper Local: pip install faster-whisper==1.1.0' 
+            if not local_whisper_installed 
+            else f"🆓 Transcrição: Whisper Local ({local_whisper_model}), GPU: {'✓' if gpu_available else 'CPU'}"
+        )
     })
 
 
