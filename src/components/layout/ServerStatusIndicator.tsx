@@ -1,13 +1,16 @@
 import { useState, useEffect } from 'react';
-import { Server, Settings, AlertTriangle } from 'lucide-react';
+import { Server, Settings, AlertTriangle, Link2, Copy } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { checkLocalServerAvailable, hasServerUrlConfigured } from '@/lib/apiMode';
-import { useNavigate } from 'react-router-dom';
+import { checkLocalServerAvailable, hasServerUrlConfigured, getApiBase } from '@/lib/apiMode';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import { toast } from 'sonner';
 
 interface ServerStatusIndicatorProps {
   collapsed?: boolean;
@@ -17,7 +20,10 @@ type ConnectionStatus = 'checking' | 'online' | 'offline' | 'not-configured';
 
 export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps) {
   const [status, setStatus] = useState<ConnectionStatus>('checking');
+  const [showQuickConfig, setShowQuickConfig] = useState(false);
+  const [tunnelUrl, setTunnelUrl] = useState('');
   const navigate = useNavigate();
+  const location = useLocation();
 
   useEffect(() => {
     const checkStatus = async () => {
@@ -36,6 +42,30 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
 
     return () => clearInterval(interval);
   }, []);
+
+  const handleQuickConnect = () => {
+    const url = tunnelUrl.trim();
+    if (!url) {
+      toast.error('Cole a URL do túnel Cloudflare');
+      return;
+    }
+    
+    // Salvar no localStorage
+    localStorage.setItem('cloudflare_tunnel_url', url);
+    toast.success('Túnel configurado! Reconectando...');
+    setShowQuickConfig(false);
+    setTunnelUrl('');
+    
+    // Forçar recheck
+    window.location.reload();
+  };
+
+  const copyUrlExample = () => {
+    const baseUrl = window.location.origin + window.location.pathname;
+    const example = `${baseUrl}?tunnel=https://SEU-TUNEL.trycloudflare.com`;
+    navigator.clipboard.writeText(example);
+    toast.success('Exemplo copiado! Cole no terminal e substitua a URL.');
+  };
 
   const getStatusConfig = () => {
     switch (status) {
@@ -77,7 +107,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           color: 'bg-orange-500',
           textColor: 'text-orange-500',
           label: 'Configurar',
-          tooltip: 'Clique para configurar a URL do servidor',
+          tooltip: 'Túnel não configurado. Clique para configurar.',
           icon: AlertTriangle,
           iconColor: 'text-orange-500',
           animate: true,
@@ -86,12 +116,55 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
     }
   };
 
+  // Quick config panel for not-configured state
+  if (showQuickConfig && !collapsed) {
+    return (
+      <div className="flex flex-col gap-2 rounded-lg px-3 py-3 bg-orange-500/10 border border-orange-500/30">
+        <div className="flex items-center gap-2 text-xs font-medium text-orange-500">
+          <Link2 className="h-4 w-4" />
+          Configurar Túnel
+        </div>
+        <Input
+          value={tunnelUrl}
+          onChange={(e) => setTunnelUrl(e.target.value)}
+          placeholder="https://xxx.trycloudflare.com"
+          className="h-8 text-xs"
+        />
+        <div className="flex gap-1">
+          <Button size="sm" className="h-7 text-xs flex-1" onClick={handleQuickConnect}>
+            Conectar
+          </Button>
+          <Button 
+            size="sm" 
+            variant="ghost" 
+            className="h-7 text-xs px-2"
+            onClick={() => setShowQuickConfig(false)}
+          >
+            ✕
+          </Button>
+        </div>
+        <button 
+          onClick={copyUrlExample}
+          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <Copy className="h-3 w-3" />
+          Copiar exemplo de URL com ?tunnel=
+        </button>
+      </div>
+    );
+  }
+
   const config = getStatusConfig();
   const Icon = config.icon;
 
   const handleClick = () => {
-    if (config.clickable) {
-      navigate('/settings');
+    if (status === 'not-configured') {
+      // Se collapsed, ir para settings. Se expandido, mostrar quick config
+      if (collapsed) {
+        navigate('/settings');
+      } else {
+        setShowQuickConfig(true);
+      }
     }
   };
 

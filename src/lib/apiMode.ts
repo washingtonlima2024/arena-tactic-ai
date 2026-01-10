@@ -6,10 +6,35 @@
  * Outros arquivos (como apiClient.ts) devem importar getApiBase() daqui.
  */
 
-// URL padrão do túnel Cloudflare como fallback (pode ser sobrescrita via Settings)
-const DEFAULT_CLOUDFLARE_TUNNEL = 'https://traveler-href-able-interval.trycloudflare.com';
+// Sem fallback fixo - força configuração explícita via ?tunnel= ou Settings
+const DEFAULT_CLOUDFLARE_TUNNEL = '';
 
 export type ApiMode = 'local';
+
+/**
+ * Inicializa a URL do túnel a partir do parâmetro da URL (?tunnel=...)
+ * Deve ser chamado uma vez no início da aplicação.
+ */
+export const initTunnelFromUrl = (): void => {
+  if (typeof window === 'undefined') return;
+  
+  const urlParams = new URLSearchParams(window.location.search);
+  const tunnelParam = urlParams.get('tunnel')?.trim();
+  
+  if (tunnelParam) {
+    // Salvar no localStorage para uso futuro
+    localStorage.setItem('cloudflare_tunnel_url', tunnelParam);
+    console.log('[ApiMode] Túnel configurado via URL:', tunnelParam);
+    
+    // Remover parâmetro da URL para ficar limpo
+    const newUrl = new URL(window.location.href);
+    newUrl.searchParams.delete('tunnel');
+    window.history.replaceState({}, '', newUrl.toString());
+  }
+};
+
+// Inicializar automaticamente ao carregar o módulo
+initTunnelFromUrl();
 
 // Sempre retorna 'local' - sem modo Supabase
 export const getApiMode = (): ApiMode => {
@@ -26,10 +51,21 @@ export const isLocalMode = (): boolean => {
 
 /**
  * Verifica se há uma URL de servidor configurada.
- * Sempre retorna true agora que temos fallback do Cloudflare.
+ * Retorna true se houver URL customizada, ngrok, cloudflare ou localhost.
  */
 export const hasServerUrlConfigured = (): boolean => {
-  return true;
+  // Localhost sempre está configurado
+  if (typeof window !== 'undefined' && 
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    return true;
+  }
+  
+  // Verificar URLs configuradas no localStorage
+  const arenaUrl = localStorage.getItem('arenaApiUrl')?.trim();
+  const ngrokUrl = localStorage.getItem('ngrok_fallback_url')?.trim();
+  const cloudflareUrl = localStorage.getItem('cloudflare_tunnel_url')?.trim();
+  
+  return !!(arenaUrl || ngrokUrl || cloudflareUrl);
 };
 
 /**
