@@ -23,9 +23,17 @@ GEMINI_ENABLED = True
 OPENAI_ENABLED = True
 ELEVENLABS_ENABLED = True
 
+# Local Whisper settings (FREE transcription)
+LOCAL_WHISPER_ENABLED = os.environ.get('LOCAL_WHISPER_ENABLED', 'false').lower() == 'true'
+LOCAL_WHISPER_MODEL = os.environ.get('LOCAL_WHISPER_MODEL', 'base')
+
 LOVABLE_API_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions'
 OPENAI_API_URL = 'https://api.openai.com/v1'
 GOOGLE_API_URL = 'https://generativelanguage.googleapis.com/v1beta'
+
+# Faster-Whisper model cache (singleton)
+_whisper_model = None
+_whisper_model_name = None
 
 
 def set_api_keys(
@@ -38,12 +46,15 @@ def set_api_keys(
     ollama_enabled: bool = None,
     gemini_enabled: bool = None,
     openai_enabled: bool = None,
-    elevenlabs_enabled: bool = None
+    elevenlabs_enabled: bool = None,
+    local_whisper_enabled: bool = None,
+    local_whisper_model: str = None
 ):
     """Set API keys programmatically."""
     global LOVABLE_API_KEY, OPENAI_API_KEY, ELEVENLABS_API_KEY, GOOGLE_API_KEY
     global OLLAMA_URL, OLLAMA_MODEL, OLLAMA_ENABLED
     global GEMINI_ENABLED, OPENAI_ENABLED, ELEVENLABS_ENABLED
+    global LOCAL_WHISPER_ENABLED, LOCAL_WHISPER_MODEL
     if lovable_key:
         LOVABLE_API_KEY = lovable_key
     if openai_key:
@@ -64,6 +75,10 @@ def set_api_keys(
         OPENAI_ENABLED = openai_enabled
     if elevenlabs_enabled is not None:
         ELEVENLABS_ENABLED = elevenlabs_enabled
+    if local_whisper_enabled is not None:
+        LOCAL_WHISPER_ENABLED = local_whisper_enabled
+    if local_whisper_model is not None:
+        LOCAL_WHISPER_MODEL = local_whisper_model
 
 
 def call_ollama(
@@ -416,6 +431,100 @@ def transcribe_audio(audio_path: str, language: str = 'pt') -> Optional[str]:
     
     data = response.json()
     return data.get('text')
+
+
+def _transcribe_with_local_whisper(audio_path: str, match_id: str = None) -> Dict[str, Any]:
+    """
+    Transcribe audio using local Faster-Whisper (100% FREE, offline).
+    
+    Uses faster-whisper library for efficient local transcription.
+    Supports CPU and CUDA acceleration.
+    
+    Args:
+        audio_path: Path to audio file
+        match_id: Optional match ID for metadata
+    
+    Returns:
+        Dict with 'success', 'text', 'srtContent', 'segments'
+    """
+    global _whisper_model, _whisper_model_name
+    
+    try:
+        from faster_whisper import WhisperModel
+        import torch
+    except ImportError:
+        return {"error": "faster-whisper not installed. Run: pip install faster-whisper", "success": False}
+    
+    try:
+        model_name = LOCAL_WHISPER_MODEL or 'base'
+        audio_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
+        print(f"[LocalWhisper] Iniciando transcrição local ({model_name}) para arquivo de {audio_size_mb:.1f}MB...")
+        
+        # Check device availability
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        compute_type = "float16" if device == "cuda" else "int8"
+        
+        print(f"[LocalWhisper] Device: {device}, Compute: {compute_type}")
+        
+        # Load or reuse model (singleton pattern for efficiency)
+        if _whisper_model is None or _whisper_model_name != model_name:
+            print(f"[LocalWhisper] Carregando modelo '{model_name}'... (pode levar alguns minutos na primeira vez)")
+            _whisper_model = WhisperModel(model_name, device=device, compute_type=compute_type)
+            _whisper_model_name = model_name
+            print(f"[LocalWhisper] ✓ Modelo carregado!")
+        
+        # Transcribe
+        print(f"[LocalWhisper] Transcrevendo áudio...")
+        segments_gen, info = _whisper_model.transcribe(
+            audio_path, 
+            language="pt",
+            beam_size=5,
+            vad_filter=True,  # Voice Activity Detection for better accuracy
+            vad_parameters=dict(min_silence_duration_ms=500)
+        )
+        
+        print(f"[LocalWhisper] Idioma detectado: {info.language} (probabilidade: {info.language_probability:.2%})")
+        
+        # Build SRT and text output
+        srt_lines = []
+        full_text = []
+        segments_list = []
+        
+        for i, seg in enumerate(segments_gen, 1):
+            start_str = _format_srt_time(seg.start)
+            end_str = _format_srt_time(seg.end)
+            text = seg.text.strip()
+            
+            if text:
+                srt_lines.append(f"{i}\n{start_str} --> {end_str}\n{text}\n")
+                full_text.append(text)
+                segments_list.append({
+                    'start': seg.start,
+                    'end': seg.end,
+                    'text': text
+                })
+        
+        srt_content = '\n'.join(srt_lines)
+        text_content = ' '.join(full_text)
+        
+        print(f"[LocalWhisper] ✓ Transcrição completa: {len(text_content)} chars, {len(segments_list)} segmentos")
+        
+        return {
+            "success": True,
+            "text": text_content,
+            "srtContent": srt_content,
+            "segments": segments_list,
+            "matchId": match_id,
+            "provider": "local_whisper",
+            "model": model_name,
+            "device": device
+        }
+        
+    except Exception as e:
+        import traceback
+        print(f"[LocalWhisper] Erro: {e}")
+        traceback.print_exc()
+        return {"error": f"Local Whisper error: {str(e)}", "success": False}
 
 
 def _transcribe_with_elevenlabs(audio_path: str, match_id: str = None) -> Dict[str, Any]:
@@ -1633,27 +1742,29 @@ def transcribe_large_video(
     from storage import get_file_path, STORAGE_DIR, save_file, get_match_storage_path
     
     # Check if any transcription API is available and enabled
+    local_whisper_available = LOCAL_WHISPER_ENABLED
     elevenlabs_available = bool(ELEVENLABS_API_KEY) and ELEVENLABS_ENABLED
     openai_available = bool(OPENAI_API_KEY) and OPENAI_ENABLED
     gemini_available = (bool(GOOGLE_API_KEY) or bool(LOVABLE_API_KEY)) and GEMINI_ENABLED
     
     # Debug log das chaves configuradas
     print(f"[Transcribe] DEBUG - Chaves configuradas:")
+    print(f"  LOCAL_WHISPER_ENABLED: {'✓ modelo=' + LOCAL_WHISPER_MODEL if LOCAL_WHISPER_ENABLED else '✗ desativado'}")
     print(f"  GOOGLE_API_KEY: {'✓ ' + GOOGLE_API_KEY[:10] + '...' if GOOGLE_API_KEY else '✗ não configurada'}")
     print(f"  LOVABLE_API_KEY: {'✓ ' + LOVABLE_API_KEY[:10] + '...' if LOVABLE_API_KEY else '✗ não configurada'}")
     print(f"  OPENAI_API_KEY: {'✓ ' + OPENAI_API_KEY[:10] + '...' if OPENAI_API_KEY else '✗ não configurada'}")
     print(f"  ELEVENLABS_API_KEY: {'✓ ' + ELEVENLABS_API_KEY[:10] + '...' if ELEVENLABS_API_KEY else '✗ não configurada'}")
     print(f"  GEMINI_ENABLED: {GEMINI_ENABLED}")
     
-    if not elevenlabs_available and not openai_available and not gemini_available:
+    if not local_whisper_available and not elevenlabs_available and not openai_available and not gemini_available:
         raise ValueError(
             "Nenhuma API de transcrição ativa. "
-            f"Chaves detectadas: GEMINI={'✓' if GOOGLE_API_KEY else '✗'}, OPENAI={'✓' if OPENAI_API_KEY else '✗'}, ELEVENLABS={'✓' if ELEVENLABS_API_KEY else '✗'}. "
-            "Configure uma chave de API em Configurações > APIs e clique em 'Salvar Configurações'."
+            f"Chaves detectadas: LocalWhisper={'✓' if LOCAL_WHISPER_ENABLED else '✗'}, GEMINI={'✓' if GOOGLE_API_KEY else '✗'}, OPENAI={'✓' if OPENAI_API_KEY else '✗'}, ELEVENLABS={'✓' if ELEVENLABS_API_KEY else '✗'}. "
+            "Configure Whisper Local gratuito ou uma chave de API em Configurações > APIs."
         )
     
     print(f"[Transcribe] Iniciando transcrição para: {video_url}")
-    print(f"[Transcribe] APIs ativas: ElevenLabs={'✓' if elevenlabs_available else '✗'}, Whisper={'✓' if openai_available else '✗'}, Gemini={'✓' if gemini_available else '✗'}")
+    print(f"[Transcribe] APIs ativas: LocalWhisper={'✓' if local_whisper_available else '✗'}, ElevenLabs={'✓' if elevenlabs_available else '✗'}, Whisper={'✓' if openai_available else '✗'}, Gemini={'✓' if gemini_available else '✗'}")
     
     with tempfile.TemporaryDirectory() as tmpdir:
         video_path = os.path.join(tmpdir, 'video.mp4')
@@ -1730,8 +1841,18 @@ def transcribe_large_video(
         # ========== TRANSCRIPTION ==========
         transcription_result = None
         
-        # Try ElevenLabs first (supports larger files) - only if enabled
-        if elevenlabs_available:
+        # ===== NEW: Try Local Whisper first (FREE!) =====
+        if local_whisper_available:
+            print(f"[Transcribe] 🆓 Tentando Whisper Local (gratuito, modelo={LOCAL_WHISPER_MODEL})...")
+            transcription_result = _transcribe_with_local_whisper(audio_path, match_id)
+            if transcription_result.get('success'):
+                print(f"[Transcribe] ✓ Whisper Local sucesso! (gratuito)")
+            else:
+                print(f"[Transcribe] ⚠ Whisper Local falhou: {transcription_result.get('error', 'Unknown')}")
+                transcription_result = None
+        
+        # Try ElevenLabs (supports larger files) - only if enabled
+        if not transcription_result and elevenlabs_available:
             print(f"[Transcribe] Tentando ElevenLabs Scribe...")
             transcription_result = _transcribe_with_elevenlabs(audio_path, match_id)
             if transcription_result.get('success'):
@@ -1740,7 +1861,7 @@ def transcribe_large_video(
                 print(f"[Transcribe] ⚠ ElevenLabs falhou: {transcription_result.get('error', 'Unknown')}")
                 transcription_result = None
         
-        # Fallback to Whisper - only if enabled
+        # Fallback to Whisper API - only if enabled
         if not transcription_result and openai_available:
             print(f"[Transcribe] Usando Whisper como fallback...")
             
