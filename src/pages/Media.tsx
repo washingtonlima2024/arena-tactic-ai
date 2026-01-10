@@ -43,6 +43,7 @@ import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
 import { SocialContentDialog } from '@/components/media/SocialContentDialog';
 import { ExportPreviewDialog } from '@/components/media/ExportPreviewDialog';
 import { LinkVideoDialog } from '@/components/media/LinkVideoDialog';
+import { SocialSharePanel } from '@/components/media/SocialSharePanel';
 import { toast } from '@/hooks/use-toast';
 import { apiClient, normalizeStorageUrl } from '@/lib/apiClient';
 
@@ -76,6 +77,7 @@ export default function Media() {
   const [selectedPlatform, setSelectedPlatform] = useState<string>('');
   const [isGeneratingSocial, setIsGeneratingSocial] = useState(false);
   const [linkVideoDialogOpen, setLinkVideoDialogOpen] = useState(false);
+  const [shareClipId, setShareClipId] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [activeHalfTab, setActiveHalfTab] = useState<string>('all');
 
@@ -534,6 +536,14 @@ export default function Media() {
               onVignetteComplete={() => setShowingVignette(false)}
             />
 
+            {/* Social Share Panel */}
+            <SocialSharePanel
+              isOpen={!!shareClipId}
+              onClose={() => setShareClipId(null)}
+              clipCount={1}
+              matchTitle={`${selectedMatch?.home_team?.name || 'Time Casa'} vs ${selectedMatch?.away_team?.name || 'Time Fora'}`}
+            />
+
             {/* Recording in progress warning */}
             {hasRecordingInProgress && (
               <Card variant="glass" className="border-warning/50 bg-warning/5">
@@ -837,7 +847,13 @@ export default function Media() {
                               )}
                             </Button>
                           )}
-                          <Button variant="outline" size="sm" className="flex-1">
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            className="flex-1"
+                            onClick={() => setShareClipId(clip.id)}
+                            disabled={!clip.clipUrl}
+                          >
                             <Share2 className="mr-1 h-3 w-3" />
                             Compartilhar
                           </Button>
