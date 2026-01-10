@@ -397,6 +397,17 @@ export default function Events() {
 
   // Group events by half - use minute as PRIMARY criteria, match_half as secondary
   // This ensures events are correctly grouped even if match_half field is wrong
+  // Helper to check if event is first half (handles both 'first' and 'first_half' formats)
+  const isFirstHalf = (halfValue: string | null | undefined): boolean => {
+    if (!halfValue) return false;
+    return halfValue === 'first' || halfValue === 'first_half';
+  };
+  
+  const isSecondHalf = (halfValue: string | null | undefined): boolean => {
+    if (!halfValue) return false;
+    return halfValue === 'second' || halfValue === 'second_half';
+  };
+  
   const firstHalfEvents = filteredEvents.filter(e => {
     const minute = e.minute || 0;
     const matchHalf = (e as any).match_half;
@@ -407,7 +418,7 @@ export default function Events() {
     if (minute < 45) return true;
     
     // For minute 45+, check if explicitly marked as first half (stoppage time)
-    if (matchHalf === 'first' || metadataHalf === 'first') {
+    if (isFirstHalf(matchHalf) || isFirstHalf(metadataHalf)) {
       // Only trust this if minute is close to 45 (stoppage time scenario)
       if (minute >= 45 && minute <= 50) return true;
     }
@@ -424,14 +435,14 @@ export default function Events() {
     // Events at/after 45 minutes are second half (unless stoppage time)
     if (minute >= 45) {
       // Check if this might be first half stoppage time
-      if ((matchHalf === 'first' || metadataHalf === 'first') && minute <= 50) {
+      if ((isFirstHalf(matchHalf) || isFirstHalf(metadataHalf)) && minute <= 50) {
         return false; // Stoppage time, keep in first half
       }
       return true;
     }
     
     // Explicitly marked as second half
-    if (matchHalf === 'second' || metadataHalf === 'second') return true;
+    if (isSecondHalf(matchHalf) || isSecondHalf(metadataHalf)) return true;
     
     return false;
   });
