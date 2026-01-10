@@ -245,6 +245,27 @@ export default function Events() {
     toast.info('Use o diálogo "Analisar Transcrição" para refinar eventos');
   };
 
+  // Handle clear all events for match
+  const handleClearEvents = async () => {
+    if (!currentMatchId) return;
+    
+    const confirmed = window.confirm(
+      'Tem certeza que deseja LIMPAR TODOS os eventos desta partida?\n\nIsso removerá permanentemente todos os eventos detectados.'
+    );
+    
+    if (!confirmed) return;
+    
+    try {
+      const result = await apiClient.delete(`/matches/${currentMatchId}/events`);
+      toast.success(`${result.deleted_count || 0} eventos removidos com sucesso`);
+      refetchEvents();
+      queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
+    } catch (error) {
+      console.error('Erro ao limpar eventos:', error);
+      toast.error('Erro ao limpar eventos');
+    }
+  };
+
   // Handle re-analyze match - now requires transcription
   const handleReanalyze = async () => {
     if (!currentMatchId || !selectedMatch) return;
@@ -865,6 +886,13 @@ export default function Events() {
                       <DropdownMenuItem onClick={() => handleGenerateClips('all', 50)}>
                         <Video className="mr-2 h-4 w-4" />
                         Gerar Todos (máx 50)
+                      </DropdownMenuItem>
+                      <DropdownMenuItem 
+                        onClick={handleClearEvents}
+                        className="text-destructive focus:text-destructive"
+                      >
+                        <AlertTriangle className="mr-2 h-4 w-4" />
+                        Limpar Todos os Eventos
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>

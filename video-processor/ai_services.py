@@ -650,20 +650,36 @@ TIMES DA PARTIDA:
 
 FORMATO DE SAÍDA: Retorne APENAS um array JSON válido, sem explicações."""
 
-    user_prompt = f"""⚽⚽⚽ MISSÃO CRÍTICA: ENCONTRAR TODOS OS GOLS! ⚽⚽⚽
+    user_prompt = f"""⚽⚽⚽ MISSÃO CRÍTICA: ENCONTRAR TODOS OS GOLS E EVENTOS! ⚽⚽⚽
 
 ═══════════════════════════════════════════════════════════════
 PARTIDA: {home_team} (casa) vs {away_team} (visitante)
 PERÍODO: {half_desc} (minutos {game_start_minute}' a {game_end_minute}')
 ═══════════════════════════════════════════════════════════════
 
+🎯 QUANTIDADE MÍNIMA DE EVENTOS (OBRIGATÓRIO):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Para um tempo de 45 minutos, retorne PELO MENOS 15-30 eventos!
+Inclua TODOS os tipos mencionados pelo narrador:
+- GOLS (prioridade máxima!)
+- Cartões amarelos e vermelhos
+- Faltas importantes
+- Escanteios
+- Chances de gol, finalizações
+- Defesas do goleiro
+- Pênaltis (cobrados ou não)
+- Impedimentos
+- Substituições
+- Jogadas de destaque (dribles, passes decisivos)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 INSTRUÇÕES (SIGA EXATAMENTE):
 
 1️⃣ PRIMEIRO: Leia TODA a transcrição abaixo
 2️⃣ SEGUNDO: PROCURE por TODAS as palavras: GOL, GOOOL, GOLAÇO, ENTROU, PRA DENTRO
 3️⃣ TERCEIRO: Para CADA gol encontrado, crie um evento com event_type: "goal"
-4️⃣ QUARTO: Identifique cartões, faltas, chances, defesas
-5️⃣ QUINTO: Retorne o array JSON com todos os eventos
+4️⃣ QUARTO: Identifique cartões, faltas, chances, defesas, escanteios, laterais
+5️⃣ QUINTO: Retorne o array JSON com TODOS os eventos (mínimo 15-30)
 
 ═══════════════════════════════════════════════════════════════
 TRANSCRIÇÃO COMPLETA (LEIA COM ATENÇÃO):
@@ -675,8 +691,10 @@ TRANSCRIÇÃO COMPLETA (LEIA COM ATENÇÃO):
 ⚽ CHECKLIST DE VALIDAÇÃO (ANTES DE RESPONDER):
 ═══════════════════════════════════════════════════════════════
 □ Quantas vezes aparece "GOL" na transcrição? → Deve haver o mesmo número de eventos de gol
+□ Retornou pelo menos 15-30 eventos para um tempo completo?
 □ Cada gol tem team: "home" ou "away" correto?
 □ Gols contra têm isOwnGoal: true?
+□ Incluiu cartões, faltas, chances, defesas?
 
 LEMBRE-SE:
 - Gols de {home_team} → team: "home"
