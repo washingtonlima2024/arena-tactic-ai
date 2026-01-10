@@ -6,6 +6,9 @@
  * Outros arquivos (como apiClient.ts) devem importar getApiBase() daqui.
  */
 
+// URL do túnel Cloudflare como fallback para acesso remoto
+const TUNNEL_FALLBACK_URL = 'https://bedford-flip-moderate-invision.trycloudflare.com';
+
 export type ApiMode = 'local';
 
 // Sempre retorna 'local' - sem modo Supabase
@@ -23,35 +26,19 @@ export const isLocalMode = (): boolean => {
 
 /**
  * Verifica se há uma URL de servidor configurada.
- * Retorna true se localhost ou URL do ngrok estiver disponível.
+ * Sempre retorna true agora que temos fallback do Cloudflare.
  */
 export const hasServerUrlConfigured = (): boolean => {
-  // Em localhost, sempre temos uma URL
-  if (typeof window !== 'undefined' && 
-      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-    return true;
-  }
-  
-  // URL customizada
-  const stored = localStorage.getItem('arenaApiUrl');
-  if (stored) return true;
-  
-  // URL do ngrok configurada
-  const configuredNgrok = localStorage.getItem('ngrok_fallback_url');
-  if (configuredNgrok) return true;
-  
-  return false;
+  return true;
 };
 
 /**
  * Retorna a URL base da API.
- * Prioridade: arenaApiUrl (custom) > localhost > ngrok configurado
- * 
- * Retorna null se nenhuma URL estiver configurada (preview sem ngrok).
+ * Prioridade: arenaApiUrl (custom) > localhost > túnel configurado > fallback Cloudflare
  * 
  * EXPORTADO para uso em apiClient.ts e outros módulos.
  */
-export const getApiBase = (): string | null => {
+export const getApiBase = (): string => {
   // 1. URL customizada (maior prioridade)
   const stored = localStorage.getItem('arenaApiUrl');
   if (stored) return stored;
@@ -62,12 +49,12 @@ export const getApiBase = (): string | null => {
     return 'http://localhost:5000';
   }
   
-  // 3. URL do ngrok configurada via Settings
-  const configuredNgrok = localStorage.getItem('ngrok_fallback_url');
-  if (configuredNgrok) return configuredNgrok;
+  // 3. URL do túnel configurada via Settings
+  const configuredTunnel = localStorage.getItem('ngrok_fallback_url');
+  if (configuredTunnel) return configuredTunnel;
   
-  // 4. Nenhuma URL configurada - retorna null
-  return null;
+  // 4. Fallback para túnel Cloudflare
+  return TUNNEL_FALLBACK_URL;
 };
 
 export const checkLocalServerAvailable = async (): Promise<boolean> => {
