@@ -466,6 +466,8 @@ def _transcribe_with_local_whisper(audio_path: str, match_id: str = None) -> Dic
     try:
         from faster_whisper import WhisperModel
         import torch
+    except ImportError as e:
+        return {"error": f"Dependência não instalada: {e}", "success": False}
     
     try:
         model_name = LOCAL_WHISPER_MODEL or 'base'
