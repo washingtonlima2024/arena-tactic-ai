@@ -6,8 +6,8 @@
  * Outros arquivos (como apiClient.ts) devem importar getApiBase() daqui.
  */
 
-// URL do túnel Cloudflare como fallback para acesso remoto
-const TUNNEL_FALLBACK_URL = 'https://bedford-flip-moderate-invision.trycloudflare.com';
+// URL padrão do túnel Cloudflare como fallback (pode ser sobrescrita via Settings)
+const DEFAULT_CLOUDFLARE_TUNNEL = 'https://lace-actually-touring-northern.trycloudflare.com';
 
 export type ApiMode = 'local';
 
@@ -34,7 +34,7 @@ export const hasServerUrlConfigured = (): boolean => {
 
 /**
  * Retorna a URL base da API.
- * Prioridade: arenaApiUrl (custom) > localhost > túnel configurado > fallback Cloudflare
+ * Prioridade: arenaApiUrl (custom) > localhost > ngrok > cloudflare configurado > fallback Cloudflare
  * 
  * EXPORTADO para uso em apiClient.ts e outros módulos.
  */
@@ -49,12 +49,16 @@ export const getApiBase = (): string => {
     return 'http://localhost:5000';
   }
   
-  // 3. URL do túnel configurada via Settings
-  const configuredTunnel = localStorage.getItem('ngrok_fallback_url');
-  if (configuredTunnel) return configuredTunnel;
+  // 3. URL do túnel ngrok configurada via Settings
+  const ngrokTunnel = localStorage.getItem('ngrok_fallback_url');
+  if (ngrokTunnel) return ngrokTunnel;
   
-  // 4. Fallback para túnel Cloudflare
-  return TUNNEL_FALLBACK_URL;
+  // 4. URL do túnel Cloudflare configurada via Settings
+  const cloudflareTunnel = localStorage.getItem('cloudflare_tunnel_url');
+  if (cloudflareTunnel) return cloudflareTunnel;
+  
+  // 5. Fallback para túnel Cloudflare padrão
+  return DEFAULT_CLOUDFLARE_TUNNEL;
 };
 
 export const checkLocalServerAvailable = async (): Promise<boolean> => {

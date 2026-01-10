@@ -83,6 +83,9 @@ export default function Settings() {
   // Ngrok URL setting
   const [ngrokUrl, setNgrokUrl] = useState('');
   const [detectingNgrok, setDetectingNgrok] = useState(false);
+  
+  // Cloudflare Tunnel URL setting
+  const [cloudflareUrl, setCloudflareUrl] = useState('');
   // Lovable API Key (para geração de thumbnails)
   const [lovableApiKey, setLovableApiKey] = useState('');
   const [showLovableKey, setShowLovableKey] = useState(false);
@@ -144,7 +147,11 @@ export default function Settings() {
       const storedNgrokUrl = localStorage.getItem('ngrok_fallback_url') || 
         apiSettings.find(s => s.setting_key === 'ngrok_fallback_url')?.setting_value || '';
       setNgrokUrl(storedNgrokUrl);
-      setOllamaEnabled(apiSettings.find(s => s.setting_key === 'ollama_enabled')?.setting_value === 'true');
+      
+      // Cloudflare Tunnel URL - load from localStorage first, then from settings
+      const storedCloudflareUrl = localStorage.getItem('cloudflare_tunnel_url') || 
+        apiSettings.find(s => s.setting_key === 'cloudflare_tunnel_url')?.setting_value || '';
+      setCloudflareUrl(storedCloudflareUrl);
       
       // Lovable API Key
       setLovableApiKey(apiSettings.find(s => s.setting_key === 'LOVABLE_API_KEY')?.setting_value || '');
@@ -186,6 +193,8 @@ export default function Settings() {
         upsertApiSetting.mutateAsync({ key: 'OLLAMA_MODEL', value: ollamaModel }),
         // Ngrok URL
         ...(ngrokUrl ? [upsertApiSetting.mutateAsync({ key: 'ngrok_fallback_url', value: ngrokUrl })] : []),
+        // Cloudflare Tunnel URL
+        ...(cloudflareUrl ? [upsertApiSetting.mutateAsync({ key: 'cloudflare_tunnel_url', value: cloudflareUrl })] : []),
       ]);
       
       // Also save ngrok URL to localStorage for immediate use
@@ -193,6 +202,13 @@ export default function Settings() {
         localStorage.setItem('ngrok_fallback_url', ngrokUrl);
       } else {
         localStorage.removeItem('ngrok_fallback_url');
+      }
+      
+      // Also save Cloudflare URL to localStorage for immediate use
+      if (cloudflareUrl) {
+        localStorage.setItem('cloudflare_tunnel_url', cloudflareUrl);
+      } else {
+        localStorage.removeItem('cloudflare_tunnel_url');
       }
       toast.success('Todas as configurações foram salvas!');
     } catch (error) {
@@ -1018,12 +1034,62 @@ export default function Settings() {
                       {ngrokUrl ? (
                         <>
                           <CheckCircle2 className="h-4 w-4 text-blue-500" />
-                          <span className="text-sm text-blue-500">Túnel configurado - será usado para acesso remoto</span>
+                          <span className="text-sm text-blue-500">Túnel ngrok configurado</span>
                         </>
                       ) : (
                         <>
                           <AlertCircle className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm text-muted-foreground">Sem túnel - usando apenas localhost:5000</span>
+                          <span className="text-sm text-muted-foreground">Sem túnel ngrok</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                </div>
+                
+                <Separator />
+                
+                {/* Cloudflare Tunnel URL Configuration */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Cloud className="h-4 w-4 text-orange-500" />
+                    <Label className="font-medium">URL do Túnel Cloudflare (Acesso Remoto)</Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Configure a URL do túnel Cloudflare para acessar o servidor local remotamente. Usado como fallback quando ngrok não está disponível.
+                  </p>
+                  <div className="flex gap-2">
+                    <Input 
+                      value={cloudflareUrl}
+                      onChange={(e) => setCloudflareUrl(e.target.value)}
+                      placeholder="https://xxxxxx.trycloudflare.com"
+                      className="flex-1"
+                    />
+                    {cloudflareUrl && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => {
+                          setCloudflareUrl('');
+                          localStorage.removeItem('cloudflare_tunnel_url');
+                          toast.success('URL do Cloudflare removida');
+                        }}
+                        title="Limpar URL"
+                      >
+                        <Trash2 className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                    )}
+                  </div>
+                  <div className={`rounded-lg border p-3 ${cloudflareUrl ? 'border-orange-500/30 bg-orange-500/5' : 'border-muted bg-muted/30'}`}>
+                    <div className="flex items-center gap-2">
+                      {cloudflareUrl ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4 text-orange-500" />
+                          <span className="text-sm text-orange-500">Túnel Cloudflare configurado - fallback ativo</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm text-muted-foreground">Sem túnel Cloudflare configurado</span>
                         </>
                       )}
                     </div>
