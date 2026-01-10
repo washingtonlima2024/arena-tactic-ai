@@ -33,8 +33,10 @@ from storage import (
 import ai_services
 import threading
 import json as json_module
+import re
 
-# Global conversion jobs tracker
+# Global jobs trackers
+download_jobs = {}  # Para jobs de download por URL
 conversion_jobs = {}
 
 app = Flask(__name__)
@@ -4304,6 +4306,236 @@ def list_temp_folders():
 
 
 # ============================================================================
+# URL DOWNLOAD SYSTEM
+# ============================================================================
+
+def convert_to_direct_url(url: str) -> str:
+    """Converte URLs de Google Drive, Dropbox, etc. para links diretos."""
+    
+    # Google Drive: /file/d/{ID}/view → /uc?export=download&id={ID}
+    if 'drive.google.com' in url:
+        match = re.search(r'/file/d/([a-zA-Z0-9_-]+)', url)
+        if match:
+            file_id = match.group(1)
+            return f'https://drive.google.com/uc?export=download&id={file_id}&confirm=t'
+    
+    # Dropbox: ?dl=0 → ?dl=1
+    if 'dropbox.com' in url:
+        return url.replace('?dl=0', '?dl=1').replace('&dl=0', '&dl=1')
+    
+    # OneDrive: convert to direct download
+    if 'onedrive.live.com' in url or '1drv.ms' in url:
+        # Replace 'embed' or 'view' with 'download'
+        return url.replace('embed', 'download').replace('view.aspx', 'download.aspx')
+    
+    return url
+
+
+def download_video_with_progress(url: str, output_path: str, job_id: str, match_id: str, video_type: str):
+    """Baixa vídeo com tracking de progresso."""
+    try:
+        # Converter URLs de serviços de nuvem para links diretos
+        direct_url = convert_to_direct_url(url)
+        print(f"[download-url] Job {job_id}: Baixando de {direct_url[:80]}...")
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+        
+        response = requests.get(direct_url, stream=True, timeout=60, headers=headers)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get('content-length', 0))
+        download_jobs[job_id]['total_bytes'] = total_size
+        
+        downloaded = 0
+        with open(output_path, 'wb') as f:
+            for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks
+                if chunk:
+                    f.write(chunk)
+                    downloaded += len(chunk)
+                    
+                    # Atualizar progresso
+                    if total_size > 0:
+                        progress = int((downloaded / total_size) * 100)
+                        download_jobs[job_id]['progress'] = progress
+                    download_jobs[job_id]['bytes_downloaded'] = downloaded
+        
+        print(f"[download-url] Job {job_id}: Download completo ({downloaded / (1024*1024):.1f} MB)")
+        
+        # Verificar se o arquivo foi baixado
+        if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
+            raise Exception("Arquivo baixado inválido ou vazio")
+        
+        # Detectar duração via ffprobe
+        duration = None
+        try:
+            result = subprocess.run([
+                'ffprobe', '-v', 'error',
+                '-show_entries', 'format=duration',
+                '-of', 'default=noprint_wrappers=1:nokey=1',
+                output_path
+            ], capture_output=True, text=True, timeout=30)
+            if result.returncode == 0 and result.stdout.strip():
+                duration = int(float(result.stdout.strip()))
+        except Exception as e:
+            print(f"[download-url] Não foi possível detectar duração: {e}")
+        
+        # Registrar vídeo no banco
+        session = get_session()
+        try:
+            # Gerar URL de acesso
+            base_url = get_base_url()
+            filename = os.path.basename(output_path)
+            file_url = f"{base_url}/api/storage/{match_id}/videos/{filename}"
+            
+            video = Video(
+                match_id=match_id,
+                file_url=file_url,
+                file_name=filename,
+                video_type=video_type,
+                duration_seconds=duration,
+                status='completed'
+            )
+            session.add(video)
+            session.commit()
+            
+            download_jobs[job_id]['status'] = 'completed'
+            download_jobs[job_id]['progress'] = 100
+            download_jobs[job_id]['video'] = video.to_dict()
+            download_jobs[job_id]['completed_at'] = datetime.now().isoformat()
+            
+            print(f"[download-url] Job {job_id}: Vídeo registrado no banco com ID {video.id}")
+            
+        finally:
+            session.close()
+            
+    except Exception as e:
+        download_jobs[job_id]['status'] = 'failed'
+        download_jobs[job_id]['error'] = str(e)
+        download_jobs[job_id]['completed_at'] = datetime.now().isoformat()
+        print(f"[download-url] Job {job_id}: Erro: {e}")
+
+
+@app.route('/api/storage/<match_id>/videos/download-url', methods=['POST'])
+def download_video_from_url_endpoint(match_id: str):
+    """
+    Baixa um vídeo de uma URL diretamente para o storage da partida.
+    Executa em background com acompanhamento de progresso.
+    """
+    data = request.json or {}
+    url = data.get('url')
+    video_type = data.get('video_type', 'full')
+    filename = data.get('filename')
+    
+    # Validações
+    if not url:
+        return jsonify({'error': 'URL é obrigatória'}), 400
+    
+    # Gerar job_id para acompanhamento
+    job_id = str(uuid.uuid4())[:8]
+    
+    # Detectar nome do arquivo da URL se não fornecido
+    if not filename:
+        from urllib.parse import urlparse, unquote
+        parsed = urlparse(url)
+        path_filename = unquote(parsed.path.split('/')[-1])
+        if path_filename and '.' in path_filename:
+            filename = path_filename
+        else:
+            filename = f'video_{job_id}.mp4'
+    
+    # Garantir extensão de vídeo
+    valid_extensions = ('.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v')
+    if not any(filename.lower().endswith(ext) for ext in valid_extensions):
+        filename += '.mp4'
+    
+    # Caminho de destino
+    videos_folder = get_video_subfolder_path(match_id, 'videos')
+    output_path = str(videos_folder / filename)
+    
+    # Inicializar job de download
+    download_jobs[job_id] = {
+        'status': 'downloading',
+        'progress': 0,
+        'match_id': match_id,
+        'url': url,
+        'filename': filename,
+        'output_path': output_path,
+        'video_type': video_type,
+        'started_at': datetime.now().isoformat(),
+        'bytes_downloaded': 0,
+        'total_bytes': None,
+        'error': None,
+        'video': None,
+        'completed_at': None
+    }
+    
+    # Executar download em background
+    thread = threading.Thread(
+        target=download_video_with_progress, 
+        args=(url, output_path, job_id, match_id, video_type),
+        daemon=True
+    )
+    thread.start()
+    
+    print(f"[download-url] Job {job_id} iniciado para partida {match_id}")
+    
+    return jsonify({
+        'job_id': job_id,
+        'status': 'downloading',
+        'filename': filename,
+        'message': 'Download iniciado em background'
+    })
+
+
+@app.route('/api/storage/download-status/<job_id>', methods=['GET'])
+def get_download_status(job_id: str):
+    """Retorna status de um job de download."""
+    if job_id not in download_jobs:
+        return jsonify({'error': 'Job não encontrado'}), 404
+    
+    job = download_jobs[job_id]
+    return jsonify({
+        'job_id': job_id,
+        'status': job['status'],
+        'progress': job['progress'],
+        'bytes_downloaded': job['bytes_downloaded'],
+        'total_bytes': job['total_bytes'],
+        'filename': job['filename'],
+        'error': job.get('error'),
+        'video': job.get('video'),
+        'started_at': job.get('started_at'),
+        'completed_at': job.get('completed_at')
+    })
+
+
+@app.route('/api/storage/download-jobs', methods=['GET'])
+def list_download_jobs():
+    """Lista todos os jobs de download."""
+    match_id = request.args.get('match_id')
+    
+    jobs_list = []
+    for job_id, job in download_jobs.items():
+        if match_id and job.get('match_id') != match_id:
+            continue
+        jobs_list.append({
+            'job_id': job_id,
+            'status': job['status'],
+            'progress': job['progress'],
+            'filename': job['filename'],
+            'match_id': job.get('match_id'),
+            'started_at': job.get('started_at'),
+            'completed_at': job.get('completed_at')
+        })
+    
+    return jsonify({
+        'jobs': jobs_list,
+        'count': len(jobs_list)
+    })
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -4325,5 +4557,6 @@ if __name__ == '__main__':
     print("  GET  /api/process-match-async/status  - Status do pipeline")
     print("  POST /api/chatbot                     - Chatbot Arena")
     print("  POST /extract-clip                    - Extrair clip")
+    print("  POST /api/storage/<id>/videos/download-url - Download por URL")
     print("=" * 60)
     app.run(host='0.0.0.0', port=5000, debug=True)

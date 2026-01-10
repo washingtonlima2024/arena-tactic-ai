@@ -747,6 +747,50 @@ export const apiClient = {
     
     return response.json();
   },
+
+  // ============== URL Download (Server-side) ==============
+  downloadVideoFromUrl: async (matchId: string, url: string, videoType: string = 'full', filename?: string): Promise<{
+    job_id: string;
+    status: string;
+    filename: string;
+    message: string;
+  }> => {
+    await ensureServerAvailable();
+    return apiRequest(`/api/storage/${matchId}/videos/download-url`, {
+      method: 'POST',
+      body: JSON.stringify({ url, video_type: videoType, filename })
+    });
+  },
+
+  getDownloadStatus: async (jobId: string): Promise<{
+    job_id: string;
+    status: 'downloading' | 'completed' | 'failed';
+    progress: number;
+    bytes_downloaded: number;
+    total_bytes: number | null;
+    filename: string;
+    error?: string;
+    video?: any;
+    started_at?: string;
+    completed_at?: string;
+  }> => {
+    return apiRequest(`/api/storage/download-status/${jobId}`);
+  },
+
+  listDownloadJobs: async (matchId?: string): Promise<{
+    jobs: Array<{
+      job_id: string;
+      status: string;
+      progress: number;
+      filename: string;
+      match_id: string;
+      started_at?: string;
+      completed_at?: string;
+    }>;
+    count: number;
+  }> => {
+    return apiRequest(`/api/storage/download-jobs${matchId ? `?match_id=${matchId}` : ''}`);
+  },
 };
 
 export default apiClient;

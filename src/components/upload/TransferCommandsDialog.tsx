@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,14 @@ import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Progress } from '@/components/ui/progress';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { toast } from 'sonner';
 import { apiClient } from '@/lib/apiClient';
 import {
@@ -21,9 +29,11 @@ import {
   RefreshCw,
   Folder,
   Server,
-  MonitorDown,
-  Upload,
+  Download,
   Loader2,
+  Link,
+  CheckCircle2,
+  XCircle,
 } from 'lucide-react';
 
 interface TransferCommands {
@@ -80,11 +90,31 @@ export function TransferCommandsDialog({
   const [copiedCommand, setCopiedCommand] = useState<string | null>(null);
   const [sourceFilePath, setSourceFilePath] = useState('/caminho/do/video.mp4');
 
+  // URL Download state
+  const [videoUrl, setVideoUrl] = useState('');
+  const [videoType, setVideoType] = useState('full');
+  const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadJobId, setDownloadJobId] = useState<string | null>(null);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const [bytesDownloaded, setBytesDownloaded] = useState(0);
+  const [totalBytes, setTotalBytes] = useState<number | null>(null);
+  const [downloadStatus, setDownloadStatus] = useState<'idle' | 'downloading' | 'completed' | 'failed'>('idle');
+  const [downloadError, setDownloadError] = useState<string | null>(null);
+  const pollIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
   // Fetch commands when dialog opens
   useEffect(() => {
     if (open && matchId) {
       fetchCommands();
     }
+    
+    // Cleanup polling on close
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
+      }
+    };
   }, [open, matchId]);
 
   const fetchCommands = async () => {
@@ -132,6 +162,95 @@ export function TransferCommandsDialog({
       });
     } finally {
       setIsSyncing(false);
+    }
+  };
+
+  // Format bytes helper
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  // Poll download status
+  const pollDownloadStatus = useCallback(async (jobId: string) => {
+    try {
+      const status = await apiClient.getDownloadStatus(jobId);
+      setDownloadProgress(status.progress);
+      setBytesDownloaded(status.bytes_downloaded);
+      setTotalBytes(status.total_bytes);
+
+      if (status.status === 'completed') {
+        setDownloadStatus('completed');
+        setIsDownloading(false);
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+        toast.success('Download concluído!', {
+          description: `Vídeo ${status.filename} baixado com sucesso`,
+        });
+        onSyncComplete?.();
+        // Reset form after success
+        setTimeout(() => {
+          setVideoUrl('');
+          setDownloadJobId(null);
+          setDownloadProgress(0);
+          setBytesDownloaded(0);
+          setTotalBytes(null);
+          setDownloadStatus('idle');
+        }, 3000);
+      } else if (status.status === 'failed') {
+        setDownloadStatus('failed');
+        setDownloadError(status.error || 'Erro desconhecido');
+        setIsDownloading(false);
+        if (pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+        toast.error('Falha no download', {
+          description: status.error,
+        });
+      }
+    } catch (error: any) {
+      console.error('Error polling status:', error);
+    }
+  }, [onSyncComplete]);
+
+  // Start URL download
+  const handleDownloadFromUrl = async () => {
+    if (!videoUrl.trim()) {
+      toast.error('URL é obrigatória');
+      return;
+    }
+
+    setIsDownloading(true);
+    setDownloadStatus('downloading');
+    setDownloadProgress(0);
+    setBytesDownloaded(0);
+    setTotalBytes(null);
+    setDownloadError(null);
+
+    try {
+      const result = await apiClient.downloadVideoFromUrl(matchId, videoUrl, videoType);
+      setDownloadJobId(result.job_id);
+      toast.info('Download iniciado', {
+        description: `Baixando ${result.filename}...`,
+      });
+
+      // Start polling for status
+      pollIntervalRef.current = setInterval(() => {
+        pollDownloadStatus(result.job_id);
+      }, 2000);
+    } catch (error: any) {
+      setIsDownloading(false);
+      setDownloadStatus('failed');
+      setDownloadError(error.message);
+      toast.error('Erro ao iniciar download', {
+        description: error.message,
+      });
     }
   };
 
@@ -238,13 +357,111 @@ export function TransferCommandsDialog({
             </div>
 
             {/* Commands Tabs */}
-            <Tabs defaultValue="curl" className="w-full">
-              <TabsList className="grid w-full grid-cols-4">
-                <TabsTrigger value="curl">HTTP (cURL)</TabsTrigger>
+            <Tabs defaultValue="url-download" className="w-full">
+              <TabsList className="grid w-full grid-cols-5">
+                <TabsTrigger value="url-download" className="gap-1">
+                  <Link className="h-3 w-3" />
+                  URL
+                </TabsTrigger>
+                <TabsTrigger value="curl">cURL</TabsTrigger>
                 <TabsTrigger value="scp">SCP/Rsync</TabsTrigger>
                 <TabsTrigger value="windows">Windows</TabsTrigger>
                 <TabsTrigger value="powershell">PowerShell</TabsTrigger>
               </TabsList>
+
+              {/* URL Download Tab - NEW */}
+              <TabsContent value="url-download" className="space-y-4 mt-4">
+                <Card>
+                  <CardHeader className="py-3">
+                    <CardTitle className="text-sm flex items-center gap-2">
+                      <Download className="h-4 w-4" />
+                      Download por URL
+                    </CardTitle>
+                    <CardDescription>
+                      Cole a URL do vídeo e o servidor baixará diretamente para o storage
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="space-y-2">
+                      <Label>URL do Vídeo</Label>
+                      <Input
+                        placeholder="https://drive.google.com/file/d/.../view ou link direto .mp4"
+                        value={videoUrl}
+                        onChange={(e) => setVideoUrl(e.target.value)}
+                        disabled={isDownloading}
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Suporta: Google Drive, Dropbox, links diretos (.mp4, .mov, .mkv)
+                      </p>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label>Tipo do Vídeo</Label>
+                      <Select value={videoType} onValueChange={setVideoType} disabled={isDownloading}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="first_half">1º Tempo</SelectItem>
+                          <SelectItem value="second_half">2º Tempo</SelectItem>
+                          <SelectItem value="full">Jogo Completo</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {/* Progress display */}
+                    {downloadStatus !== 'idle' && (
+                      <div className="space-y-2 p-3 bg-muted rounded-lg">
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="flex items-center gap-2">
+                            {downloadStatus === 'downloading' && (
+                              <>
+                                <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                                Baixando...
+                              </>
+                            )}
+                            {downloadStatus === 'completed' && (
+                              <>
+                                <CheckCircle2 className="h-4 w-4 text-green-500" />
+                                Concluído
+                              </>
+                            )}
+                            {downloadStatus === 'failed' && (
+                              <>
+                                <XCircle className="h-4 w-4 text-destructive" />
+                                Falhou
+                              </>
+                            )}
+                          </span>
+                          <span className="text-muted-foreground">
+                            {totalBytes
+                              ? `${formatBytes(bytesDownloaded)} / ${formatBytes(totalBytes)}`
+                              : formatBytes(bytesDownloaded)
+                            }
+                          </span>
+                        </div>
+                        <Progress value={downloadProgress} className="h-2" />
+                        {downloadError && (
+                          <p className="text-xs text-destructive mt-1">{downloadError}</p>
+                        )}
+                      </div>
+                    )}
+
+                    <Button
+                      onClick={handleDownloadFromUrl}
+                      disabled={isDownloading || !videoUrl.trim()}
+                      className="w-full gap-2"
+                    >
+                      {isDownloading ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="h-4 w-4" />
+                      )}
+                      {isDownloading ? 'Baixando...' : 'Iniciar Download'}
+                    </Button>
+                  </CardContent>
+                </Card>
+              </TabsContent>
 
               <TabsContent value="curl" className="space-y-4 mt-4">
                 <Card>
