@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { apiClient } from '@/lib/apiClient';
+import { apiClient, normalizeStorageUrl } from '@/lib/apiClient';
 import { toast } from 'sonner';
 
 interface ThumbnailData {
@@ -48,7 +48,7 @@ export function useThumbnailGeneration(matchId?: string) {
         data.forEach((thumb: any) => {
           loaded[thumb.event_id] = {
             eventId: thumb.event_id,
-            imageUrl: thumb.image_url,
+            imageUrl: normalizeStorageUrl(thumb.image_url) || thumb.image_url,
             eventType: thumb.event_type,
             title: thumb.title || ''
           };
@@ -255,7 +255,7 @@ export function useThumbnailGeneration(matchId?: string) {
             
             const thumbnailData: ThumbnailData = {
               eventId,
-              imageUrl,
+              imageUrl: normalizeStorageUrl(imageUrl) || imageUrl,
               eventType,
               title
             };
@@ -345,7 +345,7 @@ Style: Professional sports broadcast graphics, dramatic lighting, soccer field b
       if (data?.imageUrl) {
         const thumbnailData: ThumbnailData = {
           eventId,
-          imageUrl: data.imageUrl,
+          imageUrl: normalizeStorageUrl(data.imageUrl) || data.imageUrl,
           eventType,
           title: `${eventLabel} - ${minute}'`
         };
