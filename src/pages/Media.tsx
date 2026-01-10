@@ -691,103 +691,7 @@ export default function Media() {
               </Card>
             )}
 
-            {/* Clips by Half - Storage View */}
-            {clipsByHalf && (clipsByHalf.first_half?.length > 0 || clipsByHalf.second_half?.length > 0) && (
-              <Card variant="glass">
-                <CardHeader className="pb-3">
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <Film className="h-5 w-5" />
-                    Clips Extraídos por Tempo
-                  </CardTitle>
-                  <CardDescription>
-                    Clips salvos automaticamente organizados por tempo de jogo
-                  </CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <Tabs value={activeHalfTab} onValueChange={setActiveHalfTab} className="w-full">
-                    <TabsList className="grid w-full grid-cols-3 mb-4">
-                      <TabsTrigger value="all">
-                        Todos ({(clipsByHalf.first_half?.length || 0) + (clipsByHalf.second_half?.length || 0)})
-                      </TabsTrigger>
-                      <TabsTrigger value="first_half">
-                        1º Tempo ({clipsByHalf.first_half?.length || 0})
-                      </TabsTrigger>
-                      <TabsTrigger value="second_half">
-                        2º Tempo ({clipsByHalf.second_half?.length || 0})
-                      </TabsTrigger>
-                    </TabsList>
-                    
-                    <TabsContent value="all" className="space-y-2">
-                      <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
-                        {[...(clipsByHalf.first_half || []), ...(clipsByHalf.second_half || [])].map((clip, idx) => (
-                          <div key={clip.filename} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors">
-                            <div className="flex h-10 w-10 items-center justify-center rounded bg-primary/20 text-primary">
-                              <Video className="h-5 w-5" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-sm truncate">{clip.filename}</p>
-                              <p className="text-xs text-muted-foreground">{(clip.size / 1024 / 1024).toFixed(2)} MB</p>
-                            </div>
-                            <Button variant="ghost" size="sm" asChild>
-                              <a href={`${apiClient.getApiUrl()}${clip.url}`} target="_blank" rel="noopener noreferrer">
-                                <Play className="h-4 w-4" />
-                              </a>
-                            </Button>
-                            <Button variant="ghost" size="sm" asChild>
-                              <a href={`${apiClient.getApiUrl()}${clip.url}`} download={clip.filename}>
-                                <Download className="h-4 w-4" />
-                              </a>
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    </TabsContent>
-                    
-                    <TabsContent value="first_half" className="space-y-2">
-                      <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
-                        {(clipsByHalf.first_half || []).map((clip) => (
-                          <div key={clip.filename} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors">
-                            <div className="flex h-10 w-10 items-center justify-center rounded bg-primary/20 text-primary">
-                              <Video className="h-5 w-5" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-sm truncate">{clip.filename}</p>
-                              <p className="text-xs text-muted-foreground">{(clip.size / 1024 / 1024).toFixed(2)} MB</p>
-                            </div>
-                            <Button variant="ghost" size="sm" asChild>
-                              <a href={`${apiClient.getApiUrl()}${clip.url}`} target="_blank" rel="noopener noreferrer">
-                                <Play className="h-4 w-4" />
-                              </a>
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    </TabsContent>
-                    
-                    <TabsContent value="second_half" className="space-y-2">
-                      <div className="grid gap-2 md:grid-cols-2 lg:grid-cols-3">
-                        {(clipsByHalf.second_half || []).map((clip) => (
-                          <div key={clip.filename} className="flex items-center gap-3 p-3 rounded-lg bg-muted/50 hover:bg-muted transition-colors">
-                            <div className="flex h-10 w-10 items-center justify-center rounded bg-primary/20 text-primary">
-                              <Video className="h-5 w-5" />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium text-sm truncate">{clip.filename}</p>
-                              <p className="text-xs text-muted-foreground">{(clip.size / 1024 / 1024).toFixed(2)} MB</p>
-                            </div>
-                            <Button variant="ghost" size="sm" asChild>
-                              <a href={`${apiClient.getApiUrl()}${clip.url}`} target="_blank" rel="noopener noreferrer">
-                                <Play className="h-4 w-4" />
-                              </a>
-                            </Button>
-                          </div>
-                        ))}
-                      </div>
-                    </TabsContent>
-                  </Tabs>
-                </CardContent>
-              </Card>
-            )}
+            {/* Half filter tabs for clips */}
 
             {clips.length === 0 ? (
               <Card variant="glass">
@@ -797,8 +701,42 @@ export default function Media() {
                 </CardContent>
               </Card>
             ) : (
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {clips.map(clip => {
+              <>
+                {/* Tabs de filtragem por tempo */}
+                <Tabs value={activeHalfTab} onValueChange={setActiveHalfTab} className="w-full">
+                  <TabsList className="grid w-full grid-cols-3 mb-4">
+                    <TabsTrigger value="all">
+                      Todos ({clips.length})
+                    </TabsTrigger>
+                    <TabsTrigger value="first_half">
+                      1º Tempo ({clips.filter(c => {
+                        const half = c.matchHalf;
+                        return half === 'first' || half === 'first_half';
+                      }).length})
+                    </TabsTrigger>
+                    <TabsTrigger value="second_half">
+                      2º Tempo ({clips.filter(c => {
+                        const half = c.matchHalf;
+                        return half === 'second' || half === 'second_half';
+                      }).length})
+                    </TabsTrigger>
+                  </TabsList>
+                </Tabs>
+
+                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {clips
+                  .filter(clip => {
+                    if (activeHalfTab === 'all') return true;
+                    const half = clip.matchHalf;
+                    if (activeHalfTab === 'first_half') {
+                      return half === 'first' || half === 'first_half';
+                    }
+                    if (activeHalfTab === 'second_half') {
+                      return half === 'second' || half === 'second_half';
+                    }
+                    return true;
+                  })
+                  .map(clip => {
                   const thumbnail = getThumbnail(clip.id);
                   const isPlaying = playingClipId === clip.id;
                   const isGeneratingThumbnail = isGenerating(clip.id);
@@ -1009,6 +947,7 @@ export default function Media() {
                   );
                 })}
               </div>
+              </>
             )}
           </TabsContent>
 
