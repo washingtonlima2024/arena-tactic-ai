@@ -559,8 +559,16 @@ def analyze_match_events(
         print(f"[AI] ❌ ERRO: {error_msg}")
         raise ValueError(error_msg)
     
-    # Log dos provedores disponíveis
+    # Log dos provedores disponíveis com detalhes das chaves
     providers = []
+    print(f"[AI] DEBUG - Verificando provedores de IA:")
+    print(f"  LOVABLE_API_KEY: {'✓ ' + LOVABLE_API_KEY[:10] + '...' if LOVABLE_API_KEY else '✗ não configurada'}")
+    print(f"  GOOGLE_API_KEY: {'✓ ' + GOOGLE_API_KEY[:10] + '...' if GOOGLE_API_KEY else '✗ não configurada'}")
+    print(f"  OPENAI_API_KEY: {'✓ ' + OPENAI_API_KEY[:10] + '...' if OPENAI_API_KEY else '✗ não configurada'}")
+    print(f"  OLLAMA_ENABLED: {OLLAMA_ENABLED}")
+    print(f"  GEMINI_ENABLED: {GEMINI_ENABLED}")
+    print(f"  OPENAI_ENABLED: {OPENAI_ENABLED}")
+    
     if LOVABLE_API_KEY:
         providers.append("Lovable")
     if GOOGLE_API_KEY and GEMINI_ENABLED:
@@ -569,7 +577,7 @@ def analyze_match_events(
         providers.append("OpenAI")
     if OLLAMA_ENABLED:
         providers.append("Ollama")
-    print(f"[AI] Provedores disponíveis: {', '.join(providers)}")
+    print(f"[AI] Provedores disponíveis: {', '.join(providers) if providers else 'NENHUM!'}")
     
     half_desc = "1º Tempo (0-45 min)" if game_start_minute < 45 else "2º Tempo (45-90 min)"
     match_half = 'first' if game_start_minute < 45 else 'second'
@@ -1602,12 +1610,24 @@ def transcribe_large_video(
     from storage import get_file_path, STORAGE_DIR
     
     # Check if any transcription API is available and enabled
-    elevenlabs_available = ELEVENLABS_API_KEY and ELEVENLABS_ENABLED
-    openai_available = OPENAI_API_KEY and OPENAI_ENABLED
-    gemini_available = (GOOGLE_API_KEY or LOVABLE_API_KEY) and GEMINI_ENABLED
+    elevenlabs_available = bool(ELEVENLABS_API_KEY) and ELEVENLABS_ENABLED
+    openai_available = bool(OPENAI_API_KEY) and OPENAI_ENABLED
+    gemini_available = (bool(GOOGLE_API_KEY) or bool(LOVABLE_API_KEY)) and GEMINI_ENABLED
+    
+    # Debug log das chaves configuradas
+    print(f"[Transcribe] DEBUG - Chaves configuradas:")
+    print(f"  GOOGLE_API_KEY: {'✓ ' + GOOGLE_API_KEY[:10] + '...' if GOOGLE_API_KEY else '✗ não configurada'}")
+    print(f"  LOVABLE_API_KEY: {'✓ ' + LOVABLE_API_KEY[:10] + '...' if LOVABLE_API_KEY else '✗ não configurada'}")
+    print(f"  OPENAI_API_KEY: {'✓ ' + OPENAI_API_KEY[:10] + '...' if OPENAI_API_KEY else '✗ não configurada'}")
+    print(f"  ELEVENLABS_API_KEY: {'✓ ' + ELEVENLABS_API_KEY[:10] + '...' if ELEVENLABS_API_KEY else '✗ não configurada'}")
+    print(f"  GEMINI_ENABLED: {GEMINI_ENABLED}")
     
     if not elevenlabs_available and not openai_available and not gemini_available:
-        raise ValueError("Nenhuma API de transcrição ativa. Ative ElevenLabs, OpenAI ou Gemini em Configurações > API.")
+        raise ValueError(
+            "Nenhuma API de transcrição ativa. "
+            f"Chaves detectadas: GEMINI={'✓' if GOOGLE_API_KEY else '✗'}, OPENAI={'✓' if OPENAI_API_KEY else '✗'}, ELEVENLABS={'✓' if ELEVENLABS_API_KEY else '✗'}. "
+            "Configure uma chave de API em Configurações > APIs e clique em 'Salvar Configurações'."
+        )
     
     print(f"[Transcribe] Iniciando transcrição para: {video_url}")
     print(f"[Transcribe] APIs ativas: ElevenLabs={'✓' if elevenlabs_available else '✗'}, Whisper={'✓' if openai_available else '✗'}, Gemini={'✓' if gemini_available else '✗'}")

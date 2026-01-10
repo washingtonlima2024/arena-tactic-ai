@@ -259,12 +259,17 @@ export const apiClient = {
     lovable: boolean;
     gemini: boolean;
     openai: boolean;
+    elevenlabs: boolean;
     ollama: boolean;
     anyConfigured: boolean;
+    anyTranscription: boolean;
+    anyAnalysis: boolean;
+    message: string;
     providers: {
-      lovable: { configured: boolean; enabled: boolean };
-      gemini: { configured: boolean; enabled: boolean };
-      openai: { configured: boolean; enabled: boolean };
+      lovable: { configured: boolean; enabled: boolean; keySet: boolean };
+      gemini: { configured: boolean; enabled: boolean; keySet: boolean };
+      openai: { configured: boolean; enabled: boolean; keySet: boolean };
+      elevenlabs: { configured: boolean; enabled: boolean; keySet: boolean };
       ollama: { configured: boolean; url?: string; model?: string };
     };
   }>('/api/ai-status'),
