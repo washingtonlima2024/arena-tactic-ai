@@ -737,6 +737,70 @@ def health_check():
     return jsonify(response_data)
 
 
+@app.route('/api/detect-ngrok', methods=['GET'])
+def detect_ngrok():
+    """
+    Detecta automaticamente a URL do túnel ngrok ativo.
+    O ngrok expõe uma API local em http://127.0.0.1:4040/api/tunnels
+    quando está rodando.
+    """
+    try:
+        # Tenta acessar a API local do ngrok
+        response = requests.get('http://127.0.0.1:4040/api/tunnels', timeout=2)
+        
+        if response.status_code == 200:
+            data = response.json()
+            tunnels = data.get('tunnels', [])
+            
+            # Procura por túneis HTTPS (preferido) ou HTTP
+            https_tunnel = None
+            http_tunnel = None
+            
+            for tunnel in tunnels:
+                public_url = tunnel.get('public_url', '')
+                if public_url.startswith('https://'):
+                    https_tunnel = public_url
+                elif public_url.startswith('http://'):
+                    http_tunnel = public_url
+            
+            # Prefere HTTPS sobre HTTP
+            detected_url = https_tunnel or http_tunnel
+            
+            if detected_url:
+                return jsonify({
+                    'success': True,
+                    'url': detected_url,
+                    'tunnels': len(tunnels),
+                    'message': f'Túnel ngrok detectado: {detected_url}'
+                })
+            else:
+                return jsonify({
+                    'success': False,
+                    'error': 'Nenhum túnel ativo encontrado',
+                    'tunnels': len(tunnels)
+                })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Ngrok API retornou status {response.status_code}'
+            })
+            
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'success': False,
+            'error': 'Ngrok não está rodando. Inicie com: ngrok http 5000'
+        })
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'success': False,
+            'error': 'Timeout ao conectar com ngrok API'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Erro ao detectar ngrok: {str(e)}'
+        })
+
 # ============================================================================
 # STORAGE API - Organized by Match
 # ============================================================================

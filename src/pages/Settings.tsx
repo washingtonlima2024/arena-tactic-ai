@@ -35,7 +35,9 @@ import {
   Brain,
   Mic,
   Trash2,
-  HardDrive
+  HardDrive,
+  RefreshCw,
+  Wifi
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getApiMode, setApiMode, type ApiMode } from '@/lib/apiMode';
@@ -80,6 +82,7 @@ export default function Settings() {
 
   // Ngrok URL setting
   const [ngrokUrl, setNgrokUrl] = useState('');
+  const [detectingNgrok, setDetectingNgrok] = useState(false);
   // Lovable API Key (para geração de thumbnails)
   const [lovableApiKey, setLovableApiKey] = useState('');
   const [showLovableKey, setShowLovableKey] = useState(false);
@@ -939,21 +942,91 @@ export default function Settings() {
                 
                 {/* Ngrok URL Configuration */}
                 <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Globe className="h-4 w-4 text-primary" />
-                    <Label className="font-medium">URL do Ngrok (Acesso Remoto)</Label>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Globe className="h-4 w-4 text-primary" />
+                      <Label className="font-medium">URL do Ngrok (Acesso Remoto)</Label>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        setDetectingNgrok(true);
+                        try {
+                          // Try to detect ngrok via local server
+                          const baseUrl = 'http://localhost:5000';
+                          const response = await fetch(`${baseUrl}/api/detect-ngrok`, {
+                            signal: AbortSignal.timeout(5000)
+                          });
+                          
+                          if (response.ok) {
+                            const data = await response.json();
+                            if (data.success && data.url) {
+                              setNgrokUrl(data.url);
+                              toast.success(`Ngrok detectado: ${data.url}`);
+                            } else {
+                              toast.error(data.error || 'Nenhum túnel ngrok ativo');
+                            }
+                          } else {
+                            toast.error('Servidor local não respondeu');
+                          }
+                        } catch (error) {
+                          // Fallback: try to detect directly from browser (won't work due to CORS, but worth trying)
+                          toast.error('Servidor Python offline. Inicie o servidor para detectar ngrok.');
+                        } finally {
+                          setDetectingNgrok(false);
+                        }
+                      }}
+                      disabled={detectingNgrok}
+                    >
+                      {detectingNgrok ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <Wifi className="h-4 w-4 mr-2" />
+                      )}
+                      Auto-detectar
+                    </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Configure a URL do túnel ngrok para acessar o servidor local remotamente (ex: preview do Lovable)
                   </p>
-                  <Input 
-                    value={ngrokUrl}
-                    onChange={(e) => setNgrokUrl(e.target.value)}
-                    placeholder="https://xxxxxx.ngrok-free.app"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Deixe vazio para usar apenas localhost:5000. A URL é salva automaticamente ao salvar configurações.
-                  </p>
+                  <div className="flex gap-2">
+                    <Input 
+                      value={ngrokUrl}
+                      onChange={(e) => setNgrokUrl(e.target.value)}
+                      placeholder="https://xxxxxx.ngrok-free.app"
+                      className="flex-1"
+                    />
+                    {ngrokUrl && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => {
+                          setNgrokUrl('');
+                          localStorage.removeItem('ngrok_fallback_url');
+                          toast.success('URL do ngrok removida');
+                        }}
+                        title="Limpar URL"
+                      >
+                        <Trash2 className="h-4 w-4 text-muted-foreground" />
+                      </Button>
+                    )}
+                  </div>
+                  <div className={`rounded-lg border p-3 ${ngrokUrl ? 'border-blue-500/30 bg-blue-500/5' : 'border-muted bg-muted/30'}`}>
+                    <div className="flex items-center gap-2">
+                      {ngrokUrl ? (
+                        <>
+                          <CheckCircle2 className="h-4 w-4 text-blue-500" />
+                          <span className="text-sm text-blue-500">Túnel configurado - será usado para acesso remoto</span>
+                        </>
+                      ) : (
+                        <>
+                          <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm text-muted-foreground">Sem túnel - usando apenas localhost:5000</span>
+                        </>
+                      )}
+                    </div>
+                  </div>
                 </div>
               </CardContent>
             </Card>
