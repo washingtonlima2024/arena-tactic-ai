@@ -1,7 +1,13 @@
 /**
  * Arena Play - Modo 100% Local
  * Todas as operações usam apenas o servidor Python local
+ * 
+ * IMPORTANTE: Este arquivo é a fonte única de verdade para a URL do servidor.
+ * Outros arquivos (como apiClient.ts) devem importar getApiBase() daqui.
  */
+
+// URL de fallback do ngrok - ÚNICA FONTE DE VERDADE
+const NGROK_FALLBACK_URL = 'https://d84e2dee7780.ngrok-free.app';
 
 export type ApiMode = 'local';
 
@@ -18,22 +24,27 @@ export const isLocalMode = (): boolean => {
   return true;
 };
 
-export const checkLocalServerAvailable = async (): Promise<boolean> => {
-  // Pegar URL do localStorage ou usar fallback inteligente
-  const getApiBase = () => {
-    const stored = localStorage.getItem('arenaApiUrl');
-    if (stored) return stored;
-    
-    // Em ambiente local, usar localhost
-    if (typeof window !== 'undefined' && 
-        (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-      return 'http://localhost:5000';
-    }
-    
-    // Fallback para ngrok (preview Lovable)
-    return 'https://d84e2dee7780.ngrok-free.app';
-  };
+/**
+ * Retorna a URL base da API.
+ * Prioridade: localStorage > localhost > ngrok fallback
+ * 
+ * EXPORTADO para uso em apiClient.ts e outros módulos.
+ */
+export const getApiBase = (): string => {
+  const stored = localStorage.getItem('arenaApiUrl');
+  if (stored) return stored;
+  
+  // Em ambiente local, usar localhost
+  if (typeof window !== 'undefined' && 
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    return 'http://localhost:5000';
+  }
+  
+  // Fallback para ngrok (preview Lovable)
+  return NGROK_FALLBACK_URL;
+};
 
+export const checkLocalServerAvailable = async (): Promise<boolean> => {
   try {
     const apiUrl = getApiBase();
     const response = await fetch(`${apiUrl}/health?light=true`, {

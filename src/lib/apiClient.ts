@@ -3,20 +3,10 @@
  * Modo 100% Local - Sem dependências de Supabase
  */
 
-// Prioriza localhost quando disponível, fallback para ngrok
-const getApiBase = () => {
-  const stored = localStorage.getItem('arenaApiUrl');
-  if (stored) return stored;
-  
-  // Em ambiente local (localhost/127.0.0.1), usar servidor local diretamente
-  if (typeof window !== 'undefined' && 
-      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-    return 'http://localhost:5000';
-  }
-  
-  // Fallback para ngrok (acesso remoto/preview)
-  return 'https://d84e2dee7780.ngrok-free.app';
-};
+import { getApiBase } from './apiMode';
+
+// Re-exporta getApiBase para manter compatibilidade com código existente
+export { getApiBase };
 
 // Check if local server is available
 let serverAvailable: boolean | null = null;
