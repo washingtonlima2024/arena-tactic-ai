@@ -78,6 +78,8 @@ export default function Settings() {
   const [ollamaModel, setOllamaModel] = useState('llama3.2');
   const [ollamaEnabled, setOllamaEnabled] = useState(false);
 
+  // Ngrok URL setting
+  const [ngrokUrl, setNgrokUrl] = useState('');
   // Lovable API Key (para geração de thumbnails)
   const [lovableApiKey, setLovableApiKey] = useState('');
   const [showLovableKey, setShowLovableKey] = useState(false);
@@ -135,6 +137,12 @@ export default function Settings() {
       setOllamaModel(apiSettings.find(s => s.setting_key === 'ollama_model')?.setting_value || 'llama3.2');
       setOllamaEnabled(apiSettings.find(s => s.setting_key === 'ollama_enabled')?.setting_value === 'true');
       
+      // Ngrok URL - load from localStorage first, then from settings
+      const storedNgrokUrl = localStorage.getItem('ngrok_fallback_url') || 
+        apiSettings.find(s => s.setting_key === 'ngrok_fallback_url')?.setting_value || '';
+      setNgrokUrl(storedNgrokUrl);
+      setOllamaEnabled(apiSettings.find(s => s.setting_key === 'ollama_enabled')?.setting_value === 'true');
+      
       // Lovable API Key
       setLovableApiKey(apiSettings.find(s => s.setting_key === 'LOVABLE_API_KEY')?.setting_value || '');
     }
@@ -173,7 +181,16 @@ export default function Settings() {
         ...(lovableApiKey ? [upsertApiSetting.mutateAsync({ key: 'LOVABLE_API_KEY', value: lovableApiKey })] : []),
         upsertApiSetting.mutateAsync({ key: 'OLLAMA_URL', value: ollamaUrl }),
         upsertApiSetting.mutateAsync({ key: 'OLLAMA_MODEL', value: ollamaModel }),
+        // Ngrok URL
+        ...(ngrokUrl ? [upsertApiSetting.mutateAsync({ key: 'ngrok_fallback_url', value: ngrokUrl })] : []),
       ]);
+      
+      // Also save ngrok URL to localStorage for immediate use
+      if (ngrokUrl) {
+        localStorage.setItem('ngrok_fallback_url', ngrokUrl);
+      } else {
+        localStorage.removeItem('ngrok_fallback_url');
+      }
       toast.success('Todas as configurações foram salvas!');
     } catch (error) {
       toast.error('Erro ao salvar configurações');
@@ -915,6 +932,27 @@ export default function Settings() {
                   </div>
                   <p className="text-sm text-muted-foreground">
                     Todos os dados são armazenados localmente. Nenhuma dependência de serviços externos.
+                  </p>
+                </div>
+                
+                <Separator />
+                
+                {/* Ngrok URL Configuration */}
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <Globe className="h-4 w-4 text-primary" />
+                    <Label className="font-medium">URL do Ngrok (Acesso Remoto)</Label>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Configure a URL do túnel ngrok para acessar o servidor local remotamente (ex: preview do Lovable)
+                  </p>
+                  <Input 
+                    value={ngrokUrl}
+                    onChange={(e) => setNgrokUrl(e.target.value)}
+                    placeholder="https://xxxxxx.ngrok-free.app"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Deixe vazio para usar apenas localhost:5000. A URL é salva automaticamente ao salvar configurações.
                   </p>
                 </div>
               </CardContent>
