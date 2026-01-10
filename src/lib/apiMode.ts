@@ -7,7 +7,7 @@
  */
 
 // URL de fallback do ngrok - ÚNICA FONTE DE VERDADE
-const NGROK_FALLBACK_URL = 'https://d84e2dee7780.ngrok-free.app';
+const NGROK_FALLBACK_URL = 'https://95d7f5b4a032.ngrok-free.app';
 
 export type ApiMode = 'local';
 
