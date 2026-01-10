@@ -86,6 +86,7 @@ export default function Settings() {
   
   // Cloudflare Tunnel URL setting
   const [cloudflareUrl, setCloudflareUrl] = useState('');
+  const [detectingCloudflare, setDetectingCloudflare] = useState(false);
   // Lovable API Key (para geração de thumbnails)
   const [lovableApiKey, setLovableApiKey] = useState('');
   const [showLovableKey, setShowLovableKey] = useState(false);
@@ -1054,9 +1055,51 @@ export default function Settings() {
                 
                 {/* Cloudflare Tunnel URL Configuration */}
                 <div className="space-y-3">
-                  <div className="flex items-center gap-2">
-                    <Cloud className="h-4 w-4 text-orange-500" />
-                    <Label className="font-medium">URL do Túnel Cloudflare (Acesso Remoto)</Label>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <Cloud className="h-4 w-4 text-orange-500" />
+                      <Label className="font-medium">URL do Túnel Cloudflare (Acesso Remoto)</Label>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={async () => {
+                        setDetectingCloudflare(true);
+                        try {
+                          // Try to detect cloudflare via local server
+                          const baseUrl = 'http://localhost:5000';
+                          const response = await fetch(`${baseUrl}/api/detect-cloudflare`, {
+                            signal: AbortSignal.timeout(5000)
+                          });
+                          
+                          if (response.ok) {
+                            const data = await response.json();
+                            if (data.success && data.url) {
+                              setCloudflareUrl(data.url);
+                              toast.success(`Cloudflare detectado: ${data.url}`);
+                            } else if (data.running) {
+                              toast.info(data.hint || 'Copie a URL do terminal do cloudflared');
+                            } else {
+                              toast.error(data.error || 'Nenhum túnel Cloudflare ativo');
+                            }
+                          } else {
+                            toast.error('Servidor local não respondeu');
+                          }
+                        } catch (error) {
+                          toast.error('Servidor Python offline. Inicie o servidor para detectar cloudflare.');
+                        } finally {
+                          setDetectingCloudflare(false);
+                        }
+                      }}
+                      disabled={detectingCloudflare}
+                    >
+                      {detectingCloudflare ? (
+                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                      ) : (
+                        <Wifi className="h-4 w-4 mr-2" />
+                      )}
+                      Auto-detectar
+                    </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
                     Configure a URL do túnel Cloudflare para acessar o servidor local remotamente. Usado como fallback quando ngrok não está disponível.
