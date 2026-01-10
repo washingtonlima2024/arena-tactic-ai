@@ -1,14 +1,19 @@
 """
 Database connection and initialization for Arena Play SQLite database.
+Uses BASE_DIR environment variable for predictable paths.
 """
 
 import os
+from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from models import Base
 
-# Database file path
-DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'arena_play.db')
+# Base directory from environment or current file location
+BASE_DIR = Path(os.environ.get('ARENA_BASE_DIR', os.path.dirname(__file__)))
+
+# Database file path - uses BASE_DIR for predictability
+DATABASE_PATH = str(BASE_DIR / 'arena_play.db')
 DATABASE_URL = f'sqlite:///{DATABASE_PATH}'
 
 # Create engine with check_same_thread=False for Flask compatibility
@@ -46,7 +51,19 @@ def reset_db():
     print("Database reset complete.")
 
 
+def get_database_path() -> str:
+    """Get the absolute path to the database file."""
+    return os.path.abspath(DATABASE_PATH)
+
+
+def get_base_dir() -> str:
+    """Get the absolute path to the base directory."""
+    return str(BASE_DIR.absolute())
+
+
 if __name__ == '__main__':
     # Initialize database when run directly
     init_db()
     print("Database tables created successfully!")
+    print(f"Base directory: {get_base_dir()}")
+    print(f"Database path: {get_database_path()}")

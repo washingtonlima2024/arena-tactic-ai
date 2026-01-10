@@ -23,8 +23,62 @@ MIGRATIONS = [
         'type': 'TEXT',
         'default': "'{}'"
     },
-    # Adicionar futuras migrações aqui conforme necessário
+    # TranscriptionJob columns
+    {
+        'table': 'transcription_jobs',
+        'column': 'video_path',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'transcription_jobs',
+        'column': 'chunk_results',
+        'type': 'TEXT',
+        'default': "'[]'"
+    },
 ]
+
+
+def create_transcription_jobs_table():
+    """Create transcription_jobs table if it doesn't exist."""
+    if not os.path.exists(DATABASE_PATH):
+        return
+    
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS transcription_jobs (
+                id TEXT PRIMARY KEY,
+                match_id TEXT,
+                video_id TEXT,
+                video_path TEXT,
+                status TEXT DEFAULT 'queued',
+                progress INTEGER DEFAULT 0,
+                current_step TEXT,
+                error_message TEXT,
+                total_chunks INTEGER DEFAULT 1,
+                completed_chunks INTEGER DEFAULT 0,
+                chunk_results TEXT DEFAULT '[]',
+                srt_content TEXT,
+                plain_text TEXT,
+                provider_used TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.commit()
+        print("  ✓ Tabela transcription_jobs verificada/criada")
+    except Exception as e:
+        print(f"  ⚠ Erro ao criar transcription_jobs: {e}")
+    finally:
+        conn.close()
+
+
+# Execute table creation on import
+create_transcription_jobs_table()
 
 
 def force_add_column_if_missing():

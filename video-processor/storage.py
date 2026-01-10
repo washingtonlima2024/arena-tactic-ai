@@ -1,6 +1,7 @@
 """
 Local file storage management - organized by match.
 All files for a match are grouped together in subfolders.
+Uses BASE_DIR environment variable for predictable paths.
 """
 
 import os
@@ -9,8 +10,11 @@ import uuid
 from pathlib import Path
 from datetime import datetime
 
-# Base storage directory
-STORAGE_DIR = Path(os.path.dirname(__file__)) / 'storage'
+# Base directory from environment or current file location
+BASE_DIR = Path(os.environ.get('ARENA_BASE_DIR', os.path.dirname(__file__)))
+
+# Base storage directory - uses BASE_DIR for predictability
+STORAGE_DIR = Path(os.environ.get('ARENA_STORAGE_DIR', BASE_DIR / 'storage'))
 
 # Subfolder types within each match folder
 MATCH_SUBFOLDERS = [

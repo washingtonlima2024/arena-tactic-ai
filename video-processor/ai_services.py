@@ -1776,13 +1776,20 @@ def _transcribe_multi_chunk(
     max_chunk_size_mb: int = 20
 ) -> Dict[str, Any]:
     """
-    Transcribe large audio by splitting into chunks.
+    Transcribe large audio by splitting into chunks with resilient error handling.
     
     Splits the audio into ~20MB chunks, transcribes each separately,
     and combines the results maintaining proper timing.
+    
+    Resilient features:
+    - Saves partial results if some chunks fail
+    - Handles 401 (invalid key) and 429 (rate limit) errors gracefully
+    - Returns partial transcription if at least 50% of chunks succeed
     """
     import subprocess
     import math
+    import time
+    from storage import save_file
     
     # Get audio duration
     probe_cmd = [
@@ -1809,7 +1816,24 @@ def _transcribe_multi_chunk(
     srt_index = 1
     srt_lines = []
     
+    # Track chunk results for resilience
+    chunk_results = []
+    failed_chunks = []
+    rate_limit_hit = False
+    auth_error = False
+    
     for i in range(num_chunks):
+        if auth_error:
+            # Stop if we hit authentication error (invalid key)
+            print(f"[Transcribe] Parando devido a erro de autenticação")
+            break
+        
+        if rate_limit_hit:
+            # Wait before retrying after rate limit
+            print(f"[Transcribe] Aguardando 30s devido a rate limit...")
+            time.sleep(30)
+            rate_limit_hit = False
+        
         start_time = i * chunk_duration
         chunk_path = os.path.join(tmpdir, f'chunk_{i}.mp3')
         
@@ -1826,59 +1850,109 @@ def _transcribe_multi_chunk(
         chunk_result = subprocess.run(chunk_cmd, capture_output=True, text=True, timeout=120)
         if chunk_result.returncode != 0:
             print(f"[Transcribe] Falha ao extrair chunk {i}: {chunk_result.stderr}")
+            failed_chunks.append({'chunk': i, 'error': 'extraction_failed'})
             continue
         
         if not os.path.exists(chunk_path) or os.path.getsize(chunk_path) < 1000:
             print(f"[Transcribe] Chunk {i} muito pequeno ou inexistente, pulando...")
+            failed_chunks.append({'chunk': i, 'error': 'too_small'})
             continue
         
         print(f"[Transcribe] Transcrevendo chunk {i+1}/{num_chunks} (início: {start_time:.1f}s)...")
         
-        # Transcribe chunk
-        try:
-            with open(chunk_path, 'rb') as chunk_file:
-                response = requests.post(
-                    f'{OPENAI_API_URL}/audio/transcriptions',
-                    headers={'Authorization': f'Bearer {OPENAI_API_KEY}'},
-                    files={'file': chunk_file},
-                    data={
-                        'model': 'whisper-1',
-                        'language': 'pt',
-                        'response_format': 'verbose_json'
-                    },
-                    timeout=300
-                )
-            
-            if not response.ok:
-                print(f"[Transcribe] Whisper error chunk {i}: {response.status_code}")
-                continue
-            
-            chunk_data = response.json()
-            chunk_text = chunk_data.get('text', '')
-            chunk_segments = chunk_data.get('segments', [])
-            
-            all_text.append(chunk_text)
-            
-            # Adjust timestamps for this chunk's position
-            for seg in chunk_segments:
-                adjusted_start = seg.get('start', 0) + start_time
-                adjusted_end = seg.get('end', 0) + start_time
+        # Transcribe chunk with retry
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                with open(chunk_path, 'rb') as chunk_file:
+                    response = requests.post(
+                        f'{OPENAI_API_URL}/audio/transcriptions',
+                        headers={'Authorization': f'Bearer {OPENAI_API_KEY}'},
+                        files={'file': chunk_file},
+                        data={
+                            'model': 'whisper-1',
+                            'language': 'pt',
+                            'response_format': 'verbose_json'
+                        },
+                        timeout=300
+                    )
                 
-                adjusted_seg = {**seg, 'start': adjusted_start, 'end': adjusted_end}
-                all_segments.append(adjusted_seg)
+                # Handle specific error codes
+                if response.status_code == 401:
+                    error_msg = response.json().get('error', {}).get('message', 'Invalid API key')
+                    print(f"[Transcribe] ❌ ERRO 401: {error_msg}")
+                    auth_error = True
+                    failed_chunks.append({'chunk': i, 'error': 'auth_401', 'message': error_msg})
+                    break
                 
-                # Build SRT
-                start_str = _format_srt_time(adjusted_start)
-                end_str = _format_srt_time(adjusted_end)
-                text_seg = seg.get('text', '').strip()
-                srt_lines.append(f"{srt_index}\n{start_str} --> {end_str}\n{text_seg}\n")
-                srt_index += 1
-            
-            print(f"[Transcribe] ✓ Chunk {i+1}: {len(chunk_segments)} segmentos, {len(chunk_text)} chars")
-            
-        except Exception as e:
-            print(f"[Transcribe] Erro no chunk {i}: {e}")
-            continue
+                if response.status_code == 429:
+                    print(f"[Transcribe] ⚠ Rate limit hit, aguardando...")
+                    rate_limit_hit = True
+                    if attempt < max_retries - 1:
+                        time.sleep(10 * (attempt + 1))  # Exponential backoff
+                        continue
+                    failed_chunks.append({'chunk': i, 'error': 'rate_limit_429'})
+                    break
+                
+                if not response.ok:
+                    print(f"[Transcribe] Whisper error chunk {i}: {response.status_code}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2)
+                        continue
+                    failed_chunks.append({'chunk': i, 'error': f'http_{response.status_code}'})
+                    break
+                
+                chunk_data = response.json()
+                chunk_text = chunk_data.get('text', '')
+                chunk_segments = chunk_data.get('segments', [])
+                
+                all_text.append(chunk_text)
+                
+                # Adjust timestamps for this chunk's position
+                for seg in chunk_segments:
+                    adjusted_start = seg.get('start', 0) + start_time
+                    adjusted_end = seg.get('end', 0) + start_time
+                    
+                    adjusted_seg = {**seg, 'start': adjusted_start, 'end': adjusted_end}
+                    all_segments.append(adjusted_seg)
+                    
+                    # Build SRT
+                    start_str = _format_srt_time(adjusted_start)
+                    end_str = _format_srt_time(adjusted_end)
+                    text_seg = seg.get('text', '').strip()
+                    srt_lines.append(f"{srt_index}\n{start_str} --> {end_str}\n{text_seg}\n")
+                    srt_index += 1
+                
+                # Save partial result to storage
+                if match_id:
+                    try:
+                        partial_text = f"[Chunk {i+1}/{num_chunks}]\n{chunk_text}\n"
+                        save_file(match_id, 'texts', partial_text.encode('utf-8'), f'chunk_{i:03d}.txt')
+                    except Exception as save_err:
+                        print(f"[Transcribe] Warning: Could not save partial: {save_err}")
+                
+                chunk_results.append({
+                    'chunk': i,
+                    'status': 'done',
+                    'segments': len(chunk_segments),
+                    'chars': len(chunk_text)
+                })
+                
+                print(f"[Transcribe] ✓ Chunk {i+1}: {len(chunk_segments)} segmentos, {len(chunk_text)} chars")
+                break  # Success, exit retry loop
+                
+            except requests.exceptions.Timeout:
+                print(f"[Transcribe] Timeout no chunk {i}, tentativa {attempt+1}")
+                if attempt < max_retries - 1:
+                    time.sleep(5)
+                    continue
+                failed_chunks.append({'chunk': i, 'error': 'timeout'})
+            except Exception as e:
+                print(f"[Transcribe] Erro no chunk {i}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2)
+                    continue
+                failed_chunks.append({'chunk': i, 'error': str(e)})
         
         # Clean up chunk file
         try:
@@ -1886,22 +1960,45 @@ def _transcribe_multi_chunk(
         except:
             pass
     
+    # Calculate success rate
+    success_rate = len(chunk_results) / num_chunks if num_chunks > 0 else 0
+    
+    # Return appropriate response based on success rate
     if not all_text:
-        return {"error": "Failed to transcribe any chunks"}
+        error_msg = "Failed to transcribe any chunks"
+        if auth_error:
+            error_msg = "Chave OpenAI inválida ou sem permissão para transcrição de áudio. Verifique a chave em Configurações > API."
+        return {
+            "error": error_msg,
+            "success": False,
+            "failed_chunks": failed_chunks
+        }
     
     combined_text = ' '.join(all_text)
     srt_content = '\n'.join(srt_lines)
     
-    print(f"[Transcribe] ✓ Multi-chunk completo: {len(all_segments)} segmentos, {len(combined_text)} chars")
+    print(f"[Transcribe] Multi-chunk: {len(chunk_results)}/{num_chunks} chunks OK ({success_rate*100:.0f}%)")
     
-    return {
+    # If at least 50% succeeded, return as partial success
+    is_partial = success_rate < 1.0
+    
+    result = {
         "success": True,
+        "partial": is_partial,
         "text": combined_text,
         "srtContent": srt_content,
         "segments": all_segments,
         "matchId": match_id,
-        "chunksProcessed": num_chunks
+        "chunksProcessed": len(chunk_results),
+        "totalChunks": num_chunks,
+        "successRate": success_rate
     }
+    
+    if is_partial:
+        result["warning"] = f"Transcrição parcial: {len(chunk_results)}/{num_chunks} partes processadas ({success_rate*100:.0f}%)"
+        result["failed_chunks"] = failed_chunks
+    
+    return result
 
 
 def _format_srt_time(seconds: float) -> str:
