@@ -2720,7 +2720,9 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
                 print(f"\n[PIPELINE] ═══ FASE 2: TRANSCRIÇÃO ({video_type}) ═══")
                 results['phases']['subtitles']['status'] = 'processing'
                 
-                transcription_result = ai_services.transcribe_large_video(video_url, match_id)
+                # Determine half_type from video_type
+                pipeline_half_type = 'first' if video_type == 'first_half' else ('second' if video_type == 'second_half' else None)
+                transcription_result = ai_services.transcribe_large_video(video_url, match_id, half_type=pipeline_half_type)
                 
                 if not transcription_result.get('success'):
                     error_msg = f"Falha na transcrição: {transcription_result.get('error')}"
@@ -3722,14 +3724,16 @@ def transcribe_audio_endpoint():
 
 @app.route('/api/transcribe-large-video', methods=['POST'])
 def transcribe_large_video_endpoint():
-    """Transcribe a large video file."""
+    """Transcribe a large video file. Saves audio and SRT to match folder."""
     data = request.json
     video_url = data.get('videoUrl')
     match_id = data.get('matchId')
+    half_type = data.get('halfType')  # 'first', 'second', or None
     
     print(f"\n{'='*60}")
     print(f"[TRANSCRIBE] Nova requisição de transcrição")
     print(f"[TRANSCRIBE] Match ID: {match_id}")
+    print(f"[TRANSCRIBE] Half Type: {half_type}")
     print(f"[TRANSCRIBE] Video URL: {video_url}")
     print(f"{'='*60}")
     
@@ -3739,12 +3743,16 @@ def transcribe_large_video_endpoint():
     
     try:
         print("[TRANSCRIBE] Iniciando transcrição via ai_services...")
-        result = ai_services.transcribe_large_video(video_url, match_id)
+        result = ai_services.transcribe_large_video(video_url, match_id, half_type=half_type)
         
         if result.get('success'):
             text_preview = result.get('text', '')[:200]
             print(f"[TRANSCRIBE] SUCESSO! Preview do texto: {text_preview}...")
             print(f"[TRANSCRIBE] Tamanho do SRT: {len(result.get('srtContent', ''))} chars")
+            if result.get('audioPath'):
+                print(f"[TRANSCRIBE] Áudio salvo: {result.get('audioPath')}")
+            if result.get('srtPath'):
+                print(f"[TRANSCRIBE] SRT salvo: {result.get('srtPath')}")
         else:
             print(f"[TRANSCRIBE] Falha: {result.get('error')}")
         
