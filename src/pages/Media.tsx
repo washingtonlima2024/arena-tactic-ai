@@ -513,38 +513,6 @@ export default function Media() {
                   </Button>
                 )}
 
-                {/* Extract frames from clip - ALWAYS from the clip itself */}
-                {clips.length > 0 && clips.some(c => !getThumbnail(c.id) && c.clipUrl) && (
-                  <Button 
-                    variant="arena" 
-                    size="sm"
-                    onClick={async () => {
-                      // Only extract from clips that have clipUrl - always use the clip itself
-                      const clipsWithVideo = clips.filter(c => !getThumbnail(c.id) && c.clipUrl);
-                      
-                      for (const clip of clipsWithVideo) {
-                        // Extract frame at 3 seconds (event moment after buffer)
-                        await extractFrameFromVideo({
-                          eventId: clip.id,
-                          eventType: clip.type,
-                          videoUrl: clip.clipUrl!,
-                          timestamp: 3, // Event moment in clip (after 3s buffer)
-                          matchId: matchId
-                        });
-                        // Small delay between extractions
-                        await new Promise(resolve => setTimeout(resolve, 300));
-                      }
-                    }}
-                    disabled={extractingIds.size > 0 || isGeneratingClips}
-                  >
-                    {extractingIds.size > 0 ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Image className="mr-2 h-4 w-4" />
-                    )}
-                    Extrair Capas ({clips.filter(c => !getThumbnail(c.id) && c.clipUrl).length})
-                  </Button>
-                )}
               </div>
             </div>
 
