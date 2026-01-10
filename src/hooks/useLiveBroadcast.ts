@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
 
@@ -91,7 +91,7 @@ export const useLiveBroadcast = () => {
   const animationFrameRef = useRef<number | null>(null);
   const audioStreamRef = useRef<MediaStream | null>(null);
 
-  // Save transcript to database
+  // Save transcript to database using local API
   const saveTranscriptToDatabase = useCallback(async (matchId?: string) => {
     if (!transcriptBuffer.trim()) return;
     
@@ -101,33 +101,24 @@ export const useLiveBroadcast = () => {
     setIsSavingTranscript(true);
     
     try {
-      // Check if there's already a transcript for this match
-      const { data: existing } = await supabase
-        .from("generated_audio")
-        .select("id, script")
-        .eq("match_id", targetMatchId)
-        .eq("audio_type", "live_transcript")
-        .maybeSingle();
+      // Check if there's already a transcript for this match via API
+      const existingAudio = await apiClient.getAudio(targetMatchId, 'live_transcript');
+      const existing = existingAudio?.[0];
 
       if (existing) {
-        // Update existing transcript
-        await supabase
-          .from("generated_audio")
-          .update({
-            script: transcriptBuffer.trim(),
-            updated_at: new Date().toISOString(),
-          })
-          .eq("id", existing.id);
+        // Update existing transcript via API
+        await apiClient.updateAudio(existing.id, {
+          script: transcriptBuffer.trim(),
+          updated_at: new Date().toISOString(),
+        });
       } else {
-        // Create new transcript entry
-        await supabase
-          .from("generated_audio")
-          .insert({
-            match_id: targetMatchId,
-            audio_type: "live_transcript",
-            script: transcriptBuffer.trim(),
-            voice: "whisper",
-          });
+        // Create new transcript entry via API
+        await apiClient.createAudio({
+          match_id: targetMatchId,
+          audio_type: "live_transcript",
+          script: transcriptBuffer.trim(),
+          voice: "whisper",
+        });
       }
 
       setLastSavedAt(new Date());
@@ -175,13 +166,10 @@ export const useLiveBroadcast = () => {
     
     const saveScoreToDatabase = async () => {
       try {
-        await supabase
-          .from("matches")
-          .update({
-            home_score: currentScore.home,
-            away_score: currentScore.away,
-          })
-          .eq("id", tempMatchIdRef.current);
+        await apiClient.updateMatch(tempMatchIdRef.current!, {
+          home_score: currentScore.home,
+          away_score: currentScore.away,
+        });
         console.log("Score saved in real-time:", currentScore);
       } catch (error) {
         console.error("Error saving score:", error);
@@ -196,32 +184,18 @@ export const useLiveBroadcast = () => {
     console.log("Creating match with info:", matchInfo);
     
     try {
-      const { data: match, error } = await supabase
-        .from("matches")
-        .insert({
-          home_team_id: matchInfo.homeTeamId || null,
-          away_team_id: matchInfo.awayTeamId || null,
-          home_score: 0,
-          away_score: 0,
-          competition: matchInfo.competition || "Transmissão ao vivo",
-          match_date: matchInfo.matchDate,
-          status: "live",
-          venue: "Transmissão ao vivo",
-        })
-        .select()
-        .single();
+      const match = await apiClient.createMatch({
+        home_team_id: matchInfo.homeTeamId || null,
+        away_team_id: matchInfo.awayTeamId || null,
+        home_score: 0,
+        away_score: 0,
+        competition: matchInfo.competition || "Transmissão ao vivo",
+        match_date: matchInfo.matchDate,
+        status: "live",
+        venue: "Transmissão ao vivo",
+      });
 
-      if (error) {
-        console.error("Error creating match:", error);
-        toast({
-          title: "Erro ao criar partida",
-          description: error.message,
-          variant: "destructive",
-        });
-        return null;
-      }
-
-      if (match) {
+      if (match?.id) {
         tempMatchIdRef.current = match.id;
         setCurrentMatchId(match.id);
         console.log("Match created successfully:", match.id);
@@ -233,11 +207,11 @@ export const useLiveBroadcast = () => {
       }
       
       return null;
-    } catch (error) {
-      console.error("Unexpected error creating match:", error);
+    } catch (error: any) {
+      console.error("Error creating match:", error);
       toast({
-        title: "Erro inesperado",
-        description: "Não foi possível criar a partida",
+        title: "Erro ao criar partida",
+        description: error.message || "Não foi possível criar a partida",
         variant: "destructive",
       });
       return null;
@@ -332,7 +306,7 @@ export const useLiveBroadcast = () => {
     }
   }, [isRecording, isPaused, toast]);
 
-  // NEW: Save recorded video to storage
+  // NEW: Save recorded video to storage using local API
   const saveRecordedVideo = useCallback(async (matchId: string): Promise<string | null> => {
     if (videoChunksRef.current.length === 0) {
       console.log('No video chunks to save');
@@ -349,45 +323,34 @@ export const useLiveBroadcast = () => {
       
       console.log(`Saving video: ${(videoBlob.size / (1024 * 1024)).toFixed(2)} MB`);
 
-      const filePath = `live-${matchId}-${Date.now()}.${extension}`;
+      const filename = `live-${matchId}-${Date.now()}.${extension}`;
 
       setVideoUploadProgress(20);
 
-      // Upload to Supabase Storage
-      const { error: uploadError } = await supabase.storage
-        .from('match-videos')
-        .upload(filePath, videoBlob, {
-          contentType: mimeType,
-          upsert: true
-        });
+      // Upload to local server storage
+      const uploadResult = await apiClient.uploadBlob(matchId, 'videos', videoBlob, filename);
 
-      if (uploadError) {
-        console.error('Error uploading video:', uploadError);
-        throw uploadError;
+      if (!uploadResult?.url) {
+        throw new Error('Upload failed: no URL returned');
       }
 
       setVideoUploadProgress(70);
 
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('match-videos')
-        .getPublicUrl(filePath);
+      const videoUrl = uploadResult.url;
 
-      const videoUrl = urlData.publicUrl;
-
-      // Register in videos table
-      const { error: insertError } = await supabase.from('videos').insert({
-        match_id: matchId,
-        file_url: videoUrl,
-        file_name: `Transmissão ao vivo`,
-        video_type: 'full',
-        start_minute: 0,
-        end_minute: Math.ceil(recordingTime / 60),
-        duration_seconds: recordingTime,
-        status: 'complete'
-      });
-
-      if (insertError) {
+      // Register in videos table via API
+      try {
+        await apiClient.createVideo({
+          match_id: matchId,
+          file_url: videoUrl,
+          file_name: `Transmissão ao vivo`,
+          video_type: 'full',
+          start_minute: 0,
+          end_minute: Math.ceil(recordingTime / 60),
+          duration_seconds: recordingTime,
+          status: 'completed'
+        });
+      } catch (insertError) {
         console.error('Error inserting video record:', insertError);
       }
 
@@ -576,71 +539,66 @@ export const useLiveBroadcast = () => {
         const base64Audio = (reader.result as string).split(",")[1];
         console.log("Sending audio to transcription service...");
 
-        const { data: transcriptData, error: transcriptError } = await supabase.functions.invoke(
-          "transcribe-audio",
-          { body: { audio: base64Audio } }
-        );
+        try {
+          // Use local API for transcription
+          const transcriptData = await apiClient.transcribeAudio({ audio: base64Audio });
 
-        if (transcriptError) {
-          console.error("Transcription error:", transcriptError);
-          setIsProcessingAudio(false);
-          return;
-        }
+          console.log("Transcription result:", transcriptData);
+          setLastProcessedAt(new Date());
 
-        console.log("Transcription result:", transcriptData);
-        setLastProcessedAt(new Date());
+          if (transcriptData?.text && transcriptData.text.trim()) {
+            const newChunk: TranscriptChunk = {
+              id: crypto.randomUUID(),
+              text: transcriptData.text,
+              minute: currentMinute,
+              second: currentSecond,
+              timestamp: new Date(),
+            };
 
-        if (transcriptData?.text && transcriptData.text.trim()) {
-          const newChunk: TranscriptChunk = {
-            id: crypto.randomUUID(),
-            text: transcriptData.text,
-            minute: currentMinute,
-            second: currentSecond,
-            timestamp: new Date(),
-          };
+            setTranscriptChunks((prev) => [...prev, newChunk]);
+            setTranscriptBuffer((prev) => {
+              const updated = prev + " " + transcriptData.text;
+              return updated.trim();
+            });
 
-          setTranscriptChunks((prev) => [...prev, newChunk]);
-          setTranscriptBuffer((prev) => {
-            const updated = prev + " " + transcriptData.text;
-            return updated.trim();
-          });
+            console.log("Extracting events from transcript...");
 
-          console.log("Extracting events from transcript...");
-
-          // Extract events from transcript
-          const { data: eventsData, error: eventsError } = await supabase.functions.invoke(
-            "extract-live-events",
-            {
-              body: {
+            // Extract events from transcript via local API
+            try {
+              const eventsData = await apiClient.extractLiveEvents({
                 transcript: transcriptData.text,
                 homeTeam: matchInfo.homeTeam,
                 awayTeam: matchInfo.awayTeam,
                 currentScore,
                 currentMinute,
-              },
+              });
+
+              console.log("Events extraction result:", eventsData);
+
+              if (eventsData?.events && eventsData.events.length > 0) {
+                const currentRecordingTime = recordingTime;
+                const newEvents: LiveEvent[] = eventsData.events.map((e: any) => ({
+                  id: crypto.randomUUID(),
+                  type: e.type,
+                  minute: e.minute || currentMinute,
+                  second: e.second || 0,
+                  description: e.description,
+                  confidence: e.confidence || 0.8,
+                  status: "pending" as const,
+                  recordingTimestamp: currentRecordingTime,
+                }));
+
+                console.log(`Detected ${newEvents.length} new events`);
+                setDetectedEvents((prev) => [...prev, ...newEvents]);
+              }
+            } catch (eventsError) {
+              console.error("Events extraction error:", eventsError);
             }
-          );
-
-          console.log("Events extraction result:", eventsData);
-
-          if (!eventsError && eventsData?.events && eventsData.events.length > 0) {
-            const currentRecordingTime = recordingTime;
-            const newEvents: LiveEvent[] = eventsData.events.map((e: any) => ({
-              id: crypto.randomUUID(),
-              type: e.type,
-              minute: e.minute || currentMinute,
-              second: e.second || 0,
-              description: e.description,
-              confidence: e.confidence || 0.8,
-              status: "pending" as const,
-              recordingTimestamp: currentRecordingTime, // NEW: Store recording time for clip extraction
-            }));
-
-            console.log(`Detected ${newEvents.length} new events`);
-            setDetectedEvents((prev) => [...prev, ...newEvents]);
+          } else {
+            console.log("No text in transcription result");
           }
-        } else {
-          console.log("No text in transcription result");
+        } catch (transcriptError) {
+          console.error("Transcription error:", transcriptError);
         }
         
         setIsProcessingAudio(false);
@@ -730,12 +688,11 @@ export const useLiveBroadcast = () => {
       setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
     }
 
-    // REAL-TIME: Save event to database immediately
+    // REAL-TIME: Save event to database immediately via local API
     if (matchId) {
       try {
-        await supabase.from("match_events").insert({
+        await apiClient.createEvent(matchId, {
           id: eventId,
-          match_id: matchId,
           event_type: type,
           minute,
           second,
@@ -847,12 +804,11 @@ export const useLiveBroadcast = () => {
         }
       }
 
-      // REAL-TIME: Save approved event to database immediately
+      // REAL-TIME: Save approved event to database immediately via local API
       if (matchId) {
         try {
-          await supabase.from("match_events").insert({
+          await apiClient.createEvent(matchId, {
             id: event.id,
-            match_id: matchId,
             event_type: event.type,
             minute: event.minute,
             second: event.second,
@@ -925,17 +881,14 @@ export const useLiveBroadcast = () => {
         const videoUrl = await saveRecordedVideo(matchId);
 
         // Update the temp match with final data - status 'analyzed' for full integration
-        await supabase
-          .from("matches")
-          .update({
-            home_team_id: matchInfo.homeTeamId || null,
-            away_team_id: matchInfo.awayTeamId || null,
-            home_score: currentScore.home,
-            away_score: currentScore.away,
-            competition: matchInfo.competition,
-            status: "analyzed", // CHANGED: Use 'analyzed' so match has full access to features
-          })
-          .eq("id", matchId);
+        await apiClient.updateMatch(matchId, {
+          home_team_id: matchInfo.homeTeamId || null,
+          away_team_id: matchInfo.awayTeamId || null,
+          home_score: currentScore.home,
+          away_score: currentScore.away,
+          competition: matchInfo.competition,
+          status: "analyzed",
+        });
 
         // Save final transcript
         await saveTranscriptToDatabase(matchId);
@@ -945,7 +898,7 @@ export const useLiveBroadcast = () => {
         console.log(`Finish match: ${approvedEvents.length} events already saved in real-time`);
 
         // NEW: Create analysis_job for consistency with imported matches
-        await supabase.from("analysis_jobs").insert({
+        await apiClient.createAnalysisJob({
           match_id: matchId,
           status: 'completed',
           progress: 100,

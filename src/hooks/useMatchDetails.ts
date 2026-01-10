@@ -231,9 +231,10 @@ export function useAllCompletedMatches() {
     queryFn: async () => {
       const matches = await apiClient.getMatches();
       
-      // Filter for completed/live/analyzed matches
+      // Filter for completed/live/analyzed/analyzing matches
+      // Include 'analyzing' to show matches that are being processed
       const filteredMatches = matches.filter((m: any) => 
-        ['completed', 'live', 'analyzed'].includes(m.status)
+        ['completed', 'live', 'analyzed', 'analyzing'].includes(m.status)
       );
       
       // Calculate scores from goals if needed
