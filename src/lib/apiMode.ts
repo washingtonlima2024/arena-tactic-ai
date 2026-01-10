@@ -40,7 +40,7 @@ export const hasServerUrlConfigured = (): boolean => {
  */
 export const getApiBase = (): string => {
   // 1. URL customizada (maior prioridade)
-  const stored = localStorage.getItem('arenaApiUrl');
+  const stored = localStorage.getItem('arenaApiUrl')?.trim();
   if (stored) return stored;
   
   // 2. Em ambiente local, usar localhost
@@ -49,12 +49,12 @@ export const getApiBase = (): string => {
     return 'http://localhost:5000';
   }
   
-  // 3. URL do túnel ngrok configurada via Settings
-  const ngrokTunnel = localStorage.getItem('ngrok_fallback_url');
+  // 3. URL do túnel ngrok configurada via Settings (com trim para evitar espaços)
+  const ngrokTunnel = localStorage.getItem('ngrok_fallback_url')?.trim();
   if (ngrokTunnel) return ngrokTunnel;
   
-  // 4. URL do túnel Cloudflare configurada via Settings
-  const cloudflareTunnel = localStorage.getItem('cloudflare_tunnel_url');
+  // 4. URL do túnel Cloudflare configurada via Settings (com trim para evitar espaços)
+  const cloudflareTunnel = localStorage.getItem('cloudflare_tunnel_url')?.trim();
   if (cloudflareTunnel) return cloudflareTunnel;
   
   // 5. Fallback para túnel Cloudflare padrão
