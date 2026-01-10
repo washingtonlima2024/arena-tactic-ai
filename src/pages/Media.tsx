@@ -821,29 +821,19 @@ export default function Media() {
                           </div>
                         ) : (
                           <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-primary/5 flex flex-col items-center justify-center gap-2">
-                            <div className="flex gap-2">
-                              {matchVideo && (
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={handleExtractFrame}
-                                  className="gap-1"
-                                >
-                                  <Film className="h-3 w-3" />
-                                  Frame
-                                </Button>
-                              )}
+                            {matchVideo ? (
                               <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={handleGenerateThumbnail}
+                                onClick={handleExtractFrame}
                                 className="gap-1"
                               >
-                                <Sparkles className="h-3 w-3" />
-                                IA
+                                <Film className="h-3 w-3" />
+                                Gerar Capa
                               </Button>
-                            </div>
-                            <p className="text-xs text-muted-foreground">Gerar capa</p>
+                            ) : (
+                              <p className="text-xs text-muted-foreground">Vídeo necessário</p>
+                            )}
                           </div>
                         )}
                         <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-t from-background/80 to-transparent pointer-events-none">
@@ -905,14 +895,14 @@ export default function Media() {
                           </p>
                         )}
                         <div className="mt-4 flex gap-2">
-                          {!thumbnail?.imageUrl && !isGeneratingThumbnail && (
+                          {!thumbnail?.imageUrl && !isGeneratingThumbnail && matchVideo && (
                             <Button 
                               variant="outline" 
                               size="sm" 
                               className="flex-1"
-                              onClick={handleGenerateThumbnail}
+                              onClick={handleExtractFrame}
                             >
-                              <Sparkles className="mr-1 h-3 w-3" />
+                              <Film className="mr-1 h-3 w-3" />
                               Gerar Capa
                             </Button>
                           )}
