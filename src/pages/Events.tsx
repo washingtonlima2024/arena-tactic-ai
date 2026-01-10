@@ -754,6 +754,14 @@ export default function Events() {
             )}
           </div>
           <div className="flex flex-wrap gap-2">
+<Button
+              variant="outline"
+              size="icon"
+              onClick={() => refetchEvents()}
+              title="Atualizar eventos"
+            >
+              <RefreshCw className="h-4 w-4" />
+            </Button>
             <Select 
               value={currentMatchId || ''} 
               onValueChange={(value) => setSelectedMatch(value)}
