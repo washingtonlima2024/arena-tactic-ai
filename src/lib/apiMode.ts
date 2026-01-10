@@ -26,21 +26,26 @@ export const isLocalMode = (): boolean => {
 
 /**
  * Retorna a URL base da API.
- * Prioridade: localStorage > localhost > ngrok fallback
+ * Prioridade: arenaApiUrl (custom) > localhost > ngrok configurado > ngrok fallback
  * 
  * EXPORTADO para uso em apiClient.ts e outros módulos.
  */
 export const getApiBase = (): string => {
+  // 1. URL customizada (maior prioridade)
   const stored = localStorage.getItem('arenaApiUrl');
   if (stored) return stored;
   
-  // Em ambiente local, usar localhost
+  // 2. Em ambiente local, usar localhost
   if (typeof window !== 'undefined' && 
       (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
     return 'http://localhost:5000';
   }
   
-  // Fallback para ngrok (preview Lovable)
+  // 3. URL do ngrok configurada via Settings
+  const configuredNgrok = localStorage.getItem('ngrok_fallback_url');
+  if (configuredNgrok) return configuredNgrok;
+  
+  // 4. Fallback hardcoded (preview Lovable)
   return NGROK_FALLBACK_URL;
 };
 
