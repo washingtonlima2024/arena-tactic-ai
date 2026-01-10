@@ -3,17 +3,6 @@ Arena Play - Servidor API Local Completo
 Servidor Flask com SQLite para toda a funcionalidade do Arena Play.
 """
 
-import sys
-import os
-
-# Garantir que o diretório do script esteja no path do Python
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-if SCRIPT_DIR not in sys.path:
-    sys.path.insert(0, SCRIPT_DIR)
-
-# Mudar para o diretório do script (necessário para paths relativos)
-os.chdir(SCRIPT_DIR)
-
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 import subprocess
@@ -25,14 +14,6 @@ import zipfile
 import base64
 from pathlib import Path
 from datetime import datetime
-
-# Carregar variáveis de ambiente do .env (se existir)
-try:
-    from dotenv import load_dotenv
-    load_dotenv()
-    print("[STARTUP] ✓ Variáveis de ambiente carregadas de .env")
-except ImportError:
-    print("[STARTUP] dotenv não instalado - usando variáveis do sistema")
 
 # Import local modules
 from database import init_db, get_session, Session
@@ -63,58 +44,81 @@ CORS(app)
 init_db()
 
 # Run automatic migrations
-try:
-    from migrate_db import run_migrations
-    run_migrations()
-except ImportError as e:
-    print(f"⚠ Aviso: migrate_db não encontrado: {e}")
-    print("  Execute o servidor a partir da pasta video-processor/")
-except Exception as e:
-    print(f"⚠ Aviso ao executar migrações: {e}")
+from migrate_db import run_migrations
+run_migrations()
+
+
+def _normalize_setting_key(key: str) -> str:
+    """Normalize setting keys to a canonical form for storage and lookup."""
+    if not key:
+        return ''
+    k = key.strip()
+    # Legacy uppercase keys
+    legacy_map = {
+        'OPENAI_API_KEY': 'openai_api_key',
+        'GOOGLE_API_KEY': 'gemini_api_key',
+        'GEMINI_API_KEY': 'gemini_api_key',
+        'ELEVENLABS_API_KEY': 'elevenlabs_api_key',
+        'LOVABLE_API_KEY': 'lovable_api_key',
+        'OLLAMA_URL': 'ollama_url',
+        'OLLAMA_MODEL': 'ollama_model',
+        'OLLAMA_ENABLED': 'ollama_enabled',
+    }
+    return legacy_map.get(k, k.lower())
+
+
+def _bool_from_setting(value: str, default: bool = False) -> bool:
+    if value is None:
+        return default
+    v = str(value).strip().lower()
+    if v in ('true', '1', 'yes', 'y', 'on'):
+        return True
+    if v in ('false', '0', 'no', 'n', 'off'):
+        return False
+    return default
 
 
 def load_api_keys_from_db():
-    """Load API keys from database on server startup."""
+    """Load API keys and provider flags from database on server startup."""
     session = get_session()
     try:
         settings = session.query(ApiSetting).all()
-        keys_loaded = []
-        ollama_url = None
-        ollama_model = None
-        ollama_enabled = False
-        
-        # Provider enabled flags (default True for backward compatibility)
-        gemini_enabled = True
-        openai_enabled = True
-        elevenlabs_enabled = True
-        
+
+        values = {}
         for s in settings:
-            if s.setting_key == 'openai_api_key' and s.setting_value:
-                ai_services.set_api_keys(openai_key=s.setting_value)
-                keys_loaded.append('OPENAI')
-            elif s.setting_key == 'gemini_api_key' and s.setting_value:
-                ai_services.set_api_keys(google_key=s.setting_value)
-                keys_loaded.append('GOOGLE')
-            elif s.setting_key == 'elevenlabs_api_key' and s.setting_value:
-                ai_services.set_api_keys(elevenlabs_key=s.setting_value)
-                keys_loaded.append('ELEVENLABS')
-            elif s.setting_key == 'LOVABLE_API_KEY' and s.setting_value:
-                ai_services.set_api_keys(lovable_key=s.setting_value)
-                keys_loaded.append('LOVABLE')
-            elif s.setting_key == 'ollama_url' and s.setting_value:
-                ollama_url = s.setting_value
-            elif s.setting_key == 'ollama_model' and s.setting_value:
-                ollama_model = s.setting_value
-            elif s.setting_key == 'ollama_enabled':
-                ollama_enabled = s.setting_value == 'true'
-            elif s.setting_key == 'gemini_enabled':
-                gemini_enabled = s.setting_value != 'false'
-            elif s.setting_key == 'openai_enabled':
-                openai_enabled = s.setting_value != 'false'
-            elif s.setting_key == 'elevenlabs_enabled':
-                elevenlabs_enabled = s.setting_value != 'false'
-        
-        # Configure Ollama if settings exist
+            k = _normalize_setting_key(s.setting_key)
+            values[k] = s.setting_value
+
+        keys_loaded = []
+        # Provider enabled flags (default True for backward compatibility)
+        gemini_enabled = _bool_from_setting(values.get('gemini_enabled'), True)
+        openai_enabled = _bool_from_setting(values.get('openai_enabled'), True)
+        elevenlabs_enabled = _bool_from_setting(values.get('elevenlabs_enabled'), True)
+
+        # Prefer DB values, fallback to environment variables if DB is missing
+        openai_key = values.get('openai_api_key') or os.environ.get('OPENAI_API_KEY', '')
+        gemini_key = values.get('gemini_api_key') or os.environ.get('GOOGLE_GENERATIVE_AI_API_KEY', '') or os.environ.get('GOOGLE_API_KEY', '')
+        elevenlabs_key = values.get('elevenlabs_api_key') or os.environ.get('ELEVENLABS_API_KEY', '')
+        lovable_key = values.get('lovable_api_key') or os.environ.get('LOVABLE_API_KEY', '')
+
+        if openai_key:
+            ai_services.set_api_keys(openai_key=openai_key)
+            keys_loaded.append('OPENAI')
+        if gemini_key:
+            ai_services.set_api_keys(google_key=gemini_key)
+            keys_loaded.append('GEMINI')
+        if elevenlabs_key:
+            ai_services.set_api_keys(elevenlabs_key=elevenlabs_key)
+            keys_loaded.append('ELEVENLABS')
+        if lovable_key:
+            ai_services.set_api_keys(lovable_key=lovable_key)
+            keys_loaded.append('LOVABLE')
+
+        # Ollama optional settings
+        ollama_url = values.get('ollama_url')
+        ollama_model = values.get('ollama_model')
+        ollama_enabled = _bool_from_setting(values.get('ollama_enabled'), False)
+
         if ollama_url or ollama_model or ollama_enabled:
             ai_services.set_api_keys(
                 ollama_url=ollama_url,
@@ -123,21 +127,20 @@ def load_api_keys_from_db():
             )
             if ollama_enabled:
                 keys_loaded.append(f'OLLAMA ({ollama_model or "llama3.2"})')
-        
+
         # Apply provider enabled flags
         ai_services.set_api_keys(
             gemini_enabled=gemini_enabled,
             openai_enabled=openai_enabled,
             elevenlabs_enabled=elevenlabs_enabled
         )
-        
+
         if keys_loaded:
-            # Build status with enabled/disabled indicators
             status_parts = []
             for k in keys_loaded:
                 if k == 'ELEVENLABS':
                     status_parts.append(f"ELEVENLABS {'✓' if elevenlabs_enabled else '✗'}")
-                elif k == 'GOOGLE':
+                elif k == 'GEMINI':
                     status_parts.append(f"GEMINI {'✓' if gemini_enabled else '✗'}")
                 elif k == 'OPENAI':
                     status_parts.append(f"OPENAI {'✓' if openai_enabled else '✗'}")
@@ -1271,31 +1274,17 @@ def update_match(match_id: str):
 @app.route('/api/matches/<match_id>', methods=['DELETE'])
 def delete_match(match_id: str):
     """Remove uma partida e todos os dados relacionados."""
-    print(f"[delete_match] Iniciando deleção da partida: {match_id}")
     session = get_session()
     try:
         match = session.query(Match).filter_by(id=match_id).first()
         if not match:
-            print(f"[delete_match] Partida não encontrada no banco: {match_id}")
             return jsonify({'error': 'Partida não encontrada'}), 404
         
-        # Deletar o registro (cascade remove videos, events, etc.)
         session.delete(match)
         session.commit()
-        print(f"[delete_match] Registro deletado do banco: {match_id}")
-        
-        # Deletar arquivos do storage local
-        storage_deleted = False
-        try:
-            storage_deleted = delete_match_storage(match_id)
-            print(f"[delete_match] Storage deletado: {storage_deleted}")
-        except Exception as storage_error:
-            print(f"[delete_match] Aviso: erro ao deletar storage: {storage_error}")
-        
-        return jsonify({'success': True, 'storage_deleted': storage_deleted})
+        return jsonify({'success': True})
     except Exception as e:
         session.rollback()
-        print(f"[delete_match] Erro ao deletar: {e}")
         return jsonify({'error': str(e)}), 400
     finally:
         session.close()
@@ -1503,19 +1492,6 @@ def get_videos():
             query = query.filter_by(match_id=match_id)
         videos = query.order_by(Video.created_at.desc()).all()
         return jsonify([v.to_dict() for v in videos])
-    finally:
-        session.close()
-
-
-@app.route('/api/videos/<video_id>', methods=['GET'])
-def get_video(video_id: str):
-    """Busca um vídeo por ID."""
-    session = get_session()
-    try:
-        video = session.query(Video).filter_by(id=video_id).first()
-        if not video:
-            return jsonify({'error': 'Vídeo não encontrado'}), 404
-        return jsonify(video.to_dict())
     finally:
         session.close()
 
@@ -1813,116 +1789,6 @@ def upsert_api_setting():
 # AI SERVICES ENDPOINTS
 # ============================================================================
 
-def _srt_to_plain_text(srt_content: str) -> str:
-    """Converte conteúdo SRT para texto plano removendo timestamps e numeração."""
-    lines = []
-    for line in srt_content.split('\n'):
-        line = line.strip()
-        # Pular linhas vazias, números de índice e timestamps
-        if not line or line.isdigit() or '-->' in line:
-            continue
-        lines.append(line)
-    return ' '.join(lines)
-
-
-@app.route('/api/matches/<match_id>/srt', methods=['POST'])
-def upload_match_srt(match_id: str):
-    """Upload de arquivo SRT para uma partida - salva .srt e .txt."""
-    print(f"\n{'='*60}")
-    print(f"[UPLOAD-SRT] Upload de SRT para match_id: {match_id}")
-    
-    # Aceita arquivo ou JSON com conteúdo
-    content = None
-    half_type = 'full'
-    
-    if request.content_type and 'multipart/form-data' in request.content_type:
-        if 'file' in request.files:
-            content = request.files['file'].read().decode('utf-8')
-        half_type = request.form.get('halfType', 'full')
-    else:
-        data = request.json or {}
-        content = data.get('content', '')
-        half_type = data.get('halfType', 'full')
-    
-    if not content:
-        return jsonify({'error': 'Arquivo ou conteúdo obrigatório'}), 400
-    
-    print(f"[UPLOAD-SRT] Half type: {half_type}")
-    print(f"[UPLOAD-SRT] Conteúdo: {len(content)} caracteres")
-    
-    try:
-        # Definir nomes de arquivo baseado no half_type
-        if half_type == 'full':
-            srt_filename = "full.srt"
-            txt_filename = "full_transcription.txt"
-        else:
-            srt_filename = f"{half_type}_half.srt"
-            txt_filename = f"{half_type}_half_transcription.txt"
-        
-        # Salvar arquivo SRT
-        srt_folder = get_subfolder_path(match_id, 'srt')
-        srt_path = srt_folder / srt_filename
-        with open(srt_path, 'w', encoding='utf-8') as f:
-            f.write(content)
-        print(f"[UPLOAD-SRT] ✓ SRT salvo: {srt_path}")
-        
-        # Converter para texto plano e salvar
-        plain_text = _srt_to_plain_text(content)
-        txt_folder = get_subfolder_path(match_id, 'texts')
-        txt_path = txt_folder / txt_filename
-        with open(txt_path, 'w', encoding='utf-8') as f:
-            f.write(plain_text)
-        print(f"[UPLOAD-SRT] ✓ TXT salvo: {txt_path}")
-        
-        return jsonify({
-            'success': True,
-            'srtPath': str(srt_path),
-            'txtPath': str(txt_path),
-            'srtUrl': f'/api/storage/{match_id}/srt/{srt_filename}',
-            'txtUrl': f'/api/storage/{match_id}/texts/{txt_filename}',
-            'textLength': len(plain_text)
-        })
-    except Exception as e:
-        print(f"[UPLOAD-SRT] ✗ Erro: {e}")
-        import traceback
-        traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-
-@app.route('/api/matches/<match_id>/files', methods=['GET'])
-def list_match_files_endpoint(match_id: str):
-    """Lista todos os arquivos salvos para uma partida organizados por pasta."""
-    try:
-        stats = get_match_storage_stats(match_id)
-        files = list_match_files(match_id)
-        
-        # Organizar por subfolder
-        organized = {
-            'videos': [],
-            'clips': [],
-            'srt': [],
-            'texts': [],
-            'audio': [],
-            'images': [],
-            'json': []
-        }
-        
-        for f in files:
-            sf = f.get('subfolder', 'other')
-            if sf in organized:
-                organized[sf].append(f)
-            elif sf.startswith('clips/'):
-                organized['clips'].append(f)
-        
-        return jsonify({
-            'matchId': match_id,
-            'stats': stats,
-            'files': organized
-        })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-
 @app.route('/api/analyze-match', methods=['POST'])
 def analyze_match():
     """Analisa uma partida a partir de transcrição e extrai clips automaticamente."""
@@ -1931,7 +1797,7 @@ def analyze_match():
     transcription = data.get('transcription')
     home_team = data.get('homeTeam', 'Time A')
     away_team = data.get('awayTeam', 'Time B')
-    half_type = data.get('halfType', 'first')  # 'first' or 'second' or 'full'
+    half_type = data.get('halfType', 'first')  # 'first' or 'second'
     game_start_minute = data.get('gameStartMinute', 0)
     game_end_minute = data.get('gameEndMinute', 45)
     auto_clip = data.get('autoClip', True)  # Corte automático de clips
@@ -1943,44 +1809,11 @@ def analyze_match():
     print(f"[ANALYZE-MATCH] Half Type: {half_type}")
     print(f"[ANALYZE-MATCH] Game Minutes: {game_start_minute} - {game_end_minute}")
     print(f"[ANALYZE-MATCH] Auto Clip: {auto_clip}")
-    print(f"[ANALYZE-MATCH] Transcription length: {len(transcription) if transcription else 0} chars")
+    print(f"[ANALYZE-MATCH] Transcription length: {len(transcription)} chars")
     print(f"{'='*60}")
     
     if not transcription:
         return jsonify({'error': 'Transcrição é obrigatória'}), 400
-    
-    # NOVO: Salvar transcrição recebida em arquivo para persistência
-    if match_id and transcription:
-        try:
-            # Definir nomes de arquivo baseado no half_type
-            if half_type == 'full':
-                txt_filename = "full_transcription.txt"
-            else:
-                txt_filename = f"{half_type}_half_transcription.txt"
-            
-            txt_folder = get_subfolder_path(match_id, 'texts')
-            txt_path = txt_folder / txt_filename
-            with open(txt_path, 'w', encoding='utf-8') as f:
-                f.write(transcription)
-            print(f"[ANALYZE-MATCH] ✓ Transcrição salva: {txt_path}")
-        except Exception as e:
-            print(f"[ANALYZE-MATCH] Aviso: não salvou transcrição: {e}")
-    
-    # Se a transcrição parece ser SRT (contém timestamps), salvar também como .srt
-    if match_id and transcription and '-->' in transcription:
-        try:
-            if half_type == 'full':
-                srt_filename = "full.srt"
-            else:
-                srt_filename = f"{half_type}_half.srt"
-            
-            srt_folder = get_subfolder_path(match_id, 'srt')
-            srt_path = srt_folder / srt_filename
-            with open(srt_path, 'w', encoding='utf-8') as f:
-                f.write(transcription)
-            print(f"[ANALYZE-MATCH] ✓ SRT salvo: {srt_path}")
-        except Exception as e:
-            print(f"[ANALYZE-MATCH] Aviso: não salvou SRT: {e}")
     
     try:
         events = ai_services.analyze_match_events(
@@ -2081,61 +1914,6 @@ def analyze_match():
             print(f"[ANALYZE-MATCH] Saved {len(events)} events with match_half={match_half}")
         finally:
             session.close()
-        
-        # SYNC TO SUPABASE CLOUD: Garantir eventos apareçam no preview/cloud
-        supabase_url = os.getenv('SUPABASE_URL') or os.getenv('VITE_SUPABASE_URL')
-        supabase_key = os.getenv('SUPABASE_SERVICE_KEY') or os.getenv('SUPABASE_SERVICE_ROLE_KEY')
-        
-        if supabase_url and supabase_key:
-            print(f"[ANALYZE-MATCH] Sincronizando {len(saved_events)} eventos com Supabase Cloud...")
-            sync_success = 0
-            sync_errors = 0
-            
-            for saved_event in saved_events:
-                try:
-                    supabase_event = {
-                        'id': saved_event['id'],
-                        'match_id': match_id,
-                        'event_type': saved_event['event_type'],
-                        'minute': saved_event['minute'],
-                        'second': saved_event.get('second', 0),
-                        'description': saved_event.get('description', ''),
-                        'match_half': match_half,
-                        'clip_pending': True,
-                        'is_highlight': saved_event.get('event_type') == 'goal',
-                        'metadata': json_module.dumps({
-                            'ai_generated': True,
-                            'team': saved_event.get('team'),
-                            'synced_from_local': True
-                        })
-                    }
-                    
-                    headers = {
-                        'apikey': supabase_key,
-                        'Authorization': f'Bearer {supabase_key}',
-                        'Content-Type': 'application/json',
-                        'Prefer': 'resolution=merge-duplicates'
-                    }
-                    
-                    resp = requests.post(
-                        f"{supabase_url}/rest/v1/match_events",
-                        json=supabase_event,
-                        headers=headers,
-                        timeout=10
-                    )
-                    
-                    if resp.status_code in [200, 201]:
-                        sync_success += 1
-                    else:
-                        print(f"[ANALYZE-MATCH] Sync error for event {saved_event['id']}: {resp.status_code} - {resp.text[:200]}")
-                        sync_errors += 1
-                except Exception as sync_err:
-                    print(f"[ANALYZE-MATCH] Sync exception: {sync_err}")
-                    sync_errors += 1
-            
-            print(f"[ANALYZE-MATCH] ✓ Sincronização Cloud: {sync_success} ok, {sync_errors} erros")
-        else:
-            print(f"[ANALYZE-MATCH] Supabase sync skipped (no credentials configured)")
         
         # Auto clip extraction
         clips_extracted = []
@@ -2950,6 +2728,22 @@ def text_to_speech_endpoint():
         return jsonify({'error': str(e)}), 500
 
 
+
+
+def _status_from_ai_error(err: str) -> int:
+    """Best effort mapping from upstream AI errors to HTTP status codes."""
+    if not err:
+        return 500
+    e = str(err).lower()
+    if 'invalid_api_key' in e or 'incorrect api key' in e or 'unauthorized' in e or ' 401' in e or '401' in e:
+        return 401
+    if 'insufficient permissions' in e or 'missing scopes' in e or 'forbidden' in e or ' 403' in e or '403' in e:
+        return 403
+    if 'not found' in e or ' 404' in e or '404' in e:
+        return 404
+    if 'timeout' in e or 'timed out' in e or 'gateway' in e:
+        return 504
+    return 500
 @app.route('/api/transcribe', methods=['POST'])
 def transcribe():
     """Transcribe audio endpoint."""
@@ -3030,7 +2824,10 @@ def transcribe_large_video_endpoint():
         else:
             print(f"[TRANSCRIBE] Falha: {result.get('error')}")
         
-        return jsonify(result)
+        if result.get('success'):
+            return jsonify(result), 200
+        status = _status_from_ai_error(result.get('error') or result.get('detail') or '')
+        return jsonify(result), status
     except Exception as e:
         print(f"[TRANSCRIBE] EXCEÇÃO: {str(e)}")
         import traceback
@@ -3349,7 +3146,10 @@ def detect_players_endpoint():
             image_url=image_url,
             frame_timestamp=frame_timestamp
         )
-        return jsonify(result)
+        if result.get('success'):
+            return jsonify(result), 200
+        status = _status_from_ai_error(result.get('error') or result.get('detail') or '')
+        return jsonify(result), status
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
