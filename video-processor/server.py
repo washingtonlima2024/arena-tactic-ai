@@ -1949,6 +1949,12 @@ def upsert_api_setting():
         elif key_lower == 'ollama_model':
             ai_services.set_api_keys(ollama_model=value)
             print(f"[Settings] ✓ Ollama model atualizado")
+        elif key_lower == 'local_whisper_enabled':
+            ai_services.set_api_keys(local_whisper_enabled=value == 'true')
+            print(f"[Settings] 🆓 Local Whisper enabled: {value}")
+        elif key_lower == 'local_whisper_model':
+            ai_services.set_api_keys(local_whisper_model=value)
+            print(f"[Settings] 🆓 Local Whisper model: {value}")
         
         session.commit()
         return jsonify(setting.to_dict())
@@ -1978,11 +1984,24 @@ def ai_status():
     elevenlabs_configured = elevenlabs_key_set and elevenlabs_enabled
     ollama_configured = ai_services.OLLAMA_ENABLED
     
+    # Local Whisper (FREE transcription)
+    local_whisper_enabled = ai_services.LOCAL_WHISPER_ENABLED
+    local_whisper_model = ai_services.LOCAL_WHISPER_MODEL
+    
+    # Try to detect GPU availability
+    gpu_available = False
+    try:
+        import torch
+        gpu_available = torch.cuda.is_available()
+    except:
+        pass
+    
     any_analysis = lovable_configured or gemini_configured or openai_configured or ollama_configured
-    any_transcription = elevenlabs_configured or openai_configured or gemini_configured or lovable_configured
+    # Local Whisper is now included in transcription options
+    any_transcription = local_whisper_enabled or elevenlabs_configured or openai_configured or gemini_configured or lovable_configured
     
     # Log para debug
-    print(f"[AI-STATUS] Lovable: {lovable_configured}, Gemini: {gemini_configured} (key:{gemini_key_set}, enabled:{gemini_enabled}), OpenAI: {openai_configured}, ElevenLabs: {elevenlabs_configured}, Ollama: {ollama_configured}")
+    print(f"[AI-STATUS] Lovable: {lovable_configured}, Gemini: {gemini_configured} (key:{gemini_key_set}, enabled:{gemini_enabled}), OpenAI: {openai_configured}, ElevenLabs: {elevenlabs_configured}, Ollama: {ollama_configured}, LocalWhisper: {local_whisper_enabled} ({local_whisper_model})")
     
     return jsonify({
         'lovable': lovable_configured,
@@ -1990,6 +2009,7 @@ def ai_status():
         'openai': openai_configured,
         'elevenlabs': elevenlabs_configured,
         'ollama': ollama_configured,
+        'localWhisper': local_whisper_enabled,
         'anyConfigured': any_analysis,
         'anyTranscription': any_transcription,
         'anyAnalysis': any_analysis,
@@ -2018,9 +2038,16 @@ def ai_status():
                 'configured': ollama_configured,
                 'url': ai_services.OLLAMA_URL if ollama_configured else None,
                 'model': ai_services.OLLAMA_MODEL if ollama_configured else None
+            },
+            'localWhisper': {
+                'configured': local_whisper_enabled,
+                'enabled': local_whisper_enabled,
+                'model': local_whisper_model if local_whisper_enabled else None,
+                'gpuAvailable': gpu_available,
+                'free': True
             }
         },
-        'message': 'Nenhum provedor de IA configurado' if not any_analysis else f"Provedores ativos: {', '.join([p for p, v in [('Lovable', lovable_configured), ('Gemini', gemini_configured), ('OpenAI', openai_configured), ('Ollama', ollama_configured)] if v])}"
+        'message': 'Nenhum provedor de IA configurado' if not any_analysis else f"Provedores ativos: {', '.join([p for p, v in [('Lovable', lovable_configured), ('Gemini', gemini_configured), ('OpenAI', openai_configured), ('Ollama', ollama_configured), ('🆓 LocalWhisper', local_whisper_enabled)] if v])}"
     })
 
 
