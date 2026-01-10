@@ -74,6 +74,34 @@ export default function Matches() {
     console.log('[Reprocess] Match ID:', matchToReprocess.id);
     console.log('[Reprocess] Options:', options);
     
+    // ═══════════════════════════════════════════════════════════════
+    // VERIFICAÇÃO PRÉVIA: Checar se há pelo menos um provedor de IA
+    // ═══════════════════════════════════════════════════════════════
+    try {
+      const aiStatus = await apiClient.checkAiStatus();
+      console.log('[Reprocess] AI Status:', aiStatus);
+      
+      if (!aiStatus.anyConfigured) {
+        toast({
+          title: "Nenhum provedor de IA configurado",
+          description: "Configure uma chave de API (Lovable, Gemini, OpenAI ou Ollama) em Configurações > API antes de analisar.",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      // Log quais provedores estão disponíveis
+      const availableProviders = [];
+      if (aiStatus.lovable) availableProviders.push('Lovable');
+      if (aiStatus.gemini) availableProviders.push('Gemini');
+      if (aiStatus.openai) availableProviders.push('OpenAI');
+      if (aiStatus.ollama) availableProviders.push('Ollama');
+      console.log('[Reprocess] Provedores de IA disponíveis:', availableProviders.join(', '));
+    } catch (aiCheckError) {
+      console.warn('[Reprocess] Não foi possível verificar status de IA:', aiCheckError);
+      // Continuar mesmo se a verificação falhar (endpoint pode não existir em versões antigas)
+    }
+    
     setIsReprocessing(true);
     const matchId = matchToReprocess.id;
     

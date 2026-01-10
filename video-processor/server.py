@@ -1855,6 +1855,44 @@ def upsert_api_setting():
 # AI SERVICES ENDPOINTS
 # ============================================================================
 
+@app.route('/api/ai-status', methods=['GET'])
+def ai_status():
+    """Retorna status dos provedores de IA configurados."""
+    lovable_configured = bool(ai_services.LOVABLE_API_KEY)
+    gemini_configured = bool(ai_services.GOOGLE_API_KEY) and ai_services.GEMINI_ENABLED
+    openai_configured = bool(ai_services.OPENAI_API_KEY) and ai_services.OPENAI_ENABLED
+    ollama_configured = ai_services.OLLAMA_ENABLED
+    
+    any_configured = lovable_configured or gemini_configured or openai_configured or ollama_configured
+    
+    return jsonify({
+        'lovable': lovable_configured,
+        'gemini': gemini_configured,
+        'openai': openai_configured,
+        'ollama': ollama_configured,
+        'anyConfigured': any_configured,
+        'providers': {
+            'lovable': {
+                'configured': lovable_configured,
+                'enabled': True  # Always enabled if key exists
+            },
+            'gemini': {
+                'configured': bool(ai_services.GOOGLE_API_KEY),
+                'enabled': ai_services.GEMINI_ENABLED
+            },
+            'openai': {
+                'configured': bool(ai_services.OPENAI_API_KEY),
+                'enabled': ai_services.OPENAI_ENABLED
+            },
+            'ollama': {
+                'configured': ai_services.OLLAMA_ENABLED,
+                'url': ai_services.OLLAMA_URL if ai_services.OLLAMA_ENABLED else None,
+                'model': ai_services.OLLAMA_MODEL if ai_services.OLLAMA_ENABLED else None
+            }
+        }
+    })
+
+
 @app.route('/api/analyze-match', methods=['POST'])
 def analyze_match():
     """Analisa uma partida a partir de transcrição e extrai clips automaticamente."""

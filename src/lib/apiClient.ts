@@ -253,6 +253,21 @@ export const apiClient = {
 
   // ============== Health ==============
   health: () => apiRequest<{ status: string; ffmpeg: boolean }>('/health'),
+  
+  // ============== AI Status ==============
+  checkAiStatus: () => apiRequest<{
+    lovable: boolean;
+    gemini: boolean;
+    openai: boolean;
+    ollama: boolean;
+    anyConfigured: boolean;
+    providers: {
+      lovable: { configured: boolean; enabled: boolean };
+      gemini: { configured: boolean; enabled: boolean };
+      openai: { configured: boolean; enabled: boolean };
+      ollama: { configured: boolean; url?: string; model?: string };
+    };
+  }>('/api/ai-status'),
 
   // ============== Teams ==============
   getTeams: () => apiRequest<any[]>('/api/teams'),

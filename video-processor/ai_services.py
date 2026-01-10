@@ -541,8 +541,35 @@ def analyze_match_events(
     
     Returns:
         List of detected events with validated scores
+    
+    Raises:
+        ValueError: If no AI provider is configured
+        RuntimeError: If all analysis attempts fail
     """
     import time
+    
+    # ═══════════════════════════════════════════════════════════════
+    # VALIDAÇÃO PRÉVIA: Verificar se há pelo menos um provedor de IA
+    # ═══════════════════════════════════════════════════════════════
+    if not LOVABLE_API_KEY and not GOOGLE_API_KEY and not OPENAI_API_KEY and not OLLAMA_ENABLED:
+        error_msg = (
+            "Nenhum provedor de IA configurado. "
+            "Configure uma chave de API (Lovable, Gemini, OpenAI ou Ollama) em Configurações > API."
+        )
+        print(f"[AI] ❌ ERRO: {error_msg}")
+        raise ValueError(error_msg)
+    
+    # Log dos provedores disponíveis
+    providers = []
+    if LOVABLE_API_KEY:
+        providers.append("Lovable")
+    if GOOGLE_API_KEY and GEMINI_ENABLED:
+        providers.append("Gemini")
+    if OPENAI_API_KEY and OPENAI_ENABLED:
+        providers.append("OpenAI")
+    if OLLAMA_ENABLED:
+        providers.append("Ollama")
+    print(f"[AI] Provedores disponíveis: {', '.join(providers)}")
     
     half_desc = "1º Tempo (0-45 min)" if game_start_minute < 45 else "2º Tempo (45-90 min)"
     match_half = 'first' if game_start_minute < 45 else 'second'
@@ -703,8 +730,9 @@ RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL.
         if attempt < max_retries - 1:
             time.sleep(2 * (attempt + 1))  # Exponential backoff
     
-    print(f"[AI] All {max_retries} attempts failed. Last error: {last_error}")
-    return []
+    error_msg = f"Análise falhou após {max_retries} tentativas. Último erro: {last_error}"
+    print(f"[AI] ❌ {error_msg}")
+    raise RuntimeError(error_msg)
 
 
 def validate_goal_detection(transcription: str, detected_events: List[Dict]) -> Dict:
