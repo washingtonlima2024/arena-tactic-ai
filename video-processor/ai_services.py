@@ -1321,6 +1321,8 @@ def generate_thumbnail_image(
     """
     Generate a thumbnail image using AI.
     
+    Prioriza LOVABLE_API_KEY, mas usa GOOGLE_API_KEY como fallback.
+    
     Args:
         prompt: Description for the image
         event_id: Related event ID
@@ -1329,49 +1331,93 @@ def generate_thumbnail_image(
     Returns:
         Dict with image data or error
     """
-    if not LOVABLE_API_KEY:
-        raise ValueError("LOVABLE_API_KEY not configured")
+    use_lovable = bool(LOVABLE_API_KEY)
+    use_google = bool(GOOGLE_API_KEY)
     
-    response = requests.post(
-        LOVABLE_API_URL,
-        headers={
-            'Authorization': f'Bearer {LOVABLE_API_KEY}',
-            'Content-Type': 'application/json'
-        },
-        json={
-            'model': 'google/gemini-2.5-flash-image-preview',
-            'messages': [
-                {
-                    'role': 'user',
-                    'content': f"Generate a high-quality thumbnail image: {prompt}. Style: sports, dynamic, vibrant colors."
+    if not use_lovable and not use_google:
+        return {"error": "Nenhuma chave de API configurada (LOVABLE ou GOOGLE)"}
+    
+    image_prompt = f"Generate a high-quality thumbnail image: {prompt}. Style: sports, dynamic, vibrant colors."
+    
+    try:
+        if use_lovable:
+            # Usar Lovable AI Gateway
+            response = requests.post(
+                LOVABLE_API_URL,
+                headers={
+                    'Authorization': f'Bearer {LOVABLE_API_KEY}',
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'model': 'google/gemini-2.5-flash-image-preview',
+                    'messages': [{'role': 'user', 'content': image_prompt}],
+                    'modalities': ['image', 'text']
+                },
+                timeout=120
+            )
+            
+            if not response.ok:
+                if response.status_code == 429:
+                    return {"error": "Rate limit exceeded"}
+                if response.status_code == 402:
+                    return {"error": "Insufficient credits"}
+                return {"error": f"Lovable API error: {response.status_code}"}
+            
+            data = response.json()
+            images = data.get('choices', [{}])[0].get('message', {}).get('images', [])
+            if images:
+                image_url = images[0].get('image_url', {}).get('url', '')
+                return {
+                    "success": True,
+                    "imageData": image_url,
+                    "eventId": event_id,
+                    "matchId": match_id
                 }
-            ],
-            'modalities': ['image', 'text']
-        },
-        timeout=120
-    )
+            return {"error": "No image generated from Lovable AI"}
+        
+        else:
+            # Fallback: Usar Google Gemini API diretamente
+            api_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp-image-generation:generateContent?key={GOOGLE_API_KEY}"
+            
+            response = requests.post(
+                api_url,
+                headers={'Content-Type': 'application/json'},
+                json={
+                    'contents': [{'parts': [{'text': image_prompt}]}],
+                    'generationConfig': {'responseModalities': ['TEXT', 'IMAGE']}
+                },
+                timeout=120
+            )
+            
+            if not response.ok:
+                error_text = response.text[:200] if response.text else "Unknown error"
+                return {"error": f"Google API error: {response.status_code} - {error_text}"}
+            
+            data = response.json()
+            
+            # Extrair imagem do formato Google Gemini
+            candidates = data.get('candidates', [])
+            if candidates:
+                parts = candidates[0].get('content', {}).get('parts', [])
+                for part in parts:
+                    if 'inlineData' in part:
+                        mime_type = part['inlineData'].get('mimeType', 'image/png')
+                        base64_data = part['inlineData'].get('data', '')
+                        if base64_data:
+                            image_url = f"data:{mime_type};base64,{base64_data}"
+                            return {
+                                "success": True,
+                                "imageData": image_url,
+                                "eventId": event_id,
+                                "matchId": match_id
+                            }
+            
+            return {"error": "No image generated from Google Gemini"}
     
-    if not response.ok:
-        if response.status_code == 429:
-            return {"error": "Rate limit exceeded"}
-        if response.status_code == 402:
-            return {"error": "Insufficient credits"}
-        return {"error": f"API error: {response.status_code}"}
-    
-    data = response.json()
-    
-    # Extract image from response
-    images = data.get('choices', [{}])[0].get('message', {}).get('images', [])
-    if images:
-        image_url = images[0].get('image_url', {}).get('url', '')
-        return {
-            "success": True,
-            "imageData": image_url,
-            "eventId": event_id,
-            "matchId": match_id
-        }
-    
-    return {"error": "No image generated"}
+    except requests.exceptions.Timeout:
+        return {"error": "Timeout ao gerar imagem"}
+    except Exception as e:
+        return {"error": f"Erro ao gerar thumbnail: {str(e)}"}
 
 
 def _transcribe_with_gemini(audio_path: str, match_id: str = None) -> Dict[str, Any]:

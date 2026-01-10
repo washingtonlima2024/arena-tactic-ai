@@ -762,7 +762,8 @@ export default function Settings() {
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Necessária para gerar capas de eventos automaticamente. Obtenha em <a href="https://lovable.dev/settings" target="_blank" className="text-primary hover:underline">lovable.dev/settings</a>
+                    Opcional: provisionada automaticamente no Lovable Cloud. 
+                    O servidor local usará a API do Google Gemini se esta não estiver configurada.
                   </p>
                 </div>
                 <div className={`rounded-lg border p-3 ${lovableApiKey ? 'border-green-500/30 bg-green-500/5' : 'border-muted bg-muted/30'}`}>
