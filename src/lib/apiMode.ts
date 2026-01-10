@@ -6,9 +6,6 @@
  * Outros arquivos (como apiClient.ts) devem importar getApiBase() daqui.
  */
 
-// URL de fallback do ngrok - ÚNICA FONTE DE VERDADE
-const NGROK_FALLBACK_URL = 'https://95d7f5b4a032.ngrok-free.app';
-
 export type ApiMode = 'local';
 
 // Sempre retorna 'local' - sem modo Supabase
@@ -25,12 +22,36 @@ export const isLocalMode = (): boolean => {
 };
 
 /**
+ * Verifica se há uma URL de servidor configurada.
+ * Retorna true se localhost ou URL do ngrok estiver disponível.
+ */
+export const hasServerUrlConfigured = (): boolean => {
+  // Em localhost, sempre temos uma URL
+  if (typeof window !== 'undefined' && 
+      (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
+    return true;
+  }
+  
+  // URL customizada
+  const stored = localStorage.getItem('arenaApiUrl');
+  if (stored) return true;
+  
+  // URL do ngrok configurada
+  const configuredNgrok = localStorage.getItem('ngrok_fallback_url');
+  if (configuredNgrok) return true;
+  
+  return false;
+};
+
+/**
  * Retorna a URL base da API.
- * Prioridade: arenaApiUrl (custom) > localhost > ngrok configurado > ngrok fallback
+ * Prioridade: arenaApiUrl (custom) > localhost > ngrok configurado
+ * 
+ * Retorna null se nenhuma URL estiver configurada (preview sem ngrok).
  * 
  * EXPORTADO para uso em apiClient.ts e outros módulos.
  */
-export const getApiBase = (): string => {
+export const getApiBase = (): string | null => {
   // 1. URL customizada (maior prioridade)
   const stored = localStorage.getItem('arenaApiUrl');
   if (stored) return stored;
@@ -45,13 +66,17 @@ export const getApiBase = (): string => {
   const configuredNgrok = localStorage.getItem('ngrok_fallback_url');
   if (configuredNgrok) return configuredNgrok;
   
-  // 4. Fallback hardcoded (preview Lovable)
-  return NGROK_FALLBACK_URL;
+  // 4. Nenhuma URL configurada - retorna null
+  return null;
 };
 
 export const checkLocalServerAvailable = async (): Promise<boolean> => {
   try {
     const apiUrl = getApiBase();
+    
+    // Sem URL configurada = não disponível
+    if (!apiUrl) return false;
+    
     const response = await fetch(`${apiUrl}/health?light=true`, {
       signal: AbortSignal.timeout(5000),
       headers: {
