@@ -2489,21 +2489,112 @@ def process_match_complete():
     - autoClip: Se deve cortar clips automaticamente (default: True)
     - autoTactical: Se deve gerar análise tática (default: True)
     """
-    data = request.json
+    return _process_match_pipeline(request.json, full_pipeline=False)
+
+
+@app.route('/api/process-match-full', methods=['POST'])
+def process_match_full_pipeline():
+    """
+    Pipeline COMPLETO e UNIFICADO de processamento de partida.
+    
+    Executa TODO o fluxo Arena Play:
+    
+    FASE 1 - INGESTÃO:
+    ├── 1.1 Download/localização dos vídeos MP4
+    ├── 1.2 Extração de áudio (FFmpeg)
+    └── 1.3 Transcrição automática (ElevenLabs/Whisper/Gemini)
+    
+    FASE 2 - LEGENDAS:
+    ├── 2.1 Geração de SRT com timestamps
+    └── 2.2 Salvamento em /srt/
+    
+    FASE 3 - ANÁLISE IA:
+    ├── 3.1 Detecção de eventos (15-30+ por tempo)
+    ├── 3.2 Validação de gols
+    └── 3.3 Salvamento no banco de dados
+    
+    FASE 4 - CLIPS:
+    ├── 4.1 Extração automática de cada evento
+    ├── 4.2 Aplicação de tarja + legenda (branding)
+    └── 4.3 Organização em /clips/first_half/ e /clips/second_half/
+    
+    FASE 5 - ANÁLISE TÁTICA:
+    ├── 5.1 Resumo tático completo
+    ├── 5.2 Estatísticas detalhadas
+    └── 5.3 Salvamento em /json/tactical_analysis.json
+    
+    FASE 6 - ORGANIZAÇÃO:
+    ├── 6.1 Atualização do placar no banco
+    ├── 6.2 Indexação de eventos por categoria
+    └── 6.3 Geração de resumo da partida
+    
+    Input JSON:
+    {
+        "matchId": "uuid",
+        "videos": [
+            {"url": "...", "videoType": "first_half|second_half|full", "startMinute": 0, "endMinute": 45}
+        ],
+        "homeTeam": "Time Casa",
+        "awayTeam": "Time Visitante",
+        "options": {
+            "autoClip": true,
+            "autoTactical": true,
+            "autoSrt": true,
+            "includeSubtitles": true,
+            "generateSummary": true,
+            "categorizeEvents": true
+        }
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "matchId": "uuid",
+        "phases": {
+            "ingestion": {...},
+            "subtitles": {...},
+            "analysis": {...},
+            "clips": {...},
+            "tactical": {...},
+            "organization": {...}
+        },
+        "summary": {...},
+        "statistics": {...},
+        "files": {...}
+    }
+    """
+    return _process_match_pipeline(request.json, full_pipeline=True)
+
+
+def _process_match_pipeline(data: dict, full_pipeline: bool = False):
+    """
+    Core pipeline processor for match analysis.
+    
+    Args:
+        data: Request JSON data
+        full_pipeline: If True, runs all phases including advanced analytics
+    """
     match_id = data.get('matchId')
     videos = data.get('videos', [])
     home_team = data.get('homeTeam', 'Time Casa')
     away_team = data.get('awayTeam', 'Time Fora')
-    auto_clip = data.get('autoClip', True)
-    auto_tactical = data.get('autoTactical', True)
     
-    print(f"\n{'='*60}")
-    print(f"[PROCESS-MATCH] Pipeline completo iniciado")
-    print(f"[PROCESS-MATCH] Match ID: {match_id}")
-    print(f"[PROCESS-MATCH] Videos: {len(videos)}")
-    print(f"[PROCESS-MATCH] Teams: {home_team} vs {away_team}")
-    print(f"[PROCESS-MATCH] Auto Clip: {auto_clip}, Auto Tactical: {auto_tactical}")
-    print(f"{'='*60}")
+    # Options with defaults
+    options = data.get('options', {})
+    auto_clip = options.get('autoClip', data.get('autoClip', True))
+    auto_tactical = options.get('autoTactical', data.get('autoTactical', True))
+    auto_srt = options.get('autoSrt', True)
+    include_subtitles = options.get('includeSubtitles', True)
+    generate_summary = options.get('generateSummary', full_pipeline)
+    categorize_events = options.get('categorizeEvents', full_pipeline)
+    
+    print(f"\n{'='*70}")
+    print(f"[PIPELINE] {'FULL' if full_pipeline else 'STANDARD'} Pipeline Iniciado")
+    print(f"[PIPELINE] Match ID: {match_id}")
+    print(f"[PIPELINE] Videos: {len(videos)}")
+    print(f"[PIPELINE] Teams: {home_team} vs {away_team}")
+    print(f"[PIPELINE] Options: clip={auto_clip}, tactical={auto_tactical}, srt={auto_srt}")
+    print(f"{'='*70}")
     
     if not match_id:
         return jsonify({'error': 'matchId é obrigatório'}), 400
@@ -2511,45 +2602,80 @@ def process_match_complete():
     if not videos:
         return jsonify({'error': 'Pelo menos um vídeo é obrigatório'}), 400
     
+    # Initialize result structure
     results = {
+        'success': False,
         'matchId': match_id,
-        'videos': [],
-        'totalEvents': 0,
-        'totalClips': 0,
-        'homeScore': 0,
-        'awayScore': 0,
-        'errors': []
+        'phases': {
+            'ingestion': {'status': 'pending', 'videos': []},
+            'subtitles': {'status': 'pending', 'files': []},
+            'analysis': {'status': 'pending', 'events': [], 'eventsCount': 0},
+            'clips': {'status': 'pending', 'clips': [], 'clipsCount': 0},
+            'tactical': {'status': 'pending', 'analysis': None},
+            'organization': {'status': 'pending', 'files': {}}
+        },
+        'summary': {},
+        'statistics': {
+            'totalEvents': 0,
+            'totalClips': 0,
+            'homeScore': 0,
+            'awayScore': 0,
+            'eventsByType': {},
+            'eventsByHalf': {'first_half': 0, 'second_half': 0}
+        },
+        'files': {
+            'videos': [],
+            'clips': [],
+            'srt': [],
+            'texts': [],
+            'json': [],
+            'audio': []
+        },
+        'errors': [],
+        'warnings': []
     }
     
     try:
         with tempfile.TemporaryDirectory() as tmpdir:
-            for video_info in videos:
+            all_events = []
+            all_clips = []
+            
+            # ════════════════════════════════════════════════════════════════
+            # FASE 1: INGESTÃO - Download e preparação dos vídeos
+            # ════════════════════════════════════════════════════════════════
+            print(f"\n[PIPELINE] ═══ FASE 1: INGESTÃO ═══")
+            results['phases']['ingestion']['status'] = 'processing'
+            
+            for idx, video_info in enumerate(videos):
                 video_url = video_info.get('url')
                 video_type = video_info.get('videoType', 'full')
                 start_minute = video_info.get('startMinute', 0)
                 end_minute = video_info.get('endMinute', 45 if video_type == 'first_half' else 90)
                 
                 half_type = 'first' if start_minute < 45 else 'second'
+                match_half = 'first_half' if half_type == 'first' else 'second_half'
                 
-                print(f"\n[PROCESS-MATCH] Processando vídeo: {video_type}")
-                print(f"[PROCESS-MATCH] URL: {video_url[:50]}...")
-                print(f"[PROCESS-MATCH] Minutos: {start_minute} - {end_minute}")
+                print(f"\n[PIPELINE] Processando vídeo {idx+1}/{len(videos)}: {video_type}")
+                print(f"[PIPELINE] URL: {video_url[:60]}..." if len(video_url) > 60 else f"[PIPELINE] URL: {video_url}")
+                print(f"[PIPELINE] Minutos: {start_minute}' - {end_minute}'")
                 
                 video_result = {
                     'videoType': video_type,
+                    'halfType': half_type,
+                    'matchHalf': match_half,
                     'startMinute': start_minute,
                     'endMinute': end_minute,
                     'transcription': None,
                     'srt': None,
                     'events': [],
                     'clips': [],
-                    'error': None
+                    'status': 'processing'
                 }
                 
-                # Step 1: Download video
-                video_path = os.path.join(tmpdir, f'video_{video_type}.mp4')
+                # Download/locate video
+                video_path = os.path.join(tmpdir, f'video_{video_type}_{idx}.mp4')
+                local_video_path = None
                 
-                # Check if local URL
                 if video_url.startswith('/api/storage/') or 'localhost' in video_url:
                     # Resolve local path
                     clean_url = video_url.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '')
@@ -2559,86 +2685,150 @@ def process_match_complete():
                         subfolder = parts[3]
                         filename = '/'.join(parts[4:])
                         local_path = get_file_path(local_match_id, subfolder, filename)
+                        
+                        # Resolve symlinks
+                        if local_path and os.path.islink(str(local_path)):
+                            local_path = Path(os.path.realpath(str(local_path)))
+                        
                         if local_path and os.path.exists(local_path):
                             import shutil
                             shutil.copy(local_path, video_path)
-                            print(f"[PROCESS-MATCH] Vídeo local copiado: {local_path}")
+                            local_video_path = str(local_path)
+                            print(f"[PIPELINE] ✓ Vídeo local copiado: {local_path}")
                         else:
+                            video_result['status'] = 'error'
                             video_result['error'] = f"Arquivo local não encontrado: {local_path}"
                             results['errors'].append(video_result['error'])
-                            results['videos'].append(video_result)
+                            results['phases']['ingestion']['videos'].append(video_result)
                             continue
                 else:
                     # Download external URL
+                    print(f"[PIPELINE] Baixando vídeo externo...")
                     if not download_video(video_url, video_path):
+                        video_result['status'] = 'error'
                         video_result['error'] = "Falha ao baixar vídeo"
                         results['errors'].append(video_result['error'])
-                        results['videos'].append(video_result)
+                        results['phases']['ingestion']['videos'].append(video_result)
                         continue
                 
-                # Step 2: Transcribe video
-                print(f"[PROCESS-MATCH] Transcrevendo vídeo...")
+                video_result['localPath'] = local_video_path or video_path
+                results['phases']['ingestion']['videos'].append(video_result)
+                
+                # ════════════════════════════════════════════════════════════
+                # FASE 2: TRANSCRIÇÃO E SRT
+                # ════════════════════════════════════════════════════════════
+                print(f"\n[PIPELINE] ═══ FASE 2: TRANSCRIÇÃO ({video_type}) ═══")
+                results['phases']['subtitles']['status'] = 'processing'
+                
                 transcription_result = ai_services.transcribe_large_video(video_url, match_id)
                 
                 if not transcription_result.get('success'):
-                    video_result['error'] = f"Falha na transcrição: {transcription_result.get('error')}"
-                    results['errors'].append(video_result['error'])
-                    results['videos'].append(video_result)
+                    error_msg = f"Falha na transcrição: {transcription_result.get('error')}"
+                    video_result['error'] = error_msg
+                    results['warnings'].append(error_msg)
+                    print(f"[PIPELINE] ⚠ {error_msg}")
                     continue
                 
                 transcription = transcription_result.get('text', '')
                 srt_content = transcription_result.get('srtContent', '')
+                provider = transcription_result.get('provider', 'unknown')
                 
-                video_result['transcription'] = transcription[:500] + '...' if len(transcription) > 500 else transcription
-                video_result['srt'] = srt_content[:500] + '...' if len(srt_content) > 500 else srt_content
+                print(f"[PIPELINE] ✓ Transcrição: {len(transcription)} chars (provider: {provider})")
+                
+                video_result['transcription'] = transcription
+                video_result['transcriptionLength'] = len(transcription)
+                video_result['provider'] = provider
                 
                 # Save SRT file
-                if srt_content:
+                if auto_srt and srt_content:
                     srt_filename = f"{video_type}.srt"
                     srt_path = get_subfolder_path(match_id, 'srt') / srt_filename
                     with open(srt_path, 'w', encoding='utf-8') as f:
                         f.write(srt_content)
-                    print(f"[PROCESS-MATCH] SRT salvo: {srt_path}")
+                    print(f"[PIPELINE] ✓ SRT salvo: {srt_filename}")
+                    results['files']['srt'].append(srt_filename)
+                    results['phases']['subtitles']['files'].append({
+                        'filename': srt_filename,
+                        'path': str(srt_path),
+                        'url': f"/api/storage/{match_id}/srt/{srt_filename}"
+                    })
                 
-                # Save transcription text file
-                if transcription:
-                    txt_filename = f"{video_type}_transcription.txt"
-                    txt_path = get_subfolder_path(match_id, 'texts') / txt_filename
-                    with open(txt_path, 'w', encoding='utf-8') as f:
-                        f.write(transcription)
-                    print(f"[PROCESS-MATCH] Transcrição TXT salva: {txt_path}")
+                # Save transcription text
+                txt_filename = f"{video_type}_transcription.txt"
+                txt_path = get_subfolder_path(match_id, 'texts') / txt_filename
+                with open(txt_path, 'w', encoding='utf-8') as f:
+                    f.write(transcription)
+                print(f"[PIPELINE] ✓ TXT salvo: {txt_filename}")
+                results['files']['texts'].append(txt_filename)
                 
-                # Step 3: Analyze transcription with AI
-                print(f"[PROCESS-MATCH] Analisando transcrição com IA...")
+                # ════════════════════════════════════════════════════════════
+                # FASE 3: ANÁLISE IA - DETECÇÃO DE EVENTOS
+                # ════════════════════════════════════════════════════════════
+                print(f"\n[PIPELINE] ═══ FASE 3: ANÁLISE IA ({video_type}) ═══")
+                results['phases']['analysis']['status'] = 'processing'
+                
+                # Delete existing events for this half to avoid duplicates
+                session = get_session()
+                try:
+                    deleted = session.query(MatchEvent).filter_by(
+                        match_id=match_id,
+                        match_half=match_half
+                    ).delete()
+                    session.commit()
+                    if deleted > 0:
+                        print(f"[PIPELINE] ✓ {deleted} eventos anteriores removidos")
+                except Exception as e:
+                    session.rollback()
+                    print(f"[PIPELINE] ⚠ Erro ao limpar eventos: {e}")
+                finally:
+                    session.close()
+                
+                # Analyze transcription
                 events = ai_services.analyze_match_events(
                     transcription, home_team, away_team, start_minute, end_minute
                 )
                 
                 if not events:
-                    print(f"[PROCESS-MATCH] Nenhum evento detectado")
-                    video_result['events'] = []
+                    results['warnings'].append(f"Nenhum evento detectado para {video_type}")
+                    print(f"[PIPELINE] ⚠ Nenhum evento detectado")
                 else:
-                    print(f"[PROCESS-MATCH] {len(events)} eventos detectados")
+                    print(f"[PIPELINE] ✓ {len(events)} eventos detectados")
                     
-                    # Determine match_half
-                    match_half = 'first_half' if half_type == 'first' else 'second_half'
+                    # Validate goal detection
+                    validation = ai_services.validate_goal_detection(transcription, events)
+                    if validation.get('warning'):
+                        results['warnings'].append(validation['warning'])
                     
-                    # Count goals
+                    # Calculate scores from goals
                     for event in events:
                         if event.get('event_type') == 'goal':
-                            desc = (event.get('description') or '').lower()
-                            if home_team.lower() in desc:
-                                results['homeScore'] += 1
-                            elif away_team.lower() in desc:
-                                results['awayScore'] += 1
+                            team = event.get('team', 'home')
+                            is_own_goal = event.get('isOwnGoal', False)
+                            
+                            if is_own_goal:
+                                if team == 'home':
+                                    results['statistics']['awayScore'] += 1
+                                else:
+                                    results['statistics']['homeScore'] += 1
                             else:
-                                results['homeScore'] += 1  # fallback
+                                if team == 'home':
+                                    results['statistics']['homeScore'] += 1
+                                else:
+                                    results['statistics']['awayScore'] += 1
+                        
+                        # Count by type
+                        event_type = event.get('event_type', 'unknown')
+                        results['statistics']['eventsByType'][event_type] = \
+                            results['statistics']['eventsByType'].get(event_type, 0) + 1
                     
                     # Save events to database
+                    saved_events = []
                     session = get_session()
                     try:
                         for event_data in events:
                             raw_minute = event_data.get('minute', 0)
+                            
+                            # Adjust minute for second half
                             if half_type == 'second' and raw_minute < 45:
                                 raw_minute = raw_minute + 45
                             
@@ -2647,102 +2837,429 @@ def process_match_complete():
                                 event_type=event_data.get('event_type', 'unknown'),
                                 description=event_data.get('description'),
                                 minute=raw_minute,
+                                second=event_data.get('second', 0),
                                 match_half=match_half,
                                 is_highlight=event_data.get('is_highlight', False),
-                                metadata={'ai_generated': True, 'pipeline': 'process-match', **event_data}
+                                event_metadata={
+                                    'ai_generated': True,
+                                    'pipeline': 'full' if full_pipeline else 'standard',
+                                    'original_minute': event_data.get('minute'),
+                                    'team': event_data.get('team'),
+                                    'isOwnGoal': event_data.get('isOwnGoal', False),
+                                    'player': event_data.get('player'),
+                                    **event_data
+                                }
                             )
+                            event.clip_pending = True
                             session.add(event)
+                            session.flush()
+                            
+                            saved_event = {
+                                'id': event.id,
+                                'minute': raw_minute,
+                                'second': event_data.get('second', 0),
+                                'event_type': event_data.get('event_type'),
+                                'description': event_data.get('description', ''),
+                                'team': event_data.get('team', 'home'),
+                                'is_highlight': event_data.get('is_highlight', False)
+                            }
+                            saved_events.append(saved_event)
+                        
                         session.commit()
-                        print(f"[PROCESS-MATCH] Eventos salvos no banco")
+                        print(f"[PIPELINE] ✓ {len(saved_events)} eventos salvos no banco")
                     finally:
                         session.close()
                     
-                    video_result['events'] = events
-                    results['totalEvents'] += len(events)
+                    video_result['events'] = saved_events
+                    all_events.extend(saved_events)
+                    results['statistics']['totalEvents'] += len(saved_events)
+                    results['statistics']['eventsByHalf'][match_half] += len(saved_events)
                     
-                    # Step 4: Extract clips automatically
-                    if auto_clip and events:
-                        print(f"[PROCESS-MATCH] Extraindo clips automaticamente...")
-                        clips = extract_event_clips_auto(
-                            match_id=match_id,
-                            video_path=video_path,
-                            events=events,
-                            half_type=half_type,
-                            home_team=home_team,
-                            away_team=away_team
-                        )
-                        video_result['clips'] = clips
-                        results['totalClips'] += len(clips)
-                        print(f"[PROCESS-MATCH] {len(clips)} clips extraídos")
+                    # ════════════════════════════════════════════════════════
+                    # FASE 4: EXTRAÇÃO DE CLIPS
+                    # ════════════════════════════════════════════════════════
+                    if auto_clip and saved_events:
+                        print(f"\n[PIPELINE] ═══ FASE 4: CLIPS ({video_type}) ═══")
+                        results['phases']['clips']['status'] = 'processing'
+                        
+                        # Use local video path for clip extraction
+                        clip_video_path = local_video_path or video_path
+                        
+                        if os.path.exists(clip_video_path):
+                            clips = extract_event_clips_auto(
+                                match_id=match_id,
+                                video_path=clip_video_path,
+                                events=saved_events,
+                                half_type=half_type,
+                                home_team=home_team,
+                                away_team=away_team,
+                                include_subtitles=include_subtitles
+                            )
+                            
+                            video_result['clips'] = clips
+                            all_clips.extend(clips)
+                            results['statistics']['totalClips'] += len(clips)
+                            results['files']['clips'].extend([c['filename'] for c in clips])
+                            
+                            print(f"[PIPELINE] ✓ {len(clips)} clips extraídos")
+                        else:
+                            results['warnings'].append(f"Vídeo não encontrado para clips: {clip_video_path}")
                 
-                results['videos'].append(video_result)
+                video_result['status'] = 'completed'
             
-            # Step 5: Generate tactical analysis (if enabled)
-            if auto_tactical and results['totalEvents'] > 0:
-                print(f"[PROCESS-MATCH] Gerando análise tática...")
+            # Update ingestion status
+            results['phases']['ingestion']['status'] = 'completed'
+            results['phases']['subtitles']['status'] = 'completed'
+            results['phases']['analysis']['status'] = 'completed'
+            results['phases']['analysis']['events'] = all_events
+            results['phases']['analysis']['eventsCount'] = len(all_events)
+            results['phases']['clips']['status'] = 'completed'
+            results['phases']['clips']['clips'] = all_clips
+            results['phases']['clips']['clipsCount'] = len(all_clips)
+            
+            # ════════════════════════════════════════════════════════════════
+            # FASE 5: ANÁLISE TÁTICA
+            # ════════════════════════════════════════════════════════════════
+            if auto_tactical and all_events:
+                print(f"\n[PIPELINE] ═══ FASE 5: ANÁLISE TÁTICA ═══")
+                results['phases']['tactical']['status'] = 'processing'
+                
                 try:
-                    all_events = []
-                    for v in results['videos']:
-                        all_events.extend(v.get('events', []))
-                    
                     tactical = ai_services.generate_tactical_summary(
                         all_events, home_team, away_team,
-                        results['homeScore'], results['awayScore']
+                        results['statistics']['homeScore'],
+                        results['statistics']['awayScore']
                     )
                     
                     if tactical:
                         # Save tactical analysis to JSON
-                        json_path = get_subfolder_path(match_id, 'json') / 'tactical_analysis.json'
+                        json_filename = 'tactical_analysis.json'
+                        json_path = get_subfolder_path(match_id, 'json') / json_filename
                         with open(json_path, 'w', encoding='utf-8') as f:
-                            json.dump(tactical, f, ensure_ascii=False, indent=2)
-                        print(f"[PROCESS-MATCH] Análise tática salva: {json_path}")
-                        results['tacticalAnalysis'] = tactical
+                            json_module.dump(tactical, f, ensure_ascii=False, indent=2)
+                        
+                        results['phases']['tactical']['analysis'] = tactical
+                        results['phases']['tactical']['status'] = 'completed'
+                        results['files']['json'].append(json_filename)
+                        print(f"[PIPELINE] ✓ Análise tática salva")
+                        
                 except Exception as e:
-                    print(f"[PROCESS-MATCH] Erro na análise tática: {e}")
-                    results['errors'].append(f"Tactical analysis failed: {str(e)}")
+                    results['phases']['tactical']['status'] = 'error'
+                    results['phases']['tactical']['error'] = str(e)
+                    results['errors'].append(f"Análise tática falhou: {e}")
+                    print(f"[PIPELINE] ⚠ Erro na análise tática: {e}")
             
-            # Update match status
+            # ════════════════════════════════════════════════════════════════
+            # FASE 6: ORGANIZAÇÃO FINAL
+            # ════════════════════════════════════════════════════════════════
+            print(f"\n[PIPELINE] ═══ FASE 6: ORGANIZAÇÃO ═══")
+            results['phases']['organization']['status'] = 'processing'
+            
+            # Update match record
             session = get_session()
             try:
                 match = session.query(Match).filter_by(id=match_id).first()
                 if match:
-                    match.home_score = (match.home_score or 0) + results['homeScore']
-                    match.away_score = (match.away_score or 0) + results['awayScore']
-                    match.status = 'completed'
+                    match.home_score = results['statistics']['homeScore']
+                    match.away_score = results['statistics']['awayScore']
+                    match.status = 'analyzed'
                     session.commit()
-                    print(f"[PROCESS-MATCH] Match atualizado: {match.home_score} x {match.away_score}")
+                    print(f"[PIPELINE] ✓ Placar atualizado: {match.home_score} x {match.away_score}")
             finally:
                 session.close()
-        
-        results['success'] = True
-        print(f"\n[PROCESS-MATCH] Pipeline concluído com sucesso!")
-        print(f"[PROCESS-MATCH] Total eventos: {results['totalEvents']}")
-        print(f"[PROCESS-MATCH] Total clips: {results['totalClips']}")
-        print(f"[PROCESS-MATCH] Placar: {results['homeScore']} x {results['awayScore']}")
-        
-        return jsonify(results)
-        
+            
+            # Categorize events by type (if full pipeline)
+            if categorize_events and all_events:
+                categories = {}
+                for event in all_events:
+                    event_type = event.get('event_type', 'unknown')
+                    if event_type not in categories:
+                        categories[event_type] = []
+                    categories[event_type].append(event)
+                
+                # Save categorized events
+                categories_path = get_subfolder_path(match_id, 'json') / 'events_by_category.json'
+                with open(categories_path, 'w', encoding='utf-8') as f:
+                    json_module.dump(categories, f, ensure_ascii=False, indent=2)
+                results['files']['json'].append('events_by_category.json')
+                print(f"[PIPELINE] ✓ Eventos categorizados salvos")
+            
+            # Generate match summary (if full pipeline)
+            if generate_summary and all_events:
+                summary = {
+                    'matchId': match_id,
+                    'homeTeam': home_team,
+                    'awayTeam': away_team,
+                    'homeScore': results['statistics']['homeScore'],
+                    'awayScore': results['statistics']['awayScore'],
+                    'totalEvents': results['statistics']['totalEvents'],
+                    'totalClips': results['statistics']['totalClips'],
+                    'eventsByType': results['statistics']['eventsByType'],
+                    'eventsByHalf': results['statistics']['eventsByHalf'],
+                    'highlights': [e for e in all_events if e.get('is_highlight')],
+                    'goals': [e for e in all_events if e.get('event_type') == 'goal'],
+                    'cards': [e for e in all_events if e.get('event_type') in ['yellow_card', 'red_card']],
+                    'processedAt': datetime.now().isoformat()
+                }
+                
+                # Save summary
+                summary_path = get_subfolder_path(match_id, 'json') / 'match_summary.json'
+                with open(summary_path, 'w', encoding='utf-8') as f:
+                    json_module.dump(summary, f, ensure_ascii=False, indent=2)
+                results['summary'] = summary
+                results['files']['json'].append('match_summary.json')
+                print(f"[PIPELINE] ✓ Resumo da partida salvo")
+            
+            # List all generated files
+            results['phases']['organization']['files'] = {
+                'srt': results['files']['srt'],
+                'texts': results['files']['texts'],
+                'clips': results['files']['clips'],
+                'json': results['files']['json']
+            }
+            results['phases']['organization']['status'] = 'completed'
+            
+            # Final success
+            results['success'] = True
+            
+            print(f"\n{'='*70}")
+            print(f"[PIPELINE] ✅ PIPELINE CONCLUÍDO COM SUCESSO!")
+            print(f"[PIPELINE] Eventos: {results['statistics']['totalEvents']}")
+            print(f"[PIPELINE] Clips: {results['statistics']['totalClips']}")
+            print(f"[PIPELINE] Placar: {home_team} {results['statistics']['homeScore']} x {results['statistics']['awayScore']} {away_team}")
+            print(f"[PIPELINE] Warnings: {len(results['warnings'])}")
+            print(f"[PIPELINE] Errors: {len(results['errors'])}")
+            print(f"{'='*70}\n")
+            
+            return jsonify(results)
+            
     except Exception as e:
-        print(f"[PROCESS-MATCH] ERRO: {str(e)}")
+        print(f"\n[PIPELINE] ❌ ERRO CRÍTICO: {str(e)}")
         import traceback
         traceback.print_exc()
+        
         results['success'] = False
         results['error'] = str(e)
+        results['phases']['organization']['status'] = 'error'
+        
         return jsonify(results), 500
+
+
+@app.route('/api/matches/<match_id>/files', methods=['GET'])
+def list_match_all_files(match_id: str):
+    """
+    List ALL files for a match, organized by subfolder.
+    
+    Returns complete inventory of generated files:
+    {
+        "matchId": "uuid",
+        "folders": {
+            "videos": [...],
+            "clips": {"first_half": [...], "second_half": [...], ...},
+            "srt": [...],
+            "texts": [...],
+            "json": [...],
+            "audio": [...],
+            "images": [...]
+        },
+        "statistics": {
+            "totalFiles": 42,
+            "totalSizeMB": 1234.5
+        }
+    }
+    """
+    from storage import MATCH_SUBFOLDERS, CLIP_SUBFOLDERS, get_match_storage_path
+    
+    result = {
+        'matchId': match_id,
+        'folders': {},
+        'statistics': {
+            'totalFiles': 0,
+            'totalSizeBytes': 0
+        }
+    }
+    
+    match_path = get_match_storage_path(match_id)
+    if not match_path.exists():
+        return jsonify({'error': 'Match storage not found', 'matchId': match_id}), 404
+    
+    for subfolder in MATCH_SUBFOLDERS:
+        subfolder_path = match_path / subfolder
+        
+        if subfolder == 'clips':
+            # Special handling for clips (organized by half)
+            clips_by_half = {}
+            for half in CLIP_SUBFOLDERS:
+                half_path = subfolder_path / half
+                if half_path.exists():
+                    files = []
+                    for file_path in half_path.iterdir():
+                        if file_path.is_file():
+                            stat = file_path.stat()
+                            files.append({
+                                'filename': file_path.name,
+                                'url': f"/api/storage/{match_id}/clips/{half}/{file_path.name}",
+                                'size': stat.st_size,
+                                'sizeMB': round(stat.st_size / (1024*1024), 2),
+                                'modifiedAt': datetime.fromtimestamp(stat.st_mtime).isoformat()
+                            })
+                            result['statistics']['totalFiles'] += 1
+                            result['statistics']['totalSizeBytes'] += stat.st_size
+                    clips_by_half[half] = sorted(files, key=lambda x: x['filename'])
+                else:
+                    clips_by_half[half] = []
+            result['folders']['clips'] = clips_by_half
+            
+        elif subfolder == 'videos':
+            # Special handling for videos (original and optimized)
+            videos = {'original': [], 'optimized': []}
+            for video_type in ['original', 'optimized']:
+                type_path = subfolder_path / video_type
+                if type_path.exists():
+                    for file_path in type_path.iterdir():
+                        if file_path.is_file():
+                            stat = file_path.stat()
+                            videos[video_type].append({
+                                'filename': file_path.name,
+                                'url': f"/api/storage/{match_id}/videos/{video_type}/{file_path.name}",
+                                'size': stat.st_size,
+                                'sizeMB': round(stat.st_size / (1024*1024), 2),
+                                'modifiedAt': datetime.fromtimestamp(stat.st_mtime).isoformat()
+                            })
+                            result['statistics']['totalFiles'] += 1
+                            result['statistics']['totalSizeBytes'] += stat.st_size
+            result['folders']['videos'] = videos
+            
+        else:
+            # Standard folder listing
+            if subfolder_path.exists():
+                files = []
+                for file_path in subfolder_path.iterdir():
+                    if file_path.is_file():
+                        stat = file_path.stat()
+                        files.append({
+                            'filename': file_path.name,
+                            'url': f"/api/storage/{match_id}/{subfolder}/{file_path.name}",
+                            'size': stat.st_size,
+                            'sizeMB': round(stat.st_size / (1024*1024), 2),
+                            'modifiedAt': datetime.fromtimestamp(stat.st_mtime).isoformat()
+                        })
+                        result['statistics']['totalFiles'] += 1
+                        result['statistics']['totalSizeBytes'] += stat.st_size
+                result['folders'][subfolder] = sorted(files, key=lambda x: x['filename'])
+            else:
+                result['folders'][subfolder] = []
+    
+    result['statistics']['totalSizeMB'] = round(result['statistics']['totalSizeBytes'] / (1024*1024), 2)
+    result['statistics']['totalSizeGB'] = round(result['statistics']['totalSizeBytes'] / (1024*1024*1024), 3)
+    
+    return jsonify(result)
+
+
+@app.route('/api/matches/<match_id>/summary', methods=['GET'])
+def get_match_summary(match_id: str):
+    """
+    Get match summary including events, clips, and analysis.
+    """
+    session = get_session()
+    try:
+        # Get match
+        match = session.query(Match).filter_by(id=match_id).first()
+        if not match:
+            return jsonify({'error': 'Match not found'}), 404
+        
+        match_data = match.to_dict()
+        
+        # Get teams
+        if match.home_team_id:
+            home_team = session.query(Team).filter_by(id=match.home_team_id).first()
+            if home_team:
+                match_data['homeTeam'] = home_team.to_dict()
+        
+        if match.away_team_id:
+            away_team = session.query(Team).filter_by(id=match.away_team_id).first()
+            if away_team:
+                match_data['awayTeam'] = away_team.to_dict()
+        
+        # Get events
+        events = session.query(MatchEvent).filter_by(match_id=match_id).order_by(MatchEvent.minute).all()
+        events_data = [e.to_dict() for e in events]
+        
+        # Count by type
+        events_by_type = {}
+        events_by_half = {'first_half': 0, 'second_half': 0}
+        highlights = []
+        goals = []
+        
+        for event in events_data:
+            event_type = event.get('event_type', 'unknown')
+            events_by_type[event_type] = events_by_type.get(event_type, 0) + 1
+            
+            match_half = event.get('match_half', 'first_half')
+            if match_half in events_by_half:
+                events_by_half[match_half] += 1
+            
+            if event.get('is_highlight'):
+                highlights.append(event)
+            
+            if event_type == 'goal':
+                goals.append(event)
+        
+        # Get clips
+        clips_result = {}
+        from storage import CLIP_SUBFOLDERS
+        for half in CLIP_SUBFOLDERS:
+            try:
+                clip_folder = get_clip_subfolder_path(match_id, half)
+                if clip_folder.exists():
+                    clips = []
+                    for file_path in clip_folder.iterdir():
+                        if file_path.is_file() and file_path.suffix.lower() in ['.mp4', '.webm', '.mov']:
+                            stat = file_path.stat()
+                            clips.append({
+                                'filename': file_path.name,
+                                'url': f"/api/storage/{match_id}/clips/{half}/{file_path.name}",
+                                'size': stat.st_size
+                            })
+                    clips_result[half] = clips
+                else:
+                    clips_result[half] = []
+            except:
+                clips_result[half] = []
+        
+        # Load tactical analysis if exists
+        tactical_analysis = None
+        try:
+            json_path = get_subfolder_path(match_id, 'json') / 'tactical_analysis.json'
+            if json_path.exists():
+                with open(json_path, 'r', encoding='utf-8') as f:
+                    tactical_analysis = json_module.load(f)
+        except:
+            pass
+        
+        return jsonify({
+            'match': match_data,
+            'events': events_data,
+            'clips': clips_result,
+            'tacticalAnalysis': tactical_analysis,
+            'statistics': {
+                'totalEvents': len(events_data),
+                'totalClips': sum(len(c) for c in clips_result.values()),
+                'eventsByType': events_by_type,
+                'eventsByHalf': events_by_half,
+                'highlights': highlights,
+                'goals': goals
+            }
+        })
+        
+    finally:
+        session.close()
 
 
 @app.route('/api/clips/<match_id>', methods=['GET'])
 def list_match_clips(match_id: str):
     """
     List all clips for a match, organized by half.
-    
-    Returns structure:
-    {
-      "first_half": [...clips],
-      "second_half": [...clips],
-      "full": [...clips],
-      "extra": [...clips]
-    }
     """
     from storage import CLIP_SUBFOLDERS
     
