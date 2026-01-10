@@ -2569,11 +2569,12 @@ export default function VideoUpload() {
         onOpenChange={setShowTransferCommands}
         matchId={getValidMatchId() || ''}
         onSyncComplete={async () => {
-          // Refetch videos list to update segments
-          await refetchVideos();
-          
-          // Force segments reload by clearing and let useEffect reload
+          // Limpar segmentos PRIMEIRO para que o useEffect seja acionado corretamente
           setSegments([]);
+          
+          // Aguardar refetch - quando terminar, existingVideos será atualizado
+          // e o useEffect carregará os novos vídeos automaticamente
+          await refetchVideos();
           
           toast({
             title: 'Vídeos sincronizados',
