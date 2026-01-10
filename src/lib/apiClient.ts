@@ -60,6 +60,14 @@ class LocalServerOfflineError extends Error {
   }
 }
 
+// Headers padrão para compatibilidade com túneis (ngrok, Cloudflare)
+const getDefaultHeaders = () => ({
+  'Content-Type': 'application/json',
+  'ngrok-skip-browser-warning': 'true',
+  'Accept': 'application/json',
+  'Cache-Control': 'no-cache',
+});
+
 // Timeout padrão (60s) para operações normais
 async function apiRequest<T>(
   endpoint: string,
@@ -68,14 +76,16 @@ async function apiRequest<T>(
 ): Promise<T> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const apiBase = getApiBase();
 
   try {
-    const response = await fetch(`${getApiBase()}${endpoint}`, {
+    console.log(`[API] ${options.method || 'GET'} ${endpoint} → ${apiBase}`);
+    
+    const response = await fetch(`${apiBase}${endpoint}`, {
       ...options,
       signal: controller.signal,
       headers: {
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true',
+        ...getDefaultHeaders(),
         ...options.headers,
       },
     });
@@ -93,8 +103,43 @@ async function apiRequest<T>(
     if (error.name === 'AbortError') {
       throw new Error('Requisição expirou - o servidor demorou muito para responder');
     }
+    // Log detalhado para debug de problemas de conexão
+    console.error(`[API] Erro em ${endpoint}:`, error.message);
     throw error;
   }
+}
+
+// Retry com exponential backoff para operações críticas
+async function apiRequestWithRetry<T>(
+  endpoint: string,
+  options: RequestInit = {},
+  timeoutMs: number = 60000,
+  maxRetries: number = 3
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await apiRequest<T>(endpoint, options, timeoutMs);
+    } catch (error: any) {
+      lastError = error;
+      console.warn(`[API] Tentativa ${attempt}/${maxRetries} falhou para ${endpoint}:`, error.message);
+      
+      // Não tentar novamente se for erro de timeout ou servidor offline
+      if (error.message?.includes('expirou') || error.name === 'LocalServerOfflineError') {
+        throw error;
+      }
+      
+      if (attempt < maxRetries) {
+        // Exponential backoff: 1s, 2s, 4s...
+        const delay = Math.min(1000 * Math.pow(2, attempt - 1), 10000);
+        console.log(`[API] Aguardando ${delay}ms antes de tentar novamente...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  throw lastError || new Error('Todas as tentativas falharam');
 }
 
 // Timeout longo (30 minutos) para operações de transcrição/análise
@@ -105,14 +150,16 @@ async function apiRequestLongRunning<T>(
 ): Promise<T> {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const apiBase = getApiBase();
 
   try {
-    const response = await fetch(`${getApiBase()}${endpoint}`, {
+    console.log(`[API-LongRunning] ${options.method || 'GET'} ${endpoint} → ${apiBase} (timeout: ${Math.round(timeoutMs/60000)}min)`);
+    
+    const response = await fetch(`${apiBase}${endpoint}`, {
       ...options,
       signal: controller.signal,
       headers: {
-        'Content-Type': 'application/json',
-        'ngrok-skip-browser-warning': 'true',
+        ...getDefaultHeaders(),
         ...options.headers,
       },
     });
@@ -131,8 +178,41 @@ async function apiRequestLongRunning<T>(
       const mins = Math.round(timeoutMs / 60000);
       throw new Error(`Operação expirou após ${mins} minutos - verifique o servidor ou tente com arquivo menor`);
     }
+    console.error(`[API-LongRunning] Erro em ${endpoint}:`, error.message);
     throw error;
   }
+}
+
+// Versão com retry para operações longas críticas
+async function apiRequestLongRunningWithRetry<T>(
+  endpoint: string,
+  options: RequestInit = {},
+  timeoutMs: number = 1800000,
+  maxRetries: number = 2
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await apiRequestLongRunning<T>(endpoint, options, timeoutMs);
+    } catch (error: any) {
+      lastError = error;
+      console.warn(`[API-LongRunning] Tentativa ${attempt}/${maxRetries} falhou para ${endpoint}:`, error.message);
+      
+      // Não tentar novamente se for erro de timeout
+      if (error.message?.includes('expirou')) {
+        throw error;
+      }
+      
+      if (attempt < maxRetries) {
+        const delay = 3000; // 3 segundos entre tentativas longas
+        console.log(`[API-LongRunning] Aguardando ${delay}ms antes de tentar novamente...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  
+  throw lastError || new Error('Todas as tentativas falharam');
 }
 
 // Video info interface
@@ -221,7 +301,8 @@ export const apiClient = {
     videos: any[];
     message: string;
   }> => {
-    return apiRequest(`/api/videos/sync/${matchId}`, { method: 'POST' });
+    // Usar retry para sincronização de vídeos (operação crítica)
+    return apiRequestWithRetry(`/api/videos/sync/${matchId}`, { method: 'POST' }, 60000, 3);
   },
 
   // ============== Analysis Jobs ==============
@@ -275,11 +356,11 @@ export const apiClient = {
       includeSubtitles: data.includeSubtitles ?? true,
     };
 
-    // Usar timeout longo (10 minutos) para análise de IA
-    return apiRequestLongRunning<any>('/api/analyze-match', { 
+    // Usar timeout longo (10 minutos) com retry para análise de IA
+    return apiRequestLongRunningWithRetry<any>('/api/analyze-match', { 
       method: 'POST', 
       body: JSON.stringify(body)
-    }, 600000); // 10 minutos
+    }, 600000, 2); // 10 minutos, 2 tentativas
   },
 
   generateNarration: (data: any) =>
