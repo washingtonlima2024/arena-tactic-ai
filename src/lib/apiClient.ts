@@ -60,6 +60,33 @@ class LocalServerOfflineError extends Error {
   }
 }
 
+/**
+ * Normaliza URLs de storage local para usar a base de API atual.
+ * Corrige URLs localhost:5000 para usar o túnel configurado (ngrok/cloudflare).
+ */
+export function normalizeStorageUrl(url: string | null | undefined): string | null {
+  if (!url) return null;
+  
+  const apiBase = getApiBase();
+  
+  // Se já é a mesma base, retornar como está
+  if (url.startsWith(apiBase)) return url;
+  
+  // Substituir localhost:5000 ou 127.0.0.1:5000 pela base atual
+  if (url.includes('localhost:5000') || url.includes('127.0.0.1:5000')) {
+    return url
+      .replace('http://localhost:5000', apiBase)
+      .replace('http://127.0.0.1:5000', apiBase);
+  }
+  
+  // Se é caminho relativo /api/storage/..., prefixar com base
+  if (url.startsWith('/api/storage/')) {
+    return `${apiBase}${url}`;
+  }
+  
+  return url;
+}
+
 // Headers padrão para compatibilidade com túneis (ngrok, Cloudflare)
 const getDefaultHeaders = () => ({
   'Content-Type': 'application/json',
