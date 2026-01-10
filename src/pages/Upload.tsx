@@ -32,7 +32,8 @@ import {
   HardDrive,
   Server,
   Cloud,
-  Loader2
+  Loader2,
+  Terminal
 } from 'lucide-react';
 import { useTeams } from '@/hooks/useTeams';
 import { useCreateMatch } from '@/hooks/useMatches';
@@ -56,6 +57,7 @@ import { AnalysisSummary } from '@/components/upload/AnalysisSummary';
 import { MatchTimesConfig, defaultMatchTimes, MatchTimes } from '@/components/upload/MatchTimesConfig';
 import { HalfDropzone, getDefaultVideoType, getDefaultMinutes } from '@/components/upload/HalfDropzone';
 import { LocalFileBrowser } from '@/components/upload/LocalFileBrowser';
+import { TransferCommandsDialog } from '@/components/upload/TransferCommandsDialog';
 import { splitVideoInBrowser, calculateOptimalParts, shouldSplitInBrowser, downloadVideoWithProgress } from '@/lib/videoSplitter';
 import { cn } from '@/lib/utils';
 
@@ -171,6 +173,7 @@ export default function VideoUpload() {
   const [isDragging, setIsDragging] = useState(false);
   const [showLocalBrowser, setShowLocalBrowser] = useState(false);
   const [localBrowserHalf, setLocalBrowserHalf] = useState<'first' | 'second' | null>(null);
+  const [showTransferCommands, setShowTransferCommands] = useState(false);
   
   // Auto-detect environment: use 'local' on localhost, 'file' on preview/production
   const isLocalHost = typeof window !== 'undefined' && window.location.hostname === 'localhost';
@@ -2199,6 +2202,21 @@ export default function VideoUpload() {
                   </Badge>
                 </div>
 
+                {/* Transfer Commands Button - for large files */}
+                {isLocalServerOnline && (selectedExistingMatch || existingMatchId || createdMatchId) && (
+                  <div className="flex justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setShowTransferCommands(true)}
+                      className="gap-2 text-muted-foreground hover:text-foreground"
+                    >
+                      <Terminal className="h-4 w-4" />
+                      Transferência Direta (SCP/Rsync)
+                    </Button>
+                  </div>
+                )}
+
                 {/* LOCAL FILE MODE - No upload needed */}
                 <TabsContent value="local" className="mt-4 space-y-4">
                   <div className="p-4 rounded-lg bg-primary/5 border border-primary/20">
@@ -2541,6 +2559,20 @@ export default function VideoUpload() {
         onOpenChange={setShowLocalBrowser}
         onSelectFile={handleLocalFileSelect}
         matchId={getValidMatchId() || ''}
+      />
+
+      {/* Transfer Commands Dialog */}
+      <TransferCommandsDialog
+        open={showTransferCommands}
+        onOpenChange={setShowTransferCommands}
+        matchId={getValidMatchId() || ''}
+        onSyncComplete={() => {
+          // Refetch videos list if we have query capability
+          toast({
+            title: 'Vídeos sincronizados',
+            description: 'A lista de vídeos foi atualizada.',
+          });
+        }}
       />
     </AppLayout>
   );

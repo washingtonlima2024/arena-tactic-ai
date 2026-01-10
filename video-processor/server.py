@@ -2843,6 +2843,162 @@ def analyze_goal_play():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/storage/transfer-command/<match_id>', methods=['GET'])
+def get_transfer_commands(match_id: str):
+    """
+    Gera comandos prontos para transferência direta de arquivos para a pasta da partida.
+    Suporta múltiplos sistemas operacionais e métodos de transferência.
+    Ideal para vídeos grandes que excedem o limite de upload do navegador.
+    """
+    import socket
+    
+    # Criar pasta de destino se não existir
+    match_storage = get_match_storage_path(match_id)
+    videos_path = match_storage / "videos"
+    videos_path.mkdir(parents=True, exist_ok=True)
+    
+    # Detectar hostname e IP
+    hostname = socket.gethostname()
+    try:
+        local_ip = socket.gethostbyname(hostname)
+    except:
+        local_ip = "IP_DO_SERVIDOR"
+    
+    # Caminho absoluto do destino
+    dest_path = str(videos_path.absolute())
+    
+    # Usuário do sistema
+    import getpass
+    username = getpass.getuser()
+    
+    commands = {
+        "match_id": match_id,
+        "destination_path": dest_path,
+        "hostname": hostname,
+        "ip": local_ip,
+        "commands": {
+            "scp": {
+                "description": "Linux/Mac - Cópia segura via SSH",
+                "single_file": f"scp /caminho/do/video.mp4 {username}@{local_ip}:{dest_path}/",
+                "multiple_files": f"scp /caminho/*.mp4 {username}@{local_ip}:{dest_path}/",
+                "folder": f"scp -r /caminho/pasta/ {username}@{local_ip}:{dest_path}/"
+            },
+            "rsync": {
+                "description": "Linux/Mac - Sincronização inteligente (com resume automático)",
+                "single_file": f"rsync -avP /caminho/do/video.mp4 {username}@{local_ip}:{dest_path}/",
+                "folder": f"rsync -avP /caminho/pasta/*.mp4 {username}@{local_ip}:{dest_path}/"
+            },
+            "windows_network": {
+                "description": "Windows - Cópia via rede compartilhada",
+                "copy": f'copy "C:\\caminho\\video.mp4" "\\\\{hostname}\\arena-storage\\{match_id}\\videos\\"',
+                "xcopy": f'xcopy "C:\\caminho\\*.mp4" "\\\\{hostname}\\arena-storage\\{match_id}\\videos\\" /Y'
+            },
+            "curl": {
+                "description": "Upload via HTTP (qualquer sistema operacional)",
+                "command": f"curl -X POST -F 'file=@/caminho/do/video.mp4' -F 'video_type=full' http://{local_ip}:5000/api/storage/{match_id}/videos/upload"
+            },
+            "powershell": {
+                "description": "Windows PowerShell - Cópia remota",
+                "command": f'Copy-Item -Path "C:\\caminho\\video.mp4" -Destination "\\\\{hostname}\\arena-storage\\{match_id}\\videos\\"'
+            }
+        },
+        "sync_after": f"POST http://{local_ip}:5000/api/videos/sync/{match_id}",
+        "notes": [
+            "Substitua '/caminho/do/video.mp4' pelo caminho real do arquivo",
+            f"Para SCP/Rsync, o usuário padrão é '{username}'",
+            "Após a transferência, clique em 'Sincronizar Vídeos' na interface",
+            "O método cURL funciona em qualquer sistema com cURL instalado",
+            "Rsync permite retomar transferências interrompidas"
+        ]
+    }
+    
+    return jsonify(commands)
+
+
+@app.route('/api/storage/<match_id>/videos/upload', methods=['POST'])
+def upload_video_direct(match_id: str):
+    """
+    Upload direto de vídeo via HTTP multipart.
+    Alternativa ao link-local quando o arquivo não está na mesma máquina.
+    
+    Aceita:
+    - file: Arquivo de vídeo (multipart/form-data)
+    - video_type: Tipo do vídeo (full, first_half, second_half)
+    
+    Retorna informações do vídeo registrado no banco.
+    """
+    if 'file' not in request.files:
+        return jsonify({'error': 'Nenhum arquivo enviado'}), 400
+    
+    file = request.files['file']
+    video_type = request.form.get('video_type', 'full')
+    
+    if not file.filename:
+        return jsonify({'error': 'Nome de arquivo vazio'}), 400
+    
+    try:
+        # Salvar arquivo na pasta de vídeos
+        result = save_uploaded_file(match_id, 'videos', file)
+        
+        file_path = Path(result['path'])
+        
+        # Detectar duração usando ffprobe
+        duration_seconds = None
+        try:
+            probe_result = subprocess.run([
+                'ffprobe', '-v', 'quiet', '-print_format', 'json',
+                '-show_format', str(file_path)
+            ], capture_output=True, text=True, timeout=30)
+            
+            if probe_result.returncode == 0:
+                probe_data = json_module.loads(probe_result.stdout)
+                duration_seconds = int(float(probe_data.get('format', {}).get('duration', 0)))
+        except Exception as e:
+            print(f"[upload-video] Erro ao detectar duração: {e}")
+        
+        # Criar registro no banco
+        session = get_session()
+        try:
+            # Determinar minutos de início e fim
+            start_minute = 0 if video_type == 'first_half' else (45 if video_type == 'second_half' else 0)
+            end_minute = 45 if video_type == 'first_half' else (90 if video_type in ['second_half', 'full'] else None)
+            
+            video = Video(
+                match_id=match_id,
+                file_url=result['url'],
+                file_name=result['filename'],
+                video_type=video_type,
+                duration_seconds=duration_seconds,
+                status='ready',
+                start_minute=start_minute,
+                end_minute=end_minute
+            )
+            session.add(video)
+            session.commit()
+            
+            video_dict = video.to_dict()
+            
+            return jsonify({
+                'success': True,
+                'video': video_dict,
+                'file_path': result['path'],
+                'file_size': result['size'],
+                'file_size_mb': round(result['size'] / (1024 * 1024), 2),
+                'duration_seconds': duration_seconds
+            })
+        except Exception as e:
+            session.rollback()
+            return jsonify({'error': str(e)}), 400
+        finally:
+            session.close()
+            
+    except Exception as e:
+        print(f"[upload-video] Erro: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/transcribe-audio', methods=['POST'])
 def transcribe_audio_endpoint():
     """Transcribe audio from base64 data."""
