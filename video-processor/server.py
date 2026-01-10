@@ -1083,9 +1083,29 @@ def link_local_file():
         print(f"[link-local] Symlink falhou, usando referência direta: {e}")
         file_url = f"file://{file_path.absolute()}"
     
-    # Create video record in database
+    # Create video record in database (or return existing)
     session = get_session()
     try:
+        # Check if video already exists for this match with same filename
+        existing_video = session.query(Video).filter_by(
+            match_id=match_id,
+            file_name=filename
+        ).first()
+        
+        if existing_video:
+            print(f"[link-local] Vídeo já registrado: {filename}")
+            return jsonify({
+                'success': True,
+                'video': existing_video.to_dict(),
+                'local_path': str(file_path.absolute()),
+                'file_size': file_size,
+                'file_size_mb': round(file_size / (1024 * 1024), 2),
+                'duration_seconds': existing_video.duration_seconds or duration_seconds,
+                'symlink_created': file_url.startswith('http'),
+                'already_exists': True
+            })
+        
+        # Create new video record
         video = Video(
             match_id=match_id,
             file_url=file_url,
@@ -1099,6 +1119,8 @@ def link_local_file():
         session.add(video)
         session.commit()
         
+        print(f"[link-local] ✓ Novo vídeo registrado: {filename} (ID: {video.id})")
+        
         return jsonify({
             'success': True,
             'video': video.to_dict(),
@@ -1106,7 +1128,8 @@ def link_local_file():
             'file_size': file_size,
             'file_size_mb': round(file_size / (1024 * 1024), 2),
             'duration_seconds': duration_seconds,
-            'symlink_created': file_url.startswith('http')
+            'symlink_created': file_url.startswith('http'),
+            'already_exists': False
         })
     except Exception as e:
         session.rollback()

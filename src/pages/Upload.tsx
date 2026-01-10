@@ -249,11 +249,7 @@ export default function VideoUpload() {
     queryFn: async () => {
       if (!activeMatchId) return [];
       try {
-        // Sincronizar vídeos do storage primeiro (recupera vídeos órfãos)
-        await apiClient.syncVideos(activeMatchId).catch((e) => {
-          console.warn('[Upload] Sincronização de vídeos falhou:', e);
-        });
-        
+        // Only fetch videos, no auto-sync (user can sync manually)
         const videos = await apiClient.getVideos(activeMatchId);
         return videos || [];
       } catch {
@@ -263,16 +259,30 @@ export default function VideoUpload() {
     enabled: !!activeMatchId
   });
 
+  // Ref to track if we've already loaded existing videos (prevents multiple loads)
+  const hasLoadedExistingVideos = useRef(false);
+  
+  // Reset the flag when match changes
+  useEffect(() => {
+    hasLoadedExistingVideos.current = false;
+  }, [activeMatchId]);
+
   // Auto-load existing videos as segments when page loads with a match ID
   useEffect(() => {
-    if (existingVideos && existingVideos.length > 0 && segments.length === 0) {
+    // Only load ONCE and if no segments are in progress
+    if (existingVideos && 
+        existingVideos.length > 0 && 
+        !hasLoadedExistingVideos.current &&
+        segments.filter(s => s.status !== 'error').length === 0) {
+      
       console.log('[Upload] Carregando vídeos existentes:', existingVideos.length);
+      hasLoadedExistingVideos.current = true;
       
       const loadedSegments: VideoSegment[] = existingVideos.map((video: any) => ({
-        id: video.id,
+        id: video.id,  // Use database ID to avoid duplicates
         name: video.file_name || 'Vídeo',
         url: video.file_url,
-        size: 0, // Unknown for existing videos
+        size: 0,
         videoType: (video.video_type || 'full') as VideoType,
         title: video.file_name?.replace(/\.[^/.]+$/, '') || 'Vídeo',
         durationSeconds: video.duration_seconds,
@@ -292,7 +302,7 @@ export default function VideoUpload() {
         description: "Clique em 'Iniciar Análise' para processar.",
       });
     }
-  }, [existingVideos, segments.length]);
+  }, [existingVideos]); // Removed segments.length dependency to prevent re-runs
 
   // Detect video duration using HTML5 video element
   const detectVideoDuration = (file: File): Promise<number> => {
@@ -788,10 +798,46 @@ export default function VideoUpload() {
         video_type: videoType as any,
       });
 
+      // Check if video already existed (no duplicate created)
+      if (result.already_exists) {
+        // Check if this video is already in segments list
+        const alreadyInList = segments.some(s => s.id === result.video.id);
+        
+        if (alreadyInList) {
+          // Remove the temporary segment - video already exists
+          setSegments(prev => prev.filter(s => s.id !== segmentId));
+          toast({
+            title: "Vídeo já vinculado",
+            description: `${file.name} já estava na lista.`,
+          });
+        } else {
+          // Update with the real database ID
+          setSegments(prev => prev.map(s => 
+            s.id === segmentId 
+              ? { 
+                  ...s,
+                  id: result.video.id,  // Use database ID
+                  progress: 100, 
+                  status: 'complete' as const, 
+                  url: result.video.file_url,
+                  durationSeconds: result.duration_seconds,
+                }
+              : s
+          ));
+          toast({
+            title: "✓ Vídeo já registrado",
+            description: `${file.name} (${file.size_mb} MB) - Recuperado do banco.`,
+          });
+        }
+        return;
+      }
+
+      // New video created - update segment with database ID
       setSegments(prev => prev.map(s => 
         s.id === segmentId 
           ? { 
-              ...s, 
+              ...s,
+              id: result.video.id,  // Use database ID to match future queries
               progress: 100, 
               status: 'complete' as const, 
               url: result.video.file_url,
