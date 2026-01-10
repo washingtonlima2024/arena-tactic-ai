@@ -80,6 +80,10 @@ export default function Settings() {
   const [ollamaModel, setOllamaModel] = useState('llama3.2');
   const [ollamaEnabled, setOllamaEnabled] = useState(false);
 
+  // Local Whisper settings (FREE transcription)
+  const [localWhisperEnabled, setLocalWhisperEnabled] = useState(false);
+  const [localWhisperModel, setLocalWhisperModel] = useState('base');
+
   // Ngrok URL setting
   const [ngrokUrl, setNgrokUrl] = useState('');
   const [detectingNgrok, setDetectingNgrok] = useState(false);
@@ -144,6 +148,10 @@ export default function Settings() {
       setOllamaModel(apiSettings.find(s => s.setting_key === 'ollama_model')?.setting_value || 'llama3.2');
       setOllamaEnabled(apiSettings.find(s => s.setting_key === 'ollama_enabled')?.setting_value === 'true');
       
+      // Local Whisper settings
+      setLocalWhisperEnabled(apiSettings.find(s => s.setting_key === 'local_whisper_enabled')?.setting_value === 'true');
+      setLocalWhisperModel(apiSettings.find(s => s.setting_key === 'local_whisper_model')?.setting_value || 'base');
+      
       // Ngrok URL - load from localStorage first, then from settings
       const storedNgrokUrl = localStorage.getItem('ngrok_fallback_url') || 
         apiSettings.find(s => s.setting_key === 'ngrok_fallback_url')?.setting_value || '';
@@ -185,6 +193,9 @@ export default function Settings() {
         upsertApiSetting.mutateAsync({ key: 'ollama_url', value: ollamaUrl }),
         upsertApiSetting.mutateAsync({ key: 'ollama_model', value: ollamaModel }),
         upsertApiSetting.mutateAsync({ key: 'ollama_enabled', value: String(ollamaEnabled) }),
+        // Local Whisper settings
+        upsertApiSetting.mutateAsync({ key: 'local_whisper_enabled', value: String(localWhisperEnabled) }),
+        upsertApiSetting.mutateAsync({ key: 'local_whisper_model', value: localWhisperModel }),
         // Also save with standard env var names for Python server compatibility
         ...(geminiApiKey ? [upsertApiSetting.mutateAsync({ key: 'GOOGLE_GENERATIVE_AI_API_KEY', value: geminiApiKey })] : []),
         ...(openaiApiKey ? [upsertApiSetting.mutateAsync({ key: 'OPENAI_API_KEY', value: openaiApiKey })] : []),
@@ -747,6 +758,85 @@ export default function Settings() {
                     )}
                   </div>
                 </div>
+              </CardContent>
+            </Card>
+
+            {/* Local Whisper Configuration (FREE!) */}
+            <Card variant="glow" className="border-emerald-500/30">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="flex items-center gap-2">
+                      <Mic className="h-5 w-5 text-emerald-500" />
+                      Whisper Local
+                      <Badge variant="outline" className="ml-2 text-emerald-500 border-emerald-500/50">
+                        GRATUITO
+                      </Badge>
+                    </CardTitle>
+                    <CardDescription>
+                      Transcrição 100% local e offline usando Faster-Whisper
+                    </CardDescription>
+                  </div>
+                  <Switch 
+                    checked={localWhisperEnabled} 
+                    onCheckedChange={setLocalWhisperEnabled}
+                  />
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <Label>Modelo</Label>
+                  <Select value={localWhisperModel} onValueChange={setLocalWhisperModel}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="tiny">Tiny (~40MB) - Mais rápido, qualidade básica</SelectItem>
+                      <SelectItem value="base">Base (~150MB) - Equilíbrio velocidade/qualidade</SelectItem>
+                      <SelectItem value="small">Small (~500MB) - Boa qualidade</SelectItem>
+                      <SelectItem value="medium">Medium (~1.5GB) - Alta qualidade</SelectItem>
+                      <SelectItem value="large-v3">Large V3 (~3GB) - Qualidade profissional</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground">
+                    O modelo será baixado automaticamente na primeira transcrição
+                  </p>
+                </div>
+                
+                <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
+                  <div className="flex items-start gap-3">
+                    <CheckCircle2 className="h-5 w-5 text-emerald-500 mt-0.5" />
+                    <div className="space-y-1">
+                      <p className="text-sm font-medium text-emerald-600">Vantagens:</p>
+                      <ul className="text-xs text-muted-foreground space-y-0.5">
+                        <li>• 100% gratuito - sem custos de API</li>
+                        <li>• Funciona offline após download do modelo</li>
+                        <li>• Sem limite de tamanho de arquivo</li>
+                        <li>• Suporta aceleração GPU (CUDA) se disponível</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+                
+                <div className={`rounded-lg border p-3 ${localWhisperEnabled ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-muted bg-muted/30'}`}>
+                  <div className="flex items-center gap-2">
+                    {localWhisperEnabled ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                        <span className="text-sm text-emerald-500">Ativo (prioridade máxima na transcrição)</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">Desativado - usando APIs pagas</span>
+                      </>
+                    )}
+                  </div>
+                </div>
+                
+                <p className="text-xs text-muted-foreground">
+                  Requer instalação: <code className="bg-muted px-1 rounded">pip install faster-whisper</code> no servidor Python
+                </p>
               </CardContent>
             </Card>
 

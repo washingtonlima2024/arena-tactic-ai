@@ -96,6 +96,10 @@ def load_api_keys_from_db():
         gemini_enabled = _bool_from_setting(values.get('gemini_enabled'), True)
         openai_enabled = _bool_from_setting(values.get('openai_enabled'), True)
         elevenlabs_enabled = _bool_from_setting(values.get('elevenlabs_enabled'), True)
+        
+        # Local Whisper settings (FREE transcription)
+        local_whisper_enabled = _bool_from_setting(values.get('local_whisper_enabled'), False)
+        local_whisper_model = values.get('local_whisper_model') or 'base'
 
         # Prefer DB values, fallback to environment variables if DB is missing
         openai_key = values.get('openai_api_key') or os.environ.get('OPENAI_API_KEY', '')
@@ -134,8 +138,14 @@ def load_api_keys_from_db():
         ai_services.set_api_keys(
             gemini_enabled=gemini_enabled,
             openai_enabled=openai_enabled,
-            elevenlabs_enabled=elevenlabs_enabled
+            elevenlabs_enabled=elevenlabs_enabled,
+            local_whisper_enabled=local_whisper_enabled,
+            local_whisper_model=local_whisper_model
         )
+        
+        # Log Local Whisper status
+        if local_whisper_enabled:
+            keys_loaded.append(f'LOCAL_WHISPER ({local_whisper_model})')
 
         if keys_loaded:
             status_parts = []
@@ -146,6 +156,8 @@ def load_api_keys_from_db():
                     status_parts.append(f"GEMINI {'✓' if gemini_enabled else '✗'}")
                 elif k == 'OPENAI':
                     status_parts.append(f"OPENAI {'✓' if openai_enabled else '✗'}")
+                elif k.startswith('LOCAL_WHISPER'):
+                    status_parts.append(f"🆓 {k}")
                 else:
                     status_parts.append(k)
             print(f"✓ AI providers: {', '.join(status_parts)}")
