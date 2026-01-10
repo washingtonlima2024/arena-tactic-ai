@@ -779,14 +779,40 @@ export default function Settings() {
                   </div>
                   <Switch 
                     checked={localWhisperEnabled} 
-                    onCheckedChange={setLocalWhisperEnabled}
+                    onCheckedChange={async (checked) => {
+                      setLocalWhisperEnabled(checked);
+                      try {
+                        await upsertApiSetting.mutateAsync({ 
+                          key: 'local_whisper_enabled', 
+                          value: String(checked) 
+                        });
+                        toast.success(checked ? 'Whisper Local ativado!' : 'Whisper Local desativado');
+                      } catch (error) {
+                        setLocalWhisperEnabled(!checked);
+                        toast.error('Erro ao salvar configuração');
+                      }
+                    }}
                   />
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Modelo</Label>
-                  <Select value={localWhisperModel} onValueChange={setLocalWhisperModel}>
+                  <Select 
+                    value={localWhisperModel} 
+                    onValueChange={async (value) => {
+                      setLocalWhisperModel(value);
+                      try {
+                        await upsertApiSetting.mutateAsync({ 
+                          key: 'local_whisper_model', 
+                          value 
+                        });
+                        toast.success(`Modelo alterado para ${value}`);
+                      } catch (error) {
+                        toast.error('Erro ao salvar modelo');
+                      }
+                    }}
+                  >
                     <SelectTrigger>
                       <SelectValue />
                     </SelectTrigger>
