@@ -24,7 +24,15 @@ OPENAI_ENABLED = True
 ELEVENLABS_ENABLED = True
 
 # Local Whisper settings (FREE transcription)
-LOCAL_WHISPER_ENABLED = os.environ.get('LOCAL_WHISPER_ENABLED', 'false').lower() == 'true'
+# Auto-detect if faster-whisper is installed
+try:
+    from faster_whisper import WhisperModel
+    _FASTER_WHISPER_AVAILABLE = True
+except ImportError:
+    _FASTER_WHISPER_AVAILABLE = False
+
+# Enable by default if library is installed, or via env var
+LOCAL_WHISPER_ENABLED = _FASTER_WHISPER_AVAILABLE or os.environ.get('LOCAL_WHISPER_ENABLED', 'false').lower() == 'true'
 LOCAL_WHISPER_MODEL = os.environ.get('LOCAL_WHISPER_MODEL', 'base')
 
 LOVABLE_API_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions'
@@ -449,11 +457,15 @@ def _transcribe_with_local_whisper(audio_path: str, match_id: str = None) -> Dic
     """
     global _whisper_model, _whisper_model_name
     
+    if not _FASTER_WHISPER_AVAILABLE:
+        return {
+            "error": "faster-whisper não instalado. Execute: pip install faster-whisper==1.1.0", 
+            "success": False
+        }
+    
     try:
         from faster_whisper import WhisperModel
         import torch
-    except ImportError:
-        return {"error": "faster-whisper not installed. Run: pip install faster-whisper", "success": False}
     
     try:
         model_name = LOCAL_WHISPER_MODEL or 'base'
