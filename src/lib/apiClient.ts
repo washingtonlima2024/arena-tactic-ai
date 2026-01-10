@@ -245,6 +245,18 @@ async function ensureServerAvailable(): Promise<void> {
 }
 
 export const apiClient = {
+  // ============== Generic Methods ==============
+  get: <T = any>(endpoint: string) => apiRequest<T>(endpoint, { method: 'GET' }),
+  post: <T = any>(endpoint: string, data?: any) => apiRequest<T>(endpoint, { 
+    method: 'POST', 
+    body: data ? JSON.stringify(data) : undefined 
+  }),
+  put: <T = any>(endpoint: string, data?: any) => apiRequest<T>(endpoint, { 
+    method: 'PUT', 
+    body: data ? JSON.stringify(data) : undefined 
+  }),
+  delete: <T = any>(endpoint: string) => apiRequest<T>(endpoint, { method: 'DELETE' }),
+
   // ============== Configuration ==============
   setApiUrl: (url: string) => localStorage.setItem('arenaApiUrl', url),
   getApiUrl: () => getApiBase(),

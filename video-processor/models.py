@@ -254,7 +254,60 @@ class AnalysisJob(Base):
         }
 
 
+class TranscriptionJob(Base):
+    """Persistent transcription job for async processing with chunk tracking."""
+    __tablename__ = 'transcription_jobs'
+    
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    match_id = Column(String(36), ForeignKey('matches.id'))
+    video_id = Column(String(36), ForeignKey('videos.id'))
+    video_path = Column(Text)
+    
+    # Status tracking
+    status = Column(String(50), default='queued')  # queued, processing, completed, failed, partial
+    progress = Column(Integer, default=0)
+    current_step = Column(String(255))
+    error_message = Column(Text)
+    
+    # Chunk tracking for resilient processing
+    total_chunks = Column(Integer, default=1)
+    completed_chunks = Column(Integer, default=0)
+    chunk_results = Column(JSON, default=list)  # [{chunk: 1, status: 'done', text: '...'}]
+    
+    # Results
+    srt_content = Column(Text)
+    plain_text = Column(Text)
+    provider_used = Column(String(50))  # elevenlabs, whisper, gemini
+    
+    # Timestamps
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'match_id': self.match_id,
+            'video_id': self.video_id,
+            'video_path': self.video_path,
+            'status': self.status,
+            'progress': self.progress,
+            'current_step': self.current_step,
+            'error_message': self.error_message,
+            'total_chunks': self.total_chunks,
+            'completed_chunks': self.completed_chunks,
+            'chunk_results': self.chunk_results,
+            'srt_content': self.srt_content,
+            'plain_text': self.plain_text,
+            'provider_used': self.provider_used,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
 class GeneratedAudio(Base):
+
     __tablename__ = 'generated_audio'
     
     id = Column(String(36), primary_key=True, default=generate_uuid)

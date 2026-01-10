@@ -717,6 +717,8 @@ def get_conversion_status(job_id: str):
 @app.route('/health', methods=['GET'])
 def health_check():
     """Verifica status do servidor. Modo light=true para resposta rápida."""
+    from database import get_database_path, get_base_dir
+    
     light_mode = request.args.get('light', 'false').lower() == 'true'
     
     try:
@@ -728,8 +730,20 @@ def health_check():
     response_data = {
         'status': 'ok',
         'ffmpeg': ffmpeg_ok,
-        'database': 'arena_play.db',
-        'vignettes_dir': str(VIGNETTES_DIR)
+        'paths': {
+            'base_dir': get_base_dir(),
+            'database': get_database_path(),
+            'storage': str(STORAGE_DIR.absolute()),
+            'vignettes': str(VIGNETTES_DIR.absolute()),
+            'working_dir': str(Path.cwd())
+        },
+        'providers': {
+            'gemini': bool(ai_services.GOOGLE_API_KEY) and ai_services.GEMINI_ENABLED,
+            'openai': bool(ai_services.OPENAI_API_KEY) and ai_services.OPENAI_ENABLED,
+            'elevenlabs': bool(ai_services.ELEVENLABS_API_KEY) and ai_services.ELEVENLABS_ENABLED,
+            'lovable': bool(ai_services.LOVABLE_API_KEY),
+            'ollama': ai_services.OLLAMA_ENABLED
+        }
     }
     
     # Só inclui estatísticas completas do storage se não for modo light
@@ -4626,27 +4640,285 @@ def list_download_jobs():
 
 
 # ============================================================================
+# UNIFIED SETTINGS ENDPOINT
+# ============================================================================
+
+@app.route('/api/settings', methods=['GET'])
+def get_all_settings():
+    """Retorna todas as configurações para o frontend de forma unificada."""
+    from database import get_database_path, get_base_dir
+    
+    # Provider status
+    gemini_configured = bool(ai_services.GOOGLE_API_KEY) and ai_services.GEMINI_ENABLED
+    openai_configured = bool(ai_services.OPENAI_API_KEY) and ai_services.OPENAI_ENABLED
+    elevenlabs_configured = bool(ai_services.ELEVENLABS_API_KEY) and ai_services.ELEVENLABS_ENABLED
+    lovable_configured = bool(ai_services.LOVABLE_API_KEY)
+    ollama_configured = ai_services.OLLAMA_ENABLED
+    
+    # Capabilities
+    has_transcription = elevenlabs_configured or openai_configured or gemini_configured or lovable_configured
+    has_analysis = lovable_configured or gemini_configured or openai_configured or ollama_configured
+    
+    return jsonify({
+        'providers': {
+            'gemini': {
+                'enabled': ai_services.GEMINI_ENABLED,
+                'configured': gemini_configured,
+                'keySet': bool(ai_services.GOOGLE_API_KEY),
+                'keyPreview': (ai_services.GOOGLE_API_KEY[:8] + '...') if ai_services.GOOGLE_API_KEY else None
+            },
+            'openai': {
+                'enabled': ai_services.OPENAI_ENABLED,
+                'configured': openai_configured,
+                'keySet': bool(ai_services.OPENAI_API_KEY),
+                'keyPreview': (ai_services.OPENAI_API_KEY[:8] + '...') if ai_services.OPENAI_API_KEY else None
+            },
+            'elevenlabs': {
+                'enabled': ai_services.ELEVENLABS_ENABLED,
+                'configured': elevenlabs_configured,
+                'keySet': bool(ai_services.ELEVENLABS_API_KEY)
+            },
+            'lovable': {
+                'enabled': True,
+                'configured': lovable_configured,
+                'keySet': lovable_configured
+            },
+            'ollama': {
+                'enabled': ai_services.OLLAMA_ENABLED,
+                'configured': ollama_configured,
+                'url': ai_services.OLLAMA_URL if ollama_configured else None,
+                'model': ai_services.OLLAMA_MODEL if ollama_configured else None
+            }
+        },
+        'capabilities': {
+            'transcription': has_transcription,
+            'analysis': has_analysis,
+            'tts': openai_configured,
+            'vision': gemini_configured or openai_configured
+        },
+        'storage': {
+            'baseDir': get_base_dir(),
+            'database': get_database_path(),
+            'storageDir': str(STORAGE_DIR.absolute())
+        }
+    })
+
+
+# ============================================================================
+# TRANSCRIPTION JOBS ENDPOINTS  
+# ============================================================================
+
+# In-memory transcription jobs (for fast access, DB for persistence)
+transcription_jobs = {}
+
+
+@app.route('/api/transcription-jobs', methods=['POST'])
+def create_transcription_job():
+    """Cria um novo job de transcrição assíncrono."""
+    from models import TranscriptionJob
+    
+    data = request.json or {}
+    match_id = data.get('match_id')
+    video_id = data.get('video_id')
+    video_path = data.get('video_path')
+    
+    if not match_id or not video_path:
+        return jsonify({'error': 'match_id and video_path are required'}), 400
+    
+    session = get_session()
+    try:
+        # Create job in database
+        job = TranscriptionJob(
+            match_id=match_id,
+            video_id=video_id,
+            video_path=video_path,
+            status='queued',
+            progress=0,
+            current_step='Aguardando na fila...'
+        )
+        session.add(job)
+        session.commit()
+        
+        job_data = job.to_dict()
+        job_id = job.id
+        
+        # Store in memory for fast access
+        transcription_jobs[job_id] = {
+            'id': job_id,
+            'status': 'queued',
+            'progress': 0,
+            'current_step': 'Aguardando na fila...',
+            'match_id': match_id,
+            'video_id': video_id,
+            'video_path': video_path
+        }
+        
+        # Start processing in background thread
+        def process_job():
+            _process_transcription_job(job_id, match_id, video_path)
+        
+        thread = threading.Thread(target=process_job, daemon=True)
+        thread.start()
+        
+        return jsonify(job_data), 201
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/transcription-jobs/<job_id>', methods=['GET'])
+def get_transcription_job(job_id: str):
+    """Retorna status de um job de transcrição."""
+    from models import TranscriptionJob
+    
+    # First check in-memory for fast response
+    if job_id in transcription_jobs:
+        return jsonify(transcription_jobs[job_id])
+    
+    # Fallback to database
+    session = get_session()
+    try:
+        job = session.query(TranscriptionJob).filter_by(id=job_id).first()
+        if not job:
+            return jsonify({'error': 'Job not found'}), 404
+        return jsonify(job.to_dict())
+    finally:
+        session.close()
+
+
+def _process_transcription_job(job_id: str, match_id: str, video_path: str):
+    """Processa um job de transcrição em background."""
+    from models import TranscriptionJob
+    import time
+    
+    def update_job(status=None, progress=None, current_step=None, **kwargs):
+        if job_id in transcription_jobs:
+            if status:
+                transcription_jobs[job_id]['status'] = status
+            if progress is not None:
+                transcription_jobs[job_id]['progress'] = progress
+            if current_step:
+                transcription_jobs[job_id]['current_step'] = current_step
+            transcription_jobs[job_id].update(kwargs)
+        
+        # Update database
+        session = get_session()
+        try:
+            job = session.query(TranscriptionJob).filter_by(id=job_id).first()
+            if job:
+                if status:
+                    job.status = status
+                if progress is not None:
+                    job.progress = progress
+                if current_step:
+                    job.current_step = current_step
+                for key, value in kwargs.items():
+                    if hasattr(job, key):
+                        setattr(job, key, value)
+                session.commit()
+        except Exception as e:
+            print(f"[TranscriptionJob] Error updating job: {e}")
+            session.rollback()
+        finally:
+            session.close()
+    
+    try:
+        update_job(status='processing', progress=5, current_step='Iniciando transcrição...', started_at=datetime.now().isoformat())
+        
+        # Check if file exists
+        if not os.path.exists(video_path):
+            update_job(status='failed', error_message=f'Arquivo não encontrado: {video_path}')
+            return
+        
+        update_job(progress=10, current_step='Extraindo áudio...')
+        
+        # Use ai_services to transcribe
+        result = ai_services.transcribe_audio_from_video(video_path, match_id=match_id)
+        
+        if result.get('success'):
+            update_job(
+                status='completed',
+                progress=100,
+                current_step='Transcrição concluída!',
+                srt_content=result.get('srtContent'),
+                plain_text=result.get('text'),
+                provider_used=result.get('provider', 'unknown'),
+                completed_at=datetime.now().isoformat()
+            )
+            
+            # Save to storage
+            if result.get('srtContent'):
+                save_file(match_id, 'srt', result['srtContent'].encode('utf-8'), 'transcription.srt')
+            if result.get('text'):
+                save_file(match_id, 'texts', result['text'].encode('utf-8'), 'transcription.txt')
+        else:
+            update_job(
+                status='failed',
+                error_message=result.get('error', 'Erro desconhecido na transcrição')
+            )
+    except Exception as e:
+        print(f"[TranscriptionJob] Exception: {e}")
+        update_job(status='failed', error_message=str(e))
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
-if __name__ == '__main__':
-    print("=" * 60)
+def print_startup_status():
+    """Imprime status detalhado no startup."""
+    from database import get_database_path, get_base_dir
+    
+    print("\n" + "=" * 60)
     print("Arena Play - Servidor API Local")
     print("=" * 60)
-    print(f"Database: arena_play.db")
-    print(f"Storage: {STORAGE_DIR}")
-    print(f"Vinhetas: {VIGNETTES_DIR}")
-    print("=" * 60)
+    
+    print("\n[Caminhos]")
+    print(f"  Base Dir:   {get_base_dir()}")
+    print(f"  Database:   {get_database_path()}")
+    print(f"  Storage:    {STORAGE_DIR.absolute()}")
+    print(f"  Vinhetas:   {VIGNETTES_DIR.absolute()}")
+    
+    print("\n[Provedores de IA]")
+    print(f"  Gemini:     {'✓ Ativo' if ai_services.GOOGLE_API_KEY and ai_services.GEMINI_ENABLED else '✗ Inativo'}")
+    print(f"  OpenAI:     {'✓ Ativo' if ai_services.OPENAI_API_KEY and ai_services.OPENAI_ENABLED else '✗ Inativo'}")
+    print(f"  ElevenLabs: {'✓ Ativo' if ai_services.ELEVENLABS_API_KEY and ai_services.ELEVENLABS_ENABLED else '✗ Inativo'}")
+    print(f"  Lovable:    {'✓ Ativo' if ai_services.LOVABLE_API_KEY else '✗ Inativo'}")
+    print(f"  Ollama:     {'✓ Ativo (' + ai_services.OLLAMA_MODEL + ')' if ai_services.OLLAMA_ENABLED else '✗ Inativo'}")
+    
+    # Capabilities
+    has_transcription = any([
+        ai_services.ELEVENLABS_API_KEY and ai_services.ELEVENLABS_ENABLED,
+        ai_services.OPENAI_API_KEY and ai_services.OPENAI_ENABLED,
+        ai_services.GOOGLE_API_KEY and ai_services.GEMINI_ENABLED,
+        ai_services.LOVABLE_API_KEY
+    ])
+    has_analysis = any([
+        ai_services.GOOGLE_API_KEY and ai_services.GEMINI_ENABLED,
+        ai_services.OPENAI_API_KEY and ai_services.OPENAI_ENABLED,
+        ai_services.LOVABLE_API_KEY,
+        ai_services.OLLAMA_ENABLED
+    ])
+    
+    print("\n[Capacidades]")
+    print(f"  Transcrição: {'✓' if has_transcription else '✗ NENHUM PROVIDER CONFIGURADO'}")
+    print(f"  Análise:     {'✓' if has_analysis else '✗ NENHUM PROVIDER CONFIGURADO'}")
+    
+    print("\n" + "=" * 60)
     print("Endpoints principais:")
     print("  GET  /health                          - Status do servidor")
+    print("  GET  /api/settings                    - Configurações unificadas")
     print("  GET  /api/teams                       - Listar times")
     print("  GET  /api/matches                     - Listar partidas")
-    print("  GET  /api/matches/<id>                - Detalhes da partida")
+    print("  POST /api/transcription-jobs          - Criar job de transcrição")
+    print("  GET  /api/transcription-jobs/<id>     - Status do job")
     print("  POST /api/analyze-match               - Analisar partida")
-    print("  POST /api/process-match-async         - Pipeline assíncrono")
-    print("  GET  /api/process-match-async/status  - Status do pipeline")
-    print("  POST /api/chatbot                     - Chatbot Arena")
-    print("  POST /extract-clip                    - Extrair clip")
-    print("  POST /api/storage/<id>/videos/download-url - Download por URL")
-    print("=" * 60)
+    print("=" * 60 + "\n")
+
+
+if __name__ == '__main__':
+    print_startup_status()
     app.run(host='0.0.0.0', port=5000, debug=True)
+
