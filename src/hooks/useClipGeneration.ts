@@ -1,10 +1,12 @@
 // Real clip extraction using FFmpeg.wasm
 // Extracts 10-second clips (5s before + 5s after event) from original video
+// Also generates thumbnail from clip frame automatically
 
 import { useState, useCallback, useRef } from 'react';
 import { fetchFile } from '@ffmpeg/util';
 import { supabase } from '@/integrations/supabase/client';
 import { getFFmpeg } from '@/lib/ffmpegSingleton';
+import { apiClient } from '@/lib/apiClient';
 
 // Timing constants in milliseconds
 export const CLIP_BUFFER_BEFORE_MS = 3000; // 3 seconds before event
@@ -53,8 +55,22 @@ const EVENT_TYPE_LABELS: Record<string, string> = {
   'interception': 'INTERCEPTAÇÃO',
 };
 
+// Badge colors based on event type
+const EVENT_BADGE_COLORS: Record<string, { bg: string; text: string }> = {
+  goal: { bg: '#10b981', text: '#ffffff' },
+  shot: { bg: '#f59e0b', text: '#ffffff' },
+  shot_on_target: { bg: '#f59e0b', text: '#ffffff' },
+  save: { bg: '#3b82f6', text: '#ffffff' },
+  foul: { bg: '#ef4444', text: '#ffffff' },
+  yellow_card: { bg: '#eab308', text: '#000000' },
+  red_card: { bg: '#dc2626', text: '#ffffff' },
+  corner: { bg: '#8b5cf6', text: '#ffffff' },
+  penalty: { bg: '#ec4899', text: '#ffffff' },
+  offside: { bg: '#6366f1', text: '#ffffff' },
+};
+
 export interface ClipGenerationProgress {
-  stage: 'idle' | 'loading' | 'downloading' | 'extracting' | 'uploading' | 'complete' | 'error';
+  stage: 'idle' | 'loading' | 'downloading' | 'extracting' | 'uploading' | 'thumbnail' | 'complete' | 'error';
   progress: number;
   message: string;
   currentEvent?: string;
@@ -74,6 +90,183 @@ function msToFFmpegTimestamp(ms: number): string {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
   return `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}:${seconds.toFixed(3).padStart(6, '0')}`;
+}
+
+// Helper: Extract frame from video blob and create thumbnail with overlay
+async function extractThumbnailFromClip(
+  clipBlob: Blob,
+  config: {
+    eventId: string;
+    eventType?: string;
+    eventMinute?: number;
+    matchId: string;
+  }
+): Promise<string | null> {
+  return new Promise((resolve) => {
+    const video = document.createElement('video');
+    video.muted = true;
+    video.preload = 'metadata';
+    
+    const objectUrl = URL.createObjectURL(clipBlob);
+    
+    const cleanup = () => {
+      URL.revokeObjectURL(objectUrl);
+      video.remove();
+    };
+    
+    video.onloadedmetadata = () => {
+      // Seek to 3 seconds (where the event actually happens after the buffer)
+      video.currentTime = Math.min(3, video.duration - 0.1);
+    };
+    
+    video.onseeked = async () => {
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth || 1280;
+        canvas.height = video.videoHeight || 720;
+        
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          cleanup();
+          resolve(null);
+          return;
+        }
+        
+        // Draw video frame
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        
+        // Add overlay with event info
+        const eventLabel = config.eventType ? (EVENT_TYPE_LABELS[config.eventType] || config.eventType.toUpperCase().replace(/_/g, ' ')) : '';
+        const minute = config.eventMinute ?? 0;
+        const colors = EVENT_BADGE_COLORS[config.eventType || ''] || { bg: '#10b981', text: '#ffffff' };
+        
+        const scale = canvas.width / 1280;
+        const padding = 20 * scale;
+        const badgeHeight = 50 * scale;
+        const fontSize = 28 * scale;
+        const minuteFontSize = 36 * scale;
+        
+        // Draw semi-transparent gradient at bottom
+        const gradient = ctx.createLinearGradient(0, canvas.height - 120 * scale, 0, canvas.height);
+        gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+        gradient.addColorStop(1, 'rgba(0, 0, 0, 0.7)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, canvas.height - 120 * scale, canvas.width, 120 * scale);
+        
+        // Draw event type badge (bottom left)
+        if (eventLabel) {
+          ctx.font = `bold ${fontSize}px sans-serif`;
+          const textMetrics = ctx.measureText(eventLabel);
+          const badgeWidth = textMetrics.width + 30 * scale;
+          const badgeX = padding;
+          const badgeY = canvas.height - padding - badgeHeight;
+          const radius = 8 * scale;
+          
+          // Badge background with rounded corners
+          ctx.fillStyle = colors.bg;
+          ctx.beginPath();
+          ctx.moveTo(badgeX + radius, badgeY);
+          ctx.lineTo(badgeX + badgeWidth - radius, badgeY);
+          ctx.quadraticCurveTo(badgeX + badgeWidth, badgeY, badgeX + badgeWidth, badgeY + radius);
+          ctx.lineTo(badgeX + badgeWidth, badgeY + badgeHeight - radius);
+          ctx.quadraticCurveTo(badgeX + badgeWidth, badgeY + badgeHeight, badgeX + badgeWidth - radius, badgeY + badgeHeight);
+          ctx.lineTo(badgeX + radius, badgeY + badgeHeight);
+          ctx.quadraticCurveTo(badgeX, badgeY + badgeHeight, badgeX, badgeY + badgeHeight - radius);
+          ctx.lineTo(badgeX, badgeY + radius);
+          ctx.quadraticCurveTo(badgeX, badgeY, badgeX + radius, badgeY);
+          ctx.closePath();
+          ctx.fill();
+          
+          // Badge text
+          ctx.fillStyle = colors.text;
+          ctx.textBaseline = 'middle';
+          ctx.fillText(eventLabel, badgeX + 15 * scale, badgeY + badgeHeight / 2);
+        }
+        
+        // Draw minute badge (bottom right)
+        const minuteText = `${minute}'`;
+        ctx.font = `bold ${minuteFontSize}px sans-serif`;
+        const minuteMetrics = ctx.measureText(minuteText);
+        const minuteBadgeWidth = minuteMetrics.width + 30 * scale;
+        const minuteBadgeX = canvas.width - padding - minuteBadgeWidth;
+        const badgeY = canvas.height - padding - badgeHeight;
+        const radius = 8 * scale;
+        
+        // Minute badge background
+        ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+        ctx.beginPath();
+        ctx.moveTo(minuteBadgeX + radius, badgeY);
+        ctx.lineTo(minuteBadgeX + minuteBadgeWidth - radius, badgeY);
+        ctx.quadraticCurveTo(minuteBadgeX + minuteBadgeWidth, badgeY, minuteBadgeX + minuteBadgeWidth, badgeY + radius);
+        ctx.lineTo(minuteBadgeX + minuteBadgeWidth, badgeY + badgeHeight - radius);
+        ctx.quadraticCurveTo(minuteBadgeX + minuteBadgeWidth, badgeY + badgeHeight, minuteBadgeX + minuteBadgeWidth - radius, badgeY + badgeHeight);
+        ctx.lineTo(minuteBadgeX + radius, badgeY + badgeHeight);
+        ctx.quadraticCurveTo(minuteBadgeX, badgeY + badgeHeight, minuteBadgeX, badgeY + badgeHeight - radius);
+        ctx.lineTo(minuteBadgeX, badgeY + radius);
+        ctx.quadraticCurveTo(minuteBadgeX, badgeY, minuteBadgeX + radius, badgeY);
+        ctx.closePath();
+        ctx.fill();
+        
+        // Green accent line
+        ctx.fillStyle = '#10b981';
+        ctx.fillRect(minuteBadgeX, badgeY + 5 * scale, 4 * scale, badgeHeight - 10 * scale);
+        
+        // Minute text
+        ctx.fillStyle = '#ffffff';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(minuteText, minuteBadgeX + 15 * scale, badgeY + badgeHeight / 2);
+        
+        // Convert to blob and upload
+        const imageBlob = await new Promise<Blob | null>((res) => {
+          canvas.toBlob((b) => res(b), 'image/jpeg', 0.90);
+        });
+        
+        if (!imageBlob) {
+          cleanup();
+          canvas.remove();
+          resolve(null);
+          return;
+        }
+        
+        // Upload to local storage
+        const fileName = `${config.eventId}-frame.jpg`;
+        const uploadResult = await apiClient.uploadBlob(config.matchId, 'images', imageBlob, fileName);
+        const imageUrl = uploadResult.url;
+        const title = `${eventLabel} - ${minute}'`;
+        
+        // Save to database
+        await apiClient.createThumbnail({
+          event_id: config.eventId,
+          match_id: config.matchId,
+          image_url: imageUrl,
+          event_type: config.eventType || 'event',
+          title
+        });
+        
+        cleanup();
+        canvas.remove();
+        resolve(imageUrl);
+      } catch (err) {
+        console.error('Error extracting thumbnail:', err);
+        cleanup();
+        resolve(null);
+      }
+    };
+    
+    video.onerror = () => {
+      cleanup();
+      resolve(null);
+    };
+    
+    // Set timeout
+    setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, 10000);
+    
+    video.src = objectUrl;
+    video.load();
+  });
 }
 
 export function useClipGeneration() {
@@ -276,18 +469,39 @@ export function useClipGeneration() {
       // Update match_events with clip_url
       const { error: updateError } = await supabase
         .from('match_events')
-        .update({ clip_url: clipUrl })
+        .update({ clip_url: clipUrl, clip_pending: false })
         .eq('id', config.eventId);
 
       if (updateError) {
         console.error('Erro ao atualizar evento:', updateError);
       }
 
+      // Auto-generate thumbnail from clip
+      setProgress(prev => ({
+        ...prev,
+        stage: 'thumbnail',
+        progress: 85,
+        message: 'Gerando capa do clip...'
+      }));
+
+      try {
+        await extractThumbnailFromClip(clipBlob, {
+          eventId: config.eventId,
+          eventType: config.eventType,
+          eventMinute: config.eventMinute,
+          matchId: config.matchId
+        });
+        console.log('Thumbnail gerada automaticamente para evento:', config.eventId);
+      } catch (thumbError) {
+        console.warn('Erro ao gerar thumbnail automática:', thumbError);
+        // Continue - thumbnail generation is not critical
+      }
+
       setProgress(prev => ({
         ...prev,
         stage: 'complete',
         progress: 100,
-        message: 'Clip gerado com sucesso!'
+        message: 'Clip e capa gerados com sucesso!'
       }));
 
       return clipUrl;
