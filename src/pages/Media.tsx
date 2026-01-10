@@ -81,7 +81,7 @@ export default function Media() {
 
   const queryClient = useQueryClient();
   
-  const { thumbnails, generateThumbnail, generateAllThumbnails, extractFrameFromVideo, extractAllFrames, isGenerating, isExtracting, getThumbnail, generatingIds, extractingIds } = useThumbnailGeneration(matchId);
+  const { thumbnails, extractFrameFromVideo, isExtracting, getThumbnail, extractingIds } = useThumbnailGeneration(matchId);
   
   // Clip generation hook for FFmpeg extraction
   const { 
@@ -513,88 +513,36 @@ export default function Media() {
                   </Button>
                 )}
 
-                {/* Extract frames from clip/video - prioritize clip_url for accurate event frame */}
-                {matchVideo && clips.length > 0 && clips.some(c => !getThumbnail(c.id) && (c.clipUrl || c.canExtract)) && (
+                {/* Extract frames from clip - ALWAYS from the clip itself */}
+                {clips.length > 0 && clips.some(c => !getThumbnail(c.id) && c.clipUrl) && (
                   <Button 
                     variant="arena" 
                     size="sm"
-                    onClick={() => {
-                      const eventsToExtract = clips
-                        .filter(c => !getThumbnail(c.id) && (c.clipUrl || (c.canExtract && c.eventVideo)))
-                        .map(c => {
-                          // Prioritize clip_url - extract frame from the actual clip
-                          // Clip has 3 second buffer before event, so frame at ~3s is the event moment
-                          if (c.clipUrl) {
-                            return {
-                              eventId: c.id,
-                              eventType: c.type,
-                              videoUrl: c.clipUrl,
-                              timestamp: 3, // Event moment in clip (after 3s buffer)
-                              matchId: matchId
-                            };
-                          }
-                          // Fallback: use original video at event timestamp
-                          return {
-                            eventId: c.id,
-                            eventType: c.type,
-                            videoUrl: c.eventVideo!.file_url,
-                            timestamp: c.videoRelativeSeconds,
-                            matchId: matchId
-                          };
+                    onClick={async () => {
+                      // Only extract from clips that have clipUrl - always use the clip itself
+                      const clipsWithVideo = clips.filter(c => !getThumbnail(c.id) && c.clipUrl);
+                      
+                      for (const clip of clipsWithVideo) {
+                        // Extract frame at 3 seconds (event moment after buffer)
+                        await extractFrameFromVideo({
+                          eventId: clip.id,
+                          eventType: clip.type,
+                          videoUrl: clip.clipUrl!,
+                          timestamp: 3, // Event moment in clip (after 3s buffer)
+                          matchId: matchId
                         });
-                      extractAllFrames(
-                        eventsToExtract.map(e => ({ id: e.eventId, event_type: e.eventType, minute: Math.floor(e.timestamp / 60), second: e.timestamp % 60 })),
-                        eventsToExtract[0]?.videoUrl || '',
-                        matchId
-                      );
+                        // Small delay between extractions
+                        await new Promise(resolve => setTimeout(resolve, 300));
+                      }
                     }}
-                    disabled={extractingIds.size > 0 || generatingIds.size > 0 || isGeneratingClips}
+                    disabled={extractingIds.size > 0 || isGeneratingClips}
                   >
                     {extractingIds.size > 0 ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
                       <Image className="mr-2 h-4 w-4" />
                     )}
-                    Extrair Capas ({clips.filter(c => !getThumbnail(c.id) && (c.clipUrl || c.canExtract)).length})
-                  </Button>
-                )}
-                
-                {/* Generate AI thumbnails button */}
-                {clips.length > 0 && clips.some(c => !getThumbnail(c.id)) && (
-                  <Button 
-                    variant="outline" 
-                    size="sm"
-                    onClick={() => {
-                      const eventsToGenerate = clips
-                        .filter(c => !getThumbnail(c.id))
-                        .map(c => ({
-                          eventId: c.id,
-                          eventType: c.type,
-                          minute: c.minute,
-                          homeTeam: selectedMatch?.home_team?.name || 'Time Casa',
-                          awayTeam: selectedMatch?.away_team?.name || 'Time Fora',
-                          homeScore: selectedMatch?.home_score || 0,
-                          awayScore: selectedMatch?.away_score || 0,
-                          matchId: matchId,
-                          description: c.description
-                        }));
-                      generateAllThumbnails(
-                        eventsToGenerate.map(e => ({ id: e.eventId, event_type: e.eventType, minute: e.minute, description: e.description })),
-                        eventsToGenerate[0]?.homeTeam || 'Time Casa',
-                        eventsToGenerate[0]?.awayTeam || 'Time Fora',
-                        eventsToGenerate[0]?.homeScore || 0,
-                        eventsToGenerate[0]?.awayScore || 0,
-                        matchId
-                      );
-                    }}
-                    disabled={generatingIds.size > 0 || extractingIds.size > 0 || isGeneratingClips}
-                  >
-                    {generatingIds.size > 0 ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Sparkles className="mr-2 h-4 w-4" />
-                    )}
-                    Gerar Capas IA
+                    Extrair Capas ({clips.filter(c => !getThumbnail(c.id) && c.clipUrl).length})
                   </Button>
                 )}
               </div>
@@ -739,7 +687,6 @@ export default function Media() {
                   .map(clip => {
                   const thumbnail = getThumbnail(clip.id);
                   const isPlaying = playingClipId === clip.id;
-                  const isGeneratingThumbnail = isGenerating(clip.id);
                   const isExtractingFrame = isExtracting(clip.id);
                   const isExtractingClip = isGeneratingClip(clip.id);
                   const hasExtractedClip = !!clip.clipUrl;
@@ -800,21 +747,6 @@ export default function Media() {
                       matchId: matchId
                     });
                   };
-
-                  const handleGenerateThumbnail = () => {
-                    generateThumbnail({
-                      eventId: clip.id,
-                      eventType: clip.type,
-                      minute: clip.minute,
-                      homeTeam: selectedMatch?.home_team?.name || 'Time Casa',
-                      awayTeam: selectedMatch?.away_team?.name || 'Time Fora',
-                      homeScore: selectedMatch?.home_score || 0,
-                      awayScore: selectedMatch?.away_score || 0,
-                      matchId: matchId,
-                      description: clip.description
-                    });
-                  };
-                  
                   return (
                     <Card key={clip.id} variant="glow" className={`overflow-hidden ${!canExtractClip ? 'opacity-75' : ''}`}>
                       <div className="relative aspect-video bg-muted">
@@ -824,12 +756,10 @@ export default function Media() {
                             alt={clip.title}
                             className="w-full h-full object-cover"
                           />
-                        ) : isGeneratingThumbnail || isExtractingFrame ? (
+                        ) : isExtractingFrame ? (
                           <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-br from-primary/20 to-primary/5">
                             <Loader2 className="h-8 w-8 animate-spin text-primary mb-2" />
-                            <p className="text-xs text-muted-foreground">
-                              {isExtractingFrame ? 'Extraindo frame...' : 'Gerando capa...'}
-                            </p>
+                            <p className="text-xs text-muted-foreground">Extraindo frame...</p>
                           </div>
                         ) : (
                           <div className="absolute inset-0 bg-gradient-to-br from-primary/20 to-primary/5 flex flex-col items-center justify-center gap-2">
@@ -907,7 +837,7 @@ export default function Media() {
                           </p>
                         )}
                         <div className="mt-4 flex gap-2">
-                          {!thumbnail?.imageUrl && !isGeneratingThumbnail && (clip.clipUrl || matchVideo) && (
+                          {!thumbnail?.imageUrl && !isExtractingFrame && clip.clipUrl && (
                             <Button 
                               variant="outline" 
                               size="sm" 
