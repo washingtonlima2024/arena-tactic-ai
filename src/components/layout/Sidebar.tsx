@@ -12,7 +12,8 @@ import {
   Radio,
   ShieldCheck,
   Ruler,
-  Layers
+  Layers,
+  Share2
 } from 'lucide-react';
 import { NavLink, Link } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -34,6 +35,7 @@ const navItems = [
   { icon: Calendar, label: 'Eventos', path: '/events' },
   { icon: Scissors, label: 'Cortes & Mídia', path: '/media' },
   { icon: Mic, label: 'Podcast & Locução', path: '/audio' },
+  { icon: Share2, label: 'Redes Sociais', path: '/social' },
   { icon: Ruler, label: 'Campo FIFA', path: '/field' },
   { icon: Settings, label: 'Configurações', path: '/settings' },
 ];
