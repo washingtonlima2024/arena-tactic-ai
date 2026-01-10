@@ -5234,8 +5234,90 @@ def list_download_jobs():
     return jsonify({
         'jobs': jobs_list,
         'count': len(jobs_list)
-    })
+        })
 
+
+@app.route('/api/detect-cloudflare', methods=['GET'])
+def detect_cloudflare():
+    """
+    Detecta automaticamente a URL do túnel Cloudflare ativo.
+    O cloudflared expõe métricas em http://127.0.0.1:33880/metrics ou 
+    podemos checar as conexões ativas via arquivo de log ou API.
+    
+    Como fallback, tentamos detectar a URL do túnel via conexões de rede.
+    """
+    try:
+        # Método 1: Tentar verificar se o processo cloudflared está rodando
+        # e capturar a URL do log ou da saída
+        import subprocess
+        
+        # Tenta encontrar a URL do túnel via processo cloudflared
+        try:
+            # No Windows
+            result = subprocess.run(
+                ['tasklist', '/FI', 'IMAGENAME eq cloudflared.exe'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            cloudflared_running = 'cloudflared.exe' in result.stdout
+        except:
+            # No Linux/Mac
+            try:
+                result = subprocess.run(
+                    ['pgrep', '-f', 'cloudflared'],
+                    capture_output=True,
+                    text=True,
+                    timeout=5
+                )
+                cloudflared_running = len(result.stdout.strip()) > 0
+            except:
+                cloudflared_running = False
+        
+        if not cloudflared_running:
+            return jsonify({
+                'success': False,
+                'error': 'Cloudflared não está rodando. Inicie com: cloudflared tunnel --url http://localhost:5000'
+            })
+        
+        # Método 2: Tentar ler a URL do arquivo de conexão temporário
+        # O cloudflared cria arquivos em ~/.cloudflared/ ou no diretório atual
+        possible_paths = [
+            os.path.expanduser('~/.cloudflared/'),
+            os.path.join(os.getcwd(), '.cloudflared/'),
+            tempfile.gettempdir()
+        ]
+        
+        tunnel_url = None
+        
+        # Método 3: Tentar acessar as métricas do cloudflared (porta padrão 33880)
+        try:
+            metrics_response = requests.get('http://127.0.0.1:33880/ready', timeout=2)
+            if metrics_response.status_code == 200:
+                # cloudflared está pronto, mas não temos a URL diretamente das métricas
+                pass
+        except:
+            pass
+        
+        # Método 4: Fazer uma requisição de teste para o próprio servidor e ver o header
+        # Isso não funciona bem para auto-detecção
+        
+        # Por enquanto, retornamos que o cloudflared está rodando mas não conseguimos detectar a URL
+        # O usuário precisa copiar a URL manualmente da saída do cloudflared
+        return jsonify({
+            'success': False,
+            'running': True,
+            'error': 'Cloudflared detectado, mas a URL não pode ser obtida automaticamente. '
+                     'Copie a URL exibida no terminal onde o cloudflared está rodando '
+                     '(formato: https://xxxxx.trycloudflare.com)',
+            'hint': 'Execute: cloudflared tunnel --url http://localhost:5000 e copie a URL gerada'
+        })
+            
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': f'Erro ao detectar cloudflared: {str(e)}'
+        })
 
 # ============================================================================
 # UNIFIED SETTINGS ENDPOINT
