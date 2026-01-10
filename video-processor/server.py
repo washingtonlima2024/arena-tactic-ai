@@ -1496,6 +1496,23 @@ def delete_event(event_id: str):
         session.close()
 
 
+@app.route('/api/matches/<match_id>/events', methods=['DELETE'])
+def clear_match_events(match_id: str):
+    """Remove todos os eventos de uma partida."""
+    session = get_session()
+    try:
+        deleted_count = session.query(MatchEvent).filter_by(match_id=match_id).delete()
+        session.commit()
+        print(f"[CLEAR-EVENTS] ✓ {deleted_count} eventos removidos da partida {match_id}")
+        return jsonify({'success': True, 'deleted_count': deleted_count})
+    except Exception as e:
+        session.rollback()
+        print(f"[CLEAR-EVENTS] ❌ Erro: {e}")
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
 # ============================================================================
 # PLAYERS API
 # ============================================================================
@@ -2075,9 +2092,37 @@ def analyze_match():
         print(f"[ANALYZE-MATCH] Gols detectados: {len(goal_events)}")
         print(f"[ANALYZE-MATCH] ═══════════════════════════════════════")
         
+        # Save transcription to file for debugging
+        try:
+            transcription_file = f'{match_half}_transcription.txt'
+            from storage import save_file
+            save_file(match_id, 'texts', transcription_file, transcription.encode('utf-8'))
+            print(f"[ANALYZE-MATCH] ✓ Transcrição salva: {transcription_file}")
+        except Exception as e:
+            print(f"[ANALYZE-MATCH] ⚠️ Erro ao salvar transcrição: {e}")
+        
+        # Log transcription preview for debugging
+        print(f"[ANALYZE-MATCH] ═══════════════════════════════════════")
+        print(f"[ANALYZE-MATCH] TRANSCRIÇÃO PREVIEW ({len(transcription)} chars):")
+        print(f"[ANALYZE-MATCH] {transcription[:500]}...")
+        print(f"[ANALYZE-MATCH] ═══════════════════════════════════════")
+        
         # Save events to database and collect their IDs
         session = get_session()
         saved_events = []
+        
+        # IMPORTANT: Delete existing events for this half to avoid duplicates
+        try:
+            deleted_count = session.query(MatchEvent).filter_by(
+                match_id=match_id,
+                match_half=match_half
+            ).delete()
+            session.commit()
+            if deleted_count > 0:
+                print(f"[ANALYZE-MATCH] ✓ {deleted_count} eventos anteriores do {match_half} removidos")
+        except Exception as del_err:
+            print(f"[ANALYZE-MATCH] ⚠️ Erro ao remover eventos antigos: {del_err}")
+            session.rollback()
         try:
             for event_data in events:
                 # Adjust minute based on half type
