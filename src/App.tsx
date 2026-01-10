@@ -20,6 +20,7 @@ import MatchDashboard from "./pages/MatchDashboard";
 import Events from "./pages/Events";
 import Media from "./pages/Media";
 import Audio from "./pages/Audio";
+import Social from "./pages/Social";
 import Settings from "./pages/Settings";
 import Auth from "./pages/Auth";
 import Field from "./pages/Field";
@@ -66,6 +67,7 @@ const App = () => (
                 <Route path="/events" element={<RequireAuth><Events /></RequireAuth>} />
                 <Route path="/media" element={<RequireAuth><Media /></RequireAuth>} />
                 <Route path="/audio" element={<RequireAuth><Audio /></RequireAuth>} />
+                <Route path="/social" element={<RequireAuth><Social /></RequireAuth>} />
                 <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
                 <Route path="/field" element={<RequireAuth><Field /></RequireAuth>} />
                 <Route path="*" element={<NotFound />} />
