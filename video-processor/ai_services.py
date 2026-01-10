@@ -1741,30 +1741,19 @@ def transcribe_large_video(
     import math
     from storage import get_file_path, STORAGE_DIR, save_file, get_match_storage_path
     
-    # Check if any transcription API is available and enabled
+    # ===== MODO SIMPLIFICADO: APENAS WHISPER LOCAL (GRATUITO) =====
     local_whisper_available = LOCAL_WHISPER_ENABLED
-    elevenlabs_available = bool(ELEVENLABS_API_KEY) and ELEVENLABS_ENABLED
-    openai_available = bool(OPENAI_API_KEY) and OPENAI_ENABLED
-    gemini_available = (bool(GOOGLE_API_KEY) or bool(LOVABLE_API_KEY)) and GEMINI_ENABLED
     
-    # Debug log das chaves configuradas
-    print(f"[Transcribe] DEBUG - Chaves configuradas:")
-    print(f"  LOCAL_WHISPER_ENABLED: {'✓ modelo=' + LOCAL_WHISPER_MODEL if LOCAL_WHISPER_ENABLED else '✗ desativado'}")
-    print(f"  GOOGLE_API_KEY: {'✓ ' + GOOGLE_API_KEY[:10] + '...' if GOOGLE_API_KEY else '✗ não configurada'}")
-    print(f"  LOVABLE_API_KEY: {'✓ ' + LOVABLE_API_KEY[:10] + '...' if LOVABLE_API_KEY else '✗ não configurada'}")
-    print(f"  OPENAI_API_KEY: {'✓ ' + OPENAI_API_KEY[:10] + '...' if OPENAI_API_KEY else '✗ não configurada'}")
-    print(f"  ELEVENLABS_API_KEY: {'✓ ' + ELEVENLABS_API_KEY[:10] + '...' if ELEVENLABS_API_KEY else '✗ não configurada'}")
-    print(f"  GEMINI_ENABLED: {GEMINI_ENABLED}")
-    
-    if not local_whisper_available and not elevenlabs_available and not openai_available and not gemini_available:
+    if not local_whisper_available:
         raise ValueError(
-            "Nenhuma API de transcrição ativa. "
-            f"Chaves detectadas: LocalWhisper={'✓' if LOCAL_WHISPER_ENABLED else '✗'}, GEMINI={'✓' if GOOGLE_API_KEY else '✗'}, OPENAI={'✓' if OPENAI_API_KEY else '✗'}, ELEVENLABS={'✓' if ELEVENLABS_API_KEY else '✗'}. "
-            "Configure Whisper Local gratuito ou uma chave de API em Configurações > APIs."
+            "🆓 Whisper Local não está ativado. "
+            "Ative a transcrição gratuita em Configurações > APIs > Whisper Local. "
+            "Não requer API key, funciona 100% offline!"
         )
     
-    print(f"[Transcribe] Iniciando transcrição para: {video_url}")
-    print(f"[Transcribe] APIs ativas: LocalWhisper={'✓' if local_whisper_available else '✗'}, ElevenLabs={'✓' if elevenlabs_available else '✗'}, Whisper={'✓' if openai_available else '✗'}, Gemini={'✓' if gemini_available else '✗'}")
+    print(f"[Transcribe] 🆓 MODO: APENAS Whisper Local (gratuito, offline)")
+    print(f"[Transcribe]   Modelo: {LOCAL_WHISPER_MODEL}")
+    print(f"[Transcribe]   Vídeo: {video_url}")
     
     with tempfile.TemporaryDirectory() as tmpdir:
         video_path = os.path.join(tmpdir, 'video.mp4')
@@ -1841,58 +1830,16 @@ def transcribe_large_video(
         # ========== TRANSCRIPTION ==========
         transcription_result = None
         
-        # ===== NEW: Try Local Whisper first (FREE!) =====
-        if local_whisper_available:
-            print(f"[Transcribe] 🆓 Tentando Whisper Local (gratuito, modelo={LOCAL_WHISPER_MODEL})...")
-            transcription_result = _transcribe_with_local_whisper(audio_path, match_id)
-            if transcription_result.get('success'):
-                print(f"[Transcribe] ✓ Whisper Local sucesso! (gratuito)")
-            else:
-                print(f"[Transcribe] ⚠ Whisper Local falhou: {transcription_result.get('error', 'Unknown')}")
-                transcription_result = None
+        # ===== ÚNICO PROVEDOR: Whisper Local (GRATUITO!) =====
+        print(f"[Transcribe] 🆓 Iniciando Whisper Local (modelo={LOCAL_WHISPER_MODEL}, áudio={audio_size_mb:.1f}MB)...")
+        transcription_result = _transcribe_with_local_whisper(audio_path, match_id)
         
-        # Try ElevenLabs (supports larger files) - only if enabled
-        if not transcription_result and elevenlabs_available:
-            print(f"[Transcribe] Tentando ElevenLabs Scribe...")
-            transcription_result = _transcribe_with_elevenlabs(audio_path, match_id)
-            if transcription_result.get('success'):
-                print(f"[Transcribe] ✓ ElevenLabs sucesso!")
-            else:
-                print(f"[Transcribe] ⚠ ElevenLabs falhou: {transcription_result.get('error', 'Unknown')}")
-                transcription_result = None
-        
-        # Fallback to Whisper API - only if enabled
-        if not transcription_result and openai_available:
-            print(f"[Transcribe] Usando Whisper como fallback...")
-            
-            # Whisper API limit is ~25MB, use 24MB as safe threshold
-            if audio_size_mb <= 24:
-                # Direct transcription for small files
-                print(f"[Transcribe] Arquivo pequeno, transcrição direta...")
-                transcription_result = _transcribe_audio_file(audio_path, match_id)
-                if not transcription_result.get('success'):
-                    print(f"[Transcribe] ⚠ Whisper falhou: {transcription_result.get('error', 'Unknown')}")
-                    transcription_result = None
-            else:
-                # Multi-chunk transcription for large files
-                print(f"[Transcribe] Arquivo grande ({audio_size_mb:.2f} MB), usando multi-chunk...")
-                transcription_result = _transcribe_multi_chunk(audio_path, tmpdir, match_id, max_chunk_size_mb)
-                if not transcription_result.get('success'):
-                    print(f"[Transcribe] ⚠ Whisper multi-chunk falhou: {transcription_result.get('error', 'Unknown')}")
-                    transcription_result = None
-        
-        # Fallback to Gemini - only if enabled and file is small enough
-        if not transcription_result and gemini_available and audio_size_mb <= 20:
-            print(f"[Transcribe] Tentando Gemini como fallback...")
-            transcription_result = _transcribe_with_gemini(audio_path, match_id)
-            if transcription_result.get('success'):
-                print(f"[Transcribe] ✓ Gemini sucesso!")
-            else:
-                print(f"[Transcribe] ⚠ Gemini falhou: {transcription_result.get('error', 'Unknown')}")
-                transcription_result = None
-        
-        if not transcription_result:
-            return {"error": "Todas as APIs de transcrição falharam"}
+        if transcription_result.get('success'):
+            print(f"[Transcribe] ✓ Whisper Local sucesso! (gratuito, offline)")
+        else:
+            error_msg = transcription_result.get('error', 'Unknown error')
+            print(f"[Transcribe] ✗ Whisper Local falhou: {error_msg}")
+            return {"error": f"Whisper Local falhou: {error_msg}. Verifique se 'faster-whisper' está instalado: pip install faster-whisper==1.1.0"}
         
         # ========== SAVE SRT AND TXT TO MATCH FOLDER ==========
         if match_id and transcription_result.get('success'):
