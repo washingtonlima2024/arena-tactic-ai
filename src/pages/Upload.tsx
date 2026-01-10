@@ -47,7 +47,7 @@ import { TranscriptionQueue } from '@/components/upload/TranscriptionQueue';
 import { AsyncProcessingProgress } from '@/components/upload/AsyncProcessingProgress';
 import { toast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/apiClient';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import arenaPlayWordmark from '@/assets/arena-play-wordmark.png';
 import { MatchSetupCard, MatchSetupData } from '@/components/upload/MatchSetupCard';
@@ -87,6 +87,7 @@ type WizardStep = 'choice' | 'existing' | 'match' | 'videos' | 'summary';
 export default function VideoUpload() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   
   // Check for existing match ID (when reimporting)
   const existingMatchId = searchParams.get('match');
@@ -227,23 +228,24 @@ export default function VideoUpload() {
   });
 
   // Fetch existing videos when reimporting a match
-  const { data: existingVideos } = useQuery({
-    queryKey: ['existing-videos', existingMatchId],
+  const activeMatchId = selectedExistingMatch || existingMatchId;
+  const { data: existingVideos, refetch: refetchVideos } = useQuery({
+    queryKey: ['existing-videos', activeMatchId],
     queryFn: async () => {
-      if (!existingMatchId) return [];
+      if (!activeMatchId) return [];
       try {
         // Sincronizar vídeos do storage primeiro (recupera vídeos órfãos)
-        await apiClient.syncVideos(existingMatchId).catch((e) => {
+        await apiClient.syncVideos(activeMatchId).catch((e) => {
           console.warn('[Upload] Sincronização de vídeos falhou:', e);
         });
         
-        const videos = await apiClient.getVideos(existingMatchId);
+        const videos = await apiClient.getVideos(activeMatchId);
         return videos || [];
       } catch {
         return [];
       }
     },
-    enabled: !!existingMatchId
+    enabled: !!activeMatchId
   });
 
   // Auto-load existing videos as segments when page loads with a match ID
@@ -2566,8 +2568,13 @@ export default function VideoUpload() {
         open={showTransferCommands}
         onOpenChange={setShowTransferCommands}
         matchId={getValidMatchId() || ''}
-        onSyncComplete={() => {
-          // Refetch videos list if we have query capability
+        onSyncComplete={async () => {
+          // Refetch videos list to update segments
+          await refetchVideos();
+          
+          // Force segments reload by clearing and let useEffect reload
+          setSegments([]);
+          
           toast({
             title: 'Vídeos sincronizados',
             description: 'A lista de vídeos foi atualizada.',
