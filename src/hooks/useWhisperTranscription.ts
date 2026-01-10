@@ -367,7 +367,7 @@ export function useWhisperTranscription() {
       message: 'Transcrevendo no servidor...' 
     });
 
-    const data = await apiClient.transcribeLargeVideo({ videoUrl, matchId, language: 'pt' }) as any;
+    const data = await apiClient.transcribeLargeVideo({ videoUrl, matchId, language: 'pt', halfType }) as any;
 
     if (!data?.success) {
       // Check if this is a size limit error requiring local server
@@ -382,11 +382,13 @@ export function useWhisperTranscription() {
     }
 
     console.log('[Server Fallback] ✓ Transcrição completa:', data.text?.length, 'caracteres');
+    if (data.audioPath) console.log('[Server Fallback] Áudio salvo em:', data.audioPath);
+    if (data.srtPath) console.log('[Server Fallback] SRT salvo em:', data.srtPath);
     
     return {
       srtContent: data.srtContent || '',
       text: data.text || data.srtContent || '',
-      audioUrl: ''
+      audioUrl: data.audioPath || ''
     };
   };
 
@@ -394,12 +396,14 @@ export function useWhisperTranscription() {
     videoUrl: string,
     matchId: string,
     videoId: string,
-    videoSizeMB?: number
+    videoSizeMB?: number,
+    halfType?: 'first' | 'second'
   ): Promise<TranscriptionResult | null> => {
     console.log('[Transcrição] ========================================');
     console.log('[Transcrição] Iniciando transcrição para:', videoUrl);
     console.log('[Transcrição] Match ID:', matchId);
     console.log('[Transcrição] Video ID:', videoId);
+    console.log('[Transcrição] Half Type:', halfType || 'não especificado');
     if (videoSizeMB) console.log('[Transcrição] Tamanho do vídeo (passado):', videoSizeMB, 'MB');
     
     setIsTranscribing(true);
@@ -418,7 +422,7 @@ export function useWhisperTranscription() {
           : 'Transcrevendo áudio...' 
       });
       
-      const serverResult = await transcribeWithServerFallback(videoUrl, matchId, videoId, videoSizeMB);
+      const serverResult = await transcribeWithServerFallback(videoUrl, matchId, videoId, videoSizeMB, halfType);
       if (serverResult && serverResult.text && serverResult.text.trim().length > 0) {
         console.log('[Transcrição] ✓ Transcrição completa:', serverResult.text.length, 'caracteres');
         setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });

@@ -417,11 +417,11 @@ export const apiClient = {
   transcribeAudio: (data: { audio: string; language?: string }) =>
     apiRequest<{ text: string }>('/api/transcribe-audio', { method: 'POST', body: JSON.stringify(data) }),
 
-  transcribeLargeVideo: async (data: { videoUrl: string; matchId?: string; language?: string; sizeBytes?: number }): Promise<{ success: boolean; text: string; srtContent?: string; requiresLocalServer?: boolean; suggestion?: string }> => {
+  transcribeLargeVideo: async (data: { videoUrl: string; matchId?: string; language?: string; sizeBytes?: number; halfType?: 'first' | 'second' }): Promise<{ success: boolean; text: string; srtContent?: string; audioPath?: string; srtPath?: string; txtPath?: string; requiresLocalServer?: boolean; suggestion?: string }> => {
     await ensureServerAvailable();
     
     // Usar timeout longo (30 minutos) para transcrição via servidor local
-    return apiRequestLongRunning<{ success: boolean; text: string; srtContent?: string; requiresLocalServer?: boolean; suggestion?: string }>(
+    return apiRequestLongRunning<{ success: boolean; text: string; srtContent?: string; audioPath?: string; srtPath?: string; txtPath?: string; requiresLocalServer?: boolean; suggestion?: string }>(
       '/api/transcribe-large-video',
       { method: 'POST', body: JSON.stringify(data) },
       1800000 // 30 minutos

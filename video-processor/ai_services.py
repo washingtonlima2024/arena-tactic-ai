@@ -1606,7 +1606,8 @@ Se houver múltiplos falantes, separe as falas com quebras de linha.'''
 def transcribe_large_video(
     video_url: str,
     match_id: str = None,
-    max_chunk_size_mb: int = 20
+    max_chunk_size_mb: int = 20,
+    half_type: str = None
 ) -> Dict[str, Any]:
     """
     Transcribe a large video file with multi-chunk support.
@@ -1614,18 +1615,22 @@ def transcribe_large_video(
     For videos > 24MB, splits audio into chunks and transcribes each separately,
     then combines the results. This ensures complete transcription coverage.
     
+    Automatically saves extracted audio and SRT to match storage folder.
+    
     Args:
         video_url: URL to the video file (can be local /api/storage/ path or external URL)
         match_id: Related match ID
         max_chunk_size_mb: Maximum size per chunk in MB (default: 20MB)
+        half_type: 'first' or 'second' to label saved files
     
     Returns:
         Dict with transcription and SRT content
     """
     import subprocess
     import tempfile
+    import shutil
     import math
-    from storage import get_file_path, STORAGE_DIR
+    from storage import get_file_path, STORAGE_DIR, save_file, get_match_storage_path
     
     # Check if any transcription API is available and enabled
     elevenlabs_available = bool(ELEVENLABS_API_KEY) and ELEVENLABS_ENABLED
@@ -1705,46 +1710,97 @@ def transcribe_large_video(
         audio_size_mb = audio_size_bytes / (1024 * 1024)
         print(f"[Transcribe] Tamanho do áudio: {audio_size_mb:.2f} MB")
         
+        # ========== SAVE EXTRACTED AUDIO TO MATCH FOLDER ==========
+        audio_saved_path = None
+        if match_id:
+            try:
+                half_label = half_type or 'full'
+                audio_filename = f"{half_label}_audio.mp3"
+                with open(audio_path, 'rb') as af:
+                    audio_data = af.read()
+                save_result = save_file(match_id, 'audio', audio_filename, audio_data)
+                audio_saved_path = save_result.get('path')
+                print(f"[Transcribe] ✓ Áudio salvo: {audio_filename} ({audio_size_mb:.2f} MB)")
+            except Exception as save_err:
+                print(f"[Transcribe] ⚠ Erro ao salvar áudio: {save_err}")
+        
+        # ========== TRANSCRIPTION ==========
+        transcription_result = None
+        
         # Try ElevenLabs first (supports larger files) - only if enabled
         if elevenlabs_available:
             print(f"[Transcribe] Tentando ElevenLabs Scribe...")
-            result = _transcribe_with_elevenlabs(audio_path, match_id)
-            if result.get('success'):
+            transcription_result = _transcribe_with_elevenlabs(audio_path, match_id)
+            if transcription_result.get('success'):
                 print(f"[Transcribe] ✓ ElevenLabs sucesso!")
-                return result
             else:
-                print(f"[Transcribe] ⚠ ElevenLabs falhou: {result.get('error', 'Unknown')}")
+                print(f"[Transcribe] ⚠ ElevenLabs falhou: {transcription_result.get('error', 'Unknown')}")
+                transcription_result = None
         
         # Fallback to Whisper - only if enabled
-        if openai_available:
+        if not transcription_result and openai_available:
             print(f"[Transcribe] Usando Whisper como fallback...")
             
             # Whisper API limit is ~25MB, use 24MB as safe threshold
             if audio_size_mb <= 24:
                 # Direct transcription for small files
                 print(f"[Transcribe] Arquivo pequeno, transcrição direta...")
-                result = _transcribe_audio_file(audio_path, match_id)
-                if result.get('success'):
-                    return result
-                print(f"[Transcribe] ⚠ Whisper falhou: {result.get('error', 'Unknown')}")
+                transcription_result = _transcribe_audio_file(audio_path, match_id)
+                if not transcription_result.get('success'):
+                    print(f"[Transcribe] ⚠ Whisper falhou: {transcription_result.get('error', 'Unknown')}")
+                    transcription_result = None
             else:
                 # Multi-chunk transcription for large files
                 print(f"[Transcribe] Arquivo grande ({audio_size_mb:.2f} MB), usando multi-chunk...")
-                result = _transcribe_multi_chunk(audio_path, tmpdir, match_id, max_chunk_size_mb)
-                if result.get('success'):
-                    return result
-                print(f"[Transcribe] ⚠ Whisper multi-chunk falhou: {result.get('error', 'Unknown')}")
+                transcription_result = _transcribe_multi_chunk(audio_path, tmpdir, match_id, max_chunk_size_mb)
+                if not transcription_result.get('success'):
+                    print(f"[Transcribe] ⚠ Whisper multi-chunk falhou: {transcription_result.get('error', 'Unknown')}")
+                    transcription_result = None
         
         # Fallback to Gemini - only if enabled and file is small enough
-        if gemini_available and audio_size_mb <= 20:
+        if not transcription_result and gemini_available and audio_size_mb <= 20:
             print(f"[Transcribe] Tentando Gemini como fallback...")
-            result = _transcribe_with_gemini(audio_path, match_id)
-            if result.get('success'):
+            transcription_result = _transcribe_with_gemini(audio_path, match_id)
+            if transcription_result.get('success'):
                 print(f"[Transcribe] ✓ Gemini sucesso!")
-                return result
-            print(f"[Transcribe] ⚠ Gemini falhou: {result.get('error', 'Unknown')}")
+            else:
+                print(f"[Transcribe] ⚠ Gemini falhou: {transcription_result.get('error', 'Unknown')}")
+                transcription_result = None
         
-        return {"error": "Todas as APIs de transcrição falharam"}
+        if not transcription_result:
+            return {"error": "Todas as APIs de transcrição falharam"}
+        
+        # ========== SAVE SRT AND TXT TO MATCH FOLDER ==========
+        if match_id and transcription_result.get('success'):
+            half_label = half_type or 'full'
+            
+            # Save SRT file
+            srt_content = transcription_result.get('srtContent', '')
+            if srt_content:
+                try:
+                    srt_filename = f"{half_label}_transcription.srt"
+                    save_file(match_id, 'srt', srt_filename, srt_content.encode('utf-8'))
+                    transcription_result['srtPath'] = f"/api/storage/{match_id}/srt/{srt_filename}"
+                    print(f"[Transcribe] ✓ SRT salvo: {srt_filename}")
+                except Exception as srt_err:
+                    print(f"[Transcribe] ⚠ Erro ao salvar SRT: {srt_err}")
+            
+            # Save TXT file (plain text)
+            text_content = transcription_result.get('text', '')
+            if text_content:
+                try:
+                    txt_filename = f"{half_label}_transcription.txt"
+                    save_file(match_id, 'texts', txt_filename, text_content.encode('utf-8'))
+                    transcription_result['txtPath'] = f"/api/storage/{match_id}/texts/{txt_filename}"
+                    print(f"[Transcribe] ✓ TXT salvo: {txt_filename}")
+                except Exception as txt_err:
+                    print(f"[Transcribe] ⚠ Erro ao salvar TXT: {txt_err}")
+            
+            # Add audio path to result
+            if audio_saved_path:
+                transcription_result['audioPath'] = f"/api/storage/{match_id}/audio/{half_label}_audio.mp3"
+        
+        return transcription_result
 
 
 def _transcribe_audio_file(audio_path: str, match_id: str = None) -> Dict[str, Any]:
