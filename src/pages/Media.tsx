@@ -542,6 +542,9 @@ export default function Media() {
               onClose={() => setShareClipId(null)}
               clipCount={1}
               matchTitle={`${selectedMatch?.home_team?.name || 'Time Casa'} vs ${selectedMatch?.away_team?.name || 'Time Fora'}`}
+              clipUrl={clips.find(c => c.id === shareClipId)?.clipUrl}
+              matchId={matchId}
+              eventId={shareClipId || undefined}
             />
 
             {/* Recording in progress warning */}
