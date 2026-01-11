@@ -16,7 +16,8 @@ import {
   Facebook,
   Linkedin,
   Youtube,
-  Filter
+  Sparkles,
+  CalendarClock
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -26,9 +27,10 @@ import { Textarea } from '@/components/ui/textarea';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { DateTimePicker } from '@/components/ui/datetime-picker';
 import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
-import { format, isPast, isToday, isTomorrow, addDays } from 'date-fns';
+import { format, isPast, isToday, isTomorrow, addDays, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 // X (Twitter) icon component
@@ -74,11 +76,11 @@ const PLATFORMS = [
 ];
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
-  scheduled: { label: 'Agendado', color: 'bg-blue-500/10 text-blue-500', icon: Clock },
-  publishing: { label: 'Publicando', color: 'bg-yellow-500/10 text-yellow-500', icon: Loader2 },
-  published: { label: 'Publicado', color: 'bg-green-500/10 text-green-500', icon: CheckCircle },
-  failed: { label: 'Falhou', color: 'bg-red-500/10 text-red-500', icon: XCircle },
-  cancelled: { label: 'Cancelado', color: 'bg-gray-500/10 text-gray-500', icon: XCircle },
+  scheduled: { label: 'Agendado', color: 'bg-blue-500/10 text-blue-500 border-blue-500/20', icon: Clock },
+  publishing: { label: 'Publicando', color: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20', icon: Loader2 },
+  published: { label: 'Publicado', color: 'bg-green-500/10 text-green-500 border-green-500/20', icon: CheckCircle },
+  failed: { label: 'Falhou', color: 'bg-red-500/10 text-red-500 border-red-500/20', icon: XCircle },
+  cancelled: { label: 'Cancelado', color: 'bg-gray-500/10 text-gray-500 border-gray-500/20', icon: XCircle },
 };
 
 export function ScheduledPostsManager() {
@@ -95,8 +97,7 @@ export function ScheduledPostsManager() {
     content: '',
     media_url: '',
     media_type: 'video',
-    scheduled_date: '',
-    scheduled_time: '',
+    scheduled_at: null as Date | null,
     campaign_id: '',
   });
 
@@ -139,13 +140,13 @@ export function ScheduledPostsManager() {
   const openCreateDialog = () => {
     setEditingPost(null);
     const tomorrow = addDays(new Date(), 1);
+    tomorrow.setHours(12, 0, 0, 0);
     setFormData({
       platform: 'instagram',
       content: '',
       media_url: '',
       media_type: 'video',
-      scheduled_date: format(tomorrow, 'yyyy-MM-dd'),
-      scheduled_time: '12:00',
+      scheduled_at: tomorrow,
       campaign_id: '',
     });
     setDialogOpen(true);
@@ -159,21 +160,19 @@ export function ScheduledPostsManager() {
       content: post.content,
       media_url: post.media_url || '',
       media_type: post.media_type || 'video',
-      scheduled_date: format(scheduledAt, 'yyyy-MM-dd'),
-      scheduled_time: format(scheduledAt, 'HH:mm'),
+      scheduled_at: scheduledAt,
       campaign_id: post.campaign_id || '',
     });
     setDialogOpen(true);
   };
 
   const handleSubmit = async () => {
-    if (!formData.platform || !formData.content || !formData.scheduled_date || !formData.scheduled_time) {
+    if (!formData.platform || !formData.content || !formData.scheduled_at) {
       toast({ title: 'Preencha todos os campos obrigatórios', variant: 'destructive' });
       return;
     }
 
-    const scheduledAt = new Date(`${formData.scheduled_date}T${formData.scheduled_time}`);
-    if (isPast(scheduledAt)) {
+    if (isPast(formData.scheduled_at)) {
       toast({ title: 'A data deve ser no futuro', variant: 'destructive' });
       return;
     }
@@ -189,7 +188,7 @@ export function ScheduledPostsManager() {
             content: formData.content,
             media_url: formData.media_url || null,
             media_type: formData.media_type || null,
-            scheduled_at: scheduledAt.toISOString(),
+            scheduled_at: formData.scheduled_at.toISOString(),
             campaign_id: formData.campaign_id || null,
           })
           .eq('id', editingPost.id);
@@ -205,7 +204,7 @@ export function ScheduledPostsManager() {
             content: formData.content,
             media_url: formData.media_url || null,
             media_type: formData.media_type || null,
-            scheduled_at: scheduledAt.toISOString(),
+            scheduled_at: formData.scheduled_at.toISOString(),
             campaign_id: formData.campaign_id || null,
           });
 
@@ -556,25 +555,17 @@ export function ScheduledPostsManager() {
               />
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="scheduled_date">Data *</Label>
-                <Input
-                  id="scheduled_date"
-                  type="date"
-                  value={formData.scheduled_date}
-                  onChange={(e) => setFormData(prev => ({ ...prev, scheduled_date: e.target.value }))}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="scheduled_time">Horário *</Label>
-                <Input
-                  id="scheduled_time"
-                  type="time"
-                  value={formData.scheduled_time}
-                  onChange={(e) => setFormData(prev => ({ ...prev, scheduled_time: e.target.value }))}
-                />
-              </div>
+            <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <CalendarClock className="h-4 w-4 text-primary" />
+                Data e Hora *
+              </Label>
+              <DateTimePicker
+                date={formData.scheduled_at || undefined}
+                onDateChange={(date) => setFormData(prev => ({ ...prev, scheduled_at: date || null }))}
+                placeholder="Selecionar data e hora"
+                minDate={startOfDay(new Date())}
+              />
             </div>
 
             {campaigns.length > 0 && (

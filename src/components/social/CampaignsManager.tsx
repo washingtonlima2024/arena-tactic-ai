@@ -12,7 +12,8 @@ import {
   Target,
   Megaphone,
   MoreVertical,
-  CalendarDays
+  CalendarDays,
+  Sparkles
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -23,6 +24,9 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { Calendar as CalendarComponent } from '@/components/ui/calendar';
+import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { format } from 'date-fns';
@@ -51,11 +55,11 @@ const PLATFORMS = [
 ];
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
-  draft: { label: 'Rascunho', color: 'bg-gray-500/10 text-gray-500', icon: Edit2 },
-  active: { label: 'Ativa', color: 'bg-green-500/10 text-green-500', icon: Play },
-  paused: { label: 'Pausada', color: 'bg-yellow-500/10 text-yellow-500', icon: Pause },
-  completed: { label: 'Concluída', color: 'bg-blue-500/10 text-blue-500', icon: CheckCircle },
-  cancelled: { label: 'Cancelada', color: 'bg-red-500/10 text-red-500', icon: XCircle },
+  draft: { label: 'Rascunho', color: 'bg-gray-500/10 text-gray-500 border-gray-500/20', icon: Edit2 },
+  active: { label: 'Ativa', color: 'bg-green-500/10 text-green-500 border-green-500/20', icon: Play },
+  paused: { label: 'Pausada', color: 'bg-yellow-500/10 text-yellow-500 border-yellow-500/20', icon: Pause },
+  completed: { label: 'Concluída', color: 'bg-blue-500/10 text-blue-500 border-blue-500/20', icon: CheckCircle },
+  cancelled: { label: 'Cancelada', color: 'bg-red-500/10 text-red-500 border-red-500/20', icon: XCircle },
 };
 
 export function CampaignsManager() {
@@ -66,8 +70,8 @@ export function CampaignsManager() {
   const [formData, setFormData] = useState({
     name: '',
     description: '',
-    start_date: '',
-    end_date: '',
+    start_date: null as Date | null,
+    end_date: null as Date | null,
     target_platforms: [] as string[],
     tags: '',
   });
@@ -109,8 +113,8 @@ export function CampaignsManager() {
     setFormData({
       name: '',
       description: '',
-      start_date: '',
-      end_date: '',
+      start_date: null,
+      end_date: null,
       target_platforms: [],
       tags: '',
     });
@@ -122,8 +126,8 @@ export function CampaignsManager() {
     setFormData({
       name: campaign.name,
       description: campaign.description || '',
-      start_date: campaign.start_date ? format(new Date(campaign.start_date), 'yyyy-MM-dd') : '',
-      end_date: campaign.end_date ? format(new Date(campaign.end_date), 'yyyy-MM-dd') : '',
+      start_date: campaign.start_date ? new Date(campaign.start_date) : null,
+      end_date: campaign.end_date ? new Date(campaign.end_date) : null,
       target_platforms: campaign.target_platforms || [],
       tags: (campaign.tags || []).join(', '),
     });
@@ -137,7 +141,7 @@ export function CampaignsManager() {
     }
 
     try {
-      const userId = 'local-admin-user';
+      const userId = '00000000-0000-0000-0000-000000000001';
       const tagsArray = formData.tags.split(',').map(t => t.trim()).filter(Boolean);
 
       if (editingCampaign) {
@@ -146,8 +150,8 @@ export function CampaignsManager() {
           .update({
             name: formData.name,
             description: formData.description || null,
-            start_date: formData.start_date || null,
-            end_date: formData.end_date || null,
+            start_date: formData.start_date?.toISOString() || null,
+            end_date: formData.end_date?.toISOString() || null,
             target_platforms: formData.target_platforms,
             tags: tagsArray,
           })
@@ -162,8 +166,8 @@ export function CampaignsManager() {
             user_id: userId,
             name: formData.name,
             description: formData.description || null,
-            start_date: formData.start_date || null,
-            end_date: formData.end_date || null,
+            start_date: formData.start_date?.toISOString() || null,
+            end_date: formData.end_date?.toISOString() || null,
             target_platforms: formData.target_platforms,
             tags: tagsArray,
           });
@@ -407,22 +411,59 @@ export function CampaignsManager() {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="start_date">Data de Início</Label>
-                <Input
-                  id="start_date"
-                  type="date"
-                  value={formData.start_date}
-                  onChange={(e) => setFormData(prev => ({ ...prev, start_date: e.target.value }))}
-                />
+                <Label>Data de Início</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        'w-full justify-start text-left font-normal',
+                        !formData.start_date && 'text-muted-foreground'
+                      )}
+                    >
+                      <CalendarDays className="mr-2 h-4 w-4" />
+                      {formData.start_date ? format(formData.start_date, 'dd/MM/yyyy', { locale: ptBR }) : 'Selecionar'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarComponent
+                      mode="single"
+                      selected={formData.start_date || undefined}
+                      onSelect={(date) => setFormData(prev => ({ ...prev, start_date: date || null }))}
+                      initialFocus
+                      className="p-3 pointer-events-auto"
+                      locale={ptBR}
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="end_date">Data de Término</Label>
-                <Input
-                  id="end_date"
-                  type="date"
-                  value={formData.end_date}
-                  onChange={(e) => setFormData(prev => ({ ...prev, end_date: e.target.value }))}
-                />
+                <Label>Data de Término</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        'w-full justify-start text-left font-normal',
+                        !formData.end_date && 'text-muted-foreground'
+                      )}
+                    >
+                      <CalendarDays className="mr-2 h-4 w-4" />
+                      {formData.end_date ? format(formData.end_date, 'dd/MM/yyyy', { locale: ptBR }) : 'Selecionar'}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarComponent
+                      mode="single"
+                      selected={formData.end_date || undefined}
+                      onSelect={(date) => setFormData(prev => ({ ...prev, end_date: date || null }))}
+                      initialFocus
+                      className="p-3 pointer-events-auto"
+                      locale={ptBR}
+                      disabled={(date) => formData.start_date ? date < formData.start_date : false}
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
 
