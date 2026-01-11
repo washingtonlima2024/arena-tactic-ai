@@ -35,6 +35,7 @@ interface VideoPlayerModalProps {
     end_minute?: number | null;
     duration_seconds?: number | null;
   } | null;
+  videoCoverUrl?: string | null;
   homeTeam: string;
   awayTeam: string;
   homeScore: number;
@@ -63,6 +64,7 @@ export function VideoPlayerModal({
   clip,
   thumbnail,
   matchVideo,
+  videoCoverUrl,
   homeTeam,
   awayTeam,
   homeScore,
@@ -206,6 +208,7 @@ export function VideoPlayerModal({
         <video 
           ref={videoRef} 
           src={normalizedClipUrl!}
+          poster={videoCoverUrl || undefined}
           className="w-full h-full object-cover"
           controls
           autoPlay
@@ -232,6 +235,7 @@ export function VideoPlayerModal({
         <video 
           ref={videoRef} 
           src={normalizedVideoUrl}
+          poster={videoCoverUrl || undefined}
           className="w-full h-full object-cover"
           controls
           autoPlay

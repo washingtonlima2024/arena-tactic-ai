@@ -549,6 +549,29 @@ export const apiClient = {
   
   getAllStorageStats: () => apiRequest<any>('/api/storage'),
 
+  /**
+   * Get the cover/thumbnail image for a match video.
+   * Looks for cover-*.jpg files in the images subfolder.
+   */
+  getVideoCover: async (matchId: string): Promise<string | null> => {
+    try {
+      const result = await apiRequest<{ files: Array<{ filename: string; url: string }> }>(
+        `/api/storage/${matchId}/images`
+      );
+      
+      // Find the most recent cover image
+      const coverFiles = result.files?.filter(f => f.filename.startsWith('cover-') && f.filename.endsWith('.jpg'));
+      if (coverFiles && coverFiles.length > 0) {
+        // Sort by name (contains timestamp) to get the most recent
+        coverFiles.sort((a, b) => b.filename.localeCompare(a.filename));
+        return normalizeStorageUrl(coverFiles[0].url);
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  },
+
   uploadFile: async (matchId: string, subfolder: string, file: File, filename?: string): Promise<{ url: string; filename: string; match_id: string; subfolder: string }> => {
     await ensureServerAvailable();
     

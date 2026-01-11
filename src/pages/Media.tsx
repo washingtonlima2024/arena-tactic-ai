@@ -112,6 +112,16 @@ export default function Media() {
     enabled: !!matchId
   });
   
+  // Fetch video cover thumbnail
+  const { data: videoCoverUrl } = useQuery({
+    queryKey: ['video-cover', matchId],
+    queryFn: async () => {
+      if (!matchId) return null;
+      return await apiClient.getVideoCover(matchId);
+    },
+    enabled: !!matchId
+  });
+  
   // Fetch clips organized by half from storage
   const { data: clipsByHalf, refetch: refetchClipsByHalf } = useQuery({
     queryKey: ['clips-by-half', matchId],
@@ -577,6 +587,7 @@ export default function Media() {
               clip={clips.find(c => c.id === playingClipId) || null}
               thumbnail={getThumbnail(playingClipId || '')}
               matchVideo={matchVideo}
+              videoCoverUrl={videoCoverUrl}
               homeTeam={selectedMatch?.home_team?.name || 'Time Casa'}
               awayTeam={selectedMatch?.away_team?.name || 'Time Fora'}
               homeScore={selectedMatch?.home_score || 0}
