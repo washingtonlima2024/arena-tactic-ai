@@ -1155,10 +1155,31 @@ export default function VideoUpload() {
         
         console.log('[Fallback] ✓ Transcrição completa:', data.text?.length || 0, 'caracteres');
         return data.text || data.srtContent || '';
-      } catch (error) {
+      } catch (error: any) {
         console.error(`[Tentativa ${attempt}] Erro ao transcrever:`, error);
         if (attempt === MAX_RETRIES) {
           console.log('Todas as tentativas de transcrição falharam');
+          
+          // Show informative toast with actual error
+          const errorMessage = error?.message || 'Erro desconhecido';
+          const isDependencyError = errorMessage.includes('Dependência') || errorMessage.includes('module');
+          const isServerError = errorMessage.includes('servidor') || errorMessage.includes('offline');
+          
+          toast({
+            title: isDependencyError 
+              ? "⚠️ Dependência faltando no servidor" 
+              : isServerError 
+                ? "⚠️ Servidor Python offline" 
+                : "⚠️ Transcrição falhou",
+            description: isDependencyError 
+              ? "Execute: pip install faster-whisper==1.1.0 no servidor Python e reinicie."
+              : errorMessage.length > 150 
+                ? errorMessage.substring(0, 150) + '...' 
+                : errorMessage,
+            variant: "destructive",
+            duration: 10000,
+          });
+          
           return null;
         }
       }
@@ -1484,11 +1505,7 @@ export default function VideoUpload() {
           });
         } else {
           console.error('Transcrição falhou para:', segment.name);
-          toast({
-            title: `⚠️ Transcrição do ${halfLabel} falhou`,
-            description: "Verifique se o vídeo é um arquivo MP4 válido.",
-            variant: "destructive",
-          });
+          // Error toast is shown by transcribeWithWhisper with specific details
         }
       }
       
