@@ -932,6 +932,32 @@ export const apiClient = {
   }> => {
     return apiRequest(`/api/storage/download-jobs${matchId ? `?match_id=${matchId}` : ''}`);
   },
+
+  // ============== Live Match Finalization ==============
+  /**
+   * Link events to video and generate clips after live broadcast ends.
+   * This function:
+   * 1. Updates all events with video_id = null to link to the final video
+   * 2. Triggers clip extraction for each event
+   */
+  finalizeLiveMatchClips: async (matchId: string, videoId: string): Promise<{
+    success: boolean;
+    eventsLinked: number;
+    clipsGenerated: number;
+    errors: string[];
+  }> => {
+    await ensureServerAvailable();
+    
+    return apiRequestLongRunning<{
+      success: boolean;
+      eventsLinked: number;
+      clipsGenerated: number;
+      errors: string[];
+    }>('/api/finalize-live-clips', {
+      method: 'POST',
+      body: JSON.stringify({ matchId, videoId })
+    }, 600000); // 10 minutos
+  },
 };
 
 export default apiClient;
