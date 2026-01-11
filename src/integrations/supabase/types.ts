@@ -556,6 +556,48 @@ export type Database = {
           },
         ]
       }
+      social_campaigns: {
+        Row: {
+          created_at: string | null
+          description: string | null
+          end_date: string | null
+          id: string
+          name: string
+          start_date: string | null
+          status: string
+          tags: string[] | null
+          target_platforms: string[] | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string | null
+          description?: string | null
+          end_date?: string | null
+          id?: string
+          name: string
+          start_date?: string | null
+          status?: string
+          tags?: string[] | null
+          target_platforms?: string[] | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string | null
+          description?: string | null
+          end_date?: string | null
+          id?: string
+          name?: string
+          start_date?: string | null
+          status?: string
+          tags?: string[] | null
+          target_platforms?: string[] | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       social_connections: {
         Row: {
           access_token: string | null
@@ -600,6 +642,71 @@ export type Database = {
           user_id?: string
         }
         Relationships: []
+      }
+      social_scheduled_posts: {
+        Row: {
+          campaign_id: string | null
+          content: string
+          created_at: string | null
+          error_message: string | null
+          event_id: string | null
+          external_post_id: string | null
+          id: string
+          match_id: string | null
+          media_type: string | null
+          media_url: string | null
+          platform: string
+          published_at: string | null
+          scheduled_at: string
+          status: string
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          campaign_id?: string | null
+          content: string
+          created_at?: string | null
+          error_message?: string | null
+          event_id?: string | null
+          external_post_id?: string | null
+          id?: string
+          match_id?: string | null
+          media_type?: string | null
+          media_url?: string | null
+          platform: string
+          published_at?: string | null
+          scheduled_at: string
+          status?: string
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          campaign_id?: string | null
+          content?: string
+          created_at?: string | null
+          error_message?: string | null
+          event_id?: string | null
+          external_post_id?: string | null
+          id?: string
+          match_id?: string | null
+          media_type?: string | null
+          media_url?: string | null
+          platform?: string
+          published_at?: string | null
+          scheduled_at?: string
+          status?: string
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_scheduled_posts_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "social_campaigns"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       stream_configurations: {
         Row: {

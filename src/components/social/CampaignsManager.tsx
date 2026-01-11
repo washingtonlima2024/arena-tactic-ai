@@ -1,0 +1,476 @@
+import { useState, useEffect } from 'react';
+import { 
+  Calendar,
+  Clock,
+  Plus,
+  Trash2,
+  Edit2,
+  Play,
+  Pause,
+  CheckCircle,
+  XCircle,
+  Target,
+  Megaphone,
+  MoreVertical,
+  CalendarDays
+} from 'lucide-react';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { Badge } from '@/components/ui/badge';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Checkbox } from '@/components/ui/checkbox';
+import { toast } from '@/hooks/use-toast';
+import { supabase } from '@/integrations/supabase/client';
+import { format } from 'date-fns';
+import { ptBR } from 'date-fns/locale';
+
+interface Campaign {
+  id: string;
+  name: string;
+  description: string | null;
+  status: string;
+  start_date: string | null;
+  end_date: string | null;
+  target_platforms: string[];
+  tags: string[];
+  created_at: string;
+  posts_count?: number;
+}
+
+const PLATFORMS = [
+  { id: 'instagram', name: 'Instagram', color: 'bg-pink-500' },
+  { id: 'facebook', name: 'Facebook', color: 'bg-blue-600' },
+  { id: 'x', name: 'X (Twitter)', color: 'bg-black' },
+  { id: 'linkedin', name: 'LinkedIn', color: 'bg-blue-700' },
+  { id: 'youtube', name: 'YouTube', color: 'bg-red-600' },
+  { id: 'tiktok', name: 'TikTok', color: 'bg-gray-900' },
+];
+
+const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
+  draft: { label: 'Rascunho', color: 'bg-gray-500/10 text-gray-500', icon: Edit2 },
+  active: { label: 'Ativa', color: 'bg-green-500/10 text-green-500', icon: Play },
+  paused: { label: 'Pausada', color: 'bg-yellow-500/10 text-yellow-500', icon: Pause },
+  completed: { label: 'Concluída', color: 'bg-blue-500/10 text-blue-500', icon: CheckCircle },
+  cancelled: { label: 'Cancelada', color: 'bg-red-500/10 text-red-500', icon: XCircle },
+};
+
+export function CampaignsManager() {
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [editingCampaign, setEditingCampaign] = useState<Campaign | null>(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    description: '',
+    start_date: '',
+    end_date: '',
+    target_platforms: [] as string[],
+    tags: '',
+  });
+
+  useEffect(() => {
+    fetchCampaigns();
+  }, []);
+
+  const fetchCampaigns = async () => {
+    try {
+      const { data: campaignsData, error } = await supabase
+        .from('social_campaigns')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+
+      // Get posts count for each campaign
+      const campaignsWithCounts = await Promise.all(
+        (campaignsData || []).map(async (campaign) => {
+          const { count } = await supabase
+            .from('social_scheduled_posts')
+            .select('*', { count: 'exact', head: true })
+            .eq('campaign_id', campaign.id);
+          return { ...campaign, posts_count: count || 0 };
+        })
+      );
+
+      setCampaigns(campaignsWithCounts);
+    } catch (error) {
+      console.error('Error fetching campaigns:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const openCreateDialog = () => {
+    setEditingCampaign(null);
+    setFormData({
+      name: '',
+      description: '',
+      start_date: '',
+      end_date: '',
+      target_platforms: [],
+      tags: '',
+    });
+    setDialogOpen(true);
+  };
+
+  const openEditDialog = (campaign: Campaign) => {
+    setEditingCampaign(campaign);
+    setFormData({
+      name: campaign.name,
+      description: campaign.description || '',
+      start_date: campaign.start_date ? format(new Date(campaign.start_date), 'yyyy-MM-dd') : '',
+      end_date: campaign.end_date ? format(new Date(campaign.end_date), 'yyyy-MM-dd') : '',
+      target_platforms: campaign.target_platforms || [],
+      tags: (campaign.tags || []).join(', '),
+    });
+    setDialogOpen(true);
+  };
+
+  const handleSubmit = async () => {
+    if (!formData.name) {
+      toast({ title: 'Nome obrigatório', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      const userId = 'local-admin-user';
+      const tagsArray = formData.tags.split(',').map(t => t.trim()).filter(Boolean);
+
+      if (editingCampaign) {
+        const { error } = await supabase
+          .from('social_campaigns')
+          .update({
+            name: formData.name,
+            description: formData.description || null,
+            start_date: formData.start_date || null,
+            end_date: formData.end_date || null,
+            target_platforms: formData.target_platforms,
+            tags: tagsArray,
+          })
+          .eq('id', editingCampaign.id);
+
+        if (error) throw error;
+        toast({ title: 'Campanha atualizada!' });
+      } else {
+        const { error } = await supabase
+          .from('social_campaigns')
+          .insert({
+            user_id: userId,
+            name: formData.name,
+            description: formData.description || null,
+            start_date: formData.start_date || null,
+            end_date: formData.end_date || null,
+            target_platforms: formData.target_platforms,
+            tags: tagsArray,
+          });
+
+        if (error) throw error;
+        toast({ title: 'Campanha criada!' });
+      }
+
+      setDialogOpen(false);
+      fetchCampaigns();
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  const updateStatus = async (campaignId: string, status: string) => {
+    try {
+      const { error } = await supabase
+        .from('social_campaigns')
+        .update({ status })
+        .eq('id', campaignId);
+
+      if (error) throw error;
+      toast({ title: `Status atualizado para ${STATUS_CONFIG[status].label}` });
+      fetchCampaigns();
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  const deleteCampaign = async (campaignId: string) => {
+    if (!confirm('Tem certeza que deseja excluir esta campanha?')) return;
+
+    try {
+      const { error } = await supabase
+        .from('social_campaigns')
+        .delete()
+        .eq('id', campaignId);
+
+      if (error) throw error;
+      toast({ title: 'Campanha excluída' });
+      fetchCampaigns();
+    } catch (error: any) {
+      toast({ title: 'Erro', description: error.message, variant: 'destructive' });
+    }
+  };
+
+  const togglePlatform = (platformId: string) => {
+    setFormData(prev => ({
+      ...prev,
+      target_platforms: prev.target_platforms.includes(platformId)
+        ? prev.target_platforms.filter(p => p !== platformId)
+        : [...prev.target_platforms, platformId]
+    }));
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-xl font-semibold flex items-center gap-2">
+            <Megaphone className="h-5 w-5 text-primary" />
+            Campanhas
+          </h2>
+          <p className="text-sm text-muted-foreground">
+            Organize seus posts em campanhas de marketing
+          </p>
+        </div>
+        <Button variant="arena" onClick={openCreateDialog}>
+          <Plus className="h-4 w-4 mr-2" />
+          Nova Campanha
+        </Button>
+      </div>
+
+      {/* Campaigns Grid */}
+      {campaigns.length === 0 ? (
+        <Card className="border-dashed">
+          <CardContent className="flex flex-col items-center justify-center py-12">
+            <Target className="h-12 w-12 text-muted-foreground mb-4" />
+            <h3 className="text-lg font-medium mb-2">Nenhuma campanha</h3>
+            <p className="text-sm text-muted-foreground mb-4">
+              Crie sua primeira campanha para organizar seus posts
+            </p>
+            <Button variant="arena" onClick={openCreateDialog}>
+              <Plus className="h-4 w-4 mr-2" />
+              Criar Campanha
+            </Button>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {campaigns.map((campaign) => {
+            const statusConfig = STATUS_CONFIG[campaign.status] || STATUS_CONFIG.draft;
+            const StatusIcon = statusConfig.icon;
+
+            return (
+              <Card key={campaign.id} className="relative overflow-hidden hover:shadow-lg transition-shadow">
+                <CardHeader className="pb-3">
+                  <div className="flex items-start justify-between">
+                    <div className="space-y-1">
+                      <CardTitle className="text-lg">{campaign.name}</CardTitle>
+                      {campaign.description && (
+                        <CardDescription className="line-clamp-2">
+                          {campaign.description}
+                        </CardDescription>
+                      )}
+                    </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="ghost" size="icon" className="h-8 w-8">
+                          <MoreVertical className="h-4 w-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => openEditDialog(campaign)}>
+                          <Edit2 className="h-4 w-4 mr-2" />
+                          Editar
+                        </DropdownMenuItem>
+                        {campaign.status === 'draft' && (
+                          <DropdownMenuItem onClick={() => updateStatus(campaign.id, 'active')}>
+                            <Play className="h-4 w-4 mr-2" />
+                            Ativar
+                          </DropdownMenuItem>
+                        )}
+                        {campaign.status === 'active' && (
+                          <DropdownMenuItem onClick={() => updateStatus(campaign.id, 'paused')}>
+                            <Pause className="h-4 w-4 mr-2" />
+                            Pausar
+                          </DropdownMenuItem>
+                        )}
+                        {campaign.status === 'paused' && (
+                          <DropdownMenuItem onClick={() => updateStatus(campaign.id, 'active')}>
+                            <Play className="h-4 w-4 mr-2" />
+                            Retomar
+                          </DropdownMenuItem>
+                        )}
+                        {(campaign.status === 'active' || campaign.status === 'paused') && (
+                          <DropdownMenuItem onClick={() => updateStatus(campaign.id, 'completed')}>
+                            <CheckCircle className="h-4 w-4 mr-2" />
+                            Concluir
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem 
+                          className="text-destructive"
+                          onClick={() => deleteCampaign(campaign.id)}
+                        >
+                          <Trash2 className="h-4 w-4 mr-2" />
+                          Excluir
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {/* Status */}
+                  <Badge className={statusConfig.color}>
+                    <StatusIcon className="h-3 w-3 mr-1" />
+                    {statusConfig.label}
+                  </Badge>
+
+                  {/* Platforms */}
+                  {campaign.target_platforms && campaign.target_platforms.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {campaign.target_platforms.map(platform => {
+                        const platformInfo = PLATFORMS.find(p => p.id === platform);
+                        return platformInfo ? (
+                          <Badge key={platform} variant="outline" className="text-xs">
+                            {platformInfo.name}
+                          </Badge>
+                        ) : null;
+                      })}
+                    </div>
+                  )}
+
+                  {/* Dates */}
+                  {(campaign.start_date || campaign.end_date) && (
+                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                      <CalendarDays className="h-3 w-3" />
+                      {campaign.start_date && format(new Date(campaign.start_date), 'dd/MM/yy', { locale: ptBR })}
+                      {campaign.start_date && campaign.end_date && ' - '}
+                      {campaign.end_date && format(new Date(campaign.end_date), 'dd/MM/yy', { locale: ptBR })}
+                    </div>
+                  )}
+
+                  {/* Posts count */}
+                  <div className="flex items-center gap-2 text-sm">
+                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                    <span>{campaign.posts_count || 0} posts agendados</span>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      )}
+
+      {/* Create/Edit Dialog */}
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>
+              {editingCampaign ? 'Editar Campanha' : 'Nova Campanha'}
+            </DialogTitle>
+            <DialogDescription>
+              {editingCampaign 
+                ? 'Atualize as informações da campanha'
+                : 'Crie uma campanha para organizar seus posts'
+              }
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="name">Nome da Campanha *</Label>
+              <Input
+                id="name"
+                placeholder="Ex: Lançamento do Campeonato"
+                value={formData.name}
+                onChange={(e) => setFormData(prev => ({ ...prev, name: e.target.value }))}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="description">Descrição</Label>
+              <Textarea
+                id="description"
+                placeholder="Descreva os objetivos da campanha..."
+                value={formData.description}
+                onChange={(e) => setFormData(prev => ({ ...prev, description: e.target.value }))}
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="start_date">Data de Início</Label>
+                <Input
+                  id="start_date"
+                  type="date"
+                  value={formData.start_date}
+                  onChange={(e) => setFormData(prev => ({ ...prev, start_date: e.target.value }))}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="end_date">Data de Término</Label>
+                <Input
+                  id="end_date"
+                  type="date"
+                  value={formData.end_date}
+                  onChange={(e) => setFormData(prev => ({ ...prev, end_date: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Plataformas Alvo</Label>
+              <div className="grid grid-cols-2 gap-2">
+                {PLATFORMS.map(platform => (
+                  <div 
+                    key={platform.id}
+                    className="flex items-center space-x-2"
+                  >
+                    <Checkbox
+                      id={platform.id}
+                      checked={formData.target_platforms.includes(platform.id)}
+                      onCheckedChange={() => togglePlatform(platform.id)}
+                    />
+                    <label 
+                      htmlFor={platform.id}
+                      className="text-sm cursor-pointer"
+                    >
+                      {platform.name}
+                    </label>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="tags">Tags (separadas por vírgula)</Label>
+              <Input
+                id="tags"
+                placeholder="futebol, campeonato, destaque"
+                value={formData.tags}
+                onChange={(e) => setFormData(prev => ({ ...prev, tags: e.target.value }))}
+              />
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+              Cancelar
+            </Button>
+            <Button variant="arena" onClick={handleSubmit}>
+              {editingCampaign ? 'Salvar' : 'Criar Campanha'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

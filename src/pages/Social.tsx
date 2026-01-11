@@ -10,7 +10,10 @@ import {
   RefreshCw,
   ExternalLink,
   AlertCircle,
-  Loader2
+  Loader2,
+  Link2,
+  Calendar,
+  Megaphone
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -19,9 +22,13 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { CampaignsManager } from '@/components/social/CampaignsManager';
+import { ScheduledPostsManager } from '@/components/social/ScheduledPostsManager';
+import { SocialCalendar } from '@/components/social/SocialCalendar';
 
 // X (Twitter) icon component
 const XIcon = ({ className }: { className?: string }) => (
@@ -149,6 +156,7 @@ export default function Social() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedNetwork, setSelectedNetwork] = useState<SocialNetwork | null>(null);
   const [testingConnection, setTestingConnection] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState('connections');
 
   useEffect(() => {
     fetchConnections();
@@ -173,6 +181,8 @@ export default function Social() {
     return connections.find(c => c.platform === platformId);
   };
 
+  const connectedCount = connections.filter(c => c.is_connected).length;
+
   const openConnectDialog = (network: SocialNetwork) => {
     setSelectedNetwork(network);
     setCredentials({});
@@ -185,14 +195,10 @@ export default function Social() {
     setConnectingPlatform(selectedNetwork.id);
 
     try {
-      // Get user_id (simulated for local dev)
       const userId = 'local-admin-user';
-
-      // Check if connection exists
       const existingConnection = getConnection(selectedNetwork.id);
 
       if (existingConnection) {
-        // Update existing connection
         const { error } = await supabase
           .from('social_connections')
           .update({
@@ -207,7 +213,6 @@ export default function Social() {
 
         if (error) throw error;
       } else {
-        // Create new connection
         const { error } = await supabase
           .from('social_connections')
           .insert({
@@ -272,8 +277,6 @@ export default function Social() {
 
   const handleTestConnection = async (network: SocialNetwork) => {
     setTestingConnection(network.id);
-
-    // Simulate API test
     await new Promise(resolve => setTimeout(resolve, 2000));
 
     const connection = getConnection(network.id);
@@ -304,144 +307,185 @@ export default function Social() {
               Redes Sociais
             </h1>
             <p className="text-muted-foreground mt-1">
-              Conecte suas contas para publicar diretamente do Arena Play
+              Conecte, agende e gerencie publicações em múltiplas plataformas
             </p>
           </div>
+          <Badge variant="outline" className="text-sm">
+            {connectedCount} conectadas
+          </Badge>
         </div>
 
-        {/* Info Alert */}
-        <Card className="border-primary/20 bg-primary/5">
-          <CardContent className="flex items-start gap-3 py-4">
-            <AlertCircle className="h-5 w-5 text-primary shrink-0 mt-0.5" />
-            <div className="space-y-1">
-              <p className="text-sm font-medium">Como funciona?</p>
-              <p className="text-sm text-muted-foreground">
-                Configure as credenciais da API de cada rede social para habilitar a publicação automática de clipes e conteúdo diretamente da página de Mídia.
-                Você precisará criar um aplicativo de desenvolvedor em cada plataforma para obter as chaves de API.
-              </p>
-            </div>
-          </CardContent>
-        </Card>
+        {/* Tabs */}
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
+          <TabsList className="grid w-full max-w-md grid-cols-4">
+            <TabsTrigger value="connections" className="flex items-center gap-2">
+              <Link2 className="h-4 w-4" />
+              <span className="hidden sm:inline">Conexões</span>
+            </TabsTrigger>
+            <TabsTrigger value="campaigns" className="flex items-center gap-2">
+              <Megaphone className="h-4 w-4" />
+              <span className="hidden sm:inline">Campanhas</span>
+            </TabsTrigger>
+            <TabsTrigger value="scheduled" className="flex items-center gap-2">
+              <Calendar className="h-4 w-4" />
+              <span className="hidden sm:inline">Agendados</span>
+            </TabsTrigger>
+            <TabsTrigger value="calendar" className="flex items-center gap-2">
+              <Calendar className="h-4 w-4" />
+              <span className="hidden sm:inline">Calendário</span>
+            </TabsTrigger>
+          </TabsList>
 
-        {/* Social Networks Grid */}
-        <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-          {SOCIAL_NETWORKS.map((network) => {
-            const connection = getConnection(network.id);
-            const isConnected = connection?.is_connected || false;
-            const IconComponent = network.icon;
-
-            return (
-              <Card key={network.id} className="relative overflow-hidden">
-                {/* Status Badge */}
-                <div className="absolute top-4 right-4">
-                  <Badge 
-                    variant={isConnected ? 'default' : 'secondary'}
-                    className={isConnected ? 'bg-green-500/10 text-green-500 border-green-500/20' : ''}
-                  >
-                    {isConnected ? (
-                      <>
-                        <Check className="h-3 w-3 mr-1" />
-                        Conectado
-                      </>
-                    ) : (
-                      <>
-                        <X className="h-3 w-3 mr-1" />
-                        Desconectado
-                      </>
-                    )}
-                  </Badge>
+          {/* Connections Tab */}
+          <TabsContent value="connections" className="space-y-6">
+            {/* Info Alert */}
+            <Card className="border-primary/20 bg-primary/5">
+              <CardContent className="flex items-start gap-3 py-4">
+                <AlertCircle className="h-5 w-5 text-primary shrink-0 mt-0.5" />
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Como funciona?</p>
+                  <p className="text-sm text-muted-foreground">
+                    Configure as credenciais da API de cada rede social para habilitar a publicação automática de clipes e conteúdo diretamente da página de Mídia.
+                  </p>
                 </div>
+              </CardContent>
+            </Card>
 
-                <CardHeader className="pb-3">
-                  <div className="flex items-center gap-3">
-                    <div className={`p-3 rounded-xl ${network.bgColor}`}>
-                      <IconComponent className="h-6 w-6 text-white" />
+            {/* Social Networks Grid */}
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+              {SOCIAL_NETWORKS.map((network) => {
+                const connection = getConnection(network.id);
+                const isConnected = connection?.is_connected || false;
+                const IconComponent = network.icon;
+
+                return (
+                  <Card key={network.id} className="relative overflow-hidden">
+                    <div className="absolute top-4 right-4">
+                      <Badge 
+                        variant={isConnected ? 'default' : 'secondary'}
+                        className={isConnected ? 'bg-green-500/10 text-green-500 border-green-500/20' : ''}
+                      >
+                        {isConnected ? (
+                          <>
+                            <Check className="h-3 w-3 mr-1" />
+                            Conectado
+                          </>
+                        ) : (
+                          <>
+                            <X className="h-3 w-3 mr-1" />
+                            Desconectado
+                          </>
+                        )}
+                      </Badge>
                     </div>
-                    <div>
-                      <CardTitle className="text-lg">{network.name}</CardTitle>
-                      <CardDescription className="text-xs">
-                        {network.description}
-                      </CardDescription>
-                    </div>
-                  </div>
-                </CardHeader>
 
-                <CardContent className="space-y-4">
-                  {isConnected && connection?.account_name && (
-                    <div className="text-sm">
-                      <span className="text-muted-foreground">Conta: </span>
-                      <span className="font-medium">{connection.account_name}</span>
-                    </div>
-                  )}
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center gap-3">
+                        <div className={`p-3 rounded-xl ${network.bgColor}`}>
+                          <IconComponent className="h-6 w-6 text-white" />
+                        </div>
+                        <div>
+                          <CardTitle className="text-lg">{network.name}</CardTitle>
+                          <CardDescription className="text-xs">
+                            {network.description}
+                          </CardDescription>
+                        </div>
+                      </div>
+                    </CardHeader>
 
-                  {isConnected && connection?.last_sync_at && (
-                    <div className="text-xs text-muted-foreground">
-                      Última sincronização: {new Date(connection.last_sync_at).toLocaleString('pt-BR')}
-                    </div>
-                  )}
+                    <CardContent className="space-y-4">
+                      {isConnected && connection?.account_name && (
+                        <div className="text-sm">
+                          <span className="text-muted-foreground">Conta: </span>
+                          <span className="font-medium">{connection.account_name}</span>
+                        </div>
+                      )}
 
-                  <Separator />
+                      {isConnected && connection?.last_sync_at && (
+                        <div className="text-xs text-muted-foreground">
+                          Última sincronização: {new Date(connection.last_sync_at).toLocaleString('pt-BR')}
+                        </div>
+                      )}
 
-                  <div className="flex gap-2">
-                    {isConnected ? (
-                      <>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => handleTestConnection(network)}
-                          disabled={testingConnection === network.id}
-                        >
-                          {testingConnection === network.id ? (
-                            <Loader2 className="h-4 w-4 animate-spin" />
-                          ) : (
-                            <RefreshCw className="h-4 w-4 mr-1" />
-                          )}
-                          Testar
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => openConnectDialog(network)}
-                        >
-                          Editar
-                        </Button>
-                        <Button
-                          variant="destructive"
-                          size="sm"
-                          onClick={() => handleDisconnect(network.id)}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </>
-                    ) : (
-                      <>
-                        <Button
-                          variant="arena"
-                          size="sm"
-                          className="flex-1"
-                          onClick={() => openConnectDialog(network)}
-                        >
-                          Conectar
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          asChild
-                        >
-                          <a href={network.docUrl} target="_blank" rel="noopener noreferrer">
-                            <ExternalLink className="h-4 w-4" />
-                          </a>
-                        </Button>
-                      </>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            );
-          })}
-        </div>
+                      <Separator />
+
+                      <div className="flex gap-2">
+                        {isConnected ? (
+                          <>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex-1"
+                              onClick={() => handleTestConnection(network)}
+                              disabled={testingConnection === network.id}
+                            >
+                              {testingConnection === network.id ? (
+                                <Loader2 className="h-4 w-4 animate-spin" />
+                              ) : (
+                                <RefreshCw className="h-4 w-4 mr-1" />
+                              )}
+                              Testar
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="flex-1"
+                              onClick={() => openConnectDialog(network)}
+                            >
+                              Editar
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              size="sm"
+                              onClick={() => handleDisconnect(network.id)}
+                            >
+                              <X className="h-4 w-4" />
+                            </Button>
+                          </>
+                        ) : (
+                          <>
+                            <Button
+                              variant="arena"
+                              size="sm"
+                              className="flex-1"
+                              onClick={() => openConnectDialog(network)}
+                            >
+                              Conectar
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              asChild
+                            >
+                              <a href={network.docUrl} target="_blank" rel="noopener noreferrer">
+                                <ExternalLink className="h-4 w-4" />
+                              </a>
+                            </Button>
+                          </>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                );
+              })}
+            </div>
+          </TabsContent>
+
+          {/* Campaigns Tab */}
+          <TabsContent value="campaigns">
+            <CampaignsManager />
+          </TabsContent>
+
+          {/* Scheduled Posts Tab */}
+          <TabsContent value="scheduled">
+            <ScheduledPostsManager />
+          </TabsContent>
+
+          {/* Calendar Tab */}
+          <TabsContent value="calendar">
+            <SocialCalendar />
+          </TabsContent>
+        </Tabs>
 
         {/* Connect Dialog */}
         <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
