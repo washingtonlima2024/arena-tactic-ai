@@ -39,6 +39,10 @@ export function ArenaChatbot() {
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
   const [autoSpeak, setAutoSpeak] = useState(true);
+  const [isHovered, setIsHovered] = useState(false);
+  
+  // Ref for the floating button (when closed)
+  const floatingButtonRef = useRef<HTMLDivElement>(null);
 
   const chatContainerRef = useRef<HTMLDivElement>(null);
   const scrollViewportRef = useRef<HTMLDivElement>(null);
@@ -113,12 +117,12 @@ export function ArenaChatbot() {
     }
   }, [transcript]);
 
-  // Handle dragging with improved smoothness
-  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+  // Handle dragging for both button and chat window
+  const handleMouseDown = useCallback((e: React.MouseEvent, element: HTMLElement | null) => {
     e.preventDefault();
     e.stopPropagation();
-    if (chatContainerRef.current) {
-      const rect = chatContainerRef.current.getBoundingClientRect();
+    if (element) {
+      const rect = element.getBoundingClientRect();
       setDragOffset({
         x: e.clientX - rect.left,
         y: e.clientY - rect.top,
@@ -126,35 +130,96 @@ export function ArenaChatbot() {
       setIsDragging(true);
     }
   }, []);
+  
+  // Drag handler for floating button (closed state)
+  const handleButtonMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+    dragDistanceRef.current = 0;
+    wasDraggingRef.current = false;
+    
+    if (floatingButtonRef.current) {
+      const rect = floatingButtonRef.current.getBoundingClientRect();
+      setDragOffset({
+        x: e.clientX - rect.left,
+        y: e.clientY - rect.top,
+      });
+      setIsDragging(true);
+    }
+  }, []);
+  
+  // Drag handler for chat window (open state)
+  const handleChatMouseDown = useCallback((e: React.MouseEvent) => {
+    dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+    dragDistanceRef.current = 0;
+    wasDraggingRef.current = false;
+    handleMouseDown(e, chatContainerRef.current);
+  }, [handleMouseDown]);
+
+  // Track if we just finished dragging to prevent click
+  const wasDraggingRef = useRef(false);
+  const dragDistanceRef = useRef(0);
+  const dragStartPosRef = useRef({ x: 0, y: 0 });
 
   useEffect(() => {
     if (!isDragging) return;
 
     const handleMouseMove = (e: MouseEvent) => {
       e.preventDefault();
+      
+      // Track drag distance to differentiate click from drag
+      const distance = Math.sqrt(
+        Math.pow(e.clientX - dragStartPosRef.current.x, 2) + 
+        Math.pow(e.clientY - dragStartPosRef.current.y, 2)
+      );
+      dragDistanceRef.current = distance;
+      
+      if (distance > 5) {
+        wasDraggingRef.current = true;
+      }
+      
       requestAnimationFrame(() => {
-        const newX = window.innerWidth - (e.clientX - dragOffset.x) - (chatContainerRef.current?.offsetWidth || 384);
-        const newY = window.innerHeight - (e.clientY - dragOffset.y) - (chatContainerRef.current?.offsetHeight || 512);
+        // Calculate element size based on whether chat is open or closed
+        const elementWidth = isOpen 
+          ? (chatContainerRef.current?.offsetWidth || 384)
+          : (floatingButtonRef.current?.offsetWidth || 56);
+        const elementHeight = isOpen 
+          ? (chatContainerRef.current?.offsetHeight || 512)
+          : (floatingButtonRef.current?.offsetHeight || 56);
+        
+        const newX = window.innerWidth - (e.clientX - dragOffset.x) - elementWidth;
+        const newY = window.innerHeight - (e.clientY - dragOffset.y) - elementHeight;
 
         setPosition({
-          x: Math.max(0, Math.min(newX, window.innerWidth - 100)),
-          y: Math.max(0, Math.min(newY, window.innerHeight - 100)),
+          x: Math.max(10, Math.min(newX, window.innerWidth - elementWidth - 10)),
+          y: Math.max(10, Math.min(newY, window.innerHeight - elementHeight - 10)),
         });
       });
     };
 
     const handleMouseUp = () => {
       setIsDragging(false);
+      
+      // Reset drag tracking after a short delay
+      setTimeout(() => {
+        wasDraggingRef.current = false;
+        dragDistanceRef.current = 0;
+      }, 100);
     };
 
     document.addEventListener('mousemove', handleMouseMove, { passive: false });
     document.addEventListener('mouseup', handleMouseUp);
+    
+    // Prevent text selection while dragging
+    document.body.style.userSelect = 'none';
 
     return () => {
       document.removeEventListener('mousemove', handleMouseMove);
       document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.userSelect = '';
     };
-  }, [isDragging, dragOffset]);
+  }, [isDragging, dragOffset, isOpen]);
 
   const handleSendMessage = async () => {
     const messageToSend = inputValue.trim();
@@ -202,30 +267,70 @@ export function ArenaChatbot() {
 
   if (!isOpen) {
     return (
-      <button
-        onClick={handleOpen}
-        className="fixed z-50 group"
+      <div
+        ref={floatingButtonRef}
+        className={cn(
+          "fixed z-50 group cursor-grab select-none",
+          isDragging && "cursor-grabbing"
+        )}
         style={{ right: position.x, bottom: position.y }}
+        onMouseDown={handleButtonMouseDown}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
       >
-        <div className="relative">
-          {/* Glow effect */}
-          <div className="absolute inset-0 bg-primary rounded-full blur-lg opacity-50 group-hover:opacity-80 transition-opacity animate-pulse" />
+        <div 
+          className="relative"
+          onClick={(e) => {
+            // Only open if it wasn't a drag (moved less than 5px)
+            if (!wasDraggingRef.current && dragDistanceRef.current < 5) {
+              handleOpen();
+            }
+          }}
+        >
+          {/* Glow effect - more subtle */}
+          <div className={cn(
+            "absolute inset-0 bg-primary rounded-full blur-lg transition-opacity duration-300",
+            isHovered ? "opacity-60" : "opacity-20"
+          )} />
           
-          {/* Button */}
-          <div className="relative flex items-center justify-center w-16 h-16 bg-gradient-to-br from-primary to-primary/80 rounded-full shadow-lg hover:shadow-xl hover:scale-110 transition-all duration-300 border border-primary/30">
-            <Bot className="w-8 h-8 text-primary-foreground" />
+          {/* Button - more transparent when not hovered */}
+          <div className={cn(
+            "relative flex items-center justify-center w-14 h-14 rounded-full shadow-lg transition-all duration-300 border",
+            isHovered 
+              ? "bg-gradient-to-br from-primary to-primary/80 border-primary/50 scale-110 shadow-xl" 
+              : "bg-primary/40 backdrop-blur-md border-primary/20",
+            isDragging && "scale-95"
+          )}>
+            <Bot className={cn(
+              "w-7 h-7 transition-all duration-300",
+              isHovered ? "text-primary-foreground" : "text-primary-foreground/70"
+            )} />
             
-            {/* Pulse rings */}
-            <div className="absolute inset-0 rounded-full border-2 border-primary/50 animate-ping" />
-            <div className="absolute inset-0 rounded-full border border-primary/30 animate-pulse" />
+            {/* Pulse rings - only when hovered */}
+            {isHovered && !isDragging && (
+              <>
+                <div className="absolute inset-0 rounded-full border-2 border-primary/50 animate-ping" />
+                <div className="absolute inset-0 rounded-full border border-primary/30 animate-pulse" />
+              </>
+            )}
           </div>
 
-          {/* Label */}
-          <div className="absolute -top-2 -right-2 bg-arena-emerald text-white text-xs px-2 py-0.5 rounded-full font-semibold shadow-md">
+          {/* Label - more transparent */}
+          <div className={cn(
+            "absolute -top-1 -right-1 text-white text-[10px] px-1.5 py-0.5 rounded-full font-semibold shadow-sm transition-all duration-300",
+            isHovered ? "bg-arena-emerald opacity-100" : "bg-arena-emerald/60 opacity-70"
+          )}>
             AI
           </div>
+          
+          {/* Drag hint - shows on hover */}
+          {isHovered && !isDragging && (
+            <div className="absolute -left-2 top-1/2 -translate-y-1/2 bg-background/80 backdrop-blur-sm px-1 py-0.5 rounded text-[9px] text-muted-foreground whitespace-nowrap animate-fade-in">
+              Arraste para mover
+            </div>
+          )}
         </div>
-      </button>
+      </div>
     );
   }
 
@@ -250,7 +355,7 @@ export function ArenaChatbot() {
         {/* Header */}
         <div
           className="flex items-center justify-between px-4 py-3 bg-primary/20 border-b border-border/50 cursor-grab active:cursor-grabbing select-none"
-          onMouseDown={handleMouseDown}
+          onMouseDown={handleChatMouseDown}
         >
           <div className="flex items-center gap-2">
             <div className="relative">
