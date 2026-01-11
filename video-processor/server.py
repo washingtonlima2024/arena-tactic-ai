@@ -1388,18 +1388,61 @@ def update_match(match_id: str):
 
 @app.route('/api/matches/<match_id>', methods=['DELETE'])
 def delete_match(match_id: str):
-    """Remove uma partida e todos os dados relacionados."""
+    """Remove uma partida e todos os dados relacionados (cascade delete)."""
     session = get_session()
     try:
         match = session.query(Match).filter_by(id=match_id).first()
         if not match:
             return jsonify({'error': 'Partida não encontrada'}), 404
         
+        deleted_counts = {}
+        
+        # 1. Delete match events
+        events_deleted = session.query(MatchEvent).filter_by(match_id=match_id).delete()
+        deleted_counts['events'] = events_deleted
+        
+        # 2. Delete videos
+        videos_deleted = session.query(Video).filter_by(match_id=match_id).delete()
+        deleted_counts['videos'] = videos_deleted
+        
+        # 3. Delete generated audio
+        audio_deleted = session.query(GeneratedAudio).filter_by(match_id=match_id).delete()
+        deleted_counts['audio'] = audio_deleted
+        
+        # 4. Delete thumbnails
+        thumbnails_deleted = session.query(Thumbnail).filter_by(match_id=match_id).delete()
+        deleted_counts['thumbnails'] = thumbnails_deleted
+        
+        # 5. Delete analysis jobs
+        jobs_deleted = session.query(AnalysisJob).filter_by(match_id=match_id).delete()
+        deleted_counts['analysis_jobs'] = jobs_deleted
+        
+        # 6. Delete chatbot conversations
+        conversations_deleted = session.query(ChatbotConversation).filter_by(match_id=match_id).delete()
+        deleted_counts['conversations'] = conversations_deleted
+        
+        # 7. Delete stream configurations
+        stream_configs_deleted = session.query(StreamConfiguration).filter_by(match_id=match_id).delete()
+        deleted_counts['stream_configs'] = stream_configs_deleted
+        
+        # 8. Delete the match itself
         session.delete(match)
         session.commit()
-        return jsonify({'success': True})
+        
+        # 9. Delete all storage files for this match
+        storage_deleted = delete_match_storage(match_id)
+        deleted_counts['storage_deleted'] = storage_deleted
+        
+        print(f"[delete_match] Match {match_id} deleted with: {deleted_counts}")
+        
+        return jsonify({
+            'success': True,
+            'deleted': deleted_counts,
+            'message': f'Partida e todos os dados relacionados foram removidos'
+        })
     except Exception as e:
         session.rollback()
+        print(f"[delete_match] Error deleting match {match_id}: {e}")
         return jsonify({'error': str(e)}), 400
     finally:
         session.close()
