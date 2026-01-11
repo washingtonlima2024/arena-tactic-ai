@@ -5995,12 +5995,22 @@ def analyze_live_match():
         # Get video duration for time range
         duration_seconds = video.duration_seconds or 5400  # 90 min default
         
-        # Clear existing events for this match to avoid duplicates
+        # Clear only auto-detected events, preserve manual events
+        manual_sources = ['manual', 'live-manual', 'live-approved']
         existing_events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+        preserved_count = 0
+        deleted_count = 0
         for ev in existing_events:
-            session.delete(ev)
+            metadata = ev.metadata or {}
+            source = metadata.get('source', '') if isinstance(metadata, dict) else ''
+            # Preserve manual events, delete only auto-detected
+            if source in manual_sources:
+                preserved_count += 1
+            else:
+                session.delete(ev)
+                deleted_count += 1
         session.commit()
-        print(f"[LIVE-ANALYSIS] Cleared {len(existing_events)} existing events")
+        print(f"[LIVE-ANALYSIS] Deleted {deleted_count} auto-detected events, preserved {preserved_count} manual events")
         
         # Analyze transcription
         analysis_result = ai_services.analyze_match_transcription(
@@ -6058,13 +6068,28 @@ def analyze_live_match():
         session.commit()
         print(f"[LIVE-ANALYSIS] Inserted {events_detected} events")
         
+        # Link orphan events (without video_id) to the final video
+        orphan_events = session.query(MatchEvent).filter_by(
+            match_id=match_id, 
+            video_id=None
+        ).all()
+        for ev in orphan_events:
+            ev.video_id = video.id
+        if orphan_events:
+            session.commit()
+            print(f"[LIVE-ANALYSIS] Linked {len(orphan_events)} orphan events to video {video.id[:8]}")
+        
         # ════════════════════════════════════════════════════════════════
         # FASE 4: GERAR CLIPS
         # ════════════════════════════════════════════════════════════════
         print(f"\n[LIVE-ANALYSIS] ═══ FASE 4: GERANDO CLIPS ═══")
         
-        # Get all events just created
-        db_events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+        # Get ALL events with clip_pending=True (includes preserved manual events)
+        db_events = session.query(MatchEvent).filter_by(
+            match_id=match_id,
+            clip_pending=True
+        ).all()
+        print(f"[LIVE-ANALYSIS] Found {len(db_events)} events needing clips")
         
         for db_event in db_events:
             try:

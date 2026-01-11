@@ -882,6 +882,21 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       if (videoChunksRef.current.length > 0) {
         saveVideoChunk();
       }
+      
+      // Gerar clip automaticamente para evento manual (em background)
+      const eventWithRecording: LiveEvent = {
+        ...newEvent,
+        recordingTimestamp: currentRecordingTime,
+      };
+      generateClipForEvent(eventWithRecording).then(result => {
+        if (result.success) {
+          console.log("✅ Clip gerado para evento manual:", type);
+        } else {
+          console.log("⚠️ Clip não gerado (será gerado na análise pós-live):", result.error);
+        }
+      }).catch(err => {
+        console.log("⚠️ Erro ao gerar clip em background:", err);
+      });
     } catch (error) {
       console.error("Error saving manual event:", error);
     }

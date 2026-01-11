@@ -20,7 +20,8 @@ import {
   Film,
   CheckCircle,
   X,
-  Link
+  Link,
+  RefreshCw
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -35,7 +36,6 @@ import {
 import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
 import { useClipGeneration } from '@/hooks/useClipGeneration';
 
-import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipVignette } from '@/components/media/ClipVignette';
 import { TeamPlaylist } from '@/components/media/TeamPlaylist';
@@ -80,6 +80,7 @@ export default function Media() {
   const [shareClipId, setShareClipId] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const [activeHalfTab, setActiveHalfTab] = useState<string>('all');
+  const [isSyncingVideos, setIsSyncingVideos] = useState(false);
 
   const queryClient = useQueryClient();
   
@@ -96,18 +97,17 @@ export default function Media() {
   
   const { data: events, refetch: refetchEvents } = useMatchEvents(matchId);
   
-  // Fetch videos for the match (may have multiple segments)
-  const { data: matchVideos } = useQuery({
+  // Fetch videos for the match using local API
+  const { data: matchVideos, refetch: refetchVideos } = useQuery({
     queryKey: ['match-videos', matchId],
     queryFn: async () => {
       if (!matchId) return [];
-      const { data, error } = await supabase
-        .from('videos')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('start_minute', { ascending: true });
-      if (error) return [];
-      return data || [];
+      try {
+        return await apiClient.getVideos(matchId);
+      } catch (e) {
+        console.error('[Media] Error fetching videos:', e);
+        return [];
+      }
     },
     enabled: !!matchId
   });
@@ -160,10 +160,11 @@ export default function Media() {
 
   // Generate clips from events - Use eventMs from metadata as primary timestamp source
   const clips = events?.map((event) => {
-    const metadata = (event as any).metadata as { eventMs?: number; videoSecond?: number } | null;
+    const metadata = (event as any).metadata as { eventMs?: number; videoSecond?: number; source?: string } | null;
     const eventMs = metadata?.eventMs; // Primary: milliseconds from AI analysis
     const videoSecond = metadata?.videoSecond; // Fallback: seconds from AI analysis
     const matchHalf = event.match_half;
+    const source = metadata?.source;
     
     // Calculate total seconds: prefer eventMs, then videoSecond, then minute+second
     const totalSeconds = eventMs !== undefined 
@@ -200,7 +201,10 @@ export default function Media() {
       matchHalf,
       canExtract, // Flag: can this clip be extracted?
       eventVideo, // The video to use for extraction
-      videoRelativeSeconds // Timestamp relative to video start
+      videoRelativeSeconds, // Timestamp relative to video start
+      isManual: source === 'manual' || source === 'live-manual',
+      clipPending: (event as any).clip_pending === true,
+      metadata: metadata
     };
   }) || [];
   
@@ -447,6 +451,47 @@ export default function Media() {
                 )}
               </div>
               <div className="flex gap-2">
+                {/* Sync videos button */}
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={async () => {
+                    if (!matchId) return;
+                    setIsSyncingVideos(true);
+                    try {
+                      const result = await apiClient.syncVideos(matchId);
+                      if (result.synced > 0) {
+                        toast({ 
+                          title: "Vídeos sincronizados", 
+                          description: `${result.synced} vídeo(s) novo(s) encontrado(s)` 
+                        });
+                      } else {
+                        toast({ 
+                          title: "Sincronização concluída", 
+                          description: `${result.videos?.length || 0} vídeo(s) já registrado(s)` 
+                        });
+                      }
+                      refetchVideos();
+                      refetchEvents();
+                    } catch (error) {
+                      toast({ 
+                        title: "Erro ao sincronizar", 
+                        description: String(error), 
+                        variant: "destructive" 
+                      });
+                    } finally {
+                      setIsSyncingVideos(false);
+                    }
+                  }}
+                  disabled={isSyncingVideos}
+                >
+                  {isSyncingVideos ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                  )}
+                  Sincronizar
+                </Button>
                 {/* Extract video clips button - only for clips with canExtract */}
                 {matchVideo && clips.length > 0 && clips.some(c => !c.clipUrl && c.canExtract) && (
                   <Button 
@@ -796,11 +841,22 @@ export default function Media() {
                             </Badge>
                           )}
                         </div>
-                        <div className="absolute left-2 top-2 flex gap-1">
+                        <div className="absolute left-2 top-2 flex gap-1 flex-wrap max-w-[80%]">
                           <Badge variant="arena">{clip.type}</Badge>
                           {clip.matchHalf && (
                             <Badge variant="outline" className="backdrop-blur text-xs">
-                              {clip.matchHalf === 'first_half' ? '1º T' : clip.matchHalf === 'second_half' ? '2º T' : clip.matchHalf}
+                              {clip.matchHalf === 'first_half' || clip.matchHalf === 'first' ? '1º T' : clip.matchHalf === 'second_half' || clip.matchHalf === 'second' ? '2º T' : clip.matchHalf}
+                            </Badge>
+                          )}
+                          {clip.isManual && (
+                            <Badge variant="outline" className="backdrop-blur text-xs bg-blue-500/20 border-blue-500/50 text-blue-200">
+                              Manual
+                            </Badge>
+                          )}
+                          {clip.clipPending && clip.canExtract && !clip.clipUrl && (
+                            <Badge variant="warning" className="backdrop-blur text-xs gap-1">
+                              <Clock className="h-3 w-3" />
+                              Clip Pendente
                             </Badge>
                           )}
                         </div>
