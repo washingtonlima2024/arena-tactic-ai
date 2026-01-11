@@ -683,9 +683,23 @@ export default function VideoUpload() {
 
     setIsCreatingMatch(true);
     try {
-      const matchDateTime = matchData.matchDate 
-        ? new Date(`${matchData.matchDate}T${matchData.matchTime || '00:00'}`).toISOString()
-        : undefined;
+      let matchDateTime: string | undefined;
+      
+      if (matchData.matchDate) {
+        try {
+          const timeStr = matchData.matchTime || '00:00';
+          const dateTimeStr = `${matchData.matchDate}T${timeStr}:00`;
+          const parsedDate = new Date(dateTimeStr);
+          
+          // Validate the date is valid
+          if (!isNaN(parsedDate.getTime())) {
+            matchDateTime = parsedDate.toISOString();
+          }
+        } catch {
+          // If date parsing fails, leave as undefined
+          console.warn('Failed to parse match date:', matchData.matchDate, matchData.matchTime);
+        }
+      }
 
       const match = await createMatch.mutateAsync({
         home_team_id: matchData.homeTeamId,
