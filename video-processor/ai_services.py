@@ -1597,7 +1597,129 @@ def generate_thumbnail_image(
         return {"error": f"Erro ao gerar thumbnail: {str(e)}"}
 
 
-def _transcribe_with_gemini(audio_path: str, match_id: str = None) -> Dict[str, Any]:
+def _transcribe_gemini_chunks(audio_path: str, tmpdir: str, match_id: str = None, max_chunk_size_mb: int = 18) -> Dict[str, Any]:
+    """
+    Transcribe large audio by splitting into chunks and using Gemini for each.
+    
+    Splits audio into ~18MB chunks (under Gemini's 20MB limit),
+    transcribes each chunk, and combines the results.
+    
+    Args:
+        audio_path: Path to the full audio file
+        tmpdir: Temporary directory for chunk files
+        match_id: Optional match ID
+        max_chunk_size_mb: Max size per chunk in MB (default 18 to stay under 20MB limit)
+    
+    Returns:
+        Dict with combined transcription
+    """
+    import subprocess
+    
+    audio_size_bytes = os.path.getsize(audio_path)
+    audio_size_mb = audio_size_bytes / (1024 * 1024)
+    
+    # Calculate number of chunks needed
+    num_chunks = int(audio_size_mb / max_chunk_size_mb) + 1
+    
+    # Get audio duration using ffprobe
+    try:
+        probe_cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', audio_path]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        total_duration = float(probe_result.stdout.strip())
+    except:
+        # Estimate duration based on file size (~128kbps = 16KB/s)
+        total_duration = audio_size_bytes / (16 * 1024)
+    
+    chunk_duration = total_duration / num_chunks
+    print(f"[GeminiChunks] Dividindo {audio_size_mb:.1f}MB em {num_chunks} chunks de ~{chunk_duration:.0f}s cada")
+    
+    all_text = []
+    all_srt = []
+    srt_index = 1
+    time_offset = 0
+    successful_chunks = 0
+    
+    for i in range(num_chunks):
+        start_time = i * chunk_duration
+        chunk_path = os.path.join(tmpdir, f'chunk_{i}.mp3')
+        
+        # Extract chunk with ffmpeg
+        try:
+            cmd = [
+                'ffmpeg', '-y', '-i', audio_path,
+                '-ss', str(start_time),
+                '-t', str(chunk_duration),
+                '-acodec', 'libmp3lame', '-ab', '128k',
+                chunk_path
+            ]
+            subprocess.run(cmd, capture_output=True, timeout=120)
+            
+            if not os.path.exists(chunk_path):
+                print(f"[GeminiChunks] ⚠ Chunk {i+1} não foi criado")
+                continue
+                
+            chunk_size_mb = os.path.getsize(chunk_path) / (1024 * 1024)
+            print(f"[GeminiChunks] Chunk {i+1}/{num_chunks}: {chunk_size_mb:.1f}MB ({start_time:.0f}s-{start_time+chunk_duration:.0f}s)")
+            
+        except Exception as e:
+            print(f"[GeminiChunks] ⚠ Erro ao extrair chunk {i+1}: {e}")
+            continue
+        
+        # Transcribe chunk with Gemini
+        try:
+            chunk_result = _transcribe_with_gemini(chunk_path, match_id)
+            
+            if chunk_result.get('success') and chunk_result.get('text'):
+                chunk_text = chunk_result['text']
+                all_text.append(chunk_text)
+                successful_chunks += 1
+                
+                # Add SRT entries with adjusted timestamps
+                paragraphs = [p.strip() for p in chunk_text.split('\n') if p.strip()]
+                para_duration = chunk_duration / max(len(paragraphs), 1)
+                
+                for j, para in enumerate(paragraphs):
+                    seg_start = time_offset + (j * para_duration)
+                    seg_end = seg_start + para_duration
+                    all_srt.append(f"{srt_index}\n{_format_srt_time(seg_start)} --> {_format_srt_time(seg_end)}\n{para}\n")
+                    srt_index += 1
+                
+                print(f"[GeminiChunks] ✓ Chunk {i+1} transcrito: {len(chunk_text)} chars")
+            else:
+                print(f"[GeminiChunks] ⚠ Chunk {i+1} falhou: {chunk_result.get('error', 'unknown')}")
+                
+        except Exception as e:
+            print(f"[GeminiChunks] ⚠ Erro ao transcrever chunk {i+1}: {e}")
+        
+        time_offset += chunk_duration
+        
+        # Clean up chunk file
+        try:
+            os.remove(chunk_path)
+        except:
+            pass
+    
+    # Combine results
+    if successful_chunks == 0:
+        return {"error": "Nenhum chunk foi transcrito com sucesso", "success": False}
+    
+    combined_text = '\n\n'.join(all_text)
+    combined_srt = '\n'.join(all_srt)
+    
+    print(f"[GeminiChunks] ✓ Transcrição completa: {successful_chunks}/{num_chunks} chunks, {len(combined_text)} chars")
+    
+    return {
+        "success": True,
+        "text": combined_text,
+        "srtContent": combined_srt,
+        "matchId": match_id,
+        "provider": "gemini",
+        "chunksProcessed": successful_chunks,
+        "totalChunks": num_chunks
+    }
+
+
+
     """
     Transcribe audio using Google Gemini via Lovable AI Gateway.
     
@@ -1755,18 +1877,19 @@ def transcribe_large_video(
     import math
     from storage import get_file_path, STORAGE_DIR, save_file, get_match_storage_path
     
-    # ===== MODO SIMPLIFICADO: APENAS WHISPER LOCAL (GRATUITO) =====
-    local_whisper_available = LOCAL_WHISPER_ENABLED
+    # ===== PRIORIDADE: Google Gemini > Whisper Local =====
+    gemini_available = bool(LOVABLE_API_KEY or GOOGLE_API_KEY)
+    local_whisper_available = LOCAL_WHISPER_ENABLED and _FASTER_WHISPER_AVAILABLE
     
-    if not local_whisper_available:
+    if not gemini_available and not local_whisper_available:
         raise ValueError(
-            "🆓 Whisper Local não está ativado. "
-            "Ative a transcrição gratuita em Configurações > APIs > Whisper Local. "
-            "Não requer API key, funciona 100% offline!"
+            "Nenhum provedor de transcrição configurado. "
+            "Configure uma chave de API Google/Lovable em Configurações > APIs, "
+            "ou instale faster-whisper para transcrição offline."
         )
     
-    print(f"[Transcribe] 🆓 MODO: APENAS Whisper Local (gratuito, offline)")
-    print(f"[Transcribe]   Modelo: {LOCAL_WHISPER_MODEL}")
+    provider_info = "Google Gemini" if gemini_available else "Whisper Local"
+    print(f"[Transcribe] 🎙️ MODO: {provider_info}")
     print(f"[Transcribe]   Vídeo: {video_url}")
     
     with tempfile.TemporaryDirectory() as tmpdir:
@@ -1844,16 +1967,39 @@ def transcribe_large_video(
         # ========== TRANSCRIPTION ==========
         transcription_result = None
         
-        # ===== ÚNICO PROVEDOR: Whisper Local (GRATUITO!) =====
-        print(f"[Transcribe] 🆓 Iniciando Whisper Local (modelo={LOCAL_WHISPER_MODEL}, áudio={audio_size_mb:.1f}MB)...")
-        transcription_result = _transcribe_with_local_whisper(audio_path, match_id)
+        # ===== PROVEDOR 1: Google Gemini (via Lovable ou direto) =====
+        if gemini_available:
+            print(f"[Transcribe] 🌐 Usando Google Gemini para transcrição...")
+            
+            # Gemini tem limite de 20MB por arquivo, então dividimos se necessário
+            if audio_size_mb <= 20:
+                # Arquivo pequeno: transcrever diretamente
+                transcription_result = _transcribe_with_gemini(audio_path, match_id)
+            else:
+                # Arquivo grande: dividir em chunks e transcrever cada um
+                print(f"[Transcribe] Áudio grande ({audio_size_mb:.1f}MB), dividindo em chunks...")
+                transcription_result = _transcribe_gemini_chunks(audio_path, tmpdir, match_id, max_chunk_size_mb=18)
+            
+            if transcription_result.get('success'):
+                print(f"[Transcribe] ✓ Google Gemini sucesso!")
+            else:
+                error_msg = transcription_result.get('error', 'Unknown error')
+                print(f"[Transcribe] ⚠ Google Gemini falhou: {error_msg}")
+                
+                # Fallback para Whisper Local se disponível
+                if local_whisper_available:
+                    print(f"[Transcribe] 🔄 Fallback para Whisper Local...")
+                    transcription_result = _transcribe_with_local_whisper(audio_path, match_id)
         
-        if transcription_result.get('success'):
-            print(f"[Transcribe] ✓ Whisper Local sucesso! (gratuito, offline)")
-        else:
-            error_msg = transcription_result.get('error', 'Unknown error')
-            print(f"[Transcribe] ✗ Whisper Local falhou: {error_msg}")
-            return {"error": f"Whisper Local falhou: {error_msg}. Verifique se 'faster-whisper' está instalado: pip install faster-whisper==1.1.0"}
+        # ===== PROVEDOR 2: Whisper Local (fallback) =====
+        elif local_whisper_available:
+            print(f"[Transcribe] 🆓 Usando Whisper Local (offline)...")
+            transcription_result = _transcribe_with_local_whisper(audio_path, match_id)
+        
+        # Verificar resultado final
+        if not transcription_result or not transcription_result.get('success'):
+            error_msg = transcription_result.get('error', 'Nenhum provedor conseguiu transcrever') if transcription_result else 'Falha na transcrição'
+            return {"error": error_msg, "success": False}
         
         # ========== SAVE SRT AND TXT TO MATCH FOLDER ==========
         if match_id and transcription_result.get('success'):
