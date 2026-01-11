@@ -35,9 +35,16 @@ export interface StorageProgress {
   lastUploadedAt: Date | null;
 }
 
+export interface AnalysisProgressState {
+  step: string;
+  progress: number;
+}
+
 interface LiveClipProgressProps {
   clipQueue: ClipGenerationProgress[];
   storageProgress: StorageProgress;
+  analysisProgress?: AnalysisProgressState | null;
+  isAnalyzing?: boolean;
   isMinimized?: boolean;
   onToggleMinimize?: () => void;
   className?: string;
@@ -126,6 +133,8 @@ const getStatusLabel = (status: ClipGenerationProgress['status'], progress: numb
 export const LiveClipProgress = ({
   clipQueue,
   storageProgress,
+  analysisProgress,
+  isAnalyzing = false,
   isMinimized = false,
   onToggleMinimize,
   className,
@@ -145,10 +154,10 @@ export const LiveClipProgress = ({
     ? Math.round((storageProgress.uploadedChunks / storageProgress.totalChunks) * 100)
     : 0;
 
-  const hasActiveProgress = generatingClips > 0 || queuedClips > 0 || storageProgress.totalChunks > storageProgress.uploadedChunks;
+  const hasActiveProgress = generatingClips > 0 || queuedClips > 0 || storageProgress.totalChunks > storageProgress.uploadedChunks || isAnalyzing;
 
   // Don't render if there's nothing to show
-  if (clipQueue.length === 0 && storageProgress.totalChunks === 0) {
+  if (clipQueue.length === 0 && storageProgress.totalChunks === 0 && !isAnalyzing) {
     return null;
   }
 
@@ -233,6 +242,21 @@ export const LiveClipProgress = ({
       {/* Expanded Content */}
       {isExpanded && (
         <div className="border-t">
+          {/* Analysis Progress */}
+          {isAnalyzing && analysisProgress && (
+            <div className="p-3 border-b bg-primary/5">
+              <div className="flex items-center gap-2 mb-2">
+                <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                <span className="text-xs font-medium text-primary">Analisando Partida</span>
+              </div>
+              <p className="text-xs text-muted-foreground mb-2">{analysisProgress.step}</p>
+              <Progress value={analysisProgress.progress} className="h-1.5" />
+              <span className="text-[10px] text-muted-foreground mt-1 block text-right">
+                {analysisProgress.progress}%
+              </span>
+            </div>
+          )}
+
           {/* Storage Progress */}
           {storageProgress.totalChunks > 0 && (
             <div className="p-3 border-b bg-muted/10">

@@ -864,6 +864,13 @@ export const useLiveBroadcast = () => {
   const [finishResult, setFinishResult] = useState<FinishMatchResult | null>(null);
   const [isFinishing, setIsFinishing] = useState(false);
 
+  // Estado para controlar análise pós-live
+  const [isAnalyzingLive, setIsAnalyzingLive] = useState(false);
+  const [analysisProgress, setAnalysisProgress] = useState<{
+    step: string;
+    progress: number;
+  } | null>(null);
+
   const finishMatch = useCallback(async (): Promise<FinishMatchResult | null> => {
     stopRecording();
     setIsFinishing(true);
@@ -880,23 +887,136 @@ export const useLiveBroadcast = () => {
         
         const videoUrl = await saveRecordedVideo(matchId);
 
-        // Update the temp match with final data - status 'analyzed' for full integration
+        // Update the temp match with initial data
         await apiClient.updateMatch(matchId, {
           home_team_id: matchInfo.homeTeamId || null,
           away_team_id: matchInfo.awayTeamId || null,
           home_score: currentScore.home,
           away_score: currentScore.away,
           competition: matchInfo.competition,
-          status: "analyzed",
+          status: "processing", // Status intermediário durante análise
         });
 
-        // Save final transcript
+        // Save final transcript from real-time detection
         await saveTranscriptToDatabase(matchId);
 
-        // Events already saved in real-time, no need to insert again
-        console.log(`Finish match: ${approvedEvents.length + detectedEvents.length} events already saved in real-time`);
+        // Get video ID for analysis
+        const videos = await apiClient.getVideos(matchId);
+        const savedVideo = videos.find((v: any) => v.file_url === videoUrl || v.status === 'completed');
 
-        // NEW: Create analysis_job for consistency with imported matches
+        if (savedVideo) {
+          // ═══════════════════════════════════════════════════════════════
+          // NOVO: Executar pipeline completo de análise pós-live
+          // ═══════════════════════════════════════════════════════════════
+          setIsAnalyzingLive(true);
+          setAnalysisProgress({ step: 'Iniciando análise...', progress: 5 });
+
+          toast({
+            title: "Analisando partida...",
+            description: "Transcrevendo e detectando eventos automaticamente"
+          });
+
+          try {
+            // Obter nomes dos times
+            let homeTeamName = matchInfo.homeTeam || 'Time Casa';
+            let awayTeamName = matchInfo.awayTeam || 'Time Fora';
+            
+            // Tentar buscar nomes completos se temos IDs
+            if (matchInfo.homeTeamId) {
+              try {
+                const homeTeam = await apiClient.getTeam(matchInfo.homeTeamId);
+                if (homeTeam?.name) homeTeamName = homeTeam.name;
+              } catch (e) { /* usar nome do input */ }
+            }
+            if (matchInfo.awayTeamId) {
+              try {
+                const awayTeam = await apiClient.getTeam(matchInfo.awayTeamId);
+                if (awayTeam?.name) awayTeamName = awayTeam.name;
+              } catch (e) { /* usar nome do input */ }
+            }
+
+            setAnalysisProgress({ step: 'Transcrevendo vídeo...', progress: 20 });
+
+            // Executar análise completa
+            const analysisResult = await apiClient.analyzeLiveMatch(
+              matchId,
+              savedVideo.id,
+              homeTeamName,
+              awayTeamName
+            );
+
+            if (analysisResult.success) {
+              setAnalysisProgress({ step: 'Análise concluída!', progress: 100 });
+
+              // Atualizar placar com resultado da análise
+              await apiClient.updateMatch(matchId, {
+                home_score: analysisResult.homeScore,
+                away_score: analysisResult.awayScore,
+                status: "analyzed",
+              });
+
+              toast({
+                title: "Análise concluída!",
+                description: `${analysisResult.eventsDetected} eventos detectados, ${analysisResult.clipsGenerated} clips gerados`
+              });
+
+              console.log('[Live Analysis] Complete:', analysisResult);
+
+              const result: FinishMatchResult = {
+                matchId,
+                videoUrl,
+                eventsCount: analysisResult.eventsDetected,
+                transcriptWords: analysisResult.transcription?.split(" ").length || 0,
+                duration: recordingTime,
+              };
+
+              setFinishResult(result);
+              setIsFinishing(false);
+              setIsAnalyzingLive(false);
+              setAnalysisProgress(null);
+              return result;
+
+            } else {
+              throw new Error(analysisResult.errors?.join(', ') || 'Análise falhou');
+            }
+
+          } catch (analysisError) {
+            console.error('Error in live analysis pipeline:', analysisError);
+            
+            // Fallback: gerar apenas clips dos eventos já detectados em tempo real
+            toast({
+              title: "Análise falhou",
+              description: "Gerando clips dos eventos detectados em tempo real...",
+              variant: "destructive"
+            });
+
+            setAnalysisProgress({ step: 'Gerando clips de fallback...', progress: 60 });
+
+            try {
+              const clipsResult = await apiClient.finalizeLiveMatchClips(matchId, savedVideo.id);
+              
+              toast({
+                title: "Clips gerados",
+                description: `${clipsResult.clipsGenerated} clips criados dos eventos em tempo real`
+              });
+            } catch (clipError) {
+              console.error('Fallback clip generation also failed:', clipError);
+            }
+
+            // Atualizar status mesmo assim
+            await apiClient.updateMatch(matchId, { status: "analyzed" });
+          }
+
+          setIsAnalyzingLive(false);
+          setAnalysisProgress(null);
+
+        } else {
+          // Sem vídeo salvo - apenas finalizar
+          console.warn('No saved video found, skipping analysis');
+          await apiClient.updateMatch(matchId, { status: "analyzed" });
+        }
+
+        // Create analysis_job for consistency
         await apiClient.createAnalysisJob({
           match_id: matchId,
           status: 'completed',
@@ -910,37 +1030,6 @@ export const useLiveBroadcast = () => {
             transcriptWords: transcriptBuffer.split(" ").length
           }
         });
-
-        // NEW: Generate clips for live events
-        if (videoUrl) {
-          toast({
-            title: "Gerando clips...",
-            description: "Extraindo vídeos dos momentos marcados"
-          });
-
-          try {
-            // Get video ID from the saved video
-            const videos = await apiClient.getVideos(matchId);
-            const savedVideo = videos.find((v: any) => v.file_url === videoUrl || v.status === 'completed');
-            
-            if (savedVideo) {
-              const clipsResult = await apiClient.finalizeLiveMatchClips(matchId, savedVideo.id);
-              console.log('Clips generated:', clipsResult);
-              
-              toast({
-                title: "Clips gerados!",
-                description: `${clipsResult.clipsGenerated} clips criados com sucesso`
-              });
-            }
-          } catch (clipError) {
-            console.error('Error generating clips:', clipError);
-            toast({
-              title: "Aviso",
-              description: "Não foi possível gerar clips automaticamente. Você pode gerá-los manualmente na página de Mídia.",
-              variant: "destructive"
-            });
-          }
-        }
 
         const result: FinishMatchResult = {
           matchId,
@@ -965,6 +1054,8 @@ export const useLiveBroadcast = () => {
         variant: "destructive",
       });
       setIsFinishing(false);
+      setIsAnalyzingLive(false);
+      setAnalysisProgress(null);
       return null;
     }
   }, [stopRecording, currentScore, matchInfo, approvedEvents, detectedEvents, transcriptBuffer, recordingTime, saveTranscriptToDatabase, saveRecordedVideo, toast]);
@@ -1004,6 +1095,10 @@ export const useLiveBroadcast = () => {
     isFinishing,
     finishResult,
     resetFinishResult,
+    // Live analysis states
+    isAnalyzingLive,
+    analysisProgress,
+    // Actions
     startRecording,
     stopRecording,
     pauseRecording,

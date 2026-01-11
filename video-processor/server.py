@@ -5856,6 +5856,359 @@ def finalize_live_clips():
 
 
 # ============================================================================
+# ANALYZE LIVE MATCH - Full Pipeline Post-Live
+# ============================================================================
+
+@app.route('/api/analyze-live-match', methods=['POST'])
+def analyze_live_match():
+    """
+    Pipeline completo de análise pós-transmissão ao vivo.
+    
+    Este endpoint executa o fluxo Arena Play completo:
+    1. Transcreve o vídeo gravado usando IA
+    2. Analisa a transcrição para detectar eventos (gols, cartões, faltas, etc.)
+    3. Gera clips de vídeo para cada evento detectado
+    4. Atualiza o placar e status da partida
+    
+    Input JSON:
+    - matchId: ID da partida
+    - videoId: ID do vídeo final
+    - homeTeam: Nome do time da casa
+    - awayTeam: Nome do time visitante
+    
+    Returns:
+    {
+        "success": true,
+        "eventsDetected": 25,
+        "clipsGenerated": 25,
+        "homeScore": 2,
+        "awayScore": 1,
+        "transcription": "...",
+        "errors": []
+    }
+    """
+    data = request.json or {}
+    match_id = data.get('matchId')
+    video_id = data.get('videoId')
+    home_team = data.get('homeTeam', 'Time Casa')
+    away_team = data.get('awayTeam', 'Time Fora')
+    
+    if not match_id:
+        return jsonify({'success': False, 'error': 'matchId is required'}), 400
+    
+    session = get_session()
+    errors = []
+    events_detected = 0
+    clips_generated = 0
+    home_score = 0
+    away_score = 0
+    transcription = None
+    
+    print(f"\n{'='*70}")
+    print(f"[LIVE-ANALYSIS] Pipeline de Análise Pós-Live Iniciado")
+    print(f"[LIVE-ANALYSIS] Match ID: {match_id}")
+    print(f"[LIVE-ANALYSIS] Video ID: {video_id}")
+    print(f"[LIVE-ANALYSIS] Teams: {home_team} vs {away_team}")
+    print(f"{'='*70}\n")
+    
+    try:
+        # Get the video
+        video = None
+        if video_id:
+            video = session.query(Video).filter_by(id=video_id).first()
+        
+        if not video:
+            # Try to find the video for this match
+            video = session.query(Video).filter_by(
+                match_id=match_id
+            ).filter(
+                Video.status == 'completed',
+                Video.file_url.isnot(None)
+            ).order_by(Video.created_at.desc()).first()
+        
+        if not video:
+            return jsonify({
+                'success': False, 
+                'error': 'No completed video found for this match'
+            }), 404
+        
+        # Get video path
+        video_path = None
+        if video.file_url:
+            if video.file_url.startswith('/') and os.path.exists(video.file_url):
+                video_path = video.file_url
+            elif '/api/storage/' in video.file_url:
+                parts = video.file_url.split('/api/storage/')
+                if len(parts) > 1:
+                    rel_path = parts[1]
+                    video_path = str(STORAGE_DIR / rel_path)
+            
+            if video_path and os.path.islink(video_path):
+                video_path = os.path.realpath(video_path)
+        
+        if not video_path or not os.path.exists(video_path):
+            return jsonify({
+                'success': False,
+                'error': f'Video file not found at path: {video_path}'
+            }), 404
+        
+        print(f"[LIVE-ANALYSIS] Video path: {video_path}")
+        
+        # ════════════════════════════════════════════════════════════════
+        # FASE 1: TRANSCRIÇÃO
+        # ════════════════════════════════════════════════════════════════
+        print(f"\n[LIVE-ANALYSIS] ═══ FASE 1: TRANSCRIÇÃO ═══")
+        
+        transcription_result = ai_services.transcribe_audio_from_video(
+            video_path, 
+            match_id=match_id
+        )
+        
+        if not transcription_result.get('success'):
+            errors.append(f"Transcription failed: {transcription_result.get('error', 'Unknown error')}")
+            return jsonify({
+                'success': False,
+                'error': 'Transcription failed',
+                'eventsDetected': 0,
+                'clipsGenerated': 0,
+                'homeScore': 0,
+                'awayScore': 0,
+                'errors': errors
+            }), 500
+        
+        transcription = transcription_result.get('text', '')
+        srt_content = transcription_result.get('srtContent', '')
+        
+        print(f"[LIVE-ANALYSIS] Transcription complete: {len(transcription)} characters")
+        
+        # Save transcription files
+        if transcription:
+            save_file(match_id, 'texts', transcription.encode('utf-8'), 'live_transcription.txt')
+        if srt_content:
+            save_file(match_id, 'srt', srt_content.encode('utf-8'), 'live_transcription.srt')
+        
+        # ════════════════════════════════════════════════════════════════
+        # FASE 2: ANÁLISE DE EVENTOS
+        # ════════════════════════════════════════════════════════════════
+        print(f"\n[LIVE-ANALYSIS] ═══ FASE 2: ANÁLISE DE EVENTOS ═══")
+        
+        # Get video duration for time range
+        duration_seconds = video.duration_seconds or 5400  # 90 min default
+        
+        # Clear existing events for this match to avoid duplicates
+        existing_events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+        for ev in existing_events:
+            session.delete(ev)
+        session.commit()
+        print(f"[LIVE-ANALYSIS] Cleared {len(existing_events)} existing events")
+        
+        # Analyze transcription
+        analysis_result = ai_services.analyze_match_transcription(
+            transcription=transcription,
+            home_team=home_team,
+            away_team=away_team,
+            start_minute=0,
+            end_minute=90
+        )
+        
+        if not analysis_result.get('success'):
+            errors.append(f"Analysis failed: {analysis_result.get('error', 'Unknown error')}")
+            return jsonify({
+                'success': False,
+                'error': 'Analysis failed',
+                'eventsDetected': 0,
+                'clipsGenerated': 0,
+                'homeScore': 0,
+                'awayScore': 0,
+                'transcription': transcription[:1000] if transcription else None,
+                'errors': errors
+            }), 500
+        
+        events = analysis_result.get('events', [])
+        home_score = analysis_result.get('homeScore', 0)
+        away_score = analysis_result.get('awayScore', 0)
+        events_detected = len(events)
+        
+        print(f"[LIVE-ANALYSIS] Events detected: {events_detected}")
+        print(f"[LIVE-ANALYSIS] Score: {home_team} {home_score} x {away_score} {away_team}")
+        
+        # ════════════════════════════════════════════════════════════════
+        # FASE 3: INSERIR EVENTOS NO BANCO
+        # ════════════════════════════════════════════════════════════════
+        print(f"\n[LIVE-ANALYSIS] ═══ FASE 3: INSERINDO EVENTOS ═══")
+        
+        for event in events:
+            minute = event.get('minute', 0)
+            match_half = 'first_half' if minute < 45 else 'second_half'
+            
+            db_event = MatchEvent(
+                match_id=match_id,
+                video_id=video.id,
+                event_type=event.get('type', 'unknown'),
+                minute=minute,
+                second=event.get('second', 0),
+                description=event.get('description', ''),
+                match_half=match_half,
+                clip_pending=True,
+                is_highlight=event.get('type') in ['goal', 'red_card', 'penalty'],
+                metadata=event.get('metadata', {})
+            )
+            session.add(db_event)
+        
+        session.commit()
+        print(f"[LIVE-ANALYSIS] Inserted {events_detected} events")
+        
+        # ════════════════════════════════════════════════════════════════
+        # FASE 4: GERAR CLIPS
+        # ════════════════════════════════════════════════════════════════
+        print(f"\n[LIVE-ANALYSIS] ═══ FASE 4: GERANDO CLIPS ═══")
+        
+        # Get all events just created
+        db_events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+        
+        for db_event in db_events:
+            try:
+                minute = db_event.minute or 0
+                second = db_event.second or 0
+                
+                # Calculate timestamp in seconds
+                # For live recordings, use absolute time from start
+                event_seconds = minute * 60 + second
+                start_seconds = max(0, event_seconds - 3.0)  # 3 second pre-buffer
+                duration = 10.0
+                
+                half_type = db_event.match_half or ('first_half' if minute < 45 else 'second_half')
+                
+                # Generate filename
+                team_short = None
+                if home_team and home_team.lower() in (db_event.description or '').lower():
+                    team_short = home_team[:3].upper()
+                elif away_team and away_team.lower() in (db_event.description or '').lower():
+                    team_short = away_team[:3].upper()
+                
+                filename = f"{minute:02d}min-{db_event.event_type}"
+                if team_short:
+                    filename += f"-{team_short}"
+                filename += f"-{db_event.id[:8]}.mp4"
+                
+                # Get clip path
+                clip_folder = get_clip_subfolder_path(match_id, half_type.replace('_half', ''))
+                clip_path = str(clip_folder / filename)
+                
+                # Extract clip
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-ss', str(start_seconds),
+                    '-i', video_path,
+                    '-t', str(duration),
+                    '-c:v', 'libx264',
+                    '-c:a', 'aac',
+                    '-preset', 'fast',
+                    '-crf', '23',
+                    '-movflags', '+faststart',
+                    clip_path
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                
+                if result.returncode == 0 and os.path.exists(clip_path):
+                    # Apply subtitles
+                    subtitled_path = clip_path.replace('.mp4', '_sub.mp4')
+                    team_name = None
+                    if home_team and home_team.lower() in (db_event.description or '').lower():
+                        team_name = home_team
+                    elif away_team and away_team.lower() in (db_event.description or '').lower():
+                        team_name = away_team
+                    
+                    if add_subtitles_to_clip(
+                        clip_path, subtitled_path,
+                        db_event.description or '', minute, db_event.event_type, team_name
+                    ):
+                        os.replace(subtitled_path, clip_path)
+                    
+                    # Update event with clip URL
+                    clip_url = f"http://localhost:5000/api/storage/{match_id}/clips/{half_type.replace('_half', '')}/{filename}"
+                    db_event.clip_url = clip_url
+                    db_event.clip_pending = False
+                    session.commit()
+                    
+                    clips_generated += 1
+                    print(f"[LIVE-ANALYSIS] ✓ Clip: {filename}")
+                else:
+                    errors.append(f"Failed to generate clip for event {db_event.id[:8]}")
+                    
+            except Exception as e:
+                errors.append(f"Clip error: {str(e)}")
+                continue
+        
+        # ════════════════════════════════════════════════════════════════
+        # FASE 5: ATUALIZAR PARTIDA
+        # ════════════════════════════════════════════════════════════════
+        print(f"\n[LIVE-ANALYSIS] ═══ FASE 5: ATUALIZANDO PARTIDA ═══")
+        
+        match = session.query(Match).filter_by(id=match_id).first()
+        if match:
+            match.home_score = home_score
+            match.away_score = away_score
+            match.status = 'analyzed'
+            match.updated_at = datetime.now().isoformat()
+            session.commit()
+            print(f"[LIVE-ANALYSIS] Match updated: {home_score} x {away_score}, status=analyzed")
+        
+        # Create/update analysis job
+        analysis_job = session.query(AnalysisJob).filter_by(match_id=match_id).first()
+        if not analysis_job:
+            analysis_job = AnalysisJob(match_id=match_id)
+            session.add(analysis_job)
+        
+        analysis_job.status = 'completed'
+        analysis_job.progress = 100
+        analysis_job.current_step = 'Análise pós-live concluída'
+        analysis_job.completed_at = datetime.now().isoformat()
+        analysis_job.result = {
+            'eventsDetected': events_detected,
+            'clipsGenerated': clips_generated,
+            'homeScore': home_score,
+            'awayScore': away_score,
+            'source': 'live_analysis',
+            'transcriptionLength': len(transcription) if transcription else 0
+        }
+        session.commit()
+        
+        print(f"\n{'='*70}")
+        print(f"[LIVE-ANALYSIS] ✓ Pipeline Concluído!")
+        print(f"[LIVE-ANALYSIS] Eventos: {events_detected} | Clips: {clips_generated}")
+        print(f"[LIVE-ANALYSIS] Placar: {home_team} {home_score} x {away_score} {away_team}")
+        print(f"{'='*70}\n")
+        
+        return jsonify({
+            'success': True,
+            'eventsDetected': events_detected,
+            'clipsGenerated': clips_generated,
+            'homeScore': home_score,
+            'awayScore': away_score,
+            'transcription': transcription[:2000] if transcription else None,
+            'errors': errors
+        })
+        
+    except Exception as e:
+        print(f"[LIVE-ANALYSIS] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'eventsDetected': events_detected,
+            'clipsGenerated': clips_generated,
+            'homeScore': home_score,
+            'awayScore': away_score,
+            'errors': errors
+        }), 500
+    finally:
+        session.close()
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 
@@ -5907,10 +6260,10 @@ def print_startup_status():
     print("  POST /api/transcription-jobs          - Criar job de transcrição")
     print("  GET  /api/transcription-jobs/<id>     - Status do job")
     print("  POST /api/analyze-match               - Analisar partida")
+    print("  POST /api/analyze-live-match          - Analisar partida ao vivo (pós-gravação)")
     print("=" * 60 + "\n")
 
 
 if __name__ == '__main__':
     print_startup_status()
     app.run(host='0.0.0.0', port=5000, debug=True)
-
