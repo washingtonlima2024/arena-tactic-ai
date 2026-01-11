@@ -17,6 +17,7 @@ import { LiveSummaryDialog } from "@/components/live/LiveSummaryDialog";
 import { LiveEventPlayer } from "@/components/live/LiveEventPlayer";
 import { LiveAnalysisPanel } from "@/components/live/LiveAnalysisPanel";
 import { LiveTacticalField } from "@/components/tactical/LiveTacticalField";
+import { LiveClipProgress } from "@/components/live/LiveClipProgress";
 import { useLiveBroadcastContext } from "@/contexts/LiveBroadcastContext";
 import { useEventBasedAnalysis } from "@/hooks/useEventBasedAnalysis";
 import { useNavigate } from "react-router-dom";
@@ -59,6 +60,8 @@ const Live = () => {
     isFinishing,
     finishResult,
     resetFinishResult,
+    clipGenerationQueue,
+    storageProgress,
     startRecording,
     stopRecording,
     pauseRecording,
@@ -459,6 +462,14 @@ const Live = () => {
         matchInfo={matchInfo}
         score={currentScore}
       />
+
+      {/* Clip Generation Progress */}
+      {isRecording && (
+        <LiveClipProgress
+          clipQueue={clipGenerationQueue}
+          storageProgress={storageProgress}
+        />
+      )}
     </AppLayout>
   );
 };

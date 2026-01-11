@@ -52,6 +52,25 @@ export interface VideoChunk {
   timestamp: number;
 }
 
+export interface ClipGenerationProgress {
+  eventId: string;
+  eventType: string;
+  minute: number;
+  second: number;
+  status: 'queued' | 'preparing' | 'generating' | 'uploading' | 'complete' | 'error';
+  progress: number;
+  error?: string;
+  startedAt: Date;
+}
+
+export interface StorageProgress {
+  totalChunks: number;
+  uploadedChunks: number;
+  totalSizeMB: number;
+  uploadedSizeMB: number;
+  lastUploadedAt: Date | null;
+}
+
 interface LiveBroadcastContextType {
   // State
   matchInfo: MatchInfo;
@@ -79,6 +98,10 @@ interface LiveBroadcastContextType {
   isFinishing: boolean;
   finishResult: FinishMatchResult | null;
   latestVideoChunkUrl: string | null;
+  
+  // Clip generation progress
+  clipGenerationQueue: ClipGenerationProgress[];
+  storageProgress: StorageProgress;
   
   // Actions
   startRecording: (videoElement?: HTMLVideoElement | null, existingMatchId?: string | null) => Promise<void>;
@@ -149,6 +172,16 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   const [latestVideoChunkUrl, setLatestVideoChunkUrl] = useState<string | null>(null);
   const [currentVideoId, setCurrentVideoId] = useState<string | null>(null);
   const currentVideoIdRef = useRef<string | null>(null);
+  
+  // Clip generation progress states
+  const [clipGenerationQueue, setClipGenerationQueue] = useState<ClipGenerationProgress[]>([]);
+  const [storageProgress, setStorageProgress] = useState<StorageProgress>({
+    totalChunks: 0,
+    uploadedChunks: 0,
+    totalSizeMB: 0,
+    uploadedSizeMB: 0,
+    lastUploadedAt: null,
+  });
   
   const segmentBufferRef = useRef<VideoSegmentBuffer | null>(null);
   const [segmentCount, setSegmentCount] = useState(0);
@@ -373,6 +406,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
       const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
       const videoBlob = new Blob(videoChunksRef.current, { type: mimeType });
+      const chunkSizeMB = videoBlob.size / (1024 * 1024);
+      const chunksUploaded = videoChunksRef.current.length;
       
       console.log(`Saving video chunk, size: ${(videoBlob.size / 1024).toFixed(1)} KB`);
       
@@ -382,6 +417,17 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         videoBlob, 
         `chunk-${Date.now()}.${extension}`
       );
+      
+      // Update storage progress after successful upload
+      setStorageProgress(prev => ({
+        ...prev,
+        uploadedChunks: prev.uploadedChunks + chunksUploaded,
+        uploadedSizeMB: prev.uploadedSizeMB + chunkSizeMB,
+        lastUploadedAt: new Date(),
+      }));
+      
+      // Clear the chunks that were just uploaded
+      videoChunksRef.current = [];
       
       setLatestVideoChunkUrl(result.url);
       console.log('Video chunk saved successfully:', result.url);
@@ -499,6 +545,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       videoRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           const chunkSizeKB = event.data.size / 1024;
+          const chunkSizeMB = event.data.size / (1024 * 1024);
           
           videoChunksRef.current.push(event.data);
           allVideoChunksRef.current.push(event.data);
@@ -517,8 +564,17 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           }
           
           const totalSize = allVideoChunksRef.current.reduce((acc, chunk) => acc + chunk.size, 0);
+          const totalSizeMB = totalSize / (1024 * 1024);
+          
+          // Update storage progress
+          setStorageProgress(prev => ({
+            ...prev,
+            totalChunks: allVideoChunksRef.current.length,
+            totalSizeMB: totalSizeMB,
+          }));
+          
           const warnIcon = chunkSizeKB < 1 ? '⚠️' : '📹';
-          console.log(`${warnIcon} Video chunk: ${chunkSizeKB.toFixed(1)}KB at ${currentTime}s | All: ${allVideoChunksRef.current.length} (${(totalSize / 1024 / 1024).toFixed(2)}MB)`);
+          console.log(`${warnIcon} Video chunk: ${chunkSizeKB.toFixed(1)}KB at ${currentTime}s | All: ${allVideoChunksRef.current.length} (${totalSizeMB.toFixed(2)}MB)`);
         }
       };
 
@@ -879,20 +935,52 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     error?: string;
   }
 
-  // Generate clip for event
+  // Generate clip for event with progress tracking
   const generateClipForEvent = useCallback(async (event: LiveEvent, videoUrl?: string): Promise<ClipGenerationResult> => {
     const matchId = tempMatchIdRef.current;
     if (!matchId) {
       return { success: false, error: 'No match ID' };
     }
     if (isGeneratingClipRef.current) {
-      return { success: false, error: 'Already generating clip' };
+      // Add to queue instead of rejecting
+      setClipGenerationQueue(prev => {
+        if (prev.some(c => c.eventId === event.id)) return prev;
+        return [...prev, {
+          eventId: event.id,
+          eventType: event.type,
+          minute: event.minute,
+          second: event.second,
+          status: 'queued',
+          progress: 0,
+          startedAt: new Date(),
+        }];
+      });
+      return { success: false, error: 'Queued for later' };
     }
     
     isGeneratingClipRef.current = true;
     console.log(`[ClipGen] Generating clip for event ${event.id} at ${event.recordingTimestamp}s...`);
     
+    // Add to queue with preparing status
+    setClipGenerationQueue(prev => {
+      const filtered = prev.filter(c => c.eventId !== event.id);
+      return [...filtered, {
+        eventId: event.id,
+        eventType: event.type,
+        minute: event.minute,
+        second: event.second,
+        status: 'preparing',
+        progress: 10,
+        startedAt: new Date(),
+      }];
+    });
+    
     try {
+      // Update progress: Loading FFmpeg
+      setClipGenerationQueue(prev => prev.map(c => 
+        c.eventId === event.id ? { ...c, status: 'preparing', progress: 20 } : c
+      ));
+      
       const ffmpeg = await loadFFmpeg();
       
       const eventSeconds = event.recordingTimestamp || (event.minute * 60 + event.second);
@@ -960,6 +1048,9 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       
       if (!videoData) {
         console.warn('[ClipGen] No video data available from any source');
+        setClipGenerationQueue(prev => prev.map(c => 
+          c.eventId === event.id ? { ...c, status: 'error', error: 'No video data' } : c
+        ));
         isGeneratingClipRef.current = false;
         return { success: false, error: 'No video data available' };
       }
@@ -968,15 +1059,28 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       const inputSizeKB = videoData.length / 1024;
       if (inputSizeKB < 100) {
         console.warn(`[ClipGen] Input video too small: ${inputSizeKB.toFixed(1)}KB`);
+        setClipGenerationQueue(prev => prev.map(c => 
+          c.eventId === event.id ? { ...c, status: 'error', error: 'Video too small' } : c
+        ));
         isGeneratingClipRef.current = false;
         return { success: false, error: 'Input video too small' };
       }
+      
+      // Update progress: Generating
+      setClipGenerationQueue(prev => prev.map(c => 
+        c.eventId === event.id ? { ...c, status: 'generating', progress: 40 } : c
+      ));
       
       // Process with FFmpeg
       await ffmpeg.writeFile('input.webm', videoData);
       
       const extension = 'webm';
       const outputFile = `clip_${event.id}.${extension}`;
+      
+      // Update progress: Processing
+      setClipGenerationQueue(prev => prev.map(c => 
+        c.eventId === event.id ? { ...c, status: 'generating', progress: 60 } : c
+      ));
       
       await ffmpeg.exec([
         '-i', 'input.webm',
@@ -988,6 +1092,11 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         '-preset', 'ultrafast',
         outputFile
       ]);
+      
+      // Update progress: Uploading
+      setClipGenerationQueue(prev => prev.map(c => 
+        c.eventId === event.id ? { ...c, status: 'uploading', progress: 80 } : c
+      ));
       
       const clipData = await ffmpeg.readFile(outputFile);
       const clipBlob = new Blob([clipData instanceof Uint8Array ? new Uint8Array(clipData).buffer as ArrayBuffer : clipData], { type: 'video/webm' });
@@ -1009,12 +1118,25 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         await ffmpeg.deleteFile(outputFile);
       } catch {}
       
+      // Update progress: Complete
+      setClipGenerationQueue(prev => prev.map(c => 
+        c.eventId === event.id ? { ...c, status: 'complete', progress: 100 } : c
+      ));
+      
+      // Remove from queue after delay to allow UI to show "complete" state
+      setTimeout(() => {
+        setClipGenerationQueue(prev => prev.filter(c => c.eventId !== event.id));
+      }, 3000);
+      
       isGeneratingClipRef.current = false;
       console.log(`[ClipGen] ✅ Clip generated: ${result.url}`);
       
       return { success: true, clipUrl: result.url };
     } catch (error) {
       console.error('[ClipGen] Error:', error);
+      setClipGenerationQueue(prev => prev.map(c => 
+        c.eventId === event.id ? { ...c, status: 'error', error: String(error) } : c
+      ));
       isGeneratingClipRef.current = false;
       return { success: false, error: String(error) };
     }
@@ -1821,6 +1943,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     isFinishing,
     finishResult,
     latestVideoChunkUrl,
+    clipGenerationQueue,
+    storageProgress,
     startRecording,
     stopRecording,
     pauseRecording,
