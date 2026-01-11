@@ -156,7 +156,11 @@ export default function Media() {
   
   // Use first video with valid URL as primary for UI display
   const matchVideo = matchVideos?.find(v => v.file_url && v.file_url.length > 0) || null;
-  const hasRecordingInProgress = matchVideos?.some(v => v.status === 'recording' && (!v.file_url || v.file_url.length === 0));
+  // Only show recording warning if video is recording AND has no valid file_url
+  // Also check if match status indicates active recording (not analyzed/completed)
+  const matchStatus = selectedMatch?.status;
+  const isMatchStillRecording = matchStatus === 'recording' || matchStatus === 'live' || matchStatus === 'in_progress';
+  const hasRecordingInProgress = isMatchStillRecording && matchVideos?.some(v => v.status === 'recording' && (!v.file_url || v.file_url.length === 0));
 
   // Generate clips from events - Use eventMs from metadata as primary timestamp source
   const clips = events?.map((event) => {
