@@ -64,6 +64,11 @@ const Live = () => {
     storageProgress,
     isAnalyzingLive,
     analysisProgress,
+    // Manual clip states
+    isClipRecording,
+    clipStartTime,
+    clipEventType,
+    // Actions
     startRecording,
     stopRecording,
     pauseRecording,
@@ -76,6 +81,9 @@ const Live = () => {
     updateScore,
     finishMatch,
     getClipChunksForTime,
+    // Manual clip actions
+    startManualClip,
+    finishManualClip,
   } = useLiveBroadcastContext();
 
   const hasVideoSource = streamUrl || cameraStream;
@@ -327,12 +335,17 @@ const Live = () => {
               hasVideoSource={!!hasVideoSource}
               hasMatchInfo={!!(matchInfo.homeTeam && matchInfo.awayTeam)}
               currentMatchId={currentMatchId}
+              isClipRecording={isClipRecording}
+              clipEventType={clipEventType}
+              clipStartTime={clipStartTime}
               onStart={handleStartRecording}
               onStop={stopRecording}
               onPause={pauseRecording}
               onResume={resumeRecording}
               onFinish={handleFinishClick}
               onAddManualEvent={addManualEvent}
+              onStartClip={startManualClip}
+              onFinishClip={finishManualClip}
             />
           </div>
 
