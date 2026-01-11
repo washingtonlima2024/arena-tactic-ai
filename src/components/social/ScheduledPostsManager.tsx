@@ -179,7 +179,7 @@ export function ScheduledPostsManager() {
     }
 
     try {
-      const userId = 'local-admin-user';
+      const userId = '00000000-0000-0000-0000-000000000001';
 
       if (editingPost) {
         const { error } = await supabase
@@ -235,7 +235,7 @@ export function ScheduledPostsManager() {
           platform: post.platform,
           content: post.content,
           mediaUrl: post.media_url,
-          userId: 'local-admin-user',
+          userId: '00000000-0000-0000-0000-000000000001',
         }
       });
 

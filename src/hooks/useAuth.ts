@@ -7,8 +7,9 @@ import { useState, useEffect, useCallback } from 'react';
 export type AppRole = 'admin' | 'user';
 
 // Simulated user for local development
+// Using a valid UUID format for database compatibility
 const LOCAL_ADMIN_USER = {
-  id: 'local-admin-user',
+  id: '00000000-0000-0000-0000-000000000001',
   email: 'admin@arenaplay.local',
   user_metadata: {
     display_name: 'Administrador Local',
