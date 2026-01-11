@@ -500,7 +500,7 @@ export function PlaylistPlayer({
       <div className="flex-1 relative overflow-hidden flex items-center justify-center py-4">
         {/* Device mockup with video content inside */}
         {playbackState.type !== 'complete' ? (
-          <DeviceMockup format={format} platform={platform}>
+          <DeviceMockup format={format} platform={platform} allowRotation>
             <VideoContent />
           </DeviceMockup>
         ) : (

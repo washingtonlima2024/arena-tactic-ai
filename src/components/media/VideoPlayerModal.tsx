@@ -310,7 +310,7 @@ export function VideoPlayerModal({
 
           {/* Device mockup container */}
           <div className="flex items-center justify-center p-6 bg-gradient-to-b from-muted/30 to-background min-h-[400px]">
-            <DeviceMockup format={deviceFormat} size="md">
+            <DeviceMockup format={deviceFormat} size="md" allowRotation>
               <VideoContent />
             </DeviceMockup>
           </div>
