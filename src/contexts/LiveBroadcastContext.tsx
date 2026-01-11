@@ -1729,6 +1729,123 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [isPaused]);
 
+  // Extract video cover thumbnail (frame at 3 seconds)
+  const extractVideoCoverThumbnail = useCallback(async (videoUrl: string, matchId: string): Promise<string | null> => {
+    return new Promise((resolve) => {
+      const video = document.createElement('video');
+      video.crossOrigin = 'anonymous';
+      video.preload = 'metadata';
+      video.muted = true;
+      
+      let resolved = false;
+      const timeoutId = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          video.remove();
+          console.warn('[extractVideoCoverThumbnail] Timeout');
+          resolve(null);
+        }
+      }, 15000);
+      
+      video.onloadedmetadata = () => {
+        // Seek to 3 seconds or 10% of video, whichever is smaller
+        const targetTime = Math.min(3, video.duration * 0.1);
+        video.currentTime = Math.max(0, targetTime);
+      };
+      
+      video.onseeked = async () => {
+        if (resolved) return;
+        resolved = true;
+        clearTimeout(timeoutId);
+        
+        try {
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth || 1280;
+          canvas.height = video.videoHeight || 720;
+          
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            throw new Error('Failed to get canvas context');
+          }
+          
+          // Draw video frame
+          ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+          
+          // Add subtle branding overlay at bottom
+          const scale = canvas.width / 1280;
+          const gradient = ctx.createLinearGradient(0, canvas.height - 100 * scale, 0, canvas.height);
+          gradient.addColorStop(0, 'rgba(0, 0, 0, 0)');
+          gradient.addColorStop(1, 'rgba(0, 0, 0, 0.5)');
+          ctx.fillStyle = gradient;
+          ctx.fillRect(0, canvas.height - 100 * scale, canvas.width, 100 * scale);
+          
+          // Add "LIVE" badge
+          const badgeHeight = 40 * scale;
+          const padding = 20 * scale;
+          ctx.fillStyle = '#ef4444';
+          ctx.beginPath();
+          const radius = 6 * scale;
+          const badgeX = padding;
+          const badgeY = canvas.height - padding - badgeHeight;
+          const badgeWidth = 80 * scale;
+          ctx.moveTo(badgeX + radius, badgeY);
+          ctx.lineTo(badgeX + badgeWidth - radius, badgeY);
+          ctx.quadraticCurveTo(badgeX + badgeWidth, badgeY, badgeX + badgeWidth, badgeY + radius);
+          ctx.lineTo(badgeX + badgeWidth, badgeY + badgeHeight - radius);
+          ctx.quadraticCurveTo(badgeX + badgeWidth, badgeY + badgeHeight, badgeX + badgeWidth - radius, badgeY + badgeHeight);
+          ctx.lineTo(badgeX + radius, badgeY + badgeHeight);
+          ctx.quadraticCurveTo(badgeX, badgeY + badgeHeight, badgeX, badgeY + badgeHeight - radius);
+          ctx.lineTo(badgeX, badgeY + radius);
+          ctx.quadraticCurveTo(badgeX, badgeY, badgeX + radius, badgeY);
+          ctx.closePath();
+          ctx.fill();
+          
+          ctx.fillStyle = '#ffffff';
+          ctx.font = `bold ${24 * scale}px sans-serif`;
+          ctx.textBaseline = 'middle';
+          ctx.fillText('LIVE', badgeX + 15 * scale, badgeY + badgeHeight / 2);
+          
+          // Convert to blob
+          const blob = await new Promise<Blob | null>((res) => {
+            canvas.toBlob((b) => res(b), 'image/jpeg', 0.90);
+          });
+          
+          if (!blob) {
+            throw new Error('Failed to create blob');
+          }
+          
+          // Upload cover thumbnail
+          const fileName = `cover-${Date.now()}.jpg`;
+          const result = await apiClient.uploadBlob(matchId, 'images', blob, fileName);
+          
+          console.log('[extractVideoCoverThumbnail] Cover saved:', result.url);
+          
+          canvas.remove();
+          video.remove();
+          
+          resolve(result.url);
+        } catch (err) {
+          console.error('[extractVideoCoverThumbnail] Error:', err);
+          video.remove();
+          resolve(null);
+        }
+      };
+      
+      video.onerror = () => {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timeoutId);
+          video.remove();
+          console.error('[extractVideoCoverThumbnail] Video load error');
+          resolve(null);
+        }
+      };
+      
+      video.src = videoUrl;
+      video.load();
+    });
+  }, []);
+
   // Finish match
   const finishMatch = useCallback(async (): Promise<FinishMatchResult | null> => {
     setIsFinishing(true);
@@ -1838,6 +1955,16 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         
         setVideoUploadProgress(100);
         console.log('[finishMatch] Video saved:', videoUrl);
+        
+        // STEP 1.5: Extract video cover thumbnail (3s frame)
+        if (videoUrl && matchId) {
+          try {
+            console.log('[finishMatch] Extracting video cover thumbnail...');
+            await extractVideoCoverThumbnail(videoUrl, matchId);
+          } catch (thumbError) {
+            console.warn('[finishMatch] Cover thumbnail extraction failed:', thumbError);
+          }
+        }
       }
     } catch (videoError) {
       console.error('[finishMatch] Video upload error:', videoError);
