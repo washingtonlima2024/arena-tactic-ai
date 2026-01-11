@@ -1162,20 +1162,25 @@ export default function VideoUpload() {
           
           // Show informative toast with actual error
           const errorMessage = error?.message || 'Erro desconhecido';
-          const isDependencyError = errorMessage.includes('Dependência') || errorMessage.includes('module');
+          const isDependencyError = errorMessage.includes('Dependência') || errorMessage.includes('module') || errorMessage.includes('faster-whisper');
           const isServerError = errorMessage.includes('servidor') || errorMessage.includes('offline');
+          const isApiKeyError = errorMessage.includes('API') || errorMessage.includes('chave') || errorMessage.includes('configurad');
           
           toast({
             title: isDependencyError 
               ? "⚠️ Dependência faltando no servidor" 
               : isServerError 
                 ? "⚠️ Servidor Python offline" 
-                : "⚠️ Transcrição falhou",
+                : isApiKeyError
+                  ? "⚠️ Chave de API não configurada"
+                  : "⚠️ Transcrição falhou",
             description: isDependencyError 
-              ? "Execute: pip install faster-whisper==1.1.0 no servidor Python e reinicie."
-              : errorMessage.length > 150 
-                ? errorMessage.substring(0, 150) + '...' 
-                : errorMessage,
+              ? "Se quiser usar Whisper Local offline, execute: pip install faster-whisper==1.1.0"
+              : isApiKeyError
+                ? "Configure sua chave Google/Lovable em Configurações > APIs para transcrição."
+                : errorMessage.length > 150 
+                  ? errorMessage.substring(0, 150) + '...' 
+                  : errorMessage,
             variant: "destructive",
             duration: 10000,
           });
