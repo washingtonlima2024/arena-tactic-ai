@@ -5622,6 +5622,240 @@ def _process_transcription_job(job_id: str, match_id: str, video_path: str):
 
 
 # ============================================================================
+# FINALIZE LIVE MATCH CLIPS
+# ============================================================================
+
+@app.route('/api/finalize-live-clips', methods=['POST'])
+def finalize_live_clips():
+    """
+    Finaliza clips de uma partida ao vivo.
+    
+    Este endpoint:
+    1. Busca todos os eventos da partida que não têm clip
+    2. Vincula os eventos ao vídeo final
+    3. Extrai clips de cada evento usando o vídeo salvo
+    
+    Input JSON:
+    - matchId: ID da partida
+    - videoId: ID do vídeo final
+    """
+    data = request.json or {}
+    match_id = data.get('matchId')
+    video_id = data.get('videoId')
+    
+    if not match_id:
+        return jsonify({'success': False, 'error': 'matchId is required'}), 400
+    
+    session = get_session()
+    errors = []
+    events_linked = 0
+    clips_generated = 0
+    
+    try:
+        # Get the video
+        video = None
+        if video_id:
+            video = session.query(Video).filter_by(id=video_id).first()
+        
+        if not video:
+            # Try to find the video for this match
+            video = session.query(Video).filter_by(
+                match_id=match_id
+            ).filter(
+                Video.status == 'completed',
+                Video.file_url.isnot(None)
+            ).first()
+        
+        if not video:
+            return jsonify({
+                'success': False, 
+                'error': 'No completed video found for this match'
+            }), 404
+        
+        # Get all events for this match
+        events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+        
+        if not events:
+            return jsonify({
+                'success': True,
+                'eventsLinked': 0,
+                'clipsGenerated': 0,
+                'errors': ['No events found for this match']
+            })
+        
+        # Get video path
+        video_path = None
+        if video.file_url:
+            # Try local path first
+            if video.file_url.startswith('/') and os.path.exists(video.file_url):
+                video_path = video.file_url
+            elif '/api/storage/' in video.file_url:
+                # Extract path from URL
+                parts = video.file_url.split('/api/storage/')
+                if len(parts) > 1:
+                    rel_path = parts[1]
+                    video_path = str(STORAGE_DIR / rel_path)
+            
+            # Resolve symlinks
+            if video_path and os.path.islink(video_path):
+                video_path = os.path.realpath(video_path)
+        
+        if not video_path or not os.path.exists(video_path):
+            return jsonify({
+                'success': False,
+                'error': f'Video file not found: {video.file_url}'
+            }), 404
+        
+        # Get match info
+        match = session.query(Match).filter_by(id=match_id).first()
+        home_team = None
+        away_team = None
+        
+        if match:
+            if match.home_team:
+                home_team = match.home_team.name
+            if match.away_team:
+                away_team = match.away_team.name
+        
+        # Prepare events for clip extraction
+        events_to_clip = []
+        for event in events:
+            # Link event to video if not linked
+            if not event.video_id:
+                event.video_id = video.id
+                events_linked += 1
+            
+            # Check if clip already exists
+            if event.clip_url and not event.clip_pending:
+                continue
+            
+            # Prepare event data for extraction
+            metadata = event.metadata or {}
+            event_data = {
+                'id': event.id,
+                'minute': event.minute or 0,
+                'second': event.second or 0,
+                'event_type': event.event_type,
+                'description': event.description or '',
+                'eventMs': metadata.get('eventMs'),
+                'videoSecond': metadata.get('videoSecond'),
+                'recordingTimestamp': metadata.get('eventMs', (event.minute or 0) * 60 + (event.second or 0) * 1000) / 1000
+            }
+            events_to_clip.append(event_data)
+        
+        session.commit()
+        
+        # Sort events by time
+        events_to_clip.sort(key=lambda e: e.get('recordingTimestamp', 0))
+        
+        print(f"[LiveClips] Processing {len(events_to_clip)} events for clips")
+        
+        # Extract clips
+        for event_data in events_to_clip:
+            try:
+                event_id = event_data['id']
+                minute = event_data['minute']
+                second = event_data['second']
+                event_type = event_data['event_type']
+                description = event_data['description']
+                
+                # Calculate start time (use recordingTimestamp if available)
+                recording_ts = event_data.get('recordingTimestamp', minute * 60 + second)
+                start_seconds = max(0, recording_ts - 3.0)  # 3 second pre-buffer
+                duration = 10.0  # 3s before + 7s after
+                
+                # Determine half type
+                half_type = 'first_half' if minute < 45 else 'second_half'
+                
+                # Generate filename
+                team_short = None
+                if home_team and home_team.lower() in description.lower():
+                    team_short = home_team[:3].upper()
+                elif away_team and away_team.lower() in description.lower():
+                    team_short = away_team[:3].upper()
+                
+                filename = f"{minute:02d}min-{event_type}"
+                if team_short:
+                    filename += f"-{team_short}"
+                filename += ".mp4"
+                
+                # Get clip path
+                clip_folder = get_clip_subfolder_path(match_id, half_type.replace('_half', ''))
+                clip_path = str(clip_folder / filename)
+                
+                # Extract clip using FFmpeg
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-ss', str(start_seconds),
+                    '-i', video_path,
+                    '-t', str(duration),
+                    '-c:v', 'libx264',
+                    '-c:a', 'aac',
+                    '-preset', 'fast',
+                    '-crf', '23',
+                    '-movflags', '+faststart',
+                    clip_path
+                ]
+                
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                
+                if result.returncode == 0 and os.path.exists(clip_path):
+                    # Apply subtitles if possible
+                    subtitled_path = clip_path.replace('.mp4', '_sub.mp4')
+                    team_name = None
+                    if home_team and home_team.lower() in description.lower():
+                        team_name = home_team
+                    elif away_team and away_team.lower() in description.lower():
+                        team_name = away_team
+                    
+                    if add_subtitles_to_clip(
+                        clip_path, subtitled_path,
+                        description, minute, event_type, team_name
+                    ):
+                        os.replace(subtitled_path, clip_path)
+                    
+                    # Generate clip URL
+                    clip_url = f"http://localhost:5000/api/storage/{match_id}/clips/{half_type}/{filename}"
+                    
+                    # Update event in database
+                    db_event = session.query(MatchEvent).filter_by(id=event_id).first()
+                    if db_event:
+                        db_event.clip_url = clip_url
+                        db_event.clip_pending = False
+                        session.commit()
+                    
+                    clips_generated += 1
+                    print(f"[LiveClips] ✓ Generated clip: {filename}")
+                else:
+                    errors.append(f"Failed to extract clip for event {event_id}: {result.stderr[:200] if result.stderr else 'unknown error'}")
+                    
+            except Exception as e:
+                errors.append(f"Error processing event: {str(e)}")
+                continue
+        
+        return jsonify({
+            'success': True,
+            'eventsLinked': events_linked,
+            'clipsGenerated': clips_generated,
+            'errors': errors
+        })
+        
+    except Exception as e:
+        print(f"[LiveClips] Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'eventsLinked': events_linked,
+            'clipsGenerated': clips_generated,
+            'errors': errors
+        }), 500
+    finally:
+        session.close()
+
+
+# ============================================================================
 # MAIN
 # ============================================================================
 

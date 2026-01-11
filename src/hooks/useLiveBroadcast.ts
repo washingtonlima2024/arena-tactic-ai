@@ -894,8 +894,7 @@ export const useLiveBroadcast = () => {
         await saveTranscriptToDatabase(matchId);
 
         // Events already saved in real-time, no need to insert again
-        // Just log for debugging
-        console.log(`Finish match: ${approvedEvents.length} events already saved in real-time`);
+        console.log(`Finish match: ${approvedEvents.length + detectedEvents.length} events already saved in real-time`);
 
         // NEW: Create analysis_job for consistency with imported matches
         await apiClient.createAnalysisJob({
@@ -905,17 +904,48 @@ export const useLiveBroadcast = () => {
           current_step: 'Análise ao vivo concluída',
           completed_at: new Date().toISOString(),
           result: {
-            eventsDetected: approvedEvents.length,
+            eventsDetected: approvedEvents.length + detectedEvents.length,
             source: 'live',
             duration: recordingTime,
             transcriptWords: transcriptBuffer.split(" ").length
           }
         });
 
+        // NEW: Generate clips for live events
+        if (videoUrl) {
+          toast({
+            title: "Gerando clips...",
+            description: "Extraindo vídeos dos momentos marcados"
+          });
+
+          try {
+            // Get video ID from the saved video
+            const videos = await apiClient.getVideos(matchId);
+            const savedVideo = videos.find((v: any) => v.file_url === videoUrl || v.status === 'completed');
+            
+            if (savedVideo) {
+              const clipsResult = await apiClient.finalizeLiveMatchClips(matchId, savedVideo.id);
+              console.log('Clips generated:', clipsResult);
+              
+              toast({
+                title: "Clips gerados!",
+                description: `${clipsResult.clipsGenerated} clips criados com sucesso`
+              });
+            }
+          } catch (clipError) {
+            console.error('Error generating clips:', clipError);
+            toast({
+              title: "Aviso",
+              description: "Não foi possível gerar clips automaticamente. Você pode gerá-los manualmente na página de Mídia.",
+              variant: "destructive"
+            });
+          }
+        }
+
         const result: FinishMatchResult = {
           matchId,
           videoUrl,
-          eventsCount: approvedEvents.length,
+          eventsCount: approvedEvents.length + detectedEvents.length,
           transcriptWords: transcriptBuffer.split(" ").length,
           duration: recordingTime,
         };
@@ -937,7 +967,7 @@ export const useLiveBroadcast = () => {
       setIsFinishing(false);
       return null;
     }
-  }, [stopRecording, currentScore, matchInfo, approvedEvents, transcriptBuffer, recordingTime, saveTranscriptToDatabase, saveRecordedVideo, toast]);
+  }, [stopRecording, currentScore, matchInfo, approvedEvents, detectedEvents, transcriptBuffer, recordingTime, saveTranscriptToDatabase, saveRecordedVideo, toast]);
 
   const resetFinishResult = useCallback(() => {
     setFinishResult(null);
