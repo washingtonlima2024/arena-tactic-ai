@@ -270,23 +270,37 @@ export function ArenaChatbot() {
       <div
         ref={floatingButtonRef}
         className={cn(
-          "fixed z-50 group cursor-grab select-none",
-          isDragging && "cursor-grabbing"
+          "fixed z-50 group select-none",
+          isDragging ? "cursor-grabbing" : "cursor-pointer"
         )}
         style={{ right: position.x, bottom: position.y }}
-        onMouseDown={handleButtonMouseDown}
+        onMouseDown={(e) => {
+          // Start tracking for drag
+          e.preventDefault();
+          dragStartPosRef.current = { x: e.clientX, y: e.clientY };
+          dragDistanceRef.current = 0;
+          wasDraggingRef.current = false;
+          
+          if (floatingButtonRef.current) {
+            const rect = floatingButtonRef.current.getBoundingClientRect();
+            setDragOffset({
+              x: e.clientX - rect.left,
+              y: e.clientY - rect.top,
+            });
+            setIsDragging(true);
+          }
+        }}
+        onMouseUp={(e) => {
+          // If it was a click (not a drag), open the chat
+          if (!wasDraggingRef.current && dragDistanceRef.current < 10) {
+            e.stopPropagation();
+            handleOpen();
+          }
+        }}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
       >
-        <div 
-          className="relative"
-          onClick={(e) => {
-            // Only open if it wasn't a drag (moved less than 5px)
-            if (!wasDraggingRef.current && dragDistanceRef.current < 5) {
-              handleOpen();
-            }
-          }}
-        >
+        <div className="relative">
           {/* Glow effect - more subtle */}
           <div className={cn(
             "absolute inset-0 bg-primary rounded-full blur-lg transition-opacity duration-300",
