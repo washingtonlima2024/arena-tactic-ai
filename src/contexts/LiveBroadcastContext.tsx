@@ -1733,6 +1733,17 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   const finishMatch = useCallback(async (): Promise<FinishMatchResult | null> => {
     setIsFinishing(true);
     
+    // Safety timeout - 60 seconds max to prevent infinite "Saving" state
+    const safetyTimeoutId = setTimeout(() => {
+      console.error('[finishMatch] Safety timeout reached - forcing completion');
+      setIsFinishing(false);
+      toast({
+        title: "Aviso",
+        description: "Algumas operações podem não ter sido concluídas. Verifique a página de mídia.",
+        variant: "destructive"
+      });
+    }, 60000);
+    
     const matchId = tempMatchIdRef.current;
     let videoUrl: string | null = null;
     let videoId: string | null = null;
@@ -1808,7 +1819,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             file_name: 'Transmissão ao vivo',
             end_minute: Math.ceil(recordingTime / 60),
             duration_seconds: recordingTime,
-            status: 'complete'
+            status: 'completed'
           });
           videoId = existingVideoId;
         } else {
@@ -1820,7 +1831,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             start_minute: 0,
             end_minute: Math.ceil(recordingTime / 60),
             duration_seconds: recordingTime,
-            status: 'complete'
+            status: 'completed'
           });
           videoId = newVideo?.id;
         }
@@ -1851,30 +1862,36 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     // Stop recording
     stopRecording();
     
-    // STEP 3: Generate clips
-    try {
-      if (videoUrl && approvedEvents.length > 0) {
-        const eventsWithoutClips = approvedEvents.filter(e => !e.clipUrl);
+    // STEP 3: Generate clips - NON-BLOCKING (runs in background)
+    if (videoUrl && approvedEvents.length > 0) {
+      const eventsWithoutClips = approvedEvents.filter(e => !e.clipUrl);
+      
+      if (eventsWithoutClips.length > 0) {
+        toast({ 
+          title: "Partida salva!", 
+          description: `Gerando ${eventsWithoutClips.length} clips em background...` 
+        });
         
-        if (eventsWithoutClips.length > 0) {
-          toast({ 
-            title: "Gerando clips...", 
-            description: `Processando ${eventsWithoutClips.length} eventos` 
-          });
-          
-          for (const event of eventsWithoutClips) {
-            if (!isGeneratingClipRef.current) {
-              try {
-                await generateClipForEvent(event, videoUrl);
-              } catch (clipError) {
-                console.warn('[finishMatch] Failed to generate clip:', event.id, clipError);
-              }
-            }
+        // Non-blocking - fire and forget with error handling
+        Promise.all(
+          eventsWithoutClips.map(event => 
+            generateClipForEvent(event, videoUrl).catch(err => {
+              console.warn('[finishMatch] Clip generation failed:', event.id, err);
+              return { success: false, error: err };
+            })
+          )
+        ).then((results) => {
+          const successCount = results.filter((r: any) => r?.success).length;
+          if (successCount > 0) {
+            toast({ 
+              title: "Clips prontos!", 
+              description: `${successCount} clips gerados com sucesso` 
+            });
           }
-        }
+        }).catch(err => {
+          console.error('[finishMatch] Batch clip generation error:', err);
+        });
       }
-    } catch (clipsError) {
-      console.error('[finishMatch] Error generating clips:', clipsError);
     }
 
     // STEP 4: Update match record
@@ -1946,6 +1963,9 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
     console.log('[finishMatch] Complete. Result:', result);
 
+    // Clear safety timeout
+    clearTimeout(safetyTimeoutId);
+    
     setFinishResult(result);
     setIsFinishing(false);
     

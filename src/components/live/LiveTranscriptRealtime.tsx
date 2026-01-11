@@ -254,6 +254,23 @@ export const LiveTranscriptRealtime = ({
     onConnectionError: (errorMsg) => {
       console.error('Scribe connection error callback:', errorMsg);
       
+      // Check for quota exceeded errors
+      const isQuotaError = errorMsg?.toLowerCase?.()?.includes('quota') || 
+                           errorMsg?.toLowerCase?.()?.includes('exceeded') ||
+                           errorMsg?.toLowerCase?.()?.includes('limit');
+      
+      if (isQuotaError) {
+        console.warn('ElevenLabs quota exceeded - switching to video audio');
+        toast({
+          title: "Quota ElevenLabs excedida",
+          description: "Alternando para transcrição via áudio do vídeo...",
+          variant: "destructive"
+        });
+        setHasFallenBack(true);
+        setAudioSource("video");
+        return;
+      }
+      
       // If connection failed after retries and we're recording, fallback to video mode
       if (isRecording && audioSource === "mic" && !hasFallenBack && videoElement) {
         console.log('Falling back to video audio transcription');
