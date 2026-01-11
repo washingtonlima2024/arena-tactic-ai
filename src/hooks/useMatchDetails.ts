@@ -84,7 +84,43 @@ export function useMatchDetails(matchId: string | null) {
     queryFn: async () => {
       if (!matchId) return null;
       const data = await apiClient.getMatch(matchId);
-      return data as MatchWithDetails;
+      const match = data as MatchWithDetails;
+      
+      // Calculate scores from goal events if DB scores are 0
+      const dbHomeScore = match.home_score ?? 0;
+      const dbAwayScore = match.away_score ?? 0;
+      
+      if (dbHomeScore === 0 && dbAwayScore === 0) {
+        try {
+          const events = await apiClient.getMatchEvents(matchId);
+          const goalEvents = events.filter((e: any) => e.event_type === 'goal');
+          
+          if (goalEvents.length > 0) {
+            let homeGoals = 0;
+            let awayGoals = 0;
+            
+            goalEvents.forEach((goal: any) => {
+              const metadata = goal.metadata as Record<string, any> | null;
+              const team = metadata?.team || metadata?.scoring_team;
+              const isOwnGoal = metadata?.isOwnGoal === true;
+              
+              if (isOwnGoal) {
+                if (team === 'home') awayGoals++;
+                else if (team === 'away') homeGoals++;
+              } else {
+                if (team === 'home' || team === match.home_team?.name) homeGoals++;
+                else if (team === 'away' || team === match.away_team?.name) awayGoals++;
+              }
+            });
+            
+            return { ...match, home_score: homeGoals, away_score: awayGoals };
+          }
+        } catch {
+          // Ignore errors fetching events
+        }
+      }
+      
+      return match;
     },
     enabled: !!matchId,
   });
