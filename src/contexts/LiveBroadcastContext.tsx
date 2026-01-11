@@ -1177,7 +1177,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [loadFFmpeg]);
 
-  // Add detected event
+  // Add detected event with automatic clip generation using AI-defined window
   const addDetectedEvent = useCallback(async (eventData: {
     type: string;
     minute: number;
@@ -1185,6 +1185,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     description: string;
     confidence?: number;
     source?: string;
+    windowBefore?: number;
+    windowAfter?: number;
   }) => {
     const matchId = tempMatchIdRef.current || currentMatchId;
     const videoId = currentVideoIdRef.current;
@@ -1196,6 +1198,14 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
     const eventId = crypto.randomUUID();
     const currentRecordingTime = recordingTimeRef.current;
+    
+    // Use AI-defined window or defaults
+    const windowBefore = eventData.windowBefore || 5;
+    const windowAfter = eventData.windowAfter || 5;
+    const clipStartTime = Math.max(0, currentRecordingTime - windowBefore);
+    const clipEndTime = currentRecordingTime + windowAfter;
+    
+    console.log(`[AutoClip] Event ${eventData.type} at ${currentRecordingTime}s, window: -${windowBefore}s to +${windowAfter}s`);
     
     const newEvent: LiveEvent = {
       id: eventId,
@@ -1229,14 +1239,49 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           approval_status: "pending",
           is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(eventData.type),
           match_half: eventData.minute < 45 ? 'first' : 'second',
+          clip_pending: true,
           metadata: {
             eventMs: currentRecordingTime * 1000,
             videoSecond: currentRecordingTime,
+            clipStartTime,
+            clipEndTime,
+            windowBefore,
+            windowAfter,
             source: eventData.source || 'live-detected',
             confidence: eventData.confidence
           }
         });
         console.log(`✅ Detected event saved at ${currentRecordingTime}s:`, eventData.type);
+        
+        // Try to extract clip from buffer immediately (automatic clip)
+        const clipBlob = segmentBufferRef.current?.getBlobForTimeRange(clipStartTime, clipEndTime);
+        
+        if (clipBlob && clipBlob.size > 1000) {
+          console.log(`[AutoClip] Extracting clip blob: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
+          
+          try {
+            const clipResult = await apiClient.uploadBlob(
+              matchId, 
+              'clips', 
+              clipBlob, 
+              `clip_${eventId}.webm`
+            );
+            
+            if (clipResult?.url) {
+              await apiClient.updateEvent(eventId, {
+                clip_url: clipResult.url,
+                clip_pending: false
+              });
+              
+              newEvent.clipUrl = clipResult.url;
+              console.log(`[AutoClip] Clip uploaded: ${clipResult.url}`);
+            }
+          } catch (uploadError) {
+            console.warn('[AutoClip] Failed to upload clip, will be generated post-live:', uploadError);
+          }
+        } else {
+          console.log('[AutoClip] Buffer not ready, clip will be generated post-live');
+        }
         
         if (videoChunksRef.current.length > 0) {
           saveVideoChunk();
@@ -2058,11 +2103,38 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       };
       setApprovedEvents((prev) => [...prev, newEvent]);
       
-      // Extract clip from buffer
-      const clipBlob = segmentBufferRef.current?.getBlobForTimeRange(clipStartTime, clipEndTime);
+      // Extract clip from buffer - try multiple sources
+      let clipBlob: Blob | null = null;
       
-      if (clipBlob) {
-        console.log(`[ManualClip] Extracting clip blob: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
+      // Method 1: Use clipVideoChunksRef (more precise timestamps)
+      const matchingChunks = clipVideoChunksRef.current.filter(chunk => {
+        const chunkEnd = chunk.timestamp + 5; // Each chunk is ~5 seconds
+        return chunk.timestamp <= clipEndTime && chunkEnd >= clipStartTime;
+      });
+      
+      if (matchingChunks.length > 0) {
+        clipBlob = new Blob(matchingChunks.map(c => c.blob), { type: 'video/webm' });
+        console.log(`[ManualClip] Created blob from ${matchingChunks.length} timestamped chunks: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
+      }
+      
+      // Method 2: Fall back to segment buffer
+      if (!clipBlob || clipBlob.size < 1000) {
+        clipBlob = segmentBufferRef.current?.getBlobForTimeRange(clipStartTime, clipEndTime) || null;
+        if (clipBlob) {
+          console.log(`[ManualClip] Fallback to segment buffer: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
+        }
+      }
+      
+      // Method 3: Use all video chunks if buffer methods fail
+      if (!clipBlob || clipBlob.size < 1000) {
+        if (allVideoChunksRef.current.length > 0) {
+          clipBlob = new Blob(allVideoChunksRef.current, { type: 'video/webm' });
+          console.log(`[ManualClip] Fallback to all chunks: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
+        }
+      }
+      
+      if (clipBlob && clipBlob.size > 1000) {
+        console.log(`[ManualClip] Uploading clip: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
         
         // Upload the clip
         const clipResult = await apiClient.uploadBlob(
@@ -2084,16 +2156,20 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             prev.map(e => e.id === eventId ? { ...e, clipUrl: clipResult.url } : e)
           );
           
-          console.log(`[ManualClip] Clip uploaded: ${clipResult.url}`);
+          console.log(`[ManualClip] ✅ Clip uploaded: ${clipResult.url}`);
+          
+          toast({
+            title: "Clip criado!",
+            description: `${description} salvo com sucesso`,
+          });
         }
       } else {
-        console.log('[ManualClip] No blob available from buffer, clip will be generated post-live');
+        console.log('[ManualClip] ⚠️ No blob available, clip will be generated post-live');
+        toast({
+          title: "Evento marcado",
+          description: `${description} - clip será gerado na análise pós-live`,
+        });
       }
-      
-      toast({
-        title: "Clip criado!",
-        description: `${description} salvo com sucesso`,
-      });
       
     } catch (error) {
       console.error('[ManualClip] Error saving event:', error);

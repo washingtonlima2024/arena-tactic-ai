@@ -23,6 +23,8 @@ interface ExtractedEvent {
   second: number;
   description: string;
   confidence: number;
+  windowBefore?: number;
+  windowAfter?: number;
 }
 
 interface LiveTranscriptRealtimeProps {
@@ -126,9 +128,18 @@ export const LiveTranscriptRealtime = ({
         console.log(`Extracted ${events.length} events from transcript`);
         setEventsExtracted((prev) => prev + events.length);
         
-        // Notify parent component of each detected event
-        events.forEach((event: ExtractedEvent) => {
-          onEventDetected?.(event);
+        // Notify parent component of each detected event with window parameters
+        events.forEach((event: any) => {
+          const enrichedEvent: ExtractedEvent = {
+            type: event.type,
+            minute: currentMinute,
+            second: recordingTimeRef.current % 60,
+            description: event.description,
+            confidence: event.confidence || 0.8,
+            windowBefore: event.windowBefore || 5,
+            windowAfter: event.windowAfter || 5,
+          };
+          onEventDetected?.(enrichedEvent);
         });
       }
     } catch (error) {
