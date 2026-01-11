@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Checkbox } from '@/components/ui/checkbox';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Calendar } from '@/components/ui/calendar';
@@ -18,12 +17,15 @@ import {
   Calendar as CalendarIcon,
   Clock,
   Check,
-  Share2
+  Share2,
+  Video
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 
 // Social networks configuration
 const SOCIAL_NETWORKS = [
@@ -71,6 +73,16 @@ const SOCIAL_NETWORKS = [
     bgColor: 'bg-[#FF0000]',
     formats: ['16:9', '9:16']
   },
+  { 
+    id: 'tiktok', 
+    name: 'TikTok', 
+    icon: () => (
+      <Video className="h-5 w-5" />
+    ),
+    color: 'from-black to-black',
+    bgColor: 'bg-black',
+    formats: ['9:16']
+  },
 ];
 
 interface SocialSharePanelProps {
@@ -78,14 +90,21 @@ interface SocialSharePanelProps {
   onClose: () => void;
   clipCount: number;
   matchTitle: string;
+  clipUrl?: string | null;
+  matchId?: string;
+  eventId?: string;
 }
 
 export function SocialSharePanel({
   isOpen,
   onClose,
   clipCount,
-  matchTitle
+  matchTitle,
+  clipUrl,
+  matchId,
+  eventId
 }: SocialSharePanelProps) {
+  const { user } = useAuth();
   const [selectedNetworks, setSelectedNetworks] = useState<Set<string>>(new Set());
   const [shareMode, setShareMode] = useState<'now' | 'schedule'>('now');
   const [scheduleDate, setScheduleDate] = useState<Date | undefined>(undefined);
@@ -121,24 +140,81 @@ export function SocialSharePanel({
       return;
     }
 
-    setIsSharing(true);
-
-    // Simulate sharing process
-    await new Promise(resolve => setTimeout(resolve, 2000));
-
-    const networkNames = Array.from(selectedNetworks)
-      .map(id => SOCIAL_NETWORKS.find(n => n.id === id)?.name)
-      .filter(Boolean)
-      .join(', ');
-
-    if (shareMode === 'schedule' && scheduleDate) {
-      toast.success(`Publicação agendada para ${format(scheduleDate, 'dd/MM/yyyy', { locale: ptBR })} às ${scheduleTime} em: ${networkNames}`);
-    } else {
-      toast.success(`Conteúdo compartilhado com sucesso em: ${networkNames}`);
+    if (!user) {
+      toast.error('Você precisa estar logado para compartilhar');
+      return;
     }
 
-    setIsSharing(false);
-    onClose();
+    setIsSharing(true);
+
+    try {
+      const networkNames = Array.from(selectedNetworks)
+        .map(id => SOCIAL_NETWORKS.find(n => n.id === id)?.name)
+        .filter(Boolean)
+        .join(', ');
+
+      if (shareMode === 'schedule') {
+        if (!scheduleDate) {
+          toast.error('Selecione uma data para agendar');
+          setIsSharing(false);
+          return;
+        }
+
+        // Create scheduled posts for each platform
+        const [hours, minutes] = scheduleTime.split(':').map(Number);
+        const scheduledAt = new Date(scheduleDate);
+        scheduledAt.setHours(hours, minutes, 0, 0);
+
+        const posts = Array.from(selectedNetworks).map(platform => ({
+          user_id: user.id,
+          platform,
+          content: caption || `⚽ Melhores momentos: ${matchTitle}`,
+          media_url: clipUrl || null,
+          media_type: clipUrl ? 'video' : null,
+          scheduled_at: scheduledAt.toISOString(),
+          status: 'scheduled',
+          match_id: matchId || null,
+          event_id: eventId || null,
+        }));
+
+        const { error } = await supabase
+          .from('social_scheduled_posts')
+          .insert(posts);
+
+        if (error) throw error;
+
+        toast.success(`${posts.length} publicação(ões) agendada(s) para ${format(scheduledAt, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })} em: ${networkNames}`);
+      } else {
+        // Publish immediately via edge function
+        for (const platform of selectedNetworks) {
+          try {
+            const { error } = await supabase.functions.invoke('social-publish', {
+              body: {
+                platform,
+                content: caption || `⚽ Melhores momentos: ${matchTitle}`,
+                mediaUrl: clipUrl || null,
+                userId: user.id,
+              }
+            });
+
+            if (error) {
+              console.error(`Error publishing to ${platform}:`, error);
+            }
+          } catch (e) {
+            console.error(`Error publishing to ${platform}:`, e);
+          }
+        }
+
+        toast.success(`Conteúdo compartilhado em: ${networkNames}`);
+      }
+
+      onClose();
+    } catch (error: any) {
+      console.error('Error sharing:', error);
+      toast.error(error.message || 'Erro ao compartilhar');
+    } finally {
+      setIsSharing(false);
+    }
   };
 
   return (
@@ -225,6 +301,24 @@ export function SocialSharePanel({
                 })}
               </div>
             </div>
+
+            {/* Clip Preview */}
+            {clipUrl && (
+              <div className="space-y-2">
+                <Label className="text-sm font-medium">Mídia Selecionada</Label>
+                <div className="rounded-lg overflow-hidden border border-border/50 bg-muted/30">
+                  <video 
+                    src={clipUrl} 
+                    className="w-full h-32 object-cover"
+                    muted
+                  />
+                  <div className="p-2 flex items-center gap-2 text-xs text-muted-foreground">
+                    <Video className="h-3 w-3" />
+                    <span>Clip de vídeo anexado</span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Caption */}
             <div className="space-y-2">
@@ -373,7 +467,7 @@ export function SocialSharePanel({
             {isSharing ? (
               <>
                 <div className="h-4 w-4 rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground animate-spin" />
-                Compartilhando...
+                {shareMode === 'schedule' ? 'Agendando...' : 'Compartilhando...'}
               </>
             ) : shareMode === 'schedule' ? (
               <>
