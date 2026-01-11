@@ -520,11 +520,6 @@ export default function Matches() {
                             Ver Ao Vivo
                           </Link>
                         </Button>
-                        <Button variant="arena-outline" size="sm" className="flex-1" asChild>
-                          <Link to={`/analysis?match=${match.id}`}>
-                            Análise Parcial
-                          </Link>
-                        </Button>
                       </>
                     )}
                     {(match.status === 'completed' || match.status === 'analyzed') && (
@@ -548,11 +543,13 @@ export default function Matches() {
                         Reprocessar
                       </Button>
                     )}
+                    {/* Delete button - always visible for all statuses */}
                     <Button 
                       variant="ghost" 
                       size="sm" 
                       className="text-destructive hover:text-destructive hover:bg-destructive/10"
                       onClick={() => setMatchToDelete(match)}
+                      title="Deletar partida"
                     >
                       <Trash2 className="h-4 w-4" />
                     </Button>
