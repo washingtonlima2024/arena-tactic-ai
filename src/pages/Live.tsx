@@ -62,6 +62,8 @@ const Live = () => {
     resetFinishResult,
     clipGenerationQueue,
     storageProgress,
+    isAnalyzingLive,
+    analysisProgress,
     startRecording,
     stopRecording,
     pauseRecording,

@@ -958,6 +958,41 @@ export const apiClient = {
       body: JSON.stringify({ matchId, videoId })
     }, 600000); // 10 minutos
   },
+
+  // ============== Live Match Full Analysis ==============
+  /**
+   * Executa o pipeline completo de análise após transmissão ao vivo.
+   * 
+   * Este processo:
+   * 1. Transcreve o vídeo gravado usando IA
+   * 2. Analisa a transcrição para detectar eventos (gols, cartões, faltas, etc.)
+   * 3. Gera clips de vídeo para cada evento detectado
+   * 4. Atualiza o placar e status da partida
+   */
+  analyzeLiveMatch: async (matchId: string, videoId: string, homeTeam: string, awayTeam: string, onProgress?: (step: string, progress: number) => void): Promise<{
+    success: boolean;
+    eventsDetected: number;
+    clipsGenerated: number;
+    homeScore: number;
+    awayScore: number;
+    transcription?: string;
+    errors: string[];
+  }> => {
+    await ensureServerAvailable();
+    
+    return apiRequestLongRunning<{
+      success: boolean;
+      eventsDetected: number;
+      clipsGenerated: number;
+      homeScore: number;
+      awayScore: number;
+      transcription?: string;
+      errors: string[];
+    }>('/api/analyze-live-match', {
+      method: 'POST',
+      body: JSON.stringify({ matchId, videoId, homeTeam, awayTeam })
+    }, 1800000); // 30 minutos para partida completa
+  },
 };
 
 export default apiClient;

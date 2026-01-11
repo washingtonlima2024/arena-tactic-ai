@@ -103,6 +103,10 @@ interface LiveBroadcastContextType {
   clipGenerationQueue: ClipGenerationProgress[];
   storageProgress: StorageProgress;
   
+  // Live analysis progress
+  isAnalyzingLive: boolean;
+  analysisProgress: { step: string; progress: number } | null;
+  
   // Actions
   startRecording: (videoElement?: HTMLVideoElement | null, existingMatchId?: string | null) => Promise<void>;
   stopRecording: () => void;
@@ -1945,6 +1949,8 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     latestVideoChunkUrl,
     clipGenerationQueue,
     storageProgress,
+    isAnalyzingLive: false, // Will be managed by useLiveBroadcast hook in finishMatch
+    analysisProgress: null, // Will be managed by useLiveBroadcast hook in finishMatch
     startRecording,
     stopRecording,
     pauseRecording,
