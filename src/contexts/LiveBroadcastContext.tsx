@@ -107,6 +107,11 @@ interface LiveBroadcastContextType {
   isAnalyzingLive: boolean;
   analysisProgress: { step: string; progress: number } | null;
   
+  // Manual clip recording (2-click system)
+  isClipRecording: boolean;
+  clipStartTime: number | null;
+  clipEventType: string | null;
+  
   // Actions
   startRecording: (videoElement?: HTMLVideoElement | null, existingMatchId?: string | null) => Promise<void>;
   stopRecording: () => void;
@@ -120,6 +125,8 @@ interface LiveBroadcastContextType {
     description: string;
     confidence?: number;
     source?: string;
+    windowBefore?: number;
+    windowAfter?: number;
   }) => void;
   approveEvent: (eventId: string) => Promise<void>;
   editEvent: (eventId: string, updates: Partial<LiveEvent>) => void;
@@ -130,6 +137,10 @@ interface LiveBroadcastContextType {
   setTranscriptBuffer: (buffer: string) => void;
   setTranscriptChunks: (chunks: TranscriptChunk[]) => void;
   getClipChunksForTime: (startTime: number, endTime: number) => VideoChunk[];
+  
+  // Manual clip actions (2-click system)
+  startManualClip: (eventType: string) => void;
+  finishManualClip: () => Promise<void>;
 }
 
 const LiveBroadcastContext = createContext<LiveBroadcastContextType | null>(null);
@@ -186,6 +197,11 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     uploadedSizeMB: 0,
     lastUploadedAt: null,
   });
+  
+  // Manual clip recording states (2-click system)
+  const [isClipRecording, setIsClipRecording] = useState(false);
+  const [clipStartTime, setClipStartTime] = useState<number | null>(null);
+  const [clipEventType, setClipEventType] = useState<string | null>(null);
   
   const segmentBufferRef = useRef<VideoSegmentBuffer | null>(null);
   const [segmentCount, setSegmentCount] = useState(0);
@@ -1936,6 +1952,164 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     return matchingChunks;
   }, []);
 
+  // Start manual clip recording (1st click)
+  const startManualClip = useCallback((eventType: string) => {
+    const currentTime = recordingTimeRef.current;
+    setIsClipRecording(true);
+    setClipStartTime(currentTime);
+    setClipEventType(eventType);
+    
+    console.log(`[ManualClip] Started recording clip for ${eventType} at ${currentTime}s`);
+    
+    toast({
+      title: "Gravando clip...",
+      description: `Clique novamente para finalizar o clip de ${eventType}`,
+    });
+  }, [toast]);
+
+  // Finish manual clip recording (2nd click)
+  const finishManualClip = useCallback(async () => {
+    if (!isClipRecording || clipStartTime === null || !clipEventType) {
+      console.log('[ManualClip] No clip recording in progress');
+      return;
+    }
+    
+    const clipEndTime = recordingTimeRef.current;
+    const matchId = tempMatchIdRef.current || currentMatchId;
+    const videoId = currentVideoIdRef.current;
+    const duration = clipEndTime - clipStartTime;
+    
+    console.log(`[ManualClip] Finishing clip: ${clipStartTime}s - ${clipEndTime}s (${duration}s)`);
+    
+    if (!matchId) {
+      toast({
+        title: "Erro",
+        description: "Nenhuma partida em andamento",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Create event with real timestamps
+    const eventId = crypto.randomUUID();
+    const startMinute = Math.floor(clipStartTime / 60);
+    const startSecond = clipStartTime % 60;
+    
+    const eventLabels: Record<string, string> = {
+      goal: 'Gol',
+      goal_home: `Gol - ${matchInfo.homeTeam || 'Casa'}`,
+      goal_away: `Gol - ${matchInfo.awayTeam || 'Fora'}`,
+      yellow_card: 'Cartão Amarelo',
+      red_card: 'Cartão Vermelho',
+      foul: 'Falta',
+      corner: 'Escanteio',
+      offside: 'Impedimento',
+      substitution: 'Substituição',
+      penalty: 'Pênalti',
+      shot: 'Finalização',
+      save: 'Defesa',
+      halftime: 'Intervalo',
+    };
+    
+    const description = `${eventLabels[clipEventType] || clipEventType} (${duration}s)`;
+    
+    // Update score if it's a goal
+    if (clipEventType === 'goal_home' || clipEventType === 'goal') {
+      setCurrentScore((prev) => ({ ...prev, home: prev.home + 1 }));
+    } else if (clipEventType === 'goal_away') {
+      setCurrentScore((prev) => ({ ...prev, away: prev.away + 1 }));
+    }
+    
+    // Create the event in database
+    try {
+      await apiClient.createEvent(matchId, {
+        id: eventId,
+        match_id: matchId,
+        video_id: videoId || null,
+        event_type: clipEventType,
+        minute: startMinute,
+        second: startSecond,
+        description,
+        approval_status: "approved",
+        is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(clipEventType),
+        match_half: startMinute < 45 ? 'first' : 'second',
+        clip_pending: true,
+        metadata: {
+          eventMs: clipStartTime * 1000,
+          videoSecond: clipStartTime,
+          clipStartTime,
+          clipEndTime,
+          duration,
+          source: 'manual-2click',
+        }
+      });
+      
+      console.log(`[ManualClip] Event created: ${clipEventType} at ${startMinute}:${startSecond}`);
+      
+      // Add to approved events list
+      const newEvent: LiveEvent = {
+        id: eventId,
+        type: clipEventType,
+        minute: startMinute,
+        second: startSecond,
+        description,
+        status: "approved",
+        recordingTimestamp: clipStartTime,
+      };
+      setApprovedEvents((prev) => [...prev, newEvent]);
+      
+      // Extract clip from buffer
+      const clipBlob = segmentBufferRef.current?.getBlobForTimeRange(clipStartTime, clipEndTime);
+      
+      if (clipBlob) {
+        console.log(`[ManualClip] Extracting clip blob: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
+        
+        // Upload the clip
+        const clipResult = await apiClient.uploadBlob(
+          matchId, 
+          'clips', 
+          clipBlob, 
+          `clip_${eventId}.webm`
+        );
+        
+        if (clipResult?.url) {
+          // Update event with clip URL
+          await apiClient.updateEvent(eventId, {
+            clip_url: clipResult.url,
+            clip_pending: false
+          });
+          
+          // Update local event
+          setApprovedEvents((prev) => 
+            prev.map(e => e.id === eventId ? { ...e, clipUrl: clipResult.url } : e)
+          );
+          
+          console.log(`[ManualClip] Clip uploaded: ${clipResult.url}`);
+        }
+      } else {
+        console.log('[ManualClip] No blob available from buffer, clip will be generated post-live');
+      }
+      
+      toast({
+        title: "Clip criado!",
+        description: `${description} salvo com sucesso`,
+      });
+      
+    } catch (error) {
+      console.error('[ManualClip] Error saving event:', error);
+      toast({
+        title: "Erro ao salvar clip",
+        description: "O clip será gerado na análise pós-live",
+        variant: "destructive",
+      });
+    }
+    
+    // Reset clip recording state
+    setIsClipRecording(false);
+    setClipStartTime(null);
+    setClipEventType(null);
+  }, [isClipRecording, clipStartTime, clipEventType, currentMatchId, matchInfo, toast]);
+
   const value: LiveBroadcastContextType = {
     matchInfo,
     setMatchInfo,
@@ -1964,8 +2138,13 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     latestVideoChunkUrl,
     clipGenerationQueue,
     storageProgress,
-    isAnalyzingLive: false, // Will be managed by useLiveBroadcast hook in finishMatch
-    analysisProgress: null, // Will be managed by useLiveBroadcast hook in finishMatch
+    isAnalyzingLive: false,
+    analysisProgress: null,
+    // Manual clip recording (2-click system)
+    isClipRecording,
+    clipStartTime,
+    clipEventType,
+    // Actions
     startRecording,
     stopRecording,
     pauseRecording,
@@ -1981,6 +2160,9 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     setTranscriptBuffer,
     setTranscriptChunks,
     getClipChunksForTime,
+    // Manual clip actions
+    startManualClip,
+    finishManualClip,
   };
 
   return (
