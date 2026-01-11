@@ -19,7 +19,6 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { 
   Filter, 
-  Download, 
   Target,
   Shield,
   AlertTriangle,
@@ -33,15 +32,13 @@ import {
   XCircle,
   Play,
   Scissors,
-  AlertCircle,
-  Sparkles,
   RefreshCw,
   FileText,
   Film,
   StopCircle,
   Radio,
-  Upload,
-  Cog
+  Cog,
+  AlertCircle
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -776,21 +773,18 @@ export default function Events() {
     <AppLayout>
       <div className="space-y-6">
         {/* Header */}
+        {/* Header com seletor de partida */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="font-display text-3xl font-bold">Eventos da Partida</h1>
-            {selectedMatch && (
-              <p className="text-muted-foreground">
-                {selectedMatch.home_team?.name || 'Casa'} {selectedMatch.home_score ?? 0} - {selectedMatch.away_score ?? 0} {selectedMatch.away_team?.name || 'Visitante'}
-              </p>
-            )}
           </div>
-          <div className="flex flex-wrap gap-2">
-<Button
-              variant="outline"
+          <div className="flex items-center gap-2">
+            <Button
+              variant="ghost"
               size="icon"
               onClick={() => refetchEvents()}
               title="Atualizar eventos"
+              className="h-9 w-9"
             >
               <RefreshCw className="h-4 w-4" />
             </Button>
@@ -817,140 +811,183 @@ export default function Events() {
                 ))}
               </SelectContent>
             </Select>
-            {isAdmin && currentMatchId && (
-              <>
-                {/* Process Match Button - show when no events detected */}
-                {events.length === 0 && matchVideos && matchVideos.length > 0 && (
-                  <Button 
-                    variant="arena" 
-                    onClick={handleProcessMatch}
-                    disabled={isProcessingMatch}
-                    className="gap-2"
-                  >
-                    {isProcessingMatch ? (
-                      <>
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                        {processingStep || 'Processando...'}
-                      </>
-                    ) : (
-                      <>
-                        <Cog className="h-4 w-4" />
-                        Processar Partida
-                      </>
+          </div>
+        </div>
+
+        {/* Scoreboard Card - formato profissional */}
+        {selectedMatch && (
+          <Card variant="glass" className="border-primary/20 overflow-hidden">
+            <div className="absolute inset-0 bg-gradient-to-r from-primary/5 via-transparent to-primary/5 pointer-events-none" />
+            <CardContent className="relative py-6">
+              <div className="flex items-center justify-between gap-4">
+                {/* Home Team */}
+                <div className="flex-1 flex flex-col items-center gap-3">
+                  <Avatar className="h-16 w-16 border-2 border-primary/20 shadow-lg ring-2 ring-primary/10">
+                    <AvatarImage src={selectedMatch.home_team?.logo_url || ''} className="object-contain p-1" />
+                    <AvatarFallback className="text-xl font-bold bg-primary/10">
+                      {selectedMatch.home_team?.short_name?.slice(0, 2) || 'H'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <p className="font-semibold text-center text-sm truncate max-w-[120px]">
+                    {selectedMatch.home_team?.name || 'Time Casa'}
+                  </p>
+                </div>
+
+                {/* Score Display */}
+                <div className="flex flex-col items-center gap-2">
+                  <div className="flex items-center gap-4">
+                    <span className="text-5xl font-black tabular-nums w-14 text-center">
+                      {selectedMatch.home_score ?? 0}
+                    </span>
+                    <span className="text-xl font-bold text-muted-foreground">vs</span>
+                    <span className="text-5xl font-black tabular-nums w-14 text-center">
+                      {selectedMatch.away_score ?? 0}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {selectedMatch.match_date && (
+                      <Badge variant="outline" className="text-xs border-muted-foreground/30">
+                        {new Date(selectedMatch.match_date).toLocaleDateString('pt-BR')}
+                      </Badge>
                     )}
-                  </Button>
+                    <Badge 
+                      variant={selectedMatch.status === 'live' ? 'destructive' : 'success'} 
+                      className={selectedMatch.status === 'live' ? 'animate-pulse gap-1' : ''}
+                    >
+                      {selectedMatch.status === 'live' && <Radio className="h-3 w-3" />}
+                      {selectedMatch.status === 'completed' ? 'Finalizado' : 
+                       selectedMatch.status === 'live' ? 'AO VIVO' : 
+                       selectedMatch.status || 'Em análise'}
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Away Team */}
+                <div className="flex-1 flex flex-col items-center gap-3">
+                  <Avatar className="h-16 w-16 border-2 border-primary/20 shadow-lg ring-2 ring-primary/10">
+                    <AvatarImage src={selectedMatch.away_team?.logo_url || ''} className="object-contain p-1" />
+                    <AvatarFallback className="text-xl font-bold bg-primary/10">
+                      {selectedMatch.away_team?.short_name?.slice(0, 2) || 'V'}
+                    </AvatarFallback>
+                  </Avatar>
+                  <p className="font-semibold text-center text-sm truncate max-w-[120px]">
+                    {selectedMatch.away_team?.name || 'Time Visitante'}
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Action Buttons - Clean and organized */}
+        {isAdmin && currentMatchId && (
+          <div className="flex flex-wrap items-center gap-2">
+            {/* Process Match Button - only when no events */}
+            {events.length === 0 && matchVideos && matchVideos.length > 0 && (
+              <Button 
+                variant="arena" 
+                onClick={handleProcessMatch}
+                disabled={isProcessingMatch}
+              >
+                {isProcessingMatch ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    {processingStep || 'Processando...'}
+                  </>
+                ) : (
+                  <>
+                    <Cog className="mr-2 h-4 w-4" />
+                    Processar Partida
+                  </>
                 )}
-                
-                <Button variant="arena" onClick={handleCreateEvent}>
-                  <Plus className="mr-2 h-4 w-4" />
-                  Novo Evento
-                </Button>
-                {/* Regenerate Missing Clips Button */}
-                {matchVideo && !matchVideo.file_url.includes('embed') && eventsWithoutClips > 0 && (
-                  <Button 
-                    variant="arena" 
-                    onClick={() => handleGenerateClips('all', eventsWithoutClips)}
-                    disabled={isGenerating}
-                  >
+              </Button>
+            )}
+
+            {/* New Event Button */}
+            <Button variant="arena" size="sm" onClick={handleCreateEvent}>
+              <Plus className="mr-2 h-4 w-4" />
+              Novo Evento
+            </Button>
+
+            {/* Clips Dropdown - Main clip actions */}
+            {matchVideo && !matchVideo.file_url.includes('embed') && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="secondary" size="sm" disabled={isGenerating}>
                     {isGenerating ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
+                      <Scissors className="mr-2 h-4 w-4" />
                     )}
-                    Regenerar Clips
-                    <Badge variant="secondary" className="ml-2 text-xs bg-background/20">
-                      {eventsWithoutClips} sem clip
-                    </Badge>
+                    Gerar Clips
+                    {eventsWithClips > 0 && (
+                      <Badge variant="outline" className="ml-2 text-xs">
+                        {eventsWithClips}/{events.length}
+                      </Badge>
+                    )}
                   </Button>
-                )}
-                
-                {/* Clip Generation Dropdown */}
-                {matchVideo && !matchVideo.file_url.includes('embed') && (
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button 
-                        variant="secondary" 
-                        disabled={isGenerating}
-                      >
-                        {isGenerating ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <Scissors className="mr-2 h-4 w-4" />
-                        )}
-                        Gerar Clips
-                        {eventsWithClips > 0 && (
-                          <Badge variant="outline" className="ml-2 text-xs">
-                            {eventsWithClips}/{events.length}
-                          </Badge>
-                        )}
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem onClick={() => handleGenerateClips('highlights', 10)}>
-                        <Target className="mr-2 h-4 w-4" />
-                        Gerar Highlights (gols, cartões)
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleGenerateClips('all', 20)}>
-                        <Film className="mr-2 h-4 w-4" />
-                        Gerar Todos (máx 20)
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={() => handleGenerateClips('all', 50)}>
-                        <Video className="mr-2 h-4 w-4" />
-                        Gerar Todos (máx 50)
-                      </DropdownMenuItem>
-                      <DropdownMenuItem 
-                        onClick={handleClearEvents}
-                        className="text-destructive focus:text-destructive"
-                      >
-                        <AlertTriangle className="mr-2 h-4 w-4" />
-                        Limpar Todos os Eventos
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                )}
-
-                <TranscriptionAnalysisDialog
-                  matchId={currentMatchId}
-                  homeTeamName={selectedMatch?.home_team?.name || 'Casa'}
-                  awayTeamName={selectedMatch?.away_team?.name || 'Visitante'}
-                  onAnalysisComplete={() => {
-                    refetchEvents();
-                    queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
-                  }}
-                >
-                  <Button variant="secondary">
-                    <FileText className="mr-2 h-4 w-4" />
-                    Analisar Áudio
-                  </Button>
-                </TranscriptionAnalysisDialog>
-                <Button 
-                  variant="arena-outline" 
-                  onClick={handleRefineEvents}
-                  disabled={isRefining || events.length === 0}
-                >
-                  {isRefining ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="mr-2 h-4 w-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start">
+                  <DropdownMenuItem onClick={() => handleGenerateClips('highlights', 10)}>
+                    <Target className="mr-2 h-4 w-4" />
+                    Highlights (gols, cartões)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => handleGenerateClips('all', 20)}>
+                    <Film className="mr-2 h-4 w-4" />
+                    Todos (máx 20)
+                  </DropdownMenuItem>
+                  {eventsWithoutClips > 0 && (
+                    <DropdownMenuItem onClick={() => handleGenerateClips('all', eventsWithoutClips)}>
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                      Regenerar ({eventsWithoutClips} sem clip)
+                    </DropdownMenuItem>
                   )}
-                  Refinar com IA
-                </Button>
-                <Button 
-                  variant="destructive" 
-                  onClick={() => setShowResetDialog(true)}
-                  disabled={!matchVideos || matchVideos.length === 0}
-                >
-                  <RefreshCw className="mr-2 h-4 w-4" />
-                  Refazer Tudo
-                </Button>
-              </>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
-            <Button variant="arena-outline">
-              <Download className="mr-2 h-4 w-4" />
-              Exportar
+
+            {/* Analyze Audio */}
+            <TranscriptionAnalysisDialog
+              matchId={currentMatchId}
+              homeTeamName={selectedMatch?.home_team?.name || 'Casa'}
+              awayTeamName={selectedMatch?.away_team?.name || 'Visitante'}
+              onAnalysisComplete={() => {
+                refetchEvents();
+                queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
+              }}
+            >
+              <Button variant="secondary" size="sm">
+                <FileText className="mr-2 h-4 w-4" />
+                Analisar Áudio
+              </Button>
+            </TranscriptionAnalysisDialog>
+
+            {/* Reset All - Danger action */}
+            <Button 
+              variant="ghost" 
+              size="sm"
+              onClick={() => setShowResetDialog(true)}
+              disabled={!matchVideos || matchVideos.length === 0}
+              className="text-destructive hover:text-destructive hover:bg-destructive/10"
+            >
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Refazer
             </Button>
+
+            {/* Clear Events */}
+            {events.length > 0 && (
+              <Button 
+                variant="ghost" 
+                size="sm"
+                onClick={handleClearEvents}
+                className="text-destructive hover:text-destructive hover:bg-destructive/10"
+              >
+                <AlertTriangle className="mr-2 h-4 w-4" />
+                Limpar
+              </Button>
+            )}
           </div>
-        </div>
+        )}
 
         {/* Clip Generation Progress */}
         {isGenerating && (
@@ -984,55 +1021,6 @@ export default function Events() {
           </Card>
         )}
 
-        {/* Match Header Card */}
-        {selectedMatch && (
-          <Card variant="glass" className="border-primary/20">
-            <CardContent className="py-4">
-              <div className="flex items-center justify-between">
-                {/* Home Team */}
-                <div className="flex items-center gap-4 flex-1">
-                  <Avatar className="h-14 w-14 border-2 border-background shadow-lg">
-                    <AvatarImage src={selectedMatch.home_team?.logo_url || ''} className="object-contain p-1" />
-                    <AvatarFallback className="text-lg font-bold bg-primary/10">
-                      {selectedMatch.home_team?.short_name?.slice(0, 2) || 'H'}
-                    </AvatarFallback>
-                  </Avatar>
-                  <div>
-                    <p className="font-semibold">{selectedMatch.home_team?.name || 'Time Casa'}</p>
-                    <p className="text-3xl font-bold text-primary">{selectedMatch.home_score ?? 0}</p>
-                  </div>
-                </div>
-                
-                {/* Center - VS + Date + Status */}
-                <div className="text-center px-6">
-                  <p className="text-2xl font-bold text-muted-foreground">vs</p>
-                  {selectedMatch.match_date && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      {new Date(selectedMatch.match_date).toLocaleDateString('pt-BR')}
-                    </p>
-                  )}
-                  <Badge variant="success" className="mt-2">
-                    {selectedMatch.status === 'completed' ? 'Finalizado' : selectedMatch.status || 'Em análise'}
-                  </Badge>
-                </div>
-                
-                {/* Away Team */}
-                <div className="flex items-center gap-4 flex-1 justify-end">
-                  <div className="text-right">
-                    <p className="font-semibold">{selectedMatch.away_team?.name || 'Time Visitante'}</p>
-                    <p className="text-3xl font-bold text-primary">{selectedMatch.away_score ?? 0}</p>
-                  </div>
-                  <Avatar className="h-14 w-14 border-2 border-background shadow-lg">
-                    <AvatarImage src={selectedMatch.away_team?.logo_url || ''} className="object-contain p-1" />
-                    <AvatarFallback className="text-lg font-bold bg-primary/10">
-                      {selectedMatch.away_team?.short_name?.slice(0, 2) || 'V'}
-                    </AvatarFallback>
-                  </Avatar>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        )}
 
         {/* Stats Overview - Compact */}
         <div className="grid grid-cols-3 gap-3 md:grid-cols-6">
