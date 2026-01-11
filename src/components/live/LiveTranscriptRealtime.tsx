@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Clock, Loader2, Mic, Wifi, WifiOff, Save, CheckCircle, Zap, Video, Globe } from "lucide-react";
+import { FileText, Clock, Loader2, Mic, Wifi, WifiOff, Save, CheckCircle, Zap, Video, Globe, RefreshCw } from "lucide-react";
 import { useElevenLabsScribe } from "@/hooks/useElevenLabsScribe";
 import { useVideoAudioTranscription } from "@/hooks/useVideoAudioTranscription";
 import { TranscriptChunk } from "@/hooks/useLiveBroadcast";
@@ -9,6 +9,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { VolumeIndicator } from "./VolumeIndicator";
+import { useToast } from "@/hooks/use-toast";
 
 const LANGUAGES = [
   { code: "pt", label: "Português", flag: "🇧🇷" },
@@ -45,6 +46,7 @@ export const LiveTranscriptRealtime = ({
   onTranscriptUpdate,
   onEventDetected,
 }: LiveTranscriptRealtimeProps) => {
+  const { toast } = useToast();
   // Audio source: "mic" for microphone (ElevenLabs), "video" for video audio (Whisper)
   const [audioSource, setAudioSource] = useState<"mic" | "video">("mic");
   const [transcriptionLanguage, setTranscriptionLanguage] = useState<string>("pt");
@@ -219,7 +221,11 @@ export const LiveTranscriptRealtime = ({
     extractEvents(text);
   }, [onTranscriptUpdate, extractEvents, saveTranscriptToDatabase]);
 
-  // ElevenLabs Scribe for microphone
+  // Track if we've attempted fallback
+  const [hasFallenBack, setHasFallenBack] = useState(false);
+  const connectionAttemptRef = useRef(0);
+
+  // ElevenLabs Scribe for microphone with enhanced error handling
   const scribe = useElevenLabsScribe({
     onTranscript: (text) => {
       if (audioSource !== "mic") return;
@@ -227,6 +233,26 @@ export const LiveTranscriptRealtime = ({
     },
     onPartialTranscript: (text) => {
       // Partial transcript is handled by the hook
+    },
+    onConnectionChange: (connected) => {
+      console.log('Scribe connection changed:', connected);
+      if (connected) {
+        connectionAttemptRef.current = 0;
+      }
+    },
+    onConnectionError: (errorMsg) => {
+      console.error('Scribe connection error callback:', errorMsg);
+      
+      // If connection failed after retries and we're recording, fallback to video mode
+      if (isRecording && audioSource === "mic" && !hasFallenBack && videoElement) {
+        console.log('Falling back to video audio transcription');
+        setHasFallenBack(true);
+        setAudioSource("video");
+        toast({
+          title: "Modo alternativo ativado",
+          description: "Usando áudio do vídeo para transcrição",
+        });
+      }
     },
   });
 
@@ -245,46 +271,64 @@ export const LiveTranscriptRealtime = ({
 
   // Connect/disconnect based on recording state and audio source
   useEffect(() => {
-    if (isRecording) {
-      // Reset state when starting
-      setChunks([]);
-      setTranscriptBuffer("");
-      setEventsExtracted(0);
-      
-      if (audioSource === "mic") {
-        // Disconnect video if connected
-        if (videoTranscription.isConnected) {
-          videoTranscription.disconnect();
+    const connectWithDelay = async () => {
+      if (isRecording) {
+        // Reset state when starting
+        setChunks([]);
+        setTranscriptBuffer("");
+        setEventsExtracted(0);
+        setHasFallenBack(false);
+        
+        if (audioSource === "mic") {
+          // Disconnect video if connected
+          if (videoTranscription.isConnected) {
+            videoTranscription.disconnect();
+          }
+          
+          // Add small delay to prevent race conditions
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          // Connect microphone
+          if (!scribe.isConnected && !scribe.isConnecting) {
+            console.log('Initiating Scribe connection...');
+            const success = await scribe.connect();
+            if (!success) {
+              console.warn('Initial Scribe connection failed, will retry');
+            }
+          }
+        } else if (audioSource === "video" && videoElement) {
+          // Disconnect microphone if connected
+          if (scribe.isConnected) {
+            scribe.disconnect();
+          }
+          
+          // Add small delay to prevent race conditions
+          await new Promise(resolve => setTimeout(resolve, 300));
+          
+          // Connect to video audio
+          if (!videoTranscription.isConnected && !videoTranscription.isConnecting) {
+            videoTranscription.connect(videoElement);
+          }
         }
-        // Connect microphone
-        if (!scribe.isConnected && !scribe.isConnecting) {
-          scribe.connect();
-        }
-      } else if (audioSource === "video" && videoElement) {
-        // Disconnect microphone if connected
+      } else {
+        // Disconnect both when not recording
         if (scribe.isConnected) {
           scribe.disconnect();
         }
-        // Connect to video audio
-        if (!videoTranscription.isConnected && !videoTranscription.isConnecting) {
-          videoTranscription.connect(videoElement);
+        if (videoTranscription.isConnected) {
+          videoTranscription.disconnect();
         }
       }
-    } else {
-      // Disconnect both when not recording
-      if (scribe.isConnected) {
-        scribe.disconnect();
-      }
-      if (videoTranscription.isConnected) {
-        videoTranscription.disconnect();
-      }
-    }
+    };
+    
+    connectWithDelay();
   }, [isRecording, audioSource, videoElement]);
 
   // Get active transcription state
   const activeTranscription = audioSource === "mic" ? scribe : videoTranscription;
   const isConnected = activeTranscription.isConnected;
   const isConnecting = audioSource === "mic" ? scribe.isConnecting : videoTranscription.isConnecting;
+  const isReconnecting = audioSource === "mic" && scribe.connectionStatus === 'reconnecting';
   const partialTranscript = activeTranscription.partialTranscript;
   const committedTranscripts = activeTranscription.committedTranscripts;
   const transcriptionError = activeTranscription.error;
@@ -361,7 +405,13 @@ export const LiveTranscriptRealtime = ({
             Salvo
           </Badge>
         )}
-        {isConnecting && (
+        {isReconnecting && (
+          <Badge variant="outline" className="text-orange-500 border-orange-500/50">
+            <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
+            Reconectando... ({scribe.retryCount + 1}/3)
+          </Badge>
+        )}
+        {isConnecting && !isReconnecting && (
           <Badge variant="outline" className="text-blue-500 border-blue-500/50">
             <Loader2 className="h-3 w-3 mr-1 animate-spin" />
             Conectando...
@@ -372,12 +422,12 @@ export const LiveTranscriptRealtime = ({
             <Wifi className="h-3 w-3 mr-1" />
             Kakttus AI
           </Badge>
-        ) : !isRecording ? null : (
+        ) : !isRecording ? null : !isConnecting && !isReconnecting ? (
           <Badge variant="outline" className="text-muted-foreground border-muted-foreground/50">
             <WifiOff className="h-3 w-3 mr-1" />
             Desconectado
           </Badge>
-        )}
+        ) : null}
         <Badge variant="secondary">
           {wordCount} palavras
         </Badge>
