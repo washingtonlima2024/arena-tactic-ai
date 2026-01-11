@@ -140,14 +140,55 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
 
       console.log("Sending audio chunk to Whisper:", audioBlob.size, "bytes, language:", language);
 
-      const { data, error: fnError } = await supabase.functions.invoke("transcribe-audio", {
-        body: { audio: base64Audio, language },
-      });
+      // Call transcribe-audio edge function (uses Google Gemini directly)
+      let data: { success: boolean; text?: string; error?: string } | null = null;
+      let retryCount = 0;
+      const maxRetries = 2;
+      
+      while (retryCount <= maxRetries) {
+        try {
+          const response = await supabase.functions.invoke("transcribe-audio", {
+            body: { audio: base64Audio, language },
+          });
+          
+          if (response.error) {
+            console.error("Transcription function error:", response.error);
+            retryCount++;
+            if (retryCount <= maxRetries) {
+              console.log(`Retrying transcription (${retryCount}/${maxRetries})...`);
+              await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+              continue;
+            }
+            return;
+          }
+          
+          data = response.data;
+          
+          // Handle rate limiting
+          if (data && !data.success && data.error?.includes('Rate limit')) {
+            console.warn("Rate limited, waiting before retry...");
+            retryCount++;
+            if (retryCount <= maxRetries) {
+              await new Promise(resolve => setTimeout(resolve, 3000 * retryCount));
+              continue;
+            }
+            return;
+          }
+          
+          break; // Success, exit retry loop
+        } catch (err) {
+          console.error("Transcription request error:", err);
+          retryCount++;
+          if (retryCount <= maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
+            continue;
+          }
+          return;
+        }
+      }
 
-      if (fnError) {
-        console.error("Transcription error:", fnError);
-        // Don't set error for recoverable transcription failures
-        console.log("Will retry on next cycle");
+      if (!data) {
+        console.log("No transcription data received");
         return;
       }
 
