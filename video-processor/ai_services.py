@@ -1720,6 +1720,7 @@ def _transcribe_gemini_chunks(audio_path: str, tmpdir: str, match_id: str = None
 
 
 
+def _transcribe_with_gemini(audio_path: str, match_id: str = None) -> Dict[str, Any]:
     """
     Transcribe audio using Google Gemini via Lovable AI Gateway.
     
