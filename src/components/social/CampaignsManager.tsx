@@ -141,7 +141,13 @@ export function CampaignsManager() {
     }
 
     try {
-      const userId = '00000000-0000-0000-0000-000000000001';
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({ title: 'Usuário não autenticado', variant: 'destructive' });
+        return;
+      }
+
       const tagsArray = formData.tags.split(',').map(t => t.trim()).filter(Boolean);
 
       if (editingCampaign) {
@@ -163,7 +169,7 @@ export function CampaignsManager() {
         const { error } = await supabase
           .from('social_campaigns')
           .insert({
-            user_id: userId,
+            user_id: user.id,
             name: formData.name,
             description: formData.description || null,
             start_date: formData.start_date?.toISOString() || null,
