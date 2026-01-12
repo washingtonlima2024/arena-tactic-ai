@@ -2842,6 +2842,10 @@ def analyze_match():
         session = get_session()
         saved_events = []
         
+        # Define segment_start_minute for video second calculation
+        # This is the match minute where the video segment starts
+        segment_start_minute = game_start_minute if half_type == 'first' else 45
+        
         # IMPORTANT: Delete existing events for this half to avoid duplicates
         try:
             deleted_count = session.query(MatchEvent).filter_by(
