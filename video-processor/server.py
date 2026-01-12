@@ -2846,6 +2846,46 @@ def extract_event_clips_auto(
     """
     extracted = []
     
+    # ═══════════════════════════════════════════════════════════════
+    # FILTRAR EVENTOS DUPLICADOS ANTES DE PROCESSAR
+    # ═══════════════════════════════════════════════════════════════
+    def filter_duplicate_events(events_list: list, min_gap_seconds: int = 30) -> list:
+        """Remove eventos muito próximos para evitar clips repetidos."""
+        if not events_list or len(events_list) < 2:
+            return events_list
+        
+        # Ordenar por timestamp
+        sorted_events = sorted(events_list, key=lambda e: e.get('minute', 0) * 60 + e.get('second', 0))
+        
+        # Prioridade por tipo de evento (maior = mais importante)
+        priority = {'goal': 10, 'penalty': 9, 'red_card': 8, 'yellow_card': 7, 'save': 6, 'shot': 5, 'foul': 4}
+        
+        filtered = [sorted_events[0]]
+        for event in sorted_events[1:]:
+            last_event = filtered[-1]
+            last_time = last_event.get('minute', 0) * 60 + last_event.get('second', 0)
+            current_time = event.get('minute', 0) * 60 + event.get('second', 0)
+            
+            if current_time - last_time >= min_gap_seconds:
+                filtered.append(event)
+            else:
+                # Se for um evento mais importante, substituir
+                event_priority = priority.get(event.get('event_type'), 0)
+                last_priority = priority.get(last_event.get('event_type'), 0)
+                if event_priority > last_priority:
+                    print(f"[CLIP] Substituindo {last_event.get('event_type')} por {event.get('event_type')} (mais relevante)")
+                    filtered[-1] = event
+                else:
+                    print(f"[CLIP] Ignorando {event.get('event_type')} duplicado (< {min_gap_seconds}s de {last_event.get('event_type')})")
+        
+        if len(events_list) != len(filtered):
+            print(f"[CLIP] Filtrados {len(events_list) - len(filtered)} eventos duplicados ({len(events_list)} -> {len(filtered)})")
+        
+        return filtered
+    
+    # Aplicar filtro de duplicatas
+    events = filter_duplicate_events(events, min_gap_seconds=30)
+    
     # Resolve symlink if video_path is a symlink
     if os.path.islink(video_path):
         resolved_path = os.path.realpath(video_path)
@@ -2895,12 +2935,27 @@ def extract_event_clips_auto(
             if stored_video_second is not None and stored_video_second >= 0:
                 # Use exact video position from transcription
                 total_seconds = stored_video_second
-                print(f"[CLIP] Using videoSecond from transcription: {total_seconds}s")
+                print(f"[CLIP DEBUG] Evento: {event_type} min {minute}:{second}")
+                print(f"[CLIP DEBUG] Using videoSecond from metadata: {total_seconds}s")
             else:
                 # Fallback: calculate based on minute/second
                 total_seconds = (video_minute * 60) + second
+                print(f"[CLIP DEBUG] Evento: {event_type} min {minute}:{second}")
+                print(f"[CLIP DEBUG] Calculated from minute/second: video_minute={video_minute}, total_seconds={total_seconds}s")
+            
+            # ═══════════════════════════════════════════════════════════════
+            # VALIDAÇÃO DE SANIDADE DOS TIMESTAMPS
+            # ═══════════════════════════════════════════════════════════════
+            if total_seconds < 0:
+                print(f"[CLIP] ⚠ ERRO: total_seconds negativo ({total_seconds}), corrigindo para 0")
+                total_seconds = 0
+            
+            if video_duration > 0 and total_seconds > video_duration:
+                print(f"[CLIP] ⚠ ERRO: evento em {total_seconds}s ultrapassa vídeo de {video_duration}s, pulando")
+                continue
             
             start_seconds = max(0, total_seconds - actual_pre)
+            print(f"[CLIP DEBUG] start_seconds (com buffer -{actual_pre}s): {start_seconds}s, duration: {duration}s")
             
             # Validate: skip if start time is beyond video duration
             if video_duration > 0 and start_seconds >= video_duration:
@@ -2960,12 +3015,26 @@ def extract_event_clips_auto(
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
             
             if result.returncode == 0 and os.path.exists(clip_path):
-                # Validate file size - clips less than 10KB are likely corrupt
+                # ═══════════════════════════════════════════════════════════════
+                # VERIFICAÇÃO DE INTEGRIDADE DO CLIP
+                # ═══════════════════════════════════════════════════════════════
                 file_size = os.path.getsize(clip_path)
-                if file_size < 10000:  # 10KB minimum
-                    print(f"[CLIP] ⚠ Clip too small ({file_size} bytes), removing: {filename}")
+                
+                # Validar tamanho mínimo - clips < 50KB provavelmente corrompidos
+                if file_size < 50000:  # 50KB minimum
+                    print(f"[CLIP] ⚠ Clip muito pequeno ({file_size/1024:.1f}KB), removendo: {filename}")
                     os.remove(clip_path)
                     continue
+                
+                # Verificar duração real do clip gerado
+                actual_clip_duration = get_video_duration_seconds(clip_path)
+                if actual_clip_duration > 0:
+                    expected_min = actual_duration * 0.7  # Tolerância de 30%
+                    if actual_clip_duration < expected_min:
+                        print(f"[CLIP] ⚠ Duração incorreta ({actual_clip_duration:.1f}s vs {actual_duration:.1f}s esperado), regenerando")
+                        os.remove(clip_path)
+                        continue
+                    print(f"[CLIP] ✓ Duração verificada: {actual_clip_duration:.1f}s (esperado: {actual_duration:.1f}s)")
                 
                 # Aplicar legendas SEMPRE (garantir que todos os clips tenham legendas)
                 subtitled_path = clip_path.replace('.mp4', '_sub.mp4')
@@ -3449,6 +3518,10 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
                             session.add(event)
                             session.flush()
                             
+                            # Calcular videoSecond preciso para extração de clips
+                            start_minute = 0 if half_type == 'first' else 45
+                            video_second = (raw_minute - start_minute) * 60 + event_data.get('second', 0)
+                            
                             saved_event = {
                                 'id': event.id,
                                 'minute': raw_minute,
@@ -3456,7 +3529,12 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
                                 'event_type': event_data.get('event_type'),
                                 'description': event_data.get('description', ''),
                                 'team': event_data.get('team', 'home'),
-                                'is_highlight': event_data.get('is_highlight', False)
+                                'is_highlight': event_data.get('is_highlight', False),
+                                'metadata': {
+                                    'videoSecond': video_second,
+                                    'eventMs': video_second * 1000,
+                                    'half': match_half
+                                }
                             }
                             saved_events.append(saved_event)
                         
@@ -7351,6 +7429,152 @@ def get_clip_config():
 # ============================================================================
 # MAIN
 # ============================================================================
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ENDPOINT DE DIAGNÓSTICO DE CLIPS
+# ═══════════════════════════════════════════════════════════════════════════
+@app.route('/api/matches/<match_id>/diagnose-clips', methods=['GET'])
+def diagnose_match_clips(match_id):
+    """
+    Diagnostica problemas nos clips de uma partida.
+    
+    Retorna:
+    - Eventos sem clips
+    - Clips com timestamps suspeitos
+    - Clips duplicados
+    - Clips corrompidos
+    """
+    issues = {
+        'events_without_clips': [],
+        'suspicious_timestamps': [],
+        'duplicate_clips': [],
+        'corrupted_clips': [],
+        'valid_clips': [],
+        'recommendations': [],
+        'summary': {}
+    }
+    
+    session = get_session()
+    try:
+        # Buscar todos os eventos da partida
+        events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+        
+        event_times = []
+        for event in events:
+            event_dict = event.to_dict()
+            event_time = event.minute * 60 + (event.second or 0)
+            
+            # Verificar se tem clip
+            if not event.clip_url:
+                issues['events_without_clips'].append({
+                    'id': event.id,
+                    'event_type': event.event_type,
+                    'minute': event.minute,
+                    'description': event.description[:50] if event.description else None
+                })
+            else:
+                # Verificar se o arquivo existe localmente
+                clip_filename = event.clip_url.split('/')[-1] if event.clip_url else None
+                if clip_filename:
+                    half_type = 'first_half' if event.match_half == 'first' else 'second_half'
+                    clip_folder = get_clip_subfolder_path(match_id, half_type.replace('_half', ''))
+                    clip_path = clip_folder / clip_filename
+                    
+                    if os.path.exists(clip_path):
+                        file_size = os.path.getsize(clip_path)
+                        duration = get_video_duration_seconds(str(clip_path))
+                        
+                        if file_size < 50000:  # < 50KB
+                            issues['corrupted_clips'].append({
+                                'id': event.id,
+                                'event_type': event.event_type,
+                                'minute': event.minute,
+                                'file_size_kb': file_size / 1024,
+                                'issue': 'arquivo muito pequeno'
+                            })
+                        elif duration < 5:  # < 5 segundos
+                            issues['corrupted_clips'].append({
+                                'id': event.id,
+                                'event_type': event.event_type,
+                                'minute': event.minute,
+                                'duration': duration,
+                                'issue': 'duração muito curta'
+                            })
+                        else:
+                            issues['valid_clips'].append({
+                                'id': event.id,
+                                'event_type': event.event_type,
+                                'minute': event.minute,
+                                'file_size_kb': round(file_size / 1024, 1),
+                                'duration': round(duration, 1)
+                            })
+            
+            # Verificar duplicatas (eventos muito próximos)
+            for prev_time, prev_event in event_times:
+                if abs(event_time - prev_time) < 30:  # < 30 segundos
+                    issues['duplicate_clips'].append({
+                        'event_1': {'id': prev_event.id, 'type': prev_event.event_type, 'minute': prev_event.minute},
+                        'event_2': {'id': event.id, 'type': event.event_type, 'minute': event.minute},
+                        'gap_seconds': abs(event_time - prev_time)
+                    })
+            
+            event_times.append((event_time, event))
+            
+            # Verificar timestamps suspeitos
+            metadata = event.event_metadata or {}
+            video_second = metadata.get('videoSecond')
+            if video_second is not None:
+                expected_second = (event.minute - (0 if event.match_half == 'first' else 45)) * 60 + (event.second or 0)
+                if abs(video_second - expected_second) > 60:  # Diferença > 1 minuto
+                    issues['suspicious_timestamps'].append({
+                        'id': event.id,
+                        'event_type': event.event_type,
+                        'minute': event.minute,
+                        'videoSecond': video_second,
+                        'expected_second': expected_second,
+                        'difference': abs(video_second - expected_second)
+                    })
+        
+        # Gerar recomendações
+        if issues['events_without_clips']:
+            issues['recommendations'].append(
+                f"Regenerar clips: {len(issues['events_without_clips'])} eventos sem clip. "
+                f"Use POST /api/matches/{match_id}/regenerate-clips"
+            )
+        
+        if issues['corrupted_clips']:
+            issues['recommendations'].append(
+                f"Corrigir clips corrompidos: {len(issues['corrupted_clips'])} clips com problemas"
+            )
+        
+        if issues['duplicate_clips']:
+            issues['recommendations'].append(
+                f"Revisar duplicatas: {len(issues['duplicate_clips'])} pares de eventos muito próximos"
+            )
+        
+        if issues['suspicious_timestamps']:
+            issues['recommendations'].append(
+                f"Verificar timestamps: {len(issues['suspicious_timestamps'])} eventos com videoSecond inconsistente"
+            )
+        
+        # Resumo
+        issues['summary'] = {
+            'total_events': len(events),
+            'valid_clips': len(issues['valid_clips']),
+            'missing_clips': len(issues['events_without_clips']),
+            'corrupted_clips': len(issues['corrupted_clips']),
+            'duplicates': len(issues['duplicate_clips']),
+            'suspicious_timestamps': len(issues['suspicious_timestamps']),
+            'health_score': round(len(issues['valid_clips']) / max(len(events), 1) * 100, 1)
+        }
+        
+        return jsonify(issues)
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
 
 def print_startup_status():
     """Imprime status detalhado no startup."""
