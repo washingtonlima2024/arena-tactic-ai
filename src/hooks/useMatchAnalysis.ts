@@ -36,7 +36,8 @@ export function useMatchAnalysis() {
     awayTeam,
     gameStartMinute = 0,
     gameEndMinute = 45,
-    halfType
+    halfType,
+    skipValidation = false
   }: {
     matchId: string;
     transcription: string;
@@ -45,6 +46,7 @@ export function useMatchAnalysis() {
     gameStartMinute?: number;
     gameEndMinute?: number;
     halfType?: 'first' | 'second';
+    skipValidation?: boolean;
   }): Promise<AnalysisResult | null> => {
     if (!matchId || !transcription) {
       toast.error('Match ID e transcrição são obrigatórios');
@@ -67,7 +69,8 @@ export function useMatchAnalysis() {
         gameEndMinute,
         halfType: halfType || (gameStartMinute >= 45 ? 'second' : 'first'),
         autoClip: true,
-        includeSubtitles: true
+        includeSubtitles: true,
+        skipValidation
       });
 
       if (!data?.success) {

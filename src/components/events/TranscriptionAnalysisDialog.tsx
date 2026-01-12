@@ -46,13 +46,31 @@ export function TranscriptionAnalysisDialog({
       return;
     }
 
+    // Client-side validation: check if transcription mentions the teams
+    const text = transcription.toLowerCase();
+    const homeWords = homeTeamName.toLowerCase().split(' ').filter(w => w.length > 3);
+    const awayWords = awayTeamName.toLowerCase().split(' ').filter(w => w.length > 3);
+    
+    const homeFound = homeWords.some(word => text.includes(word));
+    const awayFound = awayWords.some(word => text.includes(word));
+    
+    if (!homeFound && !awayFound) {
+      const proceed = window.confirm(
+        `⚠️ A transcrição não parece mencionar "${homeTeamName}" ou "${awayTeamName}".\n\n` +
+        `Tem certeza que é a transcrição correta para esta partida?\n\n` +
+        `Se a transcrição for de outro jogo, os eventos serão atribuídos incorretamente.`
+      );
+      if (!proceed) return;
+    }
+
     const result = await analyzeWithTranscription({
       matchId,
       transcription,
       homeTeam: homeTeamName,
       awayTeam: awayTeamName,
       gameStartMinute: 0,
-      gameEndMinute: 90
+      gameEndMinute: 90,
+      skipValidation: !homeFound && !awayFound // Skip backend validation if user confirmed
     });
     
     if (result?.success) {
