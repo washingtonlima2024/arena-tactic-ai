@@ -2364,19 +2364,34 @@ def analyze_match():
                 session.close()
         
         # ═══════════════════════════════════════════════════════════════════
-        # CRITICAL: Update match status to 'analyzed' and update scores
+        # CRITICAL: Update match status to 'analyzed' and ACCUMULATE scores
         # ═══════════════════════════════════════════════════════════════════
         session_update = get_session()
         try:
             match = session_update.query(Match).filter_by(id=match_id).first()
             if match:
-                # Update scores
-                match.home_score = home_score
-                match.away_score = away_score
+                # Store previous scores for logging
+                prev_home = match.home_score or 0
+                prev_away = match.away_score or 0
+                
+                # ACCUMULATE scores based on half type
+                if half_type == 'first':
+                    # First half: set initial scores
+                    match.home_score = home_score
+                    match.away_score = away_score
+                    print(f"[ANALYZE-MATCH] 1º tempo - Placar definido: {home_score}x{away_score}")
+                else:
+                    # Second half: ACCUMULATE to existing scores
+                    match.home_score = prev_home + home_score
+                    match.away_score = prev_away + away_score
+                    print(f"[ANALYZE-MATCH] 2º tempo - Placar anterior: {prev_home}x{prev_away}")
+                    print(f"[ANALYZE-MATCH] 2º tempo - Gols detectados: +{home_score} home, +{away_score} away")
+                    print(f"[ANALYZE-MATCH] 2º tempo - Placar acumulado: {match.home_score}x{match.away_score}")
+                
                 # Update status to 'analyzed' so it appears in the Events/Dashboard pages
                 match.status = 'analyzed'
                 session_update.commit()
-                print(f"[ANALYZE-MATCH] ✓ Match status updated to 'analyzed', score: {home_score}x{away_score}")
+                print(f"[ANALYZE-MATCH] ✓ Match status updated to 'analyzed', placar final: {match.home_score}x{match.away_score}")
         except Exception as status_err:
             print(f"[ANALYZE-MATCH] ⚠️ Error updating match status: {status_err}")
             session_update.rollback()
