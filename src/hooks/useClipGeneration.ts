@@ -8,9 +8,49 @@ import { supabase } from '@/integrations/supabase/client';
 import { getFFmpeg } from '@/lib/ffmpegSingleton';
 import { apiClient } from '@/lib/apiClient';
 
-// Timing constants in milliseconds
-export const CLIP_BUFFER_BEFORE_MS = 3000; // 3 seconds before event
-export const CLIP_BUFFER_AFTER_MS = 5000;  // 5 seconds after event
+// Timing constants in milliseconds - SYNC WITH BACKEND EVENT_CLIP_CONFIG
+// Default fallback values (category-specific timings below)
+export const CLIP_BUFFER_BEFORE_MS = 15000; // 15 seconds before event (default)
+export const CLIP_BUFFER_AFTER_MS = 15000;  // 15 seconds after event (default)
+
+// Category-specific clip timings (in milliseconds) - SYNC WITH video-processor/server.py
+export const EVENT_CLIP_TIMINGS: Record<string, { before: number; after: number }> = {
+  // Alta importância - contexto longo
+  goal: { before: 20000, after: 15000 },        // 35s total
+  penalty: { before: 15000, after: 20000 },     // 35s
+  red_card: { before: 15000, after: 10000 },    // 25s
+  
+  // Média importância
+  shot_on_target: { before: 12000, after: 8000 },  // 20s
+  shot: { before: 10000, after: 8000 },            // 18s
+  save: { before: 12000, after: 8000 },            // 20s
+  yellow_card: { before: 10000, after: 8000 },     // 18s
+  corner: { before: 8000, after: 15000 },          // 23s
+  free_kick: { before: 8000, after: 15000 },       // 23s
+  
+  // Eventos curtos
+  foul: { before: 8000, after: 5000 },             // 13s
+  offside: { before: 8000, after: 5000 },          // 13s
+  substitution: { before: 5000, after: 5000 },     // 10s
+  clearance: { before: 6000, after: 4000 },        // 10s
+  tackle: { before: 6000, after: 4000 },           // 10s
+  interception: { before: 6000, after: 4000 },     // 10s
+  pass: { before: 5000, after: 5000 },             // 10s
+  cross: { before: 6000, after: 6000 },            // 12s
+  
+  // Eventos táticos
+  high_press: { before: 10000, after: 10000 },     // 20s
+  transition: { before: 8000, after: 12000 },      // 20s
+  buildup: { before: 10000, after: 10000 },        // 20s
+  
+  // Padrão
+  default: { before: 15000, after: 15000 }         // 30s
+};
+
+// Helper function to get timing for event type
+export function getEventTimings(eventType: string): { before: number; after: number } {
+  return EVENT_CLIP_TIMINGS[eventType] || EVENT_CLIP_TIMINGS.default;
+}
 
 export interface ClipConfig {
   eventId: string;
@@ -293,8 +333,10 @@ export function useClipGeneration() {
 
   // Calculate playback timestamps for a clip (without extraction)
   const getClipPlaybackInfo = useCallback((config: ClipConfig): ClipPlaybackInfo => {
-    const bufferBefore = config.bufferBeforeMs ?? CLIP_BUFFER_BEFORE_MS;
-    const bufferAfter = config.bufferAfterMs ?? CLIP_BUFFER_AFTER_MS;
+    // Use category-specific timings if not overridden
+    const eventTimings = getEventTimings(config.eventType || 'default');
+    const bufferBefore = config.bufferBeforeMs ?? eventTimings.before;
+    const bufferAfter = config.bufferAfterMs ?? eventTimings.after;
     
     const eventSeconds = config.eventMs / 1000;
     const startTimeSeconds = Math.max(0, eventSeconds - (bufferBefore / 1000));
@@ -322,12 +364,15 @@ export function useClipGeneration() {
       const ffmpeg = await loadFFmpeg();
       if (cancelRef.current) return null;
 
-      // Calculate timestamps
-      const bufferBefore = config.bufferBeforeMs ?? CLIP_BUFFER_BEFORE_MS;
-      const bufferAfter = config.bufferAfterMs ?? CLIP_BUFFER_AFTER_MS;
+      // Use category-specific timings if not overridden
+      const eventTimings = getEventTimings(config.eventType || 'default');
+      const bufferBefore = config.bufferBeforeMs ?? eventTimings.before;
+      const bufferAfter = config.bufferAfterMs ?? eventTimings.after;
       const eventSeconds = config.eventMs / 1000;
       const startTimeSeconds = Math.max(0, eventSeconds - (bufferBefore / 1000));
       const durationSeconds = (bufferBefore + bufferAfter) / 1000;
+      
+      console.log(`[ClipGeneration] Using timing for ${config.eventType}: ${bufferBefore/1000}s before, ${bufferAfter/1000}s after = ${durationSeconds}s total`);
 
       // Download video
       setProgress(prev => ({

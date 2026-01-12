@@ -536,6 +536,32 @@ export const apiClient = {
       extra: Array<{ filename: string; url: string; size: number }>;
     }>(`/api/clips/${matchId}`),
 
+  // ============== Clip Regeneration ==============
+  regenerateClips: async (matchId: string, options?: {
+    event_types?: string[];
+    force_subtitles?: boolean;
+    use_category_timings?: boolean;
+  }): Promise<{
+    success: boolean;
+    regenerated: number;
+    failed: number;
+    total_events: number;
+    timings_used: Record<string, { pre: number; post: number; total: number }>;
+    message: string;
+  }> => {
+    await ensureServerAvailable();
+    return apiRequestLongRunning(`/api/matches/${matchId}/regenerate-clips`, {
+      method: 'POST',
+      body: JSON.stringify(options || { use_category_timings: true, force_subtitles: true })
+    }, 600000); // 10 minutes timeout
+  },
+
+  getClipConfig: () => 
+    apiRequest<{
+      config: Record<string, { pre_buffer: number; post_buffer: number }>;
+      description: string;
+    }>('/api/clip-config'),
+
   // ============== Storage (organized by match) ==============
   // Structure: storage/{match_id}/{subfolder}/{filename}
   // Subfolders: videos, clips, images, audio, texts, srt, json
