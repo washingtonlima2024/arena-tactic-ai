@@ -86,38 +86,37 @@ export function useMatchDetails(matchId: string | null) {
       const data = await apiClient.getMatch(matchId);
       const match = data as MatchWithDetails;
       
-      // Calculate scores from goal events if DB scores are 0
+      // ALWAYS calculate scores from goal events for consistency
       const dbHomeScore = match.home_score ?? 0;
       const dbAwayScore = match.away_score ?? 0;
       
-      if (dbHomeScore === 0 && dbAwayScore === 0) {
-        try {
-          const events = await apiClient.getMatchEvents(matchId);
-          const goalEvents = events.filter((e: any) => e.event_type === 'goal');
+      try {
+        const events = await apiClient.getMatchEvents(matchId);
+        const goalEvents = events.filter((e: any) => e.event_type === 'goal');
+        
+        if (goalEvents.length > 0) {
+          let homeGoals = 0;
+          let awayGoals = 0;
           
-          if (goalEvents.length > 0) {
-            let homeGoals = 0;
-            let awayGoals = 0;
+          goalEvents.forEach((goal: any) => {
+            const metadata = goal.metadata as Record<string, any> | null;
+            const team = metadata?.team || metadata?.scoring_team;
+            const isOwnGoal = metadata?.isOwnGoal === true;
             
-            goalEvents.forEach((goal: any) => {
-              const metadata = goal.metadata as Record<string, any> | null;
-              const team = metadata?.team || metadata?.scoring_team;
-              const isOwnGoal = metadata?.isOwnGoal === true;
-              
-              if (isOwnGoal) {
-                if (team === 'home') awayGoals++;
-                else if (team === 'away') homeGoals++;
-              } else {
-                if (team === 'home' || team === match.home_team?.name) homeGoals++;
-                else if (team === 'away' || team === match.away_team?.name) awayGoals++;
-              }
-            });
-            
-            return { ...match, home_score: homeGoals, away_score: awayGoals };
-          }
-        } catch {
-          // Ignore errors fetching events
+            if (isOwnGoal) {
+              if (team === 'home') awayGoals++;
+              else if (team === 'away') homeGoals++;
+            } else {
+              if (team === 'home' || team === match.home_team?.name) homeGoals++;
+              else if (team === 'away' || team === match.away_team?.name) awayGoals++;
+            }
+          });
+          
+          console.log(`[Score] Match ${matchId}: calculated ${homeGoals}-${awayGoals} from ${goalEvents.length} goal events (DB was ${dbHomeScore}-${dbAwayScore})`);
+          return { ...match, home_score: homeGoals, away_score: awayGoals };
         }
+      } catch {
+        // Fallback to DB values on error
       }
       
       return match;
@@ -279,36 +278,37 @@ export function useAllCompletedMatches() {
           const dbHomeScore = match.home_score ?? 0;
           const dbAwayScore = match.away_score ?? 0;
           
-          if (dbHomeScore === 0 && dbAwayScore === 0) {
-            try {
-              const events = await apiClient.getMatchEvents(match.id);
-              const goalEvents = events.filter((e: any) => e.event_type === 'goal');
+          // ALWAYS calculate scores from goal events for consistency
+          try {
+            const events = await apiClient.getMatchEvents(match.id);
+            const goalEvents = events.filter((e: any) => e.event_type === 'goal');
+            
+            if (goalEvents.length > 0) {
+              let homeGoals = 0;
+              let awayGoals = 0;
               
-              if (goalEvents.length > 0) {
-                let homeGoals = 0;
-                let awayGoals = 0;
+              goalEvents.forEach((goal: any) => {
+                const metadata = goal.metadata as Record<string, any> | null;
+                const team = metadata?.team || metadata?.scoring_team;
+                const isOwnGoal = metadata?.isOwnGoal === true;
                 
-                goalEvents.forEach((goal: any) => {
-                  const metadata = goal.metadata as Record<string, any> | null;
-                  const team = metadata?.team || metadata?.scoring_team;
-                  const isOwnGoal = metadata?.isOwnGoal === true;
-                  
-                  if (isOwnGoal) {
-                    if (team === 'home') awayGoals++;
-                    else if (team === 'away') homeGoals++;
-                  } else {
-                    if (team === 'home' || team === match.home_team?.name) homeGoals++;
-                    else if (team === 'away' || team === match.away_team?.name) awayGoals++;
-                  }
-                });
-                
-                return { ...match, home_score: homeGoals, away_score: awayGoals, _calculated: true };
-              }
-            } catch {
-              // Ignore errors fetching events
+                if (isOwnGoal) {
+                  if (team === 'home') awayGoals++;
+                  else if (team === 'away') homeGoals++;
+                } else {
+                  if (team === 'home' || team === match.home_team?.name) homeGoals++;
+                  else if (team === 'away' || team === match.away_team?.name) awayGoals++;
+                }
+              });
+              
+              console.log(`[Score] Match ${match.id}: calculated ${homeGoals}-${awayGoals} from ${goalEvents.length} goal events (DB was ${dbHomeScore}-${dbAwayScore})`);
+              return { ...match, home_score: homeGoals, away_score: awayGoals, _calculated: true };
             }
+          } catch {
+            // Fallback to DB values on error
           }
           
+          // Fallback to DB values only if no goal events found
           return { ...match, home_score: dbHomeScore, away_score: dbAwayScore };
         })
       );
