@@ -370,6 +370,25 @@ class Profile(Base):
     user_id = Column(String(36), unique=True, nullable=False)
     email = Column(String(255))
     display_name = Column(String(255))
+    phone = Column(String(20))
+    cpf_cnpj = Column(String(18))
+    
+    # Address fields
+    address_cep = Column(String(9))
+    address_street = Column(String(255))
+    address_number = Column(String(20))
+    address_complement = Column(String(100))
+    address_neighborhood = Column(String(100))
+    address_city = Column(String(100))
+    address_state = Column(String(2))
+    
+    # Credits
+    credits_balance = Column(Integer, default=0)
+    credits_monthly_quota = Column(Integer, default=10)
+    
+    # Organization
+    organization_id = Column(String(36))
+    
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -379,6 +398,18 @@ class Profile(Base):
             'user_id': self.user_id,
             'email': self.email,
             'display_name': self.display_name,
+            'phone': self.phone,
+            'cpf_cnpj': self.cpf_cnpj,
+            'address_cep': self.address_cep,
+            'address_street': self.address_street,
+            'address_number': self.address_number,
+            'address_complement': self.address_complement,
+            'address_neighborhood': self.address_neighborhood,
+            'address_city': self.address_city,
+            'address_state': self.address_state,
+            'credits_balance': self.credits_balance,
+            'credits_monthly_quota': self.credits_monthly_quota,
+            'organization_id': self.organization_id,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

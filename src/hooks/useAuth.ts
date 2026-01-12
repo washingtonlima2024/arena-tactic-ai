@@ -136,13 +136,31 @@ export function useAuth() {
     return () => subscription.unsubscribe();
   }, [fetchUserRole]);
 
-  const signUp = useCallback(async (email: string, password: string, displayName?: string) => {
+  const signUp = useCallback(async (
+    email: string, 
+    password: string, 
+    displayName?: string,
+    profileData?: {
+      phone?: string;
+      cpf_cnpj?: string;
+      address_cep?: string;
+      address_street?: string;
+      address_number?: string;
+      address_complement?: string;
+      address_neighborhood?: string;
+      address_city?: string;
+      address_state?: string;
+    }
+  ) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         emailRedirectTo: `${window.location.origin}/dashboard`,
-        data: { display_name: displayName || email.split('@')[0] }
+        data: { 
+          display_name: displayName || email.split('@')[0],
+          ...profileData
+        }
       }
     });
     return { data, error };
