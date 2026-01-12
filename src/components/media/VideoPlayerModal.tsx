@@ -98,28 +98,31 @@ export function VideoPlayerModal({
     const videoDuration = getVideoDuration();
     const videoStartMinute = matchVideo?.start_minute ?? 0;
     
+    // Use 5 seconds before event for better context
+    const PRE_EVENT_BUFFER = 5;
+    
     if (clip.videoSecond !== undefined && clip.videoSecond >= 0 && clip.videoSecond <= videoDuration) {
-      const targetTs = Math.max(0, clip.videoSecond - 3);
+      const targetTs = Math.max(0, clip.videoSecond - PRE_EVENT_BUFFER);
       return Math.min(targetTs, Math.max(0, videoDuration - 1));
     }
     
     if (clip.eventMs !== undefined && clip.eventMs >= 0) {
       const eventSeconds = clip.eventMs / 1000;
       if (eventSeconds <= videoDuration) {
-        const targetTs = Math.max(0, eventSeconds - 3);
+        const targetTs = Math.max(0, eventSeconds - PRE_EVENT_BUFFER);
         return Math.min(targetTs, Math.max(0, videoDuration - 1));
       }
     }
     
     if (clip.totalSeconds !== undefined && clip.totalSeconds >= 0 && clip.totalSeconds <= videoDuration) {
-      const targetTs = Math.max(0, clip.totalSeconds - 3);
+      const targetTs = Math.max(0, clip.totalSeconds - PRE_EVENT_BUFFER);
       return Math.min(targetTs, Math.max(0, videoDuration - 1));
     }
     
     const gameTimeSeconds = (clip.minute * 60) + (clip.second || 0);
     
     if (gameTimeSeconds <= videoDuration) {
-      const targetTs = Math.max(0, gameTimeSeconds - 3);
+      const targetTs = Math.max(0, gameTimeSeconds - PRE_EVENT_BUFFER);
       return Math.min(targetTs, Math.max(0, videoDuration - 1));
     }
     
@@ -129,7 +132,7 @@ export function VideoPlayerModal({
     }
     
     const videoRelativeSeconds = (clip.minute - effectiveStartMinute) * 60 + (clip.second || 0);
-    const targetTs = Math.max(0, Math.min(videoRelativeSeconds - 3, videoDuration - 1));
+    const targetTs = Math.max(0, Math.min(videoRelativeSeconds - PRE_EVENT_BUFFER, videoDuration - 1));
     
     return targetTs;
   }, [clip, hasDirectClip, getVideoDuration, matchVideo?.start_minute]);

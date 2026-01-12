@@ -2500,8 +2500,8 @@ def extract_event_clips_auto(
     half_type: str,
     home_team: str = None,
     away_team: str = None,
-    pre_buffer: float = 3.0,
-    post_buffer: float = 7.0,
+    pre_buffer: float = 5.0,
+    post_buffer: float = 5.0,
     include_subtitles: bool = True,
     segment_start_minute: int = 0
 ) -> list:
@@ -2555,8 +2555,19 @@ def extract_event_clips_auto(
             # If segment starts at minute 38 and event is at minute 39, video_minute = 1
             video_minute = minute - segment_start_minute
             
+            # Check if event has precise videoSecond from transcription
+            metadata = event.get('metadata', {}) or {}
+            stored_video_second = metadata.get('videoSecond')
+            
             # Calculate start time in video (with pre-buffer)
-            total_seconds = (video_minute * 60) + second
+            if stored_video_second is not None and stored_video_second >= 0:
+                # Use exact video position from transcription
+                total_seconds = stored_video_second
+                print(f"[CLIP] Using videoSecond from transcription: {total_seconds}s")
+            else:
+                # Fallback: calculate based on minute/second
+                total_seconds = (video_minute * 60) + second
+            
             start_seconds = max(0, total_seconds - pre_buffer)
             
             # Validate: skip if start time is beyond video duration
@@ -2565,6 +2576,7 @@ def extract_event_clips_auto(
                 continue
             
             # Validate: adjust duration if it would exceed video length
+            MIN_CLIP_DURATION = 10.0  # Minimum seconds for a useful clip
             actual_duration = duration
             if video_duration > 0 and (start_seconds + duration) > video_duration:
                 actual_duration = video_duration - start_seconds
@@ -2572,6 +2584,15 @@ def extract_event_clips_auto(
                     print(f"[CLIP] ⚠ Event at min {minute} would result in clip < 2s, skipping")
                     continue
                 print(f"[CLIP] Adjusting clip duration to {actual_duration:.1f}s (end of video)")
+            
+            # Ensure minimum clip duration of 10 seconds
+            if actual_duration < MIN_CLIP_DURATION:
+                # Try to expand backwards if we hit end of video
+                if start_seconds > 0:
+                    expansion = min(start_seconds, MIN_CLIP_DURATION - actual_duration)
+                    start_seconds -= expansion
+                    actual_duration += expansion
+                    print(f"[CLIP] Expanded start by {expansion:.1f}s to reach {MIN_CLIP_DURATION}s minimum")
             
             # Determine team for filename
             team_short = None
