@@ -472,6 +472,13 @@ export const LiveTranscriptRealtime = ({
           </Badge>
         )}
         
+        {/* Error Badge */}
+        {transcriptionError && !isConnecting && !isReconnecting && (
+          <Badge variant="outline" className="text-red-500 border-red-500/50 max-w-[200px] truncate" title={transcriptionError}>
+            Erro: {transcriptionError.slice(0, 30)}{transcriptionError.length > 30 ? '...' : ''}
+          </Badge>
+        )}
+        
         {/* Volume Indicator */}
         {isRecording && isConnected && audioSource === "video" && (
           <VolumeIndicator 
