@@ -749,7 +749,6 @@ def health_check():
         '_transcribe_with_gemini': hasattr(ai_services, '_transcribe_with_gemini'),
         'transcribe_large_video': hasattr(ai_services, 'transcribe_large_video'),
         'analyze_match_events': hasattr(ai_services, 'analyze_match_events'),
-        'generate_event_clips': hasattr(ai_services, 'generate_event_clips'),
     }
     
     all_functions_loaded = all(critical_functions.values())
