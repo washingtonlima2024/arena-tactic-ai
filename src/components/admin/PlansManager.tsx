@@ -38,6 +38,19 @@ export default function PlansManager() {
     return `R$ ${(cents / 100).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`;
   };
 
+  const parseFeatures = (features: any): string[] => {
+    if (Array.isArray(features)) return features;
+    if (typeof features === 'string') {
+      try {
+        const parsed = JSON.parse(features);
+        return Array.isArray(parsed) ? parsed : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  };
+
   const handleEdit = (plan: any) => {
     setEditingPlan(plan);
     setFormData({
@@ -49,7 +62,7 @@ export default function PlansManager() {
       max_users: plan.max_users || 1,
       max_matches_per_month: plan.max_matches_per_month || 0,
       storage_limit_bytes: plan.storage_limit_bytes,
-      features: JSON.parse(plan.features || '[]').join('\n'),
+      features: parseFeatures(plan.features).join('\n'),
       is_active: plan.is_active,
     });
     setIsDialogOpen(true);
@@ -246,7 +259,7 @@ export default function PlansManager() {
 
       <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4">
         {plans.map((plan) => {
-          const features = JSON.parse(plan.features || '[]');
+          const features = parseFeatures(plan.features);
           return (
             <Card key={plan.id} className={`relative ${!plan.is_active ? 'opacity-60' : ''}`}>
               {plan.slug === 'pro' && (
