@@ -1098,6 +1098,25 @@ def link_local_file():
     except Exception as e:
         print(f"[link-local] Não foi possível detectar duração: {e}")
     
+    # ═══════════════════════════════════════════════════════════════════════
+    # AUTO-CLASSIFY VIDEO TYPE BASED ON DURATION
+    # ═══════════════════════════════════════════════════════════════════════
+    original_video_type = video_type
+    if duration_seconds:
+        duration_minutes = duration_seconds / 60
+        
+        if duration_minutes < 15:
+            # Very short video = clip/excerpt, not a half
+            if video_type in ['first_half', 'second_half', 'full']:
+                print(f"[link-local] ⚠ Duração curta ({duration_minutes:.1f}min), reclassificando de '{video_type}' para 'clip'")
+                video_type = 'clip'
+        elif duration_minutes < 40 and video_type == 'full':
+            # Medium-length video marked as full - probably just one half or segment
+            print(f"[link-local] ⚠ Duração média ({duration_minutes:.1f}min) marcada como 'full' - tratando como segmento único")
+            # Keep as 'full' but adjust start/end minutes below
+        
+        print(f"[link-local] Vídeo classificado: {video_type} ({duration_minutes:.1f}min)")
+    
     # Create symlink in match storage (optional - for easier browsing)
     try:
         match_storage = get_match_storage_path(match_id)
@@ -1140,6 +1159,28 @@ def link_local_file():
                 'already_exists': True
             })
         
+        # Calculate start/end minutes based on video type and duration
+        if video_type == 'clip':
+            # For clips, use actual duration
+            start_minute = 0
+            end_minute = max(1, int((duration_seconds or 60) / 60) + 1)
+        elif video_type == 'first_half':
+            start_minute = 0
+            end_minute = 45
+        elif video_type == 'second_half':
+            start_minute = 45
+            end_minute = 90
+        elif video_type == 'full':
+            start_minute = 0
+            # For short "full" videos, use actual duration
+            if duration_seconds and duration_seconds < 40 * 60:
+                end_minute = max(1, int(duration_seconds / 60) + 1)
+            else:
+                end_minute = 90
+        else:
+            start_minute = 0
+            end_minute = max(1, int((duration_seconds or 60) / 60) + 1) if duration_seconds else None
+        
         # Create new video record
         video = Video(
             match_id=match_id,
@@ -1148,8 +1189,8 @@ def link_local_file():
             video_type=video_type,
             duration_seconds=duration_seconds,
             status='ready',
-            start_minute=0 if video_type == 'first_half' else (45 if video_type == 'second_half' else 0),
-            end_minute=45 if video_type == 'first_half' else (90 if video_type in ['second_half', 'full'] else None)
+            start_minute=start_minute,
+            end_minute=end_minute
         )
         session.add(video)
         session.commit()
@@ -2342,20 +2383,27 @@ def analyze_match():
                 if half_type == 'second' and raw_minute < 45:
                     raw_minute = raw_minute + 45
                 
+                # Calculate videoSecond for precise clip extraction
+                event_second = event_data.get('second', 0)
+                original_minute = event_data.get('minute', 0)
+                # videoSecond is the position in the video file (relative to segment start)
+                video_second = (original_minute - segment_start_minute) * 60 + event_second
+                
                 event = MatchEvent(
                     match_id=match_id,
                     event_type=event_data.get('event_type', 'unknown'),
                     description=event_data.get('description'),
                     minute=raw_minute,
-                    second=event_data.get('second', 0),
+                    second=event_second,
                     match_half=match_half,
                     is_highlight=event_data.get('is_highlight', False),
                     event_metadata={
                         'ai_generated': True, 
-                        'original_minute': event_data.get('minute'),
+                        'original_minute': original_minute,
                         'team': event_data.get('team'),
                         'isOwnGoal': event_data.get('isOwnGoal', False),
                         'player': event_data.get('player'),
+                        'videoSecond': video_second,  # Precise position in video
                         **event_data
                     }
                 )
@@ -2590,6 +2638,99 @@ def get_video_duration_seconds(video_path: str) -> float:
     return 0.0
 
 
+def generate_thumbnail_from_clip(
+    clip_path: str,
+    match_id: str,
+    event_id: str = None,
+    event_type: str = 'event',
+    minute: int = 0
+) -> str:
+    """
+    Extract a frame from a clip to use as thumbnail.
+    
+    Args:
+        clip_path: Path to the clip video file
+        match_id: Match ID for storage
+        event_id: Optional event ID
+        event_type: Type of event for naming
+        minute: Event minute for naming
+    
+    Returns:
+        URL of the generated thumbnail or None
+    """
+    try:
+        if not os.path.exists(clip_path):
+            print(f"[THUMBNAIL] ⚠ Clip não existe: {clip_path}")
+            return None
+        
+        # Get clip duration
+        clip_duration = get_video_duration_seconds(clip_path)
+        if clip_duration <= 0:
+            clip_duration = 5.0  # Default to 5 seconds
+        
+        # Extract frame at the middle of the clip (where the event likely is)
+        # For a 10s clip, extract at 5s mark
+        frame_time = clip_duration / 2
+        
+        # Generate thumbnail filename
+        thumb_filename = f"thumb_{minute:02d}min-{event_type}"
+        if event_id:
+            thumb_filename += f"-{event_id[:8]}"
+        thumb_filename += ".jpg"
+        
+        # Get images folder path
+        images_folder = get_subfolder_path(match_id, 'images')
+        thumb_path = str(images_folder / thumb_filename)
+        
+        # Extract frame using FFmpeg
+        cmd = [
+            'ffmpeg', '-y',
+            '-ss', str(frame_time),
+            '-i', clip_path,
+            '-vframes', '1',
+            '-q:v', '2',  # High quality JPEG
+            '-vf', 'scale=640:-1',  # Resize to 640px width, maintain aspect
+            thumb_path
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode == 0 and os.path.exists(thumb_path):
+            thumb_size = os.path.getsize(thumb_path)
+            if thumb_size > 1000:  # At least 1KB
+                thumb_url = f"http://localhost:5000/api/storage/{match_id}/images/{thumb_filename}"
+                
+                # Save to database if event_id is provided
+                if event_id:
+                    try:
+                        session = get_session()
+                        thumbnail = Thumbnail(
+                            match_id=match_id,
+                            event_id=event_id,
+                            event_type=event_type,
+                            image_url=thumb_url,
+                            title=f"{event_type} - {minute}'"
+                        )
+                        session.add(thumbnail)
+                        session.commit()
+                        session.close()
+                    except Exception as db_err:
+                        print(f"[THUMBNAIL] ⚠ Erro ao salvar no banco: {db_err}")
+                
+                return thumb_url
+            else:
+                print(f"[THUMBNAIL] ⚠ Thumbnail muito pequena ({thumb_size} bytes), removendo")
+                os.remove(thumb_path)
+        else:
+            print(f"[THUMBNAIL] ⚠ FFmpeg falhou: {result.stderr[:200] if result.stderr else 'Unknown error'}")
+        
+        return None
+        
+    except Exception as e:
+        print(f"[THUMBNAIL] Erro: {e}")
+        return None
+
+
 def extract_event_clips_auto(
     match_id: str, 
     video_path: str, 
@@ -2765,6 +2906,24 @@ def extract_event_clips_auto(
                 }
                 extracted.append(clip_info)
                 print(f"[CLIP] ✓ Extracted: {filename} ({file_size/1024:.1f}KB)")
+                
+                # ═══════════════════════════════════════════════════════════
+                # AUTO-GENERATE THUMBNAIL FROM CLIP
+                # ═══════════════════════════════════════════════════════════
+                thumbnail_url = None
+                try:
+                    thumbnail_url = generate_thumbnail_from_clip(
+                        clip_path=clip_path,
+                        match_id=match_id,
+                        event_id=event.get('id'),
+                        event_type=event_type,
+                        minute=minute
+                    )
+                    if thumbnail_url:
+                        clip_info['thumbnail_url'] = thumbnail_url
+                        print(f"[CLIP] ✓ Thumbnail gerada: {thumbnail_url}")
+                except Exception as thumb_err:
+                    print(f"[CLIP] ⚠ Erro ao gerar thumbnail: {thumb_err}")
                 
                 # Update event clip_url in database if event_id is present
                 event_id = event.get('id')
