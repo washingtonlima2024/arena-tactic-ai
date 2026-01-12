@@ -182,6 +182,63 @@ VIGNETTES_DIR = Path(__file__).parent / "vinhetas"
 VIGNETTES_DIR.mkdir(exist_ok=True)
 
 
+# ═══════════════════════════════════════════════════════════════════
+# CONFIGURAÇÃO DE DURAÇÃO DE CLIPS POR CATEGORIA
+# ═══════════════════════════════════════════════════════════════════
+# Tempos em segundos: pre_buffer (antes do evento) + post_buffer (depois)
+EVENT_CLIP_CONFIG = {
+    # Eventos de alta importância - contexto longo
+    'goal': {'pre_buffer': 20, 'post_buffer': 15},  # 35s total - jogada completa
+    'penalty': {'pre_buffer': 15, 'post_buffer': 20},  # 35s - inclui cobrança
+    'red_card': {'pre_buffer': 15, 'post_buffer': 10},  # 25s
+    
+    # Eventos de média importância - contexto médio
+    'shot_on_target': {'pre_buffer': 12, 'post_buffer': 8},  # 20s
+    'shot': {'pre_buffer': 10, 'post_buffer': 8},  # 18s
+    'save': {'pre_buffer': 12, 'post_buffer': 8},  # 20s
+    'yellow_card': {'pre_buffer': 10, 'post_buffer': 8},  # 18s
+    'corner': {'pre_buffer': 8, 'post_buffer': 15},  # 23s - cruzamento + finalização
+    'free_kick': {'pre_buffer': 8, 'post_buffer': 15},  # 23s
+    
+    # Eventos de menor duração - contexto curto
+    'foul': {'pre_buffer': 8, 'post_buffer': 5},  # 13s
+    'offside': {'pre_buffer': 8, 'post_buffer': 5},  # 13s
+    'substitution': {'pre_buffer': 5, 'post_buffer': 5},  # 10s
+    'clearance': {'pre_buffer': 6, 'post_buffer': 4},  # 10s
+    'tackle': {'pre_buffer': 6, 'post_buffer': 4},  # 10s
+    'interception': {'pre_buffer': 6, 'post_buffer': 4},  # 10s
+    'pass': {'pre_buffer': 5, 'post_buffer': 5},  # 10s
+    'cross': {'pre_buffer': 6, 'post_buffer': 6},  # 12s
+    
+    # Eventos táticos
+    'high_press': {'pre_buffer': 10, 'post_buffer': 10},  # 20s
+    'transition': {'pre_buffer': 8, 'post_buffer': 12},  # 20s
+    'buildup': {'pre_buffer': 10, 'post_buffer': 10},  # 20s
+    
+    # Padrão para eventos não mapeados
+    'default': {'pre_buffer': 15, 'post_buffer': 15}  # 30s
+}
+
+
+def get_event_clip_timings(event_type: str) -> tuple:
+    """
+    Retorna (pre_buffer, post_buffer) para o tipo de evento.
+    
+    Args:
+        event_type: Tipo do evento (goal, shot, foul, etc.)
+    
+    Returns:
+        Tuple com (segundos_antes, segundos_depois)
+    """
+    config = EVENT_CLIP_CONFIG.get(event_type, EVENT_CLIP_CONFIG['default'])
+    return config['pre_buffer'], config['post_buffer']
+
+
+def get_event_clip_config_all():
+    """Retorna toda a configuração de tempos para o frontend."""
+    return EVENT_CLIP_CONFIG
+
+
 # ============================================================================
 # UTILITY FUNCTIONS
 # ============================================================================
@@ -2762,13 +2819,14 @@ def extract_event_clips_auto(
     half_type: str,
     home_team: str = None,
     away_team: str = None,
-    pre_buffer: float = 5.0,
-    post_buffer: float = 5.0,
+    pre_buffer: float = None,  # Agora opcional - usa categoria se None
+    post_buffer: float = None,  # Agora opcional - usa categoria se None
     include_subtitles: bool = True,
-    segment_start_minute: int = 0
+    segment_start_minute: int = 0,
+    use_category_timings: bool = True  # Usar tempos por categoria de evento
 ) -> list:
     """
-    Extract clips for all events automatically.
+    Extract clips for all events automatically with category-based timing.
     
     Args:
         match_id: Match ID
@@ -2777,16 +2835,16 @@ def extract_event_clips_auto(
         half_type: 'first' or 'second'
         home_team: Home team name for labeling
         away_team: Away team name for labeling
-        pre_buffer: Seconds before the event
-        post_buffer: Seconds after the event
+        pre_buffer: Override seconds before event (None = use category timing)
+        post_buffer: Override seconds after event (None = use category timing)
         include_subtitles: Whether to add subtitles to clips
-        segment_start_minute: The match minute where this video segment starts (for clips/segments)
+        segment_start_minute: The match minute where this video segment starts
+        use_category_timings: If True, use EVENT_CLIP_CONFIG for each event type
     
     Returns:
         List of extracted clip info dicts
     """
     extracted = []
-    duration = pre_buffer + post_buffer
     
     # Resolve symlink if video_path is a symlink
     if os.path.islink(video_path):
@@ -2813,6 +2871,18 @@ def extract_event_clips_auto(
             event_type = event.get('event_type', 'event')
             description = event.get('description', '')
             
+            # Determinar buffers: prioridade para override > categoria > padrão
+            if pre_buffer is not None and post_buffer is not None:
+                actual_pre = pre_buffer
+                actual_post = post_buffer
+            elif use_category_timings:
+                actual_pre, actual_post = get_event_clip_timings(event_type)
+                print(f"[CLIP] Using category timing for {event_type}: {actual_pre}s before, {actual_post}s after ({actual_pre + actual_post}s total)")
+            else:
+                actual_pre, actual_post = 15.0, 15.0  # Padrão 30s
+            
+            duration = actual_pre + actual_post
+            
             # Adjust minute relative to segment start (for clips/segments)
             # If segment starts at minute 38 and event is at minute 39, video_minute = 1
             video_minute = minute - segment_start_minute
@@ -2830,7 +2900,7 @@ def extract_event_clips_auto(
                 # Fallback: calculate based on minute/second
                 total_seconds = (video_minute * 60) + second
             
-            start_seconds = max(0, total_seconds - pre_buffer)
+            start_seconds = max(0, total_seconds - actual_pre)
             
             # Validate: skip if start time is beyond video duration
             if video_duration > 0 and start_seconds >= video_duration:
@@ -2897,22 +2967,41 @@ def extract_event_clips_auto(
                     os.remove(clip_path)
                     continue
                 
-                # Aplicar legendas se habilitado
-                if include_subtitles:
-                    subtitled_path = clip_path.replace('.mp4', '_sub.mp4')
-                    team_name = None
-                    if home_team and home_team.lower() in description.lower():
-                        team_name = home_team
-                    elif away_team and away_team.lower() in description.lower():
-                        team_name = away_team
-                    
-                    if add_subtitles_to_clip(
-                        clip_path, subtitled_path,
-                        description, minute, event_type, team_name
-                    ):
-                        # Substituir original pelo legendado
-                        os.replace(subtitled_path, clip_path)
-                        print(f"[CLIP] ✓ Legendas aplicadas: {filename}")
+                # Aplicar legendas SEMPRE (garantir que todos os clips tenham legendas)
+                subtitled_path = clip_path.replace('.mp4', '_sub.mp4')
+                
+                # Determinar team name
+                team_name = None
+                if home_team and (home_team.lower() in description.lower() or 
+                                   any(w in description.lower() for w in home_team.lower().split()[:2])):
+                    team_name = home_team
+                elif away_team and (away_team.lower() in description.lower() or
+                                     any(w in description.lower() for w in away_team.lower().split()[:2])):
+                    team_name = away_team
+                
+                # Adicionar legenda com tipo do evento traduzido (fallback se não tiver descrição)
+                EVENT_TYPE_LABELS = {
+                    'goal': 'GOL', 'shot': 'CHUTE', 'shot_on_target': 'CHUTE NO GOL',
+                    'foul': 'FALTA', 'corner': 'ESCANTEIO', 'offside': 'IMPEDIMENTO',
+                    'yellow_card': 'CARTÃO AMARELO', 'red_card': 'CARTÃO VERMELHO',
+                    'substitution': 'SUBSTITUIÇÃO', 'penalty': 'PÊNALTI',
+                    'free_kick': 'TIRO LIVRE', 'save': 'DEFESA', 'clearance': 'CORTE',
+                    'tackle': 'DESARME', 'pass': 'PASSE', 'cross': 'CRUZAMENTO',
+                    'interception': 'INTERCEPTAÇÃO', 'high_press': 'PRESSÃO ALTA',
+                    'transition': 'TRANSIÇÃO', 'buildup': 'CONSTRUÇÃO'
+                }
+                event_label = EVENT_TYPE_LABELS.get(event_type, event_type.upper())
+                subtitle_text = description if description else event_label
+                
+                if add_subtitles_to_clip(
+                    clip_path, subtitled_path,
+                    subtitle_text, minute, event_type, team_name
+                ):
+                    # Substituir original pelo legendado
+                    os.replace(subtitled_path, clip_path)
+                    print(f"[CLIP] ✓ Legendas aplicadas: {filename}")
+                else:
+                    print(f"[CLIP] ⚠ Legendas falharam, mantendo clip original: {filename}")
                 
                 # Normalize half type for URL
                 half_normalized = 'first_half' if half_type == 'first' else 'second_half'
@@ -7077,6 +7166,186 @@ def get_admin_stats():
         })
     finally:
         session.close()
+
+
+# ═══════════════════════════════════════════════════════════════════
+# ENDPOINT: REGENERAR CLIPS COM NOVOS TEMPOS
+# ═══════════════════════════════════════════════════════════════════
+@app.route('/api/matches/<match_id>/regenerate-clips', methods=['POST'])
+def regenerate_match_clips(match_id):
+    """
+    Regenera todos os clips de uma partida com as novas configurações de tempo.
+    
+    Options:
+    - event_types: Lista de tipos de evento para regenerar (null = todos)
+    - force_subtitles: Forçar legendas mesmo em clips existentes
+    - use_category_timings: Usar tempos específicos por categoria
+    """
+    data = request.json or {}
+    event_types = data.get('event_types')  # ['goal', 'save'] ou None para todos
+    force_subtitles = data.get('force_subtitles', True)
+    use_category_timings = data.get('use_category_timings', True)
+    
+    session = get_session()
+    try:
+        # Verificar se a partida existe
+        match = session.query(Match).filter_by(id=match_id).first()
+        if not match:
+            return jsonify({'error': 'Match not found'}), 404
+        
+        # Buscar nomes dos times
+        home_team_name = None
+        away_team_name = None
+        if match.home_team_id:
+            home_team = session.query(Team).filter_by(id=match.home_team_id).first()
+            home_team_name = home_team.name if home_team else None
+        if match.away_team_id:
+            away_team = session.query(Team).filter_by(id=match.away_team_id).first()
+            away_team_name = away_team.name if away_team else None
+        
+        # Buscar eventos para regenerar
+        events_query = session.query(MatchEvent).filter_by(match_id=match_id)
+        if event_types:
+            events_query = events_query.filter(MatchEvent.event_type.in_(event_types))
+        events = events_query.all()
+        
+        if not events:
+            return jsonify({'error': 'No events found to regenerate'}), 404
+        
+        # Buscar vídeos da partida
+        videos = session.query(Video).filter_by(match_id=match_id).all()
+        if not videos:
+            return jsonify({'error': 'No videos found for this match'}), 404
+        
+        # Organizar vídeos por tipo (first_half, second_half, full)
+        videos_by_type = {}
+        for v in videos:
+            vtype = v.video_type or 'full'
+            if vtype not in videos_by_type:
+                videos_by_type[vtype] = []
+            videos_by_type[vtype].append(v)
+        
+        regenerated = 0
+        failed = 0
+        timings_used = {}
+        
+        # Agrupar eventos por tempo para regeneração
+        events_first = [e for e in events if e.match_half == 'first' or (e.minute or 0) <= 45]
+        events_second = [e for e in events if e.match_half == 'second' or (e.minute or 0) > 45]
+        
+        # Processar primeiro tempo
+        if events_first and ('first_half' in videos_by_type or 'full' in videos_by_type):
+            video = videos_by_type.get('first_half', videos_by_type.get('full', [None]))[0]
+            if video:
+                video_path = None
+                # Resolver caminho do vídeo
+                from storage import get_video_subfolder_path
+                video_folder = get_video_subfolder_path(match_id, 'first_half')
+                for ext in ['.mp4', '.mov', '.webm', '.mkv']:
+                    for f in video_folder.glob(f'*{ext}'):
+                        video_path = str(f)
+                        break
+                    if video_path:
+                        break
+                
+                if video_path and os.path.exists(video_path):
+                    events_dicts = []
+                    for e in events_first:
+                        evt = {
+                            'id': e.id,
+                            'minute': e.minute or 0,
+                            'second': e.second or 0,
+                            'event_type': e.event_type,
+                            'description': e.description,
+                            'metadata': e.metadata or {}
+                        }
+                        events_dicts.append(evt)
+                        
+                        # Registrar timings usados
+                        pre, post = get_event_clip_timings(e.event_type)
+                        if e.event_type not in timings_used:
+                            timings_used[e.event_type] = {'pre': pre, 'post': post, 'total': pre + post}
+                    
+                    clips = extract_event_clips_auto(
+                        match_id=match_id,
+                        video_path=video_path,
+                        events=events_dicts,
+                        half_type='first',
+                        home_team=home_team_name,
+                        away_team=away_team_name,
+                        use_category_timings=use_category_timings
+                    )
+                    regenerated += len(clips)
+                    failed += len(events_dicts) - len(clips)
+        
+        # Processar segundo tempo
+        if events_second and ('second_half' in videos_by_type or 'full' in videos_by_type):
+            video = videos_by_type.get('second_half', videos_by_type.get('full', [None]))[0]
+            if video:
+                video_path = None
+                from storage import get_video_subfolder_path
+                video_folder = get_video_subfolder_path(match_id, 'second_half')
+                for ext in ['.mp4', '.mov', '.webm', '.mkv']:
+                    for f in video_folder.glob(f'*{ext}'):
+                        video_path = str(f)
+                        break
+                    if video_path:
+                        break
+                
+                if video_path and os.path.exists(video_path):
+                    events_dicts = []
+                    for e in events_second:
+                        evt = {
+                            'id': e.id,
+                            'minute': e.minute or 0,
+                            'second': e.second or 0,
+                            'event_type': e.event_type,
+                            'description': e.description,
+                            'metadata': e.metadata or {}
+                        }
+                        events_dicts.append(evt)
+                        
+                        pre, post = get_event_clip_timings(e.event_type)
+                        if e.event_type not in timings_used:
+                            timings_used[e.event_type] = {'pre': pre, 'post': post, 'total': pre + post}
+                    
+                    clips = extract_event_clips_auto(
+                        match_id=match_id,
+                        video_path=video_path,
+                        events=events_dicts,
+                        half_type='second',
+                        home_team=home_team_name,
+                        away_team=away_team_name,
+                        segment_start_minute=45,
+                        use_category_timings=use_category_timings
+                    )
+                    regenerated += len(clips)
+                    failed += len(events_dicts) - len(clips)
+        
+        return jsonify({
+            'success': True,
+            'regenerated': regenerated,
+            'failed': failed,
+            'total_events': len(events),
+            'timings_used': timings_used,
+            'message': f'{regenerated} clips regenerados com novos tempos por categoria'
+        })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/clip-config', methods=['GET'])
+def get_clip_config():
+    """Retorna a configuração de tempos de clips por categoria."""
+    return jsonify({
+        'config': EVENT_CLIP_CONFIG,
+        'description': 'Tempos de clip em segundos: pre_buffer (antes) + post_buffer (depois)'
+    })
 
 
 # ============================================================================

@@ -219,6 +219,7 @@ export default function Events() {
   const [showResetDialog, setShowResetDialog] = useState(false);
   const [isProcessingMatch, setIsProcessingMatch] = useState(false);
   const [processingStep, setProcessingStep] = useState<string>('');
+  const [isRegeneratingClips, setIsRegeneratingClips] = useState(false);
   
   const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useMatchEvents(currentMatchId);
 
@@ -942,6 +943,36 @@ export default function Events() {
                       Regenerar ({eventsWithoutClips} sem clip)
                     </DropdownMenuItem>
                   )}
+                  <DropdownMenuItem 
+                    onClick={async () => {
+                      if (!currentMatchId) return;
+                      setIsRegeneratingClips(true);
+                      try {
+                        const result = await apiClient.regenerateClips(currentMatchId, {
+                          use_category_timings: true,
+                          force_subtitles: true
+                        });
+                        toast.success(
+                          `${result.regenerated} clips regenerados com novos tempos por categoria`,
+                          { description: `Gols: 35s, Defesas: 20s, Faltas: 13s...` }
+                        );
+                        refetchEvents();
+                        queryClient.invalidateQueries({ queryKey: ['clips', currentMatchId] });
+                      } catch (error: any) {
+                        toast.error(`Erro ao regenerar clips: ${error.message || 'Erro desconhecido'}`);
+                      } finally {
+                        setIsRegeneratingClips(false);
+                      }
+                    }}
+                    disabled={isRegeneratingClips}
+                  >
+                    {isRegeneratingClips ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Cog className="mr-2 h-4 w-4" />
+                    )}
+                    Regenerar (30s por categoria)
+                  </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
