@@ -12,10 +12,11 @@ import CreditsManager from '@/components/admin/CreditsManager';
 import AdminSettings from '@/components/admin/AdminSettings';
 
 export default function Admin() {
-  const { isAdmin, isLoading } = useAuth();
+  const { isAdmin, isLoading, role } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
 
-  if (isLoading) {
+  // Aguardar até que a role seja carregada
+  if (isLoading || role === null) {
     return (
       <AppLayout>
         <div className="flex items-center justify-center h-96">
