@@ -1557,19 +1557,65 @@ export default function VideoUpload() {
 
       let totalEventsDetected = 0;
 
-      // Verificar se é vídeo full (partida completa)
-      const isFullMatchAnalysis = segments.some(s => 
+      // Verificar se é vídeo full (partida completa) E tem duração suficiente para dividir
+      const fullVideoSegment = currentSegments.find(s => 
         s.videoType === 'full' && (s.status === 'complete' || s.status === 'ready')
       );
+      const isFullMatchAnalysis = !!fullVideoSegment;
+      
+      // CORREÇÃO: Só dividir em 2 tempos se duração for >= 40 minutos
+      // Vídeos curtos marcados como "full" devem ser analisados como um único período
+      const fullVideoDurationMinutes = fullVideoSegment?.durationSeconds 
+        ? Math.floor(fullVideoSegment.durationSeconds / 60) 
+        : 90; // Assume 90 min se não souber duração
+      
+      const shouldSplitAnalysis = isFullMatchAnalysis && fullVideoDurationMinutes >= 40;
 
       console.log('=== MODO DE ANÁLISE ===');
       console.log('É partida completa (full)?', isFullMatchAnalysis);
+      console.log('Duração do vídeo full:', fullVideoDurationMinutes, 'min');
+      console.log('Deve dividir em 2 tempos?', shouldSplitAnalysis);
       console.log('Tem 1º tempo separado?', firstHalfSegments.length > 0 && !isFullMatchAnalysis);
       console.log('Tem 2º tempo separado?', secondHalfSegments.length > 0 && !hasFullVideo);
       console.log('Transcrição 1º Tempo:', firstHalfTranscription ? `${firstHalfTranscription.length} chars` : 'N/A');
       console.log('Transcrição 2º Tempo:', secondHalfTranscription ? `${secondHalfTranscription.length} chars` : 'N/A');
 
-      if (isFullMatchAnalysis && firstHalfTranscription) {
+      // CASO 1: Vídeo curto (clip/trecho) marcado como "full" - analisar usando startMinute/endMinute
+      if (isFullMatchAnalysis && !shouldSplitAnalysis && firstHalfTranscription) {
+        console.log(`⚠️ Vídeo "full" de apenas ${fullVideoDurationMinutes} min - analisando como trecho único`);
+        
+        // Usar os minutos do segmento se configurados, senão estimar pela duração
+        const startMinute = fullVideoSegment?.startMinute ?? 0;
+        const endMinute = fullVideoSegment?.endMinute ?? Math.min(startMinute + fullVideoDurationMinutes, 90);
+        
+        setProcessingMessage(`Analisando trecho (${startMinute}'-${endMinute}')...`);
+        
+        try {
+          const result = await startAnalysis({
+            matchId,
+            transcription: firstHalfTranscription,
+            homeTeam: homeTeamName,
+            awayTeam: awayTeamName,
+            gameStartMinute: startMinute,
+            gameEndMinute: endMinute,
+            halfType: startMinute >= 45 ? 'second' : 'first',
+          });
+          
+          totalEventsDetected += result.eventsDetected || 0;
+          setProcessingProgress(90);
+          setProcessingMessage(`✓ Trecho analisado: ${result.eventsDetected} eventos`);
+          console.log(`Trecho ${startMinute}'-${endMinute}': ${result.eventsDetected} eventos detectados`);
+        } catch (error) {
+          console.error('Erro na análise do trecho:', error);
+          toast({
+            title: "⚠️ Erro na análise do trecho",
+            description: "Verifique a transcrição e tente novamente.",
+            variant: "destructive",
+          });
+        }
+      }
+      // CASO 2: Partida completa de verdade - dividir em 2 tempos
+      else if (shouldSplitAnalysis && firstHalfTranscription) {
         // ANÁLISE DE PARTIDA COMPLETA EM 2 FASES (0-45 e 45-90)
         // Dividir em 2 análises melhora significativamente a detecção de gols
         console.log('Iniciando análise da PARTIDA COMPLETA em 2 fases...');
@@ -1632,8 +1678,16 @@ export default function VideoUpload() {
         setProcessingMessage('Analisando 1º tempo...');
         
         // Analyze first half if has transcription
-        if (firstHalfTranscription) {
-          console.log('Iniciando análise do 1º Tempo...');
+        if (firstHalfTranscription && firstHalfSegments.length > 0) {
+          const segment = firstHalfSegments[0];
+          const isClip = segment.videoType === 'clip';
+          
+          // Para clips, usar minutos configurados; para tempos, usar 0-45 ou 45-90
+          const startMin = isClip ? (segment.startMinute ?? 0) : 0;
+          const endMin = isClip ? (segment.endMinute ?? 45) : 45;
+          
+          console.log(`Iniciando análise do ${isClip ? 'trecho' : '1º Tempo'} (${startMin}'-${endMin}')...`);
+          setProcessingMessage(isClip ? `Analisando trecho (${startMin}'-${endMin}')...` : 'Analisando 1º tempo...');
           
           try {
             const result = await startAnalysis({
@@ -1641,13 +1695,14 @@ export default function VideoUpload() {
               transcription: firstHalfTranscription,
               homeTeam: homeTeamName,
               awayTeam: awayTeamName,
-              gameStartMinute: 0,
-              gameEndMinute: 45,
+              gameStartMinute: startMin,
+              gameEndMinute: endMin,
+              halfType: startMin >= 45 ? 'second' : 'first',
             });
             
             totalEventsDetected += result.eventsDetected || 0;
             setProcessingProgress(75);
-            setProcessingMessage(`✓ 1º tempo: ${result.eventsDetected} eventos`);
+            setProcessingMessage(`✓ ${isClip ? 'Trecho' : '1º tempo'}: ${result.eventsDetected} eventos`);
           } catch (error: any) {
             console.error('Erro na análise do 1º tempo:', error);
             const errorMsg = error?.message || 'Erro desconhecido';

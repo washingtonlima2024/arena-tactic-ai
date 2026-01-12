@@ -853,18 +853,42 @@ RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL.
                 events = json.loads(response[start:end])
                 print(f"[AI] ✓ Parsed {len(events)} events from response")
                 
+                # Valid event types - filter invalid ones like 'description'
+                VALID_EVENT_TYPES = [
+                    'goal', 'shot', 'save', 'foul', 'yellow_card', 'red_card',
+                    'corner', 'offside', 'substitution', 'chance', 'penalty',
+                    'free_kick', 'throw_in', 'kick_off', 'half_time', 'full_time',
+                    'var', 'injury', 'assist', 'cross', 'tackle', 'interception',
+                    'clearance', 'duel_won', 'duel_lost', 'ball_recovery', 'ball_loss',
+                    'high_press', 'transition', 'buildup', 'shot_on_target', 'unknown'
+                ]
+                
                 # Validate and enrich events
                 validated_events = []
                 for event in events:
                     # Ensure required fields
-                    event['event_type'] = event.get('event_type', 'unknown')
+                    event_type = event.get('event_type', 'unknown')
+                    
+                    # Filter invalid event types (like 'description')
+                    if event_type not in VALID_EVENT_TYPES:
+                        print(f"[AI] ⚠ Invalid event_type '{event_type}' - converting to 'unknown'")
+                        event_type = 'unknown'
+                    
+                    event['event_type'] = event_type
                     event['minute'] = max(game_start_minute, min(game_end_minute, event.get('minute', game_start_minute)))
                     event['team'] = event.get('team', 'home')
                     event['description'] = event.get('description', '')[:200]
-                    event['is_highlight'] = event.get('is_highlight', event['event_type'] in ['goal', 'yellow_card', 'red_card', 'penalty'])
+                    event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'yellow_card', 'red_card', 'penalty'])
                     event['isOwnGoal'] = event.get('isOwnGoal', False)
+                    
+                    # Skip 'unknown' events if description is empty or too short
+                    if event_type == 'unknown' and len(event['description']) < 5:
+                        print(f"[AI] ⚠ Skipping empty unknown event at minute {event['minute']}")
+                        continue
+                    
                     validated_events.append(event)
                 
+                print(f"[AI] Validated {len(validated_events)} events (filtered {len(events) - len(validated_events)} invalid)")
                 return validated_events
             else:
                 last_error = f"No JSON array found in response: {response[:200]}"
