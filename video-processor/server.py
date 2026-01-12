@@ -25,7 +25,8 @@ from models import (
     Team, Match, Player, MatchEvent, Video, AnalysisJob,
     GeneratedAudio, Thumbnail, Profile, UserRole, ApiSetting,
     ChatbotConversation, StreamConfiguration, SmartEditProject,
-    SmartEditClip, SmartEditRender, SmartEditSetting
+    SmartEditClip, SmartEditRender, SmartEditSetting,
+    Organization, SubscriptionPlan, OrganizationMember, CreditTransaction
 )
 from storage import (
     save_file, save_uploaded_file, get_file_path, file_exists,
@@ -6310,6 +6311,390 @@ def analyze_live_match():
             'awayScore': away_score,
             'errors': errors
         }), 500
+    finally:
+        session.close()
+
+
+# ============================================================================
+# ADMIN API ENDPOINTS
+# ============================================================================
+
+# ============== Organizations ==============
+@app.route('/api/admin/organizations', methods=['GET'])
+def get_organizations():
+    """List all organizations."""
+    session = get_session()
+    try:
+        orgs = session.query(Organization).order_by(Organization.created_at.desc()).all()
+        return jsonify([org.to_dict() for org in orgs])
+    finally:
+        session.close()
+
+
+@app.route('/api/admin/organizations', methods=['POST'])
+def create_organization():
+    """Create a new organization."""
+    session = get_session()
+    try:
+        data = request.get_json()
+        
+        org = Organization(
+            name=data['name'],
+            slug=data['slug'],
+            logo_url=data.get('logo_url'),
+            owner_id=data.get('owner_id'),
+            plan_id=data.get('plan_id'),
+            credits_balance=data.get('credits_balance', 0),
+            credits_monthly_quota=data.get('credits_monthly_quota', 50),
+            storage_limit_bytes=data.get('storage_limit_bytes', 5368709120),
+            is_active=data.get('is_active', True)
+        )
+        
+        session.add(org)
+        session.commit()
+        
+        return jsonify(org.to_dict()), 201
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+@app.route('/api/admin/organizations/<org_id>', methods=['PUT'])
+def update_organization(org_id):
+    """Update an organization."""
+    session = get_session()
+    try:
+        org = session.query(Organization).filter_by(id=org_id).first()
+        if not org:
+            return jsonify({'error': 'Organization not found'}), 404
+        
+        data = request.get_json()
+        
+        for key in ['name', 'slug', 'logo_url', 'owner_id', 'plan_id', 
+                    'credits_balance', 'credits_monthly_quota', 'storage_used_bytes',
+                    'storage_limit_bytes', 'is_active', 'stripe_customer_id', 
+                    'stripe_subscription_id']:
+            if key in data:
+                setattr(org, key, data[key])
+        
+        org.updated_at = datetime.utcnow()
+        session.commit()
+        
+        return jsonify(org.to_dict())
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+@app.route('/api/admin/organizations/<org_id>', methods=['DELETE'])
+def delete_organization(org_id):
+    """Delete an organization."""
+    session = get_session()
+    try:
+        org = session.query(Organization).filter_by(id=org_id).first()
+        if not org:
+            return jsonify({'error': 'Organization not found'}), 404
+        
+        session.delete(org)
+        session.commit()
+        
+        return jsonify({'success': True, 'message': 'Organization deleted'})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+# ============== Subscription Plans ==============
+@app.route('/api/admin/subscription-plans', methods=['GET'])
+def get_subscription_plans():
+    """List all subscription plans."""
+    session = get_session()
+    try:
+        plans = session.query(SubscriptionPlan).order_by(SubscriptionPlan.sort_order).all()
+        return jsonify([plan.to_dict() for plan in plans])
+    finally:
+        session.close()
+
+
+@app.route('/api/admin/subscription-plans', methods=['POST'])
+def create_subscription_plan():
+    """Create a new subscription plan."""
+    session = get_session()
+    try:
+        data = request.get_json()
+        
+        # Get next sort order
+        max_order = session.query(SubscriptionPlan).count()
+        
+        plan = SubscriptionPlan(
+            name=data['name'],
+            slug=data['slug'],
+            price_monthly=data.get('price_monthly', 0),
+            price_yearly=data.get('price_yearly'),
+            credits_per_month=data.get('credits_per_month', 50),
+            max_users=data.get('max_users', 1),
+            max_matches_per_month=data.get('max_matches_per_month'),
+            storage_limit_bytes=data.get('storage_limit_bytes', 5368709120),
+            features=data.get('features', []),
+            stripe_price_id_monthly=data.get('stripe_price_id_monthly'),
+            stripe_price_id_yearly=data.get('stripe_price_id_yearly'),
+            is_active=data.get('is_active', True),
+            sort_order=max_order + 1
+        )
+        
+        session.add(plan)
+        session.commit()
+        
+        return jsonify(plan.to_dict()), 201
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+@app.route('/api/admin/subscription-plans/<plan_id>', methods=['PUT'])
+def update_subscription_plan(plan_id):
+    """Update a subscription plan."""
+    session = get_session()
+    try:
+        plan = session.query(SubscriptionPlan).filter_by(id=plan_id).first()
+        if not plan:
+            return jsonify({'error': 'Plan not found'}), 404
+        
+        data = request.get_json()
+        
+        for key in ['name', 'slug', 'price_monthly', 'price_yearly', 'credits_per_month',
+                    'max_users', 'max_matches_per_month', 'storage_limit_bytes', 'features',
+                    'stripe_price_id_monthly', 'stripe_price_id_yearly', 'is_active', 'sort_order']:
+            if key in data:
+                setattr(plan, key, data[key])
+        
+        session.commit()
+        
+        return jsonify(plan.to_dict())
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+# ============== Admin Users ==============
+@app.route('/api/admin/users', methods=['GET'])
+def get_admin_users():
+    """List all users with their profiles and roles."""
+    session = get_session()
+    try:
+        profiles = session.query(Profile).order_by(Profile.created_at.desc()).all()
+        roles = session.query(UserRole).all()
+        
+        # Create role lookup
+        role_map = {r.user_id: r.role for r in roles}
+        
+        users = []
+        for profile in profiles:
+            user_dict = profile.to_dict()
+            user_dict['role'] = role_map.get(profile.user_id, 'user')
+            users.append(user_dict)
+        
+        return jsonify(users)
+    finally:
+        session.close()
+
+
+@app.route('/api/admin/users/<user_id>/role', methods=['PUT'])
+def update_user_role(user_id):
+    """Update a user's role."""
+    session = get_session()
+    try:
+        data = request.get_json()
+        new_role = data.get('role', 'user')
+        
+        # Find existing role
+        role = session.query(UserRole).filter_by(user_id=user_id).first()
+        
+        if role:
+            role.role = new_role
+        else:
+            role = UserRole(user_id=user_id, role=new_role)
+            session.add(role)
+        
+        session.commit()
+        
+        return jsonify({'success': True, 'user_id': user_id, 'role': new_role})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+@app.route('/api/admin/users/<user_id>/organization', methods=['PUT'])
+def update_user_organization(user_id):
+    """Update a user's organization."""
+    session = get_session()
+    try:
+        data = request.get_json()
+        org_id = data.get('organization_id')
+        
+        # Update profile
+        profile = session.query(Profile).filter_by(user_id=user_id).first()
+        if not profile:
+            return jsonify({'error': 'User profile not found'}), 404
+        
+        # Note: Profile model doesn't have organization_id yet, but we handle it
+        # For now, store in a separate membership
+        if org_id:
+            # Check if membership exists
+            member = session.query(OrganizationMember).filter_by(
+                user_id=user_id, 
+                organization_id=org_id
+            ).first()
+            
+            if not member:
+                member = OrganizationMember(
+                    user_id=user_id,
+                    organization_id=org_id,
+                    role='member',
+                    accepted_at=datetime.utcnow()
+                )
+                session.add(member)
+        
+        session.commit()
+        
+        return jsonify({'success': True, 'user_id': user_id, 'organization_id': org_id})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+# ============== Credit Transactions ==============
+@app.route('/api/admin/credit-transactions', methods=['GET'])
+def get_credit_transactions():
+    """List all credit transactions."""
+    session = get_session()
+    try:
+        limit = request.args.get('limit', 100, type=int)
+        transactions = session.query(CreditTransaction).order_by(
+            CreditTransaction.created_at.desc()
+        ).limit(limit).all()
+        
+        return jsonify([tx.to_dict() for tx in transactions])
+    finally:
+        session.close()
+
+
+@app.route('/api/admin/credit-transactions', methods=['POST'])
+def create_credit_transaction():
+    """Create a new credit transaction (add/remove credits)."""
+    session = get_session()
+    try:
+        data = request.get_json()
+        
+        org_id = data['organization_id']
+        amount = data['amount']
+        tx_type = data['transaction_type']
+        
+        # Get organization
+        org = session.query(Organization).filter_by(id=org_id).first()
+        if not org:
+            return jsonify({'error': 'Organization not found'}), 404
+        
+        # Calculate new balance
+        new_balance = (org.credits_balance or 0) + amount
+        
+        # Create transaction
+        tx = CreditTransaction(
+            organization_id=org_id,
+            amount=amount,
+            balance_after=new_balance,
+            transaction_type=tx_type,
+            description=data.get('description'),
+            match_id=data.get('match_id'),
+            created_by=data.get('created_by')
+        )
+        
+        session.add(tx)
+        
+        # Update organization balance
+        org.credits_balance = new_balance
+        org.updated_at = datetime.utcnow()
+        
+        session.commit()
+        
+        return jsonify(tx.to_dict()), 201
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+# ============== Admin Stats ==============
+@app.route('/api/admin/stats', methods=['GET'])
+def get_admin_stats():
+    """Get admin dashboard statistics."""
+    session = get_session()
+    try:
+        from datetime import timedelta
+        
+        now = datetime.utcnow()
+        start_of_month = datetime(now.year, now.month, 1)
+        
+        # Organizations count
+        total_orgs = session.query(Organization).count()
+        new_orgs = session.query(Organization).filter(
+            Organization.created_at >= start_of_month
+        ).count()
+        
+        # Users count
+        total_users = session.query(Profile).count()
+        new_users = session.query(Profile).filter(
+            Profile.created_at >= start_of_month
+        ).count()
+        
+        # Credit usage
+        all_usage = session.query(CreditTransaction).filter(
+            CreditTransaction.transaction_type == 'usage'
+        ).all()
+        
+        total_credits_used = sum(abs(tx.amount) for tx in all_usage)
+        credits_this_month = sum(
+            abs(tx.amount) for tx in all_usage 
+            if tx.created_at >= start_of_month
+        )
+        
+        # Recent activity
+        recent_profiles = session.query(Profile).order_by(
+            Profile.created_at.desc()
+        ).limit(10).all()
+        
+        recent_activity = [{
+            'type': 'signup',
+            'description': f"{p.display_name or p.email or 'Usuário'} se cadastrou",
+            'time': p.created_at.strftime('%d/%m/%Y %H:%M') if p.created_at else ''
+        } for p in recent_profiles]
+        
+        return jsonify({
+            'totalOrganizations': total_orgs,
+            'newOrganizationsThisMonth': new_orgs,
+            'totalUsers': total_users,
+            'newUsersThisMonth': new_users,
+            'totalCreditsUsed': total_credits_used,
+            'creditsUsedThisMonth': credits_this_month,
+            'monthlyRevenue': 0,
+            'revenueGrowth': 0,
+            'recentActivity': recent_activity
+        })
     finally:
         session.close()
 

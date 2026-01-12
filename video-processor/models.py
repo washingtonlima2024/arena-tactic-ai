@@ -615,6 +615,162 @@ class SmartEditSetting(Base):
             'cut_intensity': self.cut_intensity,
             'min_clip_duration': self.min_clip_duration,
             'max_clip_duration': self.max_clip_duration,
-            'max_clips': self.max_clips,
+        'max_clips': self.max_clips,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+# ============================================================================
+# ADMIN MODELS - For local admin management
+# ============================================================================
+
+class Organization(Base):
+    """Organization/Company model for multi-tenant support."""
+    __tablename__ = 'organizations'
+    
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    name = Column(String(255), nullable=False)
+    slug = Column(String(100), unique=True, nullable=False)
+    logo_url = Column(Text)
+    owner_id = Column(String(36))
+    plan_id = Column(String(36), ForeignKey('subscription_plans.id'))
+    stripe_customer_id = Column(String(255))
+    stripe_subscription_id = Column(String(255))
+    credits_balance = Column(Integer, default=0)
+    credits_monthly_quota = Column(Integer, default=50)
+    storage_used_bytes = Column(Integer, default=0)
+    storage_limit_bytes = Column(Integer, default=5368709120)  # 5GB
+    is_active = Column(Boolean, default=True)
+    trial_ends_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    plan = relationship('SubscriptionPlan', back_populates='organizations')
+    members = relationship('OrganizationMember', back_populates='organization', cascade='all, delete-orphan')
+    credit_transactions = relationship('CreditTransaction', back_populates='organization', cascade='all, delete-orphan')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'slug': self.slug,
+            'logo_url': self.logo_url,
+            'owner_id': self.owner_id,
+            'plan_id': self.plan_id,
+            'stripe_customer_id': self.stripe_customer_id,
+            'stripe_subscription_id': self.stripe_subscription_id,
+            'credits_balance': self.credits_balance,
+            'credits_monthly_quota': self.credits_monthly_quota,
+            'storage_used_bytes': self.storage_used_bytes,
+            'storage_limit_bytes': self.storage_limit_bytes,
+            'is_active': self.is_active,
+            'trial_ends_at': self.trial_ends_at.isoformat() if self.trial_ends_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+
+
+class SubscriptionPlan(Base):
+    """Subscription plan model for billing tiers."""
+    __tablename__ = 'subscription_plans'
+    
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    name = Column(String(100), nullable=False)
+    slug = Column(String(50), unique=True, nullable=False)
+    price_monthly = Column(Integer, default=0)
+    price_yearly = Column(Integer)
+    credits_per_month = Column(Integer, default=50)
+    max_users = Column(Integer, default=1)
+    max_matches_per_month = Column(Integer)
+    storage_limit_bytes = Column(Integer, default=5368709120)  # 5GB
+    features = Column(JSON, default=list)
+    stripe_price_id_monthly = Column(String(255))
+    stripe_price_id_yearly = Column(String(255))
+    is_active = Column(Boolean, default=True)
+    sort_order = Column(Integer, default=0)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    organizations = relationship('Organization', back_populates='plan')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'slug': self.slug,
+            'price_monthly': self.price_monthly,
+            'price_yearly': self.price_yearly,
+            'credits_per_month': self.credits_per_month,
+            'max_users': self.max_users,
+            'max_matches_per_month': self.max_matches_per_month,
+            'storage_limit_bytes': self.storage_limit_bytes,
+            'features': self.features,
+            'stripe_price_id_monthly': self.stripe_price_id_monthly,
+            'stripe_price_id_yearly': self.stripe_price_id_yearly,
+            'is_active': self.is_active,
+            'sort_order': self.sort_order,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class OrganizationMember(Base):
+    """Organization membership model."""
+    __tablename__ = 'organization_members'
+    
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    organization_id = Column(String(36), ForeignKey('organizations.id'))
+    user_id = Column(String(36))
+    role = Column(String(20), default='member')  # owner, admin, member
+    invited_by = Column(String(36))
+    invited_at = Column(DateTime, default=datetime.utcnow)
+    accepted_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    organization = relationship('Organization', back_populates='members')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'user_id': self.user_id,
+            'role': self.role,
+            'invited_by': self.invited_by,
+            'invited_at': self.invited_at.isoformat() if self.invited_at else None,
+            'accepted_at': self.accepted_at.isoformat() if self.accepted_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+class CreditTransaction(Base):
+    """Credit transaction model for tracking credit usage and purchases."""
+    __tablename__ = 'credit_transactions'
+    
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    organization_id = Column(String(36), ForeignKey('organizations.id'))
+    amount = Column(Integer, nullable=False)
+    balance_after = Column(Integer, nullable=False)
+    transaction_type = Column(String(50), nullable=False)  # purchase, usage, refund, bonus, manual
+    description = Column(Text)
+    match_id = Column(String(36))
+    stripe_payment_id = Column(String(255))
+    created_by = Column(String(36))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    organization = relationship('Organization', back_populates='credit_transactions')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'organization_id': self.organization_id,
+            'amount': self.amount,
+            'balance_after': self.balance_after,
+            'transaction_type': self.transaction_type,
+            'description': self.description,
+            'match_id': self.match_id,
+            'stripe_payment_id': self.stripe_payment_id,
+            'created_by': self.created_by,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
