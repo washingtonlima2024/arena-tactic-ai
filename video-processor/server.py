@@ -18,6 +18,11 @@ import zipfile
 import base64
 from pathlib import Path
 from datetime import datetime
+from typing import Optional, Dict, Any
+
+# Supabase client for cloud sync
+SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
+SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
 
 # Import local modules
 from database import init_db, get_session, Session
@@ -176,6 +181,198 @@ def load_api_keys_from_db():
 
 # Load API keys from database
 load_api_keys_from_db()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SUPABASE CLOUD SYNC FUNCTIONS
+# ═══════════════════════════════════════════════════════════════════════════
+
+def get_supabase_headers() -> Dict[str, str]:
+    """Get headers for Supabase API requests."""
+    return {
+        'apikey': SUPABASE_SERVICE_KEY,
+        'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}',
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation'
+    }
+
+
+def sync_match_to_supabase(match_id: str) -> Dict[str, Any]:
+    """
+    Sync a match and its events from local SQLite to Supabase Cloud.
+    This ensures data is visible in the frontend.
+    
+    Args:
+        match_id: The match ID to sync
+    
+    Returns:
+        Dict with sync results
+    """
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        print(f"[SUPABASE-SYNC] ⚠ Supabase not configured, skipping sync")
+        return {'success': False, 'error': 'Supabase not configured'}
+    
+    session = get_session()
+    result = {
+        'success': False,
+        'match_synced': False,
+        'events_synced': 0,
+        'videos_synced': 0,
+        'errors': []
+    }
+    
+    try:
+        # Get match from local database
+        match = session.query(Match).filter_by(id=match_id).first()
+        if not match:
+            result['error'] = f'Match {match_id} not found in local database'
+            return result
+        
+        print(f"[SUPABASE-SYNC] Syncing match {match_id}...")
+        
+        # Prepare match data for Supabase
+        match_data = {
+            'id': match.id,
+            'home_team_id': match.home_team_id,
+            'away_team_id': match.away_team_id,
+            'home_score': match.home_score,
+            'away_score': match.away_score,
+            'match_date': match.match_date.isoformat() if match.match_date else None,
+            'competition': match.competition,
+            'venue': match.venue,
+            'status': match.status or 'analyzed',
+        }
+        
+        # Upsert match to Supabase
+        headers = get_supabase_headers()
+        headers['Prefer'] = 'resolution=merge-duplicates,return=representation'
+        
+        response = requests.post(
+            f'{SUPABASE_URL}/rest/v1/matches',
+            json=match_data,
+            headers=headers,
+            timeout=30
+        )
+        
+        if response.status_code in [200, 201]:
+            result['match_synced'] = True
+            print(f"[SUPABASE-SYNC] ✓ Match synced to Supabase")
+        else:
+            error_msg = f"Failed to sync match: {response.status_code} - {response.text[:200]}"
+            result['errors'].append(error_msg)
+            print(f"[SUPABASE-SYNC] ✗ {error_msg}")
+        
+        # Sync events
+        events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+        if events:
+            events_data = []
+            for event in events:
+                event_dict = {
+                    'id': event.id,
+                    'match_id': event.match_id,
+                    'event_type': event.event_type,
+                    'minute': event.minute,
+                    'second': event.second,
+                    'description': event.description,
+                    'match_half': event.match_half,
+                    'is_highlight': event.is_highlight,
+                    'clip_url': event.clip_url,
+                    'clip_pending': event.clip_pending,
+                    'metadata': event.event_metadata
+                }
+                events_data.append(event_dict)
+            
+            # Upsert events to Supabase
+            response = requests.post(
+                f'{SUPABASE_URL}/rest/v1/match_events',
+                json=events_data,
+                headers=headers,
+                timeout=60
+            )
+            
+            if response.status_code in [200, 201]:
+                result['events_synced'] = len(events_data)
+                print(f"[SUPABASE-SYNC] ✓ {len(events_data)} events synced to Supabase")
+            else:
+                error_msg = f"Failed to sync events: {response.status_code} - {response.text[:200]}"
+                result['errors'].append(error_msg)
+                print(f"[SUPABASE-SYNC] ✗ {error_msg}")
+        
+        # Sync videos
+        videos = session.query(Video).filter_by(match_id=match_id).all()
+        if videos:
+            videos_data = []
+            for video in videos:
+                video_dict = {
+                    'id': video.id,
+                    'match_id': video.match_id,
+                    'file_url': video.file_url,
+                    'file_name': video.file_name,
+                    'video_type': video.video_type,
+                    'duration_seconds': video.duration_seconds,
+                    'start_minute': video.start_minute,
+                    'end_minute': video.end_minute,
+                    'status': video.status
+                }
+                videos_data.append(video_dict)
+            
+            response = requests.post(
+                f'{SUPABASE_URL}/rest/v1/videos',
+                json=videos_data,
+                headers=headers,
+                timeout=30
+            )
+            
+            if response.status_code in [200, 201]:
+                result['videos_synced'] = len(videos_data)
+                print(f"[SUPABASE-SYNC] ✓ {len(videos_data)} videos synced to Supabase")
+            else:
+                error_msg = f"Failed to sync videos: {response.status_code} - {response.text[:200]}"
+                result['errors'].append(error_msg)
+                print(f"[SUPABASE-SYNC] ✗ {error_msg}")
+        
+        result['success'] = result['match_synced']
+        return result
+        
+    except Exception as e:
+        error_msg = f"Sync error: {str(e)}"
+        result['errors'].append(error_msg)
+        print(f"[SUPABASE-SYNC] ✗ {error_msg}")
+        return result
+    finally:
+        session.close()
+
+
+def verify_match_exists_in_supabase(match_id: str) -> bool:
+    """Check if a match exists in Supabase Cloud."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return False
+    
+    try:
+        response = requests.get(
+            f'{SUPABASE_URL}/rest/v1/matches?id=eq.{match_id}&select=id',
+            headers=get_supabase_headers(),
+            timeout=10
+        )
+        
+        if response.status_code == 200:
+            data = response.json()
+            return len(data) > 0
+        return False
+    except Exception as e:
+        print(f"[SUPABASE-CHECK] Error checking match: {e}")
+        return False
+
+
+@app.route('/api/sync-to-supabase/<match_id>', methods=['POST'])
+def sync_to_supabase_endpoint(match_id: str):
+    """Manually sync a match to Supabase Cloud."""
+    result = sync_match_to_supabase(match_id)
+    if result.get('success'):
+        return jsonify(result)
+    else:
+        return jsonify(result), 400
+
 
 # Diretório para vinhetas locais
 VIGNETTES_DIR = Path(__file__).parent / "vinhetas"
@@ -2343,11 +2540,56 @@ def analyze_match():
     print(f"[ANALYZE-MATCH] Half Type: {half_type}")
     print(f"[ANALYZE-MATCH] Game Minutes: {game_start_minute} - {game_end_minute}")
     print(f"[ANALYZE-MATCH] Auto Clip: {auto_clip}")
-    print(f"[ANALYZE-MATCH] Transcription length: {len(transcription)} chars")
+    print(f"[ANALYZE-MATCH] Transcription length: {len(transcription) if transcription else 0} chars")
     print(f"{'='*60}")
     
+    # ═══════════════════════════════════════════════════════════════
+    # PRE-ANALYSIS VALIDATION
+    # ═══════════════════════════════════════════════════════════════
+    if not match_id:
+        return jsonify({'error': 'Match ID é obrigatório', 'validation': 'match_id_missing'}), 400
+    
     if not transcription:
-        return jsonify({'error': 'Transcrição é obrigatória'}), 400
+        return jsonify({'error': 'Transcrição é obrigatória', 'validation': 'transcription_missing'}), 400
+    
+    if len(transcription) < 100:
+        return jsonify({
+            'error': 'Transcrição muito curta para análise', 
+            'validation': 'transcription_too_short',
+            'length': len(transcription)
+        }), 400
+    
+    # Check if match exists in local database
+    session_check = get_session()
+    try:
+        match_exists = session_check.query(Match).filter_by(id=match_id).first()
+        if not match_exists:
+            print(f"[ANALYZE-MATCH] ⚠ Match {match_id} não existe no banco local, criando...")
+            # Auto-create match if it doesn't exist
+            new_match = Match(
+                id=match_id,
+                status='analyzing'
+            )
+            session_check.add(new_match)
+            session_check.commit()
+            print(f"[ANALYZE-MATCH] ✓ Match {match_id} criado automaticamente")
+    except Exception as check_err:
+        print(f"[ANALYZE-MATCH] ⚠ Erro ao verificar match: {check_err}")
+        session_check.rollback()
+    finally:
+        session_check.close()
+    
+    # Check AI providers
+    ai_status = ai_services.get_ai_status()
+    if not ai_status.get('anyAnalysis', False):
+        return jsonify({
+            'error': 'Nenhum provedor de IA configurado para análise',
+            'validation': 'no_ai_provider',
+            'providers': ai_status
+        }), 400
+    
+    print(f"[ANALYZE-MATCH] ✓ Validações pré-análise OK")
+    print(f"[ANALYZE-MATCH] AI Providers: {ai_status}")
     
     # ═══════════════════════════════════════════════════════════════
     # TRANSCRIPTION VALIDATION - Detect team contamination
@@ -2624,6 +2866,15 @@ def analyze_match():
         finally:
             session_update.close()
         
+        # ═══════════════════════════════════════════════════════════════════
+        # SYNC TO SUPABASE CLOUD
+        # ═══════════════════════════════════════════════════════════════════
+        sync_result = sync_match_to_supabase(match_id)
+        if sync_result.get('success'):
+            print(f"[ANALYZE-MATCH] ✓ Synced to Supabase: {sync_result.get('events_synced')} events")
+        else:
+            print(f"[ANALYZE-MATCH] ⚠ Supabase sync failed: {sync_result.get('error', 'Unknown error')}")
+        
         return jsonify({
             'success': True, 
             'events': events,
@@ -2633,7 +2884,8 @@ def analyze_match():
             'matchHalf': match_half,
             'clipsExtracted': len(clips_extracted),
             'clips': clips_extracted,
-            'matchStatus': 'analyzed'
+            'matchStatus': 'analyzed',
+            'supabaseSync': sync_result.get('success', False)
         })
     except Exception as e:
         print(f"[ANALYZE-MATCH] ERROR: {str(e)}")
