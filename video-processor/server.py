@@ -1416,47 +1416,69 @@ def delete_match(match_id: str):
     try:
         match = session.query(Match).filter_by(id=match_id).first()
         if not match:
+            # Even if match doesn't exist, try to clean up orphan records
+            print(f"[delete_match] Match {match_id} not found, cleaning up orphan records...")
+            deleted_counts = cleanup_orphan_records_for_match(session, match_id)
+            storage_deleted = delete_match_storage(match_id)
+            deleted_counts['storage_deleted'] = storage_deleted
+            session.commit()
+            
+            if any(v > 0 for k, v in deleted_counts.items() if k != 'storage_deleted'):
+                return jsonify({
+                    'success': True,
+                    'deleted': deleted_counts,
+                    'message': f'Registros órfãos removidos (partida já não existia)'
+                })
             return jsonify({'error': 'Partida não encontrada'}), 404
         
         deleted_counts = {}
         
-        # 1. Delete match events
-        events_deleted = session.query(MatchEvent).filter_by(match_id=match_id).delete()
+        # 1. Delete match events (explicit delete to ensure cleanup)
+        events_deleted = session.query(MatchEvent).filter_by(match_id=match_id).delete(synchronize_session='fetch')
         deleted_counts['events'] = events_deleted
+        print(f"[delete_match] Deleted {events_deleted} events for match {match_id}")
         
         # 2. Delete videos
-        videos_deleted = session.query(Video).filter_by(match_id=match_id).delete()
+        videos_deleted = session.query(Video).filter_by(match_id=match_id).delete(synchronize_session='fetch')
         deleted_counts['videos'] = videos_deleted
         
         # 3. Delete generated audio
-        audio_deleted = session.query(GeneratedAudio).filter_by(match_id=match_id).delete()
+        audio_deleted = session.query(GeneratedAudio).filter_by(match_id=match_id).delete(synchronize_session='fetch')
         deleted_counts['audio'] = audio_deleted
         
         # 4. Delete thumbnails
-        thumbnails_deleted = session.query(Thumbnail).filter_by(match_id=match_id).delete()
+        thumbnails_deleted = session.query(Thumbnail).filter_by(match_id=match_id).delete(synchronize_session='fetch')
         deleted_counts['thumbnails'] = thumbnails_deleted
         
         # 5. Delete analysis jobs
-        jobs_deleted = session.query(AnalysisJob).filter_by(match_id=match_id).delete()
+        jobs_deleted = session.query(AnalysisJob).filter_by(match_id=match_id).delete(synchronize_session='fetch')
         deleted_counts['analysis_jobs'] = jobs_deleted
         
         # 6. Delete chatbot conversations
-        conversations_deleted = session.query(ChatbotConversation).filter_by(match_id=match_id).delete()
+        conversations_deleted = session.query(ChatbotConversation).filter_by(match_id=match_id).delete(synchronize_session='fetch')
         deleted_counts['conversations'] = conversations_deleted
         
         # 7. Delete stream configurations
-        stream_configs_deleted = session.query(StreamConfiguration).filter_by(match_id=match_id).delete()
+        stream_configs_deleted = session.query(StreamConfiguration).filter_by(match_id=match_id).delete(synchronize_session='fetch')
         deleted_counts['stream_configs'] = stream_configs_deleted
         
-        # 8. Delete the match itself
+        # 8. Delete transcription jobs
+        try:
+            transcription_jobs_deleted = session.query(TranscriptionJob).filter_by(match_id=match_id).delete(synchronize_session='fetch')
+            deleted_counts['transcription_jobs'] = transcription_jobs_deleted
+        except Exception as e:
+            print(f"[delete_match] Error deleting transcription jobs: {e}")
+            deleted_counts['transcription_jobs'] = 0
+        
+        # 9. Delete the match itself
         session.delete(match)
         session.commit()
         
-        # 9. Delete all storage files for this match
+        # 10. Delete all storage files for this match
         storage_deleted = delete_match_storage(match_id)
         deleted_counts['storage_deleted'] = storage_deleted
         
-        print(f"[delete_match] Match {match_id} deleted with: {deleted_counts}")
+        print(f"[delete_match] ✓ Match {match_id} deleted with: {deleted_counts}")
         
         return jsonify({
             'success': True,
@@ -1466,6 +1488,81 @@ def delete_match(match_id: str):
     except Exception as e:
         session.rollback()
         print(f"[delete_match] Error deleting match {match_id}: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+def cleanup_orphan_records_for_match(session, match_id: str) -> dict:
+    """Clean up orphan records for a match that may not exist."""
+    deleted_counts = {}
+    
+    try:
+        deleted_counts['events'] = session.query(MatchEvent).filter_by(match_id=match_id).delete(synchronize_session='fetch')
+        deleted_counts['videos'] = session.query(Video).filter_by(match_id=match_id).delete(synchronize_session='fetch')
+        deleted_counts['audio'] = session.query(GeneratedAudio).filter_by(match_id=match_id).delete(synchronize_session='fetch')
+        deleted_counts['thumbnails'] = session.query(Thumbnail).filter_by(match_id=match_id).delete(synchronize_session='fetch')
+        deleted_counts['analysis_jobs'] = session.query(AnalysisJob).filter_by(match_id=match_id).delete(synchronize_session='fetch')
+        deleted_counts['conversations'] = session.query(ChatbotConversation).filter_by(match_id=match_id).delete(synchronize_session='fetch')
+        deleted_counts['stream_configs'] = session.query(StreamConfiguration).filter_by(match_id=match_id).delete(synchronize_session='fetch')
+        
+        try:
+            deleted_counts['transcription_jobs'] = session.query(TranscriptionJob).filter_by(match_id=match_id).delete(synchronize_session='fetch')
+        except:
+            deleted_counts['transcription_jobs'] = 0
+            
+    except Exception as e:
+        print(f"[cleanup_orphan_records] Error: {e}")
+        
+    return deleted_counts
+
+
+@app.route('/api/maintenance/cleanup-orphans', methods=['POST'])
+def cleanup_all_orphan_records():
+    """Clean up all orphan records in the database (events without valid match)."""
+    session = get_session()
+    try:
+        # Get all valid match IDs
+        valid_match_ids = [m.id for m in session.query(Match.id).all()]
+        print(f"[cleanup_orphans] Found {len(valid_match_ids)} valid matches")
+        
+        deleted_counts = {}
+        
+        # Delete orphan events
+        if valid_match_ids:
+            orphan_events = session.query(MatchEvent).filter(~MatchEvent.match_id.in_(valid_match_ids)).delete(synchronize_session='fetch')
+        else:
+            orphan_events = session.query(MatchEvent).delete(synchronize_session='fetch')
+        deleted_counts['orphan_events'] = orphan_events
+        
+        # Delete orphan videos
+        if valid_match_ids:
+            orphan_videos = session.query(Video).filter(~Video.match_id.in_(valid_match_ids)).delete(synchronize_session='fetch')
+        else:
+            orphan_videos = session.query(Video).delete(synchronize_session='fetch')
+        deleted_counts['orphan_videos'] = orphan_videos
+        
+        # Delete orphan analysis jobs
+        if valid_match_ids:
+            orphan_jobs = session.query(AnalysisJob).filter(~AnalysisJob.match_id.in_(valid_match_ids)).delete(synchronize_session='fetch')
+        else:
+            orphan_jobs = session.query(AnalysisJob).delete(synchronize_session='fetch')
+        deleted_counts['orphan_analysis_jobs'] = orphan_jobs
+        
+        session.commit()
+        
+        print(f"[cleanup_orphans] ✓ Cleaned up: {deleted_counts}")
+        
+        return jsonify({
+            'success': True,
+            'deleted': deleted_counts,
+            'message': 'Registros órfãos removidos com sucesso'
+        })
+    except Exception as e:
+        session.rollback()
+        print(f"[cleanup_orphans] Error: {e}")
         return jsonify({'error': str(e)}), 400
     finally:
         session.close()
