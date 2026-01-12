@@ -7,7 +7,90 @@ import os
 import json
 import base64
 import requests
-from typing import Optional, List, Dict, Any
+import re
+from typing import Optional, List, Dict, Any, Tuple
+
+# Known Brazilian and international teams for transcription validation
+KNOWN_TEAMS = [
+    # Série A
+    'flamengo', 'corinthians', 'palmeiras', 'são paulo', 'santos',
+    'grêmio', 'internacional', 'cruzeiro', 'atlético mineiro', 'atlético-mg',
+    'vasco', 'botafogo', 'fluminense', 'bahia', 'fortaleza',
+    # Série B / Regionais
+    'sport', 'novo horizontino', 'novorizontino', 'guarani', 'ponte preta',
+    'coritiba', 'goiás', 'vitória', 'ceará', 'américa mineiro',
+    'chapecoense', 'avaí', 'figueirense', 'juventude', 'sampaio corrêa',
+    # Seleções
+    'brasil', 'argentina', 'uruguai', 'chile', 'paraguai', 'colômbia',
+    'alemanha', 'frança', 'espanha', 'itália', 'portugal', 'inglaterra',
+    'seleção brasileira', 'seleção argentina'
+]
+
+
+def detect_teams_in_transcription(transcription: str) -> Tuple[List[str], bool]:
+    """
+    Detect known team names in transcription.
+    Returns tuple of (found_teams, has_any_match).
+    """
+    text_lower = transcription.lower()
+    found = []
+    
+    for team in KNOWN_TEAMS:
+        # Use word boundary matching for more accuracy
+        pattern = r'\b' + re.escape(team) + r'\b'
+        if re.search(pattern, text_lower):
+            found.append(team)
+    
+    return found, len(found) > 0
+
+
+def validate_transcription_teams(
+    transcription: str, 
+    home_team: str, 
+    away_team: str
+) -> Dict[str, Any]:
+    """
+    Validate if transcription mentions the expected teams.
+    Returns validation result with warnings if mismatched.
+    """
+    text_lower = transcription.lower()
+    home_lower = home_team.lower()
+    away_lower = away_team.lower()
+    
+    # Check if expected teams are mentioned
+    home_found = any(
+        word in text_lower 
+        for word in home_lower.split() 
+        if len(word) > 3
+    )
+    away_found = any(
+        word in text_lower 
+        for word in away_lower.split() 
+        if len(word) > 3
+    )
+    
+    # Detect other teams in transcription
+    detected_teams, has_other_teams = detect_teams_in_transcription(transcription)
+    
+    # Filter out the expected teams from detected
+    unexpected_teams = [
+        t for t in detected_teams 
+        if t not in home_lower and t not in away_lower
+        and home_lower not in t and away_lower not in t
+    ]
+    
+    is_valid = home_found or away_found
+    has_contamination = len(unexpected_teams) > 0 and not is_valid
+    
+    return {
+        'isValid': is_valid,
+        'homeFound': home_found,
+        'awayFound': away_found,
+        'detectedTeams': detected_teams,
+        'unexpectedTeams': unexpected_teams,
+        'hasContamination': has_contamination,
+        'warning': None if is_valid else f"Transcrição não menciona {home_team} nem {away_team}. Times detectados: {', '.join(unexpected_teams) if unexpected_teams else 'nenhum'}"
+    }
 
 # API configuration
 LOVABLE_API_KEY = os.environ.get('LOVABLE_API_KEY', '')

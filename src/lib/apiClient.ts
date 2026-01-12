@@ -400,6 +400,7 @@ export const apiClient = {
     halfType?: string;
     autoClip?: boolean;
     includeSubtitles?: boolean;
+    skipValidation?: boolean;
   }) => {
     await ensureServerAvailable();
     
@@ -413,6 +414,7 @@ export const apiClient = {
       halfType: data.halfType ?? 'first',
       autoClip: data.autoClip ?? true,
       includeSubtitles: data.includeSubtitles ?? true,
+      skipValidation: data.skipValidation ?? false,
     };
 
     // Usar timeout longo (10 minutos) com retry para análise de IA

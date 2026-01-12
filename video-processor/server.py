@@ -2278,6 +2278,7 @@ def analyze_match():
     game_end_minute = data.get('gameEndMinute', 45)
     auto_clip = data.get('autoClip', True)  # Corte automático de clips
     include_subtitles = data.get('includeSubtitles', True)
+    skip_validation = data.get('skipValidation', False)  # Allow bypassing validation
     
     print(f"\n{'='*60}")
     print(f"[ANALYZE-MATCH] Nova requisição de análise")
@@ -2290,6 +2291,29 @@ def analyze_match():
     
     if not transcription:
         return jsonify({'error': 'Transcrição é obrigatória'}), 400
+    
+    # ═══════════════════════════════════════════════════════════════
+    # TRANSCRIPTION VALIDATION - Detect team contamination
+    # ═══════════════════════════════════════════════════════════════
+    if not skip_validation:
+        validation = ai_services.validate_transcription_teams(transcription, home_team, away_team)
+        
+        if validation['hasContamination']:
+            print(f"[ANALYZE-MATCH] ⚠️ CONTAMINAÇÃO DETECTADA!")
+            print(f"[ANALYZE-MATCH] Times esperados: {home_team} vs {away_team}")
+            print(f"[ANALYZE-MATCH] Times encontrados: {validation['detectedTeams']}")
+            print(f"[ANALYZE-MATCH] Times inesperados: {validation['unexpectedTeams']}")
+            return jsonify({
+                'error': 'Transcrição parece ser de outra partida',
+                'validation': validation,
+                'message': f"Transcrição menciona {', '.join(validation['unexpectedTeams'])} mas partida é {home_team} vs {away_team}"
+            }), 400
+        
+        if not validation['isValid']:
+            print(f"[ANALYZE-MATCH] ⚠️ AVISO: Nenhum dos times encontrado na transcrição")
+            print(f"[ANALYZE-MATCH] Times esperados: {home_team} vs {away_team}")
+            print(f"[ANALYZE-MATCH] Times detectados: {validation['detectedTeams']}")
+            # Log warning but continue - user may have confirmed
     
     try:
         events = ai_services.analyze_match_events(
