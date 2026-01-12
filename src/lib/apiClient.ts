@@ -1016,6 +1016,56 @@ export const apiClient = {
       body: JSON.stringify({ matchId, videoId, homeTeam, awayTeam })
     }, 1800000); // 30 minutos para partida completa
   },
+
+  // ============== Admin API (Local) ==============
+  admin: {
+    // Organizations
+    getOrganizations: () => apiRequest<any[]>('/api/admin/organizations'),
+    createOrganization: (data: any) => apiRequest<any>('/api/admin/organizations', { 
+      method: 'POST', 
+      body: JSON.stringify(data) 
+    }),
+    updateOrganization: (id: string, data: any) => apiRequest<any>(`/api/admin/organizations/${id}`, { 
+      method: 'PUT', 
+      body: JSON.stringify(data) 
+    }),
+    deleteOrganization: (id: string) => apiRequest<any>(`/api/admin/organizations/${id}`, { 
+      method: 'DELETE' 
+    }),
+
+    // Subscription Plans
+    getSubscriptionPlans: () => apiRequest<any[]>('/api/admin/subscription-plans'),
+    createSubscriptionPlan: (data: any) => apiRequest<any>('/api/admin/subscription-plans', { 
+      method: 'POST', 
+      body: JSON.stringify(data) 
+    }),
+    updateSubscriptionPlan: (id: string, data: any) => apiRequest<any>(`/api/admin/subscription-plans/${id}`, { 
+      method: 'PUT', 
+      body: JSON.stringify(data) 
+    }),
+
+    // Users
+    getUsers: () => apiRequest<any[]>('/api/admin/users'),
+    updateUserRole: (userId: string, role: string) => apiRequest<any>(`/api/admin/users/${userId}/role`, { 
+      method: 'PUT', 
+      body: JSON.stringify({ role }) 
+    }),
+    updateUserOrganization: (userId: string, organizationId: string | null) => apiRequest<any>(`/api/admin/users/${userId}/organization`, { 
+      method: 'PUT', 
+      body: JSON.stringify({ organization_id: organizationId }) 
+    }),
+
+    // Credit Transactions
+    getCreditTransactions: (limit?: number) => apiRequest<any[]>(`/api/admin/credit-transactions${limit ? `?limit=${limit}` : ''}`),
+    addCredits: (data: { organization_id: string; amount: number; transaction_type: string; description?: string }) => 
+      apiRequest<any>('/api/admin/credit-transactions', { 
+        method: 'POST', 
+        body: JSON.stringify(data) 
+      }),
+
+    // Stats
+    getStats: () => apiRequest<any>('/api/admin/stats'),
+  },
 };
 
 export default apiClient;

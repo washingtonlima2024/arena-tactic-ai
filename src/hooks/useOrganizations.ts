@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 
 interface Organization {
   id: string;
@@ -26,34 +26,25 @@ export function useOrganizations() {
   const { data: organizations = [], isLoading } = useQuery({
     queryKey: ['organizations'],
     queryFn: async (): Promise<Organization[]> => {
-      const { data, error } = await supabase
-        .from('organizations')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-      return data || [];
+      try {
+        const data = await apiClient.admin.getOrganizations();
+        return data || [];
+      } catch (error) {
+        console.error('[useOrganizations] Error fetching organizations:', error);
+        return [];
+      }
     },
   });
 
   const createMutation = useMutation({
     mutationFn: async (org: Partial<Organization>) => {
-      const { data: { user } } = await supabase.auth.getUser();
-      
-      const { data, error } = await supabase
-        .from('organizations')
-        .insert({
-          name: org.name!,
-          slug: org.slug!,
-          plan_id: org.plan_id || null,
-          credits_balance: org.credits_balance || 0,
-          owner_id: user?.id || null,
-        })
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+      return await apiClient.admin.createOrganization({
+        name: org.name!,
+        slug: org.slug!,
+        plan_id: org.plan_id || null,
+        credits_balance: org.credits_balance || 0,
+        owner_id: org.owner_id || null,
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['organizations'] });
@@ -62,15 +53,7 @@ export function useOrganizations() {
 
   const updateMutation = useMutation({
     mutationFn: async ({ id, ...updates }: Partial<Organization> & { id: string }) => {
-      const { data, error } = await supabase
-        .from('organizations')
-        .update(updates)
-        .eq('id', id)
-        .select()
-        .single();
-
-      if (error) throw error;
-      return data;
+      return await apiClient.admin.updateOrganization(id, updates);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['organizations'] });
@@ -79,12 +62,7 @@ export function useOrganizations() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase
-        .from('organizations')
-        .delete()
-        .eq('id', id);
-
-      if (error) throw error;
+      return await apiClient.admin.deleteOrganization(id);
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['organizations'] });
