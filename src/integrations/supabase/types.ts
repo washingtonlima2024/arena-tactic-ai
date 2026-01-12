@@ -128,6 +128,60 @@ export type Database = {
         }
         Relationships: []
       }
+      credit_transactions: {
+        Row: {
+          amount: number
+          balance_after: number
+          created_at: string | null
+          created_by: string | null
+          description: string | null
+          id: string
+          match_id: string | null
+          organization_id: string | null
+          stripe_payment_id: string | null
+          transaction_type: string
+        }
+        Insert: {
+          amount: number
+          balance_after: number
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          match_id?: string | null
+          organization_id?: string | null
+          stripe_payment_id?: string | null
+          transaction_type: string
+        }
+        Update: {
+          amount?: number
+          balance_after?: number
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          id?: string
+          match_id?: string | null
+          organization_id?: string | null
+          stripe_payment_id?: string | null
+          transaction_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_transactions_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_transactions_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       generated_audio: {
         Row: {
           audio_type: string
@@ -270,6 +324,7 @@ export type Database = {
           home_team_id: string | null
           id: string
           match_date: string | null
+          organization_id: string | null
           status: string | null
           updated_at: string
           venue: string | null
@@ -283,6 +338,7 @@ export type Database = {
           home_team_id?: string | null
           id?: string
           match_date?: string | null
+          organization_id?: string | null
           status?: string | null
           updated_at?: string
           venue?: string | null
@@ -296,6 +352,7 @@ export type Database = {
           home_team_id?: string | null
           id?: string
           match_date?: string | null
+          organization_id?: string | null
           status?: string | null
           updated_at?: string
           venue?: string | null
@@ -313,6 +370,163 @@ export type Database = {
             columns: ["home_team_id"]
             isOneToOne: false
             referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "matches_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organization_invites: {
+        Row: {
+          created_at: string | null
+          created_by: string | null
+          email: string
+          expires_at: string
+          id: string
+          organization_id: string | null
+          role: string | null
+          token: string
+          used_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          created_by?: string | null
+          email: string
+          expires_at: string
+          id?: string
+          organization_id?: string | null
+          role?: string | null
+          token: string
+          used_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          created_by?: string | null
+          email?: string
+          expires_at?: string
+          id?: string
+          organization_id?: string | null
+          role?: string | null
+          token?: string
+          used_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_invites_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organization_members: {
+        Row: {
+          accepted_at: string | null
+          created_at: string | null
+          id: string
+          invited_at: string | null
+          invited_by: string | null
+          organization_id: string | null
+          role: string | null
+          user_id: string | null
+        }
+        Insert: {
+          accepted_at?: string | null
+          created_at?: string | null
+          id?: string
+          invited_at?: string | null
+          invited_by?: string | null
+          organization_id?: string | null
+          role?: string | null
+          user_id?: string | null
+        }
+        Update: {
+          accepted_at?: string | null
+          created_at?: string | null
+          id?: string
+          invited_at?: string | null
+          invited_by?: string | null
+          organization_id?: string | null
+          role?: string | null
+          user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_members_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      organizations: {
+        Row: {
+          created_at: string | null
+          credits_balance: number | null
+          credits_monthly_quota: number | null
+          id: string
+          is_active: boolean | null
+          logo_url: string | null
+          name: string
+          owner_id: string | null
+          plan_id: string | null
+          slug: string
+          storage_limit_bytes: number | null
+          storage_used_bytes: number | null
+          stripe_customer_id: string | null
+          stripe_subscription_id: string | null
+          trial_ends_at: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          credits_balance?: number | null
+          credits_monthly_quota?: number | null
+          id?: string
+          is_active?: boolean | null
+          logo_url?: string | null
+          name: string
+          owner_id?: string | null
+          plan_id?: string | null
+          slug: string
+          storage_limit_bytes?: number | null
+          storage_used_bytes?: number | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          trial_ends_at?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          credits_balance?: number | null
+          credits_monthly_quota?: number | null
+          id?: string
+          is_active?: boolean | null
+          logo_url?: string | null
+          name?: string
+          owner_id?: string | null
+          plan_id?: string | null
+          slug?: string
+          storage_limit_bytes?: number | null
+          storage_used_bytes?: number | null
+          stripe_customer_id?: string | null
+          stripe_subscription_id?: string | null
+          trial_ends_at?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organizations_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "subscription_plans"
             referencedColumns: ["id"]
           },
         ]
@@ -360,30 +574,47 @@ export type Database = {
       }
       profiles: {
         Row: {
+          avatar_url: string | null
           created_at: string
           display_name: string | null
           email: string | null
           id: string
+          organization_id: string | null
+          phone: string | null
           updated_at: string
           user_id: string
         }
         Insert: {
+          avatar_url?: string | null
           created_at?: string
           display_name?: string | null
           email?: string | null
           id?: string
+          organization_id?: string | null
+          phone?: string | null
           updated_at?: string
           user_id: string
         }
         Update: {
+          avatar_url?: string | null
           created_at?: string
           display_name?: string | null
           email?: string | null
           id?: string
+          organization_id?: string | null
+          phone?: string | null
           updated_at?: string
           user_id?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       smart_edit_clips: {
         Row: {
@@ -779,12 +1010,67 @@ export type Database = {
           },
         ]
       }
+      subscription_plans: {
+        Row: {
+          created_at: string | null
+          credits_per_month: number
+          features: Json | null
+          id: string
+          is_active: boolean | null
+          max_matches_per_month: number | null
+          max_users: number | null
+          name: string
+          price_monthly: number
+          price_yearly: number | null
+          slug: string
+          sort_order: number | null
+          storage_limit_bytes: number
+          stripe_price_id_monthly: string | null
+          stripe_price_id_yearly: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          credits_per_month?: number
+          features?: Json | null
+          id?: string
+          is_active?: boolean | null
+          max_matches_per_month?: number | null
+          max_users?: number | null
+          name: string
+          price_monthly?: number
+          price_yearly?: number | null
+          slug: string
+          sort_order?: number | null
+          storage_limit_bytes?: number
+          stripe_price_id_monthly?: string | null
+          stripe_price_id_yearly?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          credits_per_month?: number
+          features?: Json | null
+          id?: string
+          is_active?: boolean | null
+          max_matches_per_month?: number | null
+          max_users?: number | null
+          name?: string
+          price_monthly?: number
+          price_yearly?: number | null
+          slug?: string
+          sort_order?: number | null
+          storage_limit_bytes?: number
+          stripe_price_id_monthly?: string | null
+          stripe_price_id_yearly?: string | null
+        }
+        Relationships: []
+      }
       teams: {
         Row: {
           created_at: string
           id: string
           logo_url: string | null
           name: string
+          organization_id: string | null
           primary_color: string | null
           secondary_color: string | null
           short_name: string | null
@@ -795,6 +1081,7 @@ export type Database = {
           id?: string
           logo_url?: string | null
           name: string
+          organization_id?: string | null
           primary_color?: string | null
           secondary_color?: string | null
           short_name?: string | null
@@ -805,12 +1092,21 @@ export type Database = {
           id?: string
           logo_url?: string | null
           name?: string
+          organization_id?: string | null
           primary_color?: string | null
           secondary_color?: string | null
           short_name?: string | null
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "teams_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       thumbnails: {
         Row: {
