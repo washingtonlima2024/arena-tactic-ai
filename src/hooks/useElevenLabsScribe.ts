@@ -48,8 +48,10 @@ export const useElevenLabsScribe = (options: UseElevenLabsScribeOptions = {}) =>
       console.log('Committed with timestamps:', data.text, data.words);
     },
     onError: (wsError) => {
-      console.error('Scribe WebSocket error:', wsError);
-      const errorMsg = wsError instanceof Error ? wsError.message : 'WebSocket error';
+      console.error('[ElevenLabs] WebSocket error completo:', wsError);
+      const errorMsg = wsError instanceof Error ? wsError.message : 
+                       typeof wsError === 'object' ? JSON.stringify(wsError) : 'WebSocket error';
+      console.error('[ElevenLabs] Mensagem de erro:', errorMsg);
       setError(errorMsg);
       options.onConnectionError?.(errorMsg);
       
@@ -95,17 +97,36 @@ export const useElevenLabsScribe = (options: UseElevenLabsScribeOptions = {}) =>
   }, [retryCount]);
 
   const connectInternal = useCallback(async () => {
-    console.log('Requesting ElevenLabs Scribe token...');
+    console.log('[ElevenLabs] Iniciando conexão...');
+    
+    // Verificar permissão de microfone PRIMEIRO
+    try {
+      console.log('[ElevenLabs] Verificando permissão de microfone...');
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(track => track.stop()); // Liberar imediatamente
+      console.log('[ElevenLabs] Permissão de microfone OK');
+    } catch (micError) {
+      console.error('[ElevenLabs] Sem permissão de microfone:', micError);
+      throw new Error('Permissão de microfone negada. Verifique as configurações do navegador.');
+    }
+    
+    console.log('[ElevenLabs] Solicitando token...');
     
     const { data, error: tokenError } = await supabase.functions.invoke(
       'elevenlabs-scribe-token'
     );
 
-    if (tokenError || !data?.token) {
+    if (tokenError) {
+      console.error('[ElevenLabs] Erro ao obter token:', tokenError);
       throw new Error(tokenError?.message || 'Failed to get scribe token');
     }
+    
+    if (!data?.token) {
+      console.error('[ElevenLabs] Token não recebido:', data);
+      throw new Error('Token não recebido da API');
+    }
 
-    console.log('Token received, connecting to Scribe...');
+    console.log('[ElevenLabs] Token recebido, conectando WebSocket...');
 
     await scribe.connect({
       token: data.token,
@@ -120,10 +141,11 @@ export const useElevenLabsScribe = (options: UseElevenLabsScribeOptions = {}) =>
     await new Promise(resolve => setTimeout(resolve, 300));
     
     if (!scribe.isConnected) {
+      console.error('[ElevenLabs] WebSocket não conectado após timeout');
       throw new Error('WebSocket connection not established');
     }
 
-    console.log('Connected to ElevenLabs Scribe');
+    console.log('[ElevenLabs] Conectado com sucesso!');
     setConnectionStatus('connected');
     options.onConnectionChange?.(true);
   }, [scribe, options]);
