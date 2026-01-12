@@ -73,16 +73,40 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
     // Reset cache do servidor
     resetServerAvailability();
     
-    toast.info('Reconectando ao servidor...');
+    const MAX_RETRIES = 3;
+    const RETRY_DELAY = 2000; // 2 seconds
     
-    await checkStatus();
-    
-    setIsReconnecting(false);
-    
-    if (status === 'online') {
-      toast.success('Servidor reconectado!');
+    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+      toast.info(`Tentativa ${attempt}/${MAX_RETRIES}...`);
+      
+      // Reset cache antes de cada tentativa
+      resetServerAvailability();
+      
+      try {
+        const available = await checkLocalServerAvailable();
+        
+        if (available) {
+          setStatus('online');
+          setIsReconnecting(false);
+          toast.success('Servidor reconectado!');
+          await checkStatus(); // Atualizar detalhes completos
+          return;
+        }
+      } catch {
+        // Continuar para próxima tentativa
+      }
+      
+      // Aguardar antes da próxima tentativa (exceto na última)
+      if (attempt < MAX_RETRIES) {
+        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
+      }
     }
-  }, [checkStatus, status]);
+    
+    // Todas as tentativas falharam
+    setStatus('offline');
+    setIsReconnecting(false);
+    toast.error('Servidor não disponível. Verifique se o Python está rodando.');
+  }, [checkStatus]);
 
   useEffect(() => {
     checkStatus();
