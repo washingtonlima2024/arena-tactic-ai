@@ -107,13 +107,9 @@ export default function Landing() {
       });
 
       if (error) {
-        // Se credenciais inválidas, tentar criar a conta automaticamente
+        // Se credenciais inválidas
         if (error.message.includes('Invalid login credentials')) {
-          toast.info('Criando conta...', {
-            description: 'Usuário não encontrado, criando automaticamente.',
-          });
-
-          // Criar usuário
+          // Tentar criar a conta
           const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
             email,
             password,
@@ -125,6 +121,29 @@ export default function Landing() {
             }
           });
 
+          // Se usuário já existe, enviar reset de senha
+          if (signUpError?.message?.includes('User already registered')) {
+            toast.info('Usuário existe, resetando senha...', {
+              description: 'Atualizando sua senha para a nova.',
+            });
+            
+            // Usar o reset de senha via API
+            const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+              redirectTo: `${window.location.origin}/auth?mode=reset`,
+            });
+            
+            if (resetError) {
+              toast.error('Erro ao resetar senha', {
+                description: 'Tente usar a página de cadastro para criar uma nova conta.',
+              });
+            } else {
+              toast.success('Email de reset enviado!', {
+                description: 'Verifique seu email para redefinir sua senha. Ou tente criar uma nova conta.',
+              });
+            }
+            return;
+          }
+
           if (signUpError) {
             toast.error('Erro ao criar conta', {
               description: signUpError.message,
@@ -132,9 +151,8 @@ export default function Landing() {
             return;
           }
 
-          // Se criou com sucesso, tentar login novamente
-          if (signUpData.user) {
-            // Se não precisa confirmar email, já está logado
+          // Se criou com sucesso
+          if (signUpData?.user) {
             if (signUpData.session) {
               toast.success('Conta criada com sucesso!', {
                 description: 'Bem-vindo ao Arena Play!',
@@ -143,25 +161,23 @@ export default function Landing() {
               return;
             }
 
-            // Se precisa confirmar email, fazer login direto
+            // Tentar login novamente
             const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
               email,
               password,
             });
 
-            if (loginError) {
-              toast.warning('Conta criada!', {
-                description: 'Verifique seu email para confirmar a conta, ou aguarde alguns segundos e tente novamente.',
-              });
-              return;
-            }
-
-            if (loginData.user) {
+            if (!loginError && loginData.user) {
               toast.success('Bem-vindo ao Arena Play!', {
                 description: 'Conta criada e login realizado!',
               });
               navigate('/dashboard');
+              return;
             }
+
+            toast.success('Conta criada!', {
+              description: 'Clique em Entrar novamente para acessar.',
+            });
           }
         } else {
           toast.error('Erro ao fazer login', {
