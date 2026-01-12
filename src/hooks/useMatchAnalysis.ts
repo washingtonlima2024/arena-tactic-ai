@@ -6,6 +6,7 @@ export interface AnalysisProgress {
   stage: 'idle' | 'uploading' | 'transcribing' | 'analyzing' | 'complete' | 'error';
   progress: number;
   message: string;
+  usedFallback?: boolean;
 }
 
 export interface AnalysisResult {
@@ -14,6 +15,7 @@ export interface AnalysisResult {
   homeScore: number;
   awayScore: number;
   error?: string;
+  usedFallback?: boolean;
 }
 
 export function useMatchAnalysis() {
@@ -77,19 +79,27 @@ export function useMatchAnalysis() {
         throw new Error(data?.error || 'Análise falhou');
       }
 
+      const usedFallback = !data?.supabaseSync && data?.success;
+      
       setProgress({ 
         stage: 'complete', 
         progress: 100, 
-        message: `✓ ${data.eventsDetected} eventos detectados! Placar: ${data.homeScore} x ${data.awayScore}` 
+        message: `✓ ${data.eventsDetected} eventos detectados! Placar: ${data.homeScore} x ${data.awayScore}`,
+        usedFallback
       });
 
-      toast.success(`Análise completa! ${data.eventsDetected} eventos detectados.`);
+      const successMessage = usedFallback 
+        ? `Análise completa (via Edge Function)! ${data.eventsDetected} eventos detectados.`
+        : `Análise completa! ${data.eventsDetected} eventos detectados.`;
+      
+      toast.success(successMessage);
 
       return {
         success: true,
         eventsDetected: data.eventsDetected,
         homeScore: data.homeScore,
-        awayScore: data.awayScore
+        awayScore: data.awayScore,
+        usedFallback
       };
 
     } catch (error) {

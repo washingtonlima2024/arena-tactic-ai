@@ -302,6 +302,76 @@ def call_google_gemini(
         return None
 
 
+def get_ai_status() -> Dict[str, Any]:
+    """
+    Check which AI providers are configured and available.
+    
+    Returns:
+        Dict with provider status information
+    """
+    providers = {
+        'lovable': {
+            'configured': bool(LOVABLE_API_KEY),
+            'enabled': True,
+            'keySet': bool(LOVABLE_API_KEY)
+        },
+        'gemini': {
+            'configured': bool(GOOGLE_API_KEY) and GEMINI_ENABLED,
+            'enabled': GEMINI_ENABLED,
+            'keySet': bool(GOOGLE_API_KEY)
+        },
+        'openai': {
+            'configured': bool(OPENAI_API_KEY) and OPENAI_ENABLED,
+            'enabled': OPENAI_ENABLED,
+            'keySet': bool(OPENAI_API_KEY)
+        },
+        'elevenlabs': {
+            'configured': bool(ELEVENLABS_API_KEY) and ELEVENLABS_ENABLED,
+            'enabled': ELEVENLABS_ENABLED,
+            'keySet': bool(ELEVENLABS_API_KEY)
+        },
+        'ollama': {
+            'configured': OLLAMA_ENABLED,
+            'url': OLLAMA_URL if OLLAMA_ENABLED else None,
+            'model': OLLAMA_MODEL if OLLAMA_ENABLED else None
+        }
+    }
+    
+    any_configured = any([
+        providers['lovable']['configured'],
+        providers['gemini']['configured'],
+        providers['openai']['configured'],
+        providers['ollama']['configured']
+    ])
+    
+    any_transcription = any([
+        providers['lovable']['configured'],
+        providers['gemini']['configured'],
+        providers['openai']['configured'],
+        LOCAL_WHISPER_ENABLED
+    ])
+    
+    any_analysis = any([
+        providers['lovable']['configured'],
+        providers['gemini']['configured'],
+        providers['openai']['configured'],
+        providers['ollama']['configured']
+    ])
+    
+    return {
+        'lovable': providers['lovable']['configured'],
+        'gemini': providers['gemini']['configured'],
+        'openai': providers['openai']['configured'],
+        'elevenlabs': providers['elevenlabs']['configured'],
+        'ollama': providers['ollama']['configured'],
+        'anyConfigured': any_configured,
+        'anyTranscription': any_transcription,
+        'anyAnalysis': any_analysis,
+        'message': 'AI providers status',
+        'providers': providers
+    }
+
+
 def call_ai(
     messages: List[Dict[str, str]],
     model: str = 'gemini-2.5-flash',

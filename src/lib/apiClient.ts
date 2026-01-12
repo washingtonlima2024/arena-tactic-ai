@@ -402,8 +402,6 @@ export const apiClient = {
     includeSubtitles?: boolean;
     skipValidation?: boolean;
   }) => {
-    await ensureServerAvailable();
-    
     const body = {
       matchId: data.matchId,
       transcription: data.transcription,
@@ -417,11 +415,73 @@ export const apiClient = {
       skipValidation: data.skipValidation ?? false,
     };
 
-    // Usar timeout longo (10 minutos) com retry para análise de IA
-    return apiRequestLongRunningWithRetry<any>('/api/analyze-match', { 
-      method: 'POST', 
-      body: JSON.stringify(body)
-    }, 600000, 2); // 10 minutos, 2 tentativas
+    // Try local server first
+    const localServerAvailable = await isLocalServerAvailable();
+    
+    if (localServerAvailable) {
+      try {
+        // Usar timeout longo (10 minutos) com retry para análise de IA
+        const result = await apiRequestLongRunningWithRetry<any>('/api/analyze-match', { 
+          method: 'POST', 
+          body: JSON.stringify(body)
+        }, 600000, 2); // 10 minutos, 2 tentativas
+        
+        return result;
+      } catch (error) {
+        console.warn('[API] Local server analysis failed, trying Edge Function fallback...', error);
+      }
+    }
+    
+    // Fallback to Edge Function if local server fails or is unavailable
+    console.log('[API] Using Edge Function fallback for analysis');
+    return apiClient.analyzeMatchViaEdgeFunction(data);
+  },
+  
+  // Edge Function fallback for analysis
+  analyzeMatchViaEdgeFunction: async (data: { 
+    matchId: string; 
+    transcription: string; 
+    homeTeam: string; 
+    awayTeam: string; 
+    gameStartMinute?: number; 
+    gameEndMinute?: number; 
+    halfType?: string;
+    autoClip?: boolean;
+    includeSubtitles?: boolean;
+    skipValidation?: boolean;
+  }) => {
+    const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+    const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+    
+    if (!supabaseUrl || !supabaseKey) {
+      throw new Error('Supabase não configurado para fallback');
+    }
+    
+    const body = {
+      matchId: data.matchId,
+      transcription: data.transcription,
+      homeTeam: data.homeTeam,
+      awayTeam: data.awayTeam,
+      gameStartMinute: data.gameStartMinute ?? 0,
+      gameEndMinute: data.gameEndMinute ?? (data.halfType === 'second' ? 90 : 45),
+      halfType: data.halfType ?? 'first',
+    };
+    
+    const response = await fetch(`${supabaseUrl}/functions/v1/analyze-match`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${supabaseKey}`,
+      },
+      body: JSON.stringify(body),
+    });
+    
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || `Edge Function error: ${response.status}`);
+    }
+    
+    return response.json();
   },
 
   generateNarration: (data: any) =>
