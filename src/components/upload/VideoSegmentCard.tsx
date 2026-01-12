@@ -78,17 +78,64 @@ export function VideoSegmentCard({ segment, onChange, onRemove, onFallbackClick,
     return `${mb.toFixed(1)} MB`;
   };
 
-  // Suggest sync based on video duration
+  // Suggest video type based on duration
   const getSuggestion = () => {
     if (!segment.durationSeconds) return null;
     const mins = Math.floor(segment.durationSeconds / 60);
-    if (mins >= 40 && mins <= 50) return 'Este vídeo parece ser 1 tempo (~45 min)';
-    if (mins >= 85 && mins <= 100) return 'Este vídeo parece ser a partida completa (~90 min)';
-    if (mins < 15) return `Trecho de ${mins} minutos`;
+    
+    if (mins < 15) {
+      // Short clips - warn user to set correct start/end minutes
+      return {
+        text: `⚠️ Trecho curto (${mins} min) - Defina o minuto inicial na partida`,
+        type: 'warning' as const,
+        suggestedType: 'clip' as VideoType,
+      };
+    }
+    if (mins >= 15 && mins < 40) {
+      return {
+        text: `Trecho de ${mins} minutos - Informe o minuto inicial/final`,
+        type: 'info' as const,
+        suggestedType: 'clip' as VideoType,
+      };
+    }
+    if (mins >= 40 && mins <= 55) {
+      return {
+        text: `Este vídeo parece ser 1 tempo (~45 min)`,
+        type: 'info' as const,
+        suggestedType: segment.half === 'second' ? 'second_half' as VideoType : 'first_half' as VideoType,
+      };
+    }
+    if (mins >= 85 && mins <= 100) {
+      return {
+        text: `Este vídeo parece ser a partida completa (~90 min)`,
+        type: 'info' as const,
+        suggestedType: 'full' as VideoType,
+      };
+    }
+    if (mins > 55 && mins < 85) {
+      return {
+        text: `Duração incomum (${mins} min) - Verifique o tipo de vídeo`,
+        type: 'warning' as const,
+        suggestedType: null,
+      };
+    }
     return null;
   };
 
   const suggestion = getSuggestion();
+  
+  // Auto-suggest video type when video completes upload
+  const handleAutoSuggest = () => {
+    if (suggestion?.suggestedType && segment.videoType !== suggestion.suggestedType) {
+      const newConfig = videoTypeConfig[suggestion.suggestedType];
+      onChange({
+        ...segment,
+        videoType: suggestion.suggestedType,
+        startMinute: newConfig.defaultStart,
+        endMinute: newConfig.defaultEnd,
+      });
+    }
+  };
   const isUploading = segment.status === 'uploading';
   const isTimeout = segment.status === 'timeout';
   const isComplete = segment.status === 'complete' || segment.status === 'ready';
@@ -219,9 +266,24 @@ export function VideoSegmentCard({ segment, onChange, onRemove, onFallbackClick,
           <>
             {/* Suggestion */}
             {suggestion && (
-              <div className="text-xs text-primary bg-primary/10 rounded-lg px-3 py-2 flex items-center gap-2">
-                <Clock className="h-3 w-3" />
-                {suggestion}
+              <div className={cn(
+                "text-xs rounded-lg px-3 py-2 flex items-center gap-2",
+                suggestion.type === 'warning' 
+                  ? "bg-amber-500/10 text-amber-400 border border-amber-500/30" 
+                  : "bg-primary/10 text-primary"
+              )}>
+                {suggestion.type === 'warning' ? <AlertTriangle className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
+                <span className="flex-1">{suggestion.text}</span>
+                {suggestion.suggestedType && segment.videoType !== suggestion.suggestedType && (
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    className="h-6 px-2 text-xs"
+                    onClick={handleAutoSuggest}
+                  >
+                    Aplicar
+                  </Button>
+                )}
               </div>
             )}
 
