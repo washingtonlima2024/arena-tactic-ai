@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { apiClient } from '@/lib/apiClient';
+import { apiClient, normalizeStorageUrl } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 
 interface NarrationResult {
@@ -20,9 +20,10 @@ export function useNarrationGeneration() {
       const match = audioData.find((a: any) => a.voice === voice);
 
       if (match?.audio_url) {
+        const normalizedUrl = normalizeStorageUrl(match.audio_url);
         setNarration({
           script: match.script || '',
-          audioUrl: match.audio_url,
+          audioUrl: normalizedUrl || match.audio_url,
           voice: match.voice || voice,
         });
         return match;
@@ -64,7 +65,7 @@ export function useNarrationGeneration() {
 
       const result = {
         script: data.script,
-        audioUrl: data.audioUrl,
+        audioUrl: normalizeStorageUrl(data.audioUrl) || data.audioUrl,
         voice: data.voice,
       };
 
