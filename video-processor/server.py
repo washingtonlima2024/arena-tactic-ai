@@ -2476,6 +2476,23 @@ def add_subtitles_to_clip(
         return False
 
 
+def get_video_duration_seconds(video_path: str) -> float:
+    """Get video duration in seconds using FFprobe."""
+    try:
+        cmd = [
+            'ffprobe', '-v', 'error',
+            '-show_entries', 'format=duration',
+            '-of', 'default=noprint_wrappers=1:nokey=1',
+            video_path
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0 and result.stdout.strip():
+            return float(result.stdout.strip())
+    except Exception as e:
+        print(f"[CLIP] ⚠ Error getting video duration: {e}")
+    return 0.0
+
+
 def extract_event_clips_auto(
     match_id: str, 
     video_path: str, 
@@ -2485,7 +2502,8 @@ def extract_event_clips_auto(
     away_team: str = None,
     pre_buffer: float = 3.0,
     post_buffer: float = 7.0,
-    include_subtitles: bool = True
+    include_subtitles: bool = True,
+    segment_start_minute: int = 0
 ) -> list:
     """
     Extract clips for all events automatically.
@@ -2499,6 +2517,8 @@ def extract_event_clips_auto(
         away_team: Away team name for labeling
         pre_buffer: Seconds before the event
         post_buffer: Seconds after the event
+        include_subtitles: Whether to add subtitles to clips
+        segment_start_minute: The match minute where this video segment starts (for clips/segments)
     
     Returns:
         List of extracted clip info dicts
@@ -2517,6 +2537,13 @@ def extract_event_clips_auto(
         print(f"[CLIP] ⚠ Video file not found: {video_path}")
         return extracted
     
+    # Get actual video duration for validation
+    video_duration = get_video_duration_seconds(video_path)
+    if video_duration > 0:
+        print(f"[CLIP] Video duration: {video_duration:.1f}s ({video_duration/60:.1f}min), segment_start_minute: {segment_start_minute}")
+    else:
+        print(f"[CLIP] ⚠ Could not determine video duration, proceeding without validation")
+    
     for event in events:
         try:
             minute = event.get('minute', 0)
@@ -2524,9 +2551,27 @@ def extract_event_clips_auto(
             event_type = event.get('event_type', 'event')
             description = event.get('description', '')
             
+            # Adjust minute relative to segment start (for clips/segments)
+            # If segment starts at minute 38 and event is at minute 39, video_minute = 1
+            video_minute = minute - segment_start_minute
+            
             # Calculate start time in video (with pre-buffer)
-            total_seconds = (minute * 60) + second
+            total_seconds = (video_minute * 60) + second
             start_seconds = max(0, total_seconds - pre_buffer)
+            
+            # Validate: skip if start time is beyond video duration
+            if video_duration > 0 and start_seconds >= video_duration:
+                print(f"[CLIP] ⚠ Event at min {minute} (video_min {video_minute}) is beyond video duration ({video_duration/60:.1f}min), skipping")
+                continue
+            
+            # Validate: adjust duration if it would exceed video length
+            actual_duration = duration
+            if video_duration > 0 and (start_seconds + duration) > video_duration:
+                actual_duration = video_duration - start_seconds
+                if actual_duration < 2:  # Less than 2 seconds is not useful
+                    print(f"[CLIP] ⚠ Event at min {minute} would result in clip < 2s, skipping")
+                    continue
+                print(f"[CLIP] Adjusting clip duration to {actual_duration:.1f}s (end of video)")
             
             # Determine team for filename
             team_short = None
@@ -2550,7 +2595,7 @@ def extract_event_clips_auto(
                 'ffmpeg', '-y',
                 '-ss', str(start_seconds),
                 '-i', video_path,
-                '-t', str(duration),
+                '-t', str(actual_duration),
                 '-c:v', 'libx264',
                 '-c:a', 'aac',
                 '-preset', 'fast',
@@ -2562,6 +2607,13 @@ def extract_event_clips_auto(
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
             
             if result.returncode == 0 and os.path.exists(clip_path):
+                # Validate file size - clips less than 10KB are likely corrupt
+                file_size = os.path.getsize(clip_path)
+                if file_size < 10000:  # 10KB minimum
+                    print(f"[CLIP] ⚠ Clip too small ({file_size} bytes), removing: {filename}")
+                    os.remove(clip_path)
+                    continue
+                
                 # Aplicar legendas se habilitado
                 if include_subtitles:
                     subtitled_path = clip_path.replace('.mp4', '_sub.mp4')
@@ -2594,7 +2646,7 @@ def extract_event_clips_auto(
                     'description': description
                 }
                 extracted.append(clip_info)
-                print(f"[CLIP] ✓ Extracted: {filename}")
+                print(f"[CLIP] ✓ Extracted: {filename} ({file_size/1024:.1f}KB)")
                 
                 # Update event clip_url in database if event_id is present
                 event_id = event.get('id')
@@ -2612,7 +2664,7 @@ def extract_event_clips_auto(
                     finally:
                         session.close()
             else:
-                print(f"[CLIP] ✗ Failed to extract clip for minute {minute}")
+                print(f"[CLIP] ✗ Failed to extract clip for minute {minute}: {result.stderr[:200] if result.stderr else 'Unknown error'}")
                 
         except Exception as e:
             print(f"[CLIP] Error extracting clip: {e}")
