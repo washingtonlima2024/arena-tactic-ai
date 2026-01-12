@@ -182,12 +182,12 @@ export default function UsersManager() {
             </div>
             <div className="space-y-2">
               <Label>Empresa</Label>
-              <Select value={formData.organization_id} onValueChange={(value) => setFormData({ ...formData, organization_id: value })}>
+              <Select value={formData.organization_id || 'none'} onValueChange={(value) => setFormData({ ...formData, organization_id: value === 'none' ? '' : value })}>
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione uma empresa" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">Sem empresa</SelectItem>
+                  <SelectItem value="none">Sem empresa</SelectItem>
                   {organizations.map(org => (
                     <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
                   ))}
