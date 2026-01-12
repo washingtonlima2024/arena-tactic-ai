@@ -1,7 +1,8 @@
-import { useState, useEffect } from 'react';
-import { Server, Settings, AlertTriangle, Link2, Copy, RefreshCw } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { Server, Settings, AlertTriangle, Link2, Copy, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { checkLocalServerAvailable, hasServerUrlConfigured, getApiBase } from '@/lib/apiMode';
+import { resetServerAvailability } from '@/lib/apiClient';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Tooltip,
@@ -31,45 +32,64 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
   const [serverHealth, setServerHealth] = useState<ServerHealth | null>(null);
   const [showQuickConfig, setShowQuickConfig] = useState(false);
   const [tunnelUrl, setTunnelUrl] = useState('');
+  const [isReconnecting, setIsReconnecting] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
 
-  useEffect(() => {
-    const checkStatus = async () => {
-      // Primeiro verifica se há URL configurada
-      if (!hasServerUrlConfigured()) {
-        setStatus('not-configured');
-        return;
-      }
+  const checkStatus = useCallback(async () => {
+    // Primeiro verifica se há URL configurada
+    if (!hasServerUrlConfigured()) {
+      setStatus('not-configured');
+      return;
+    }
+    
+    try {
+      const response = await fetch(`${getApiBase()}/health`, {
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+      });
       
-      try {
-        const response = await fetch(`${getApiBase()}/health`, {
-          headers: { 'ngrok-skip-browser-warning': 'true' }
-        });
+      if (response.ok) {
+        const data = await response.json();
+        setServerHealth(data);
         
-        if (response.ok) {
-          const data = await response.json();
-          setServerHealth(data);
-          
-          // Verificar se funções críticas estão carregadas
-          if (data.functions_loaded === false) {
-            setStatus('outdated');
-          } else {
-            setStatus('online');
-          }
+        // Verificar se funções críticas estão carregadas
+        if (data.functions_loaded === false) {
+          setStatus('outdated');
         } else {
-          setStatus('offline');
+          setStatus('online');
         }
-      } catch {
+      } else {
         setStatus('offline');
       }
-    };
+    } catch {
+      setStatus('offline');
+    }
+  }, []);
 
+  const handleReconnect = useCallback(async () => {
+    setIsReconnecting(true);
+    setStatus('checking');
+    
+    // Reset cache do servidor
+    resetServerAvailability();
+    
+    toast.info('Reconectando ao servidor...');
+    
+    await checkStatus();
+    
+    setIsReconnecting(false);
+    
+    if (status === 'online') {
+      toast.success('Servidor reconectado!');
+    }
+  }, [checkStatus, status]);
+
+  useEffect(() => {
     checkStatus();
     const interval = setInterval(checkStatus, 10000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [checkStatus]);
 
   const handleQuickConnect = () => {
     const url = tunnelUrl.trim();
@@ -126,11 +146,11 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           color: 'bg-red-500',
           textColor: 'text-red-500',
           label: 'Offline',
-          tooltip: 'Servidor Python offline - inicie com: python server.py',
-          icon: Server,
-          iconColor: 'text-muted-foreground',
-          animate: false,
-          clickable: false
+          tooltip: 'Servidor Python offline - clique para reconectar',
+          icon: WifiOff,
+          iconColor: 'text-red-500',
+          animate: true,
+          clickable: true
         };
       case 'outdated':
         return {
@@ -199,7 +219,10 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
   const Icon = config.icon;
 
   const handleClick = () => {
-    if (status === 'not-configured') {
+    if (status === 'offline') {
+      // Reconectar ao servidor
+      handleReconnect();
+    } else if (status === 'not-configured') {
       // Se collapsed, ir para settings. Se expandido, mostrar quick config
       if (collapsed) {
         navigate('/settings');
@@ -228,11 +251,16 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
         "flex items-center gap-2 rounded-lg px-3 py-2 text-xs transition-all",
         "bg-muted/50 border border-border/50",
         collapsed ? "justify-center" : "",
-        config.clickable && "cursor-pointer hover:bg-muted hover:border-orange-500/50"
+        config.clickable && "cursor-pointer hover:bg-muted",
+        status === 'offline' && "border-red-500/50 bg-red-500/10 hover:bg-red-500/20"
       )}
     >
       <div className="relative">
-        <Icon className={cn("h-4 w-4", config.iconColor)} />
+        {isReconnecting ? (
+          <RefreshCw className={cn("h-4 w-4 animate-spin", config.iconColor)} />
+        ) : (
+          <Icon className={cn("h-4 w-4", config.iconColor)} />
+        )}
         <span 
           className={cn(
             "absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full",
@@ -242,10 +270,26 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
         />
       </div>
       {!collapsed && (
-        <div className="flex flex-col">
+        <div className="flex flex-col flex-1">
           <span className="font-medium text-foreground">Local</span>
-          <span className={cn("text-[10px]", config.textColor)}>{config.label}</span>
+          <span className={cn("text-[10px]", config.textColor)}>
+            {isReconnecting ? 'Reconectando...' : config.label}
+          </span>
         </div>
+      )}
+      {!collapsed && status === 'offline' && !isReconnecting && (
+        <Button 
+          size="sm" 
+          variant="ghost" 
+          className="h-6 px-2 text-xs text-red-500 hover:text-red-400 hover:bg-red-500/20"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleReconnect();
+          }}
+        >
+          <RefreshCw className="h-3 w-3 mr-1" />
+          Reconectar
+        </Button>
       )}
       {!collapsed && status === 'not-configured' && (
         <Settings className="h-3 w-3 text-orange-500 ml-auto" />
