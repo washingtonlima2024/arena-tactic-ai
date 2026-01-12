@@ -576,6 +576,8 @@ export type Database = {
         Row: {
           avatar_url: string | null
           created_at: string
+          credits_balance: number | null
+          credits_monthly_quota: number | null
           display_name: string | null
           email: string | null
           id: string
@@ -587,6 +589,8 @@ export type Database = {
         Insert: {
           avatar_url?: string | null
           created_at?: string
+          credits_balance?: number | null
+          credits_monthly_quota?: number | null
           display_name?: string | null
           email?: string | null
           id?: string
@@ -598,6 +602,8 @@ export type Database = {
         Update: {
           avatar_url?: string | null
           created_at?: string
+          credits_balance?: number | null
+          credits_monthly_quota?: number | null
           display_name?: string | null
           email?: string | null
           id?: string
