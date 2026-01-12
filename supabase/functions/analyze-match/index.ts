@@ -399,8 +399,13 @@ LEMBRE-SE:
     const eventsToInsert = (analysisResult.events || []).map(event => {
       const eventMinute = Math.max(gameStartMinute, Math.min(gameEndMinute, event.minute));
       const eventSecond = event.second || 0;
+      
+      // CRÍTICO: videoSecond é relativo ao início do vídeo do período
       const videoSecond = (eventMinute - gameStartMinute) * 60 + eventSecond;
       const eventMs = videoSecond * 1000;
+      
+      // Log detalhado para validação
+      console.log(`[EVENT] ${event.event_type} min ${eventMinute}:${eventSecond.toString().padStart(2, '0')} → videoSecond: ${videoSecond}s (gameStart: ${gameStartMinute})`);
       
       return {
         match_id: matchId,
@@ -415,9 +420,10 @@ LEMBRE-SE:
           teamName: event.team === 'home' ? homeTeam : awayTeam,
           source: 'ai-analysis-pro',
           gameStartMinute,
-          videoSecond,
-          eventMs,
-          half: matchHalf
+          videoSecond,      // CRÍTICO: usado pelo Python para cortar clips
+          eventMs,          // CRÍTICO: milissegundos para precisão
+          half: matchHalf,
+          validated: true   // Marcar como validado pela Edge Function
         },
         approval_status: 'pending',
         is_highlight: ['goal', 'red_card', 'penalty'].includes(event.event_type)
