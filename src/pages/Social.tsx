@@ -195,7 +195,18 @@ export default function Social() {
     setConnectingPlatform(selectedNetwork.id);
 
     try {
-      const userId = 'local-admin-user';
+      // Obter usuário autenticado
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({
+          title: 'Usuário não autenticado',
+          description: 'Faça login para conectar redes sociais.',
+          variant: 'destructive',
+        });
+        setConnectingPlatform(null);
+        return;
+      }
+
       const existingConnection = getConnection(selectedNetwork.id);
 
       if (existingConnection) {
@@ -216,7 +227,7 @@ export default function Social() {
         const { error } = await supabase
           .from('social_connections')
           .insert({
-            user_id: userId,
+            user_id: user.id,
             platform: selectedNetwork.id,
             access_token: credentials.access_token || credentials.api_key,
             refresh_token: credentials.refresh_token || credentials.access_token_secret,
