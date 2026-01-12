@@ -1,25 +1,16 @@
 /**
- * useAuth - Autenticação simplificada para modo local
- * Simula um usuário admin logado para desenvolvimento local
+ * useAuth - Autenticação com Supabase real
+ * Persiste sessão entre recarregamentos de página
  */
 import { useState, useEffect, useCallback } from 'react';
+import { User, Session } from '@supabase/supabase-js';
+import { supabase } from '@/integrations/supabase/client';
 
 export type AppRole = 'admin' | 'user';
 
-// Simulated user for local development
-// Using a valid UUID format for database compatibility
-const LOCAL_ADMIN_USER = {
-  id: '00000000-0000-0000-0000-000000000001',
-  email: 'admin@arenaplay.local',
-  user_metadata: {
-    display_name: 'Administrador Local',
-  },
-  created_at: new Date().toISOString(),
-};
-
 interface AuthState {
-  user: typeof LOCAL_ADMIN_USER | null;
-  session: { user: typeof LOCAL_ADMIN_USER } | null;
+  user: User | null;
+  session: Session | null;
   isLoading: boolean;
   isAdmin: boolean;
   role: AppRole | null;
@@ -35,55 +26,65 @@ export function useAuth() {
   });
 
   useEffect(() => {
-    // Simula carregamento inicial e depois define o usuário local como admin
-    const timer = setTimeout(() => {
+    // 1. Configurar listener de mudanças de auth PRIMEIRO
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        setAuthState({
+          user: session?.user ?? null,
+          session: session,
+          isLoading: false,
+          isAdmin: true, // Por ora todos são admin
+          role: 'admin',
+        });
+      }
+    );
+
+    // 2. DEPOIS verificar sessão existente
+    supabase.auth.getSession().then(({ data: { session } }) => {
       setAuthState({
-        user: LOCAL_ADMIN_USER,
-        session: { user: LOCAL_ADMIN_USER },
+        user: session?.user ?? null,
+        session: session,
         isLoading: false,
         isAdmin: true,
         role: 'admin',
       });
-    }, 100);
-
-    return () => clearTimeout(timer);
-  }, []);
-
-  // Funções de autenticação simplificadas para modo local
-  const signUp = useCallback(async (_email: string, _password: string, _displayName?: string) => {
-    // Em modo local, sempre retorna sucesso
-    return { 
-      data: { user: LOCAL_ADMIN_USER, session: { user: LOCAL_ADMIN_USER } }, 
-      error: null 
-    };
-  }, []);
-
-  const signIn = useCallback(async (_email: string, _password: string) => {
-    // Em modo local, sempre retorna sucesso
-    setAuthState({
-      user: LOCAL_ADMIN_USER,
-      session: { user: LOCAL_ADMIN_USER },
-      isLoading: false,
-      isAdmin: true,
-      role: 'admin',
     });
-    return { 
-      data: { user: LOCAL_ADMIN_USER, session: { user: LOCAL_ADMIN_USER } }, 
-      error: null 
-    };
+
+    return () => subscription.unsubscribe();
+  }, []);
+
+  const signUp = useCallback(async (email: string, password: string, displayName?: string) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        emailRedirectTo: `${window.location.origin}/dashboard`,
+        data: { display_name: displayName || email.split('@')[0] }
+      }
+    });
+    return { data, error };
+  }, []);
+
+  const signIn = useCallback(async (email: string, password: string) => {
+    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+    return { data, error };
   }, []);
 
   const signOut = useCallback(async () => {
-    // Em modo local, mantém o usuário (não faz logout real)
-    return { error: null };
+    const { error } = await supabase.auth.signOut();
+    return { error };
   }, []);
 
-  const resetPassword = useCallback(async (_email: string) => {
-    return { error: null };
+  const resetPassword = useCallback(async (email: string) => {
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth?mode=reset`,
+    });
+    return { error };
   }, []);
 
-  const updatePassword = useCallback(async (_newPassword: string) => {
-    return { error: null };
+  const updatePassword = useCallback(async (newPassword: string) => {
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    return { error };
   }, []);
 
   return {

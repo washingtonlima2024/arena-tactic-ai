@@ -1,3 +1,4 @@
+import { Link } from 'react-router-dom';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -20,7 +21,7 @@ import {
   Film,
   CheckCircle,
   X,
-  Link,
+  Link as LinkIcon,
   RefreshCw,
   Smartphone
 } from 'lucide-react';
@@ -461,7 +462,7 @@ export default function Media() {
                       size="sm"
                       onClick={() => setLinkVideoDialogOpen(true)}
                     >
-                      <Link className="h-3 w-3 mr-1" />
+                      <LinkIcon className="h-3 w-3 mr-1" />
                       Vincular Vídeo
                     </Button>
                   </div>
@@ -657,10 +658,10 @@ export default function Media() {
                       </p>
                     </div>
                     <Button variant="arena" size="sm" asChild>
-                      <a href="/upload">
+                      <Link to="/upload">
                         <Video className="mr-2 h-4 w-4" />
                         Fazer Upload
-                      </a>
+                      </Link>
                     </Button>
                   </div>
                 </CardContent>

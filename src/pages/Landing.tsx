@@ -22,7 +22,7 @@ import soccerBall from '@/assets/soccer-ball.png';
 import arenaIcon from '@/assets/arena-play-icon.png';
 import arenaWordmark from '@/assets/arena-play-wordmark.png';
 import heroBg from '@/assets/hero-bg.jpg';
-import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 
 // Animated counter component
 function AnimatedCounter({ 
@@ -84,10 +84,18 @@ function FloatingParticle({ delay, size, left, duration }: {
 
 export default function Landing() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('washington@kakttus.com');
-  const [password, setPassword] = useState('kakttus@2025');
+  const { user, isLoading: authLoading, signIn, signUp, resetPassword } = useAuth();
+  const [email, setEmail] = useState('admin@arenaplay.com');
+  const [password, setPassword] = useState('arena2025');
   const [isLoading, setIsLoading] = useState(false);
   const [showStats, setShowStats] = useState(false);
+
+  // Redirecionar se já estiver logado
+  useEffect(() => {
+    if (user && !authLoading) {
+      navigate('/dashboard');
+    }
+  }, [user, authLoading, navigate]);
 
   useEffect(() => {
     // Trigger stats animation after a short delay
@@ -100,37 +108,21 @@ export default function Landing() {
     setIsLoading(true);
 
     try {
-      // Tentar fazer login
-      const { data, error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+      // Tentar fazer login usando o hook unificado
+      const { error } = await signIn(email, password);
 
       if (error) {
-        // Se credenciais inválidas
+        // Se credenciais inválidas, tentar criar conta
         if (error.message.includes('Invalid login credentials')) {
-          // Tentar criar a conta
-          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-            email,
-            password,
-            options: {
-              emailRedirectTo: `${window.location.origin}/dashboard`,
-              data: {
-                display_name: email.split('@')[0],
-              }
-            }
-          });
+          const { data: signUpData, error: signUpError } = await signUp(email, password, email.split('@')[0]);
 
           // Se usuário já existe, enviar reset de senha
           if (signUpError?.message?.includes('User already registered')) {
-            toast.info('Usuário existe, resetando senha...', {
-              description: 'Atualizando sua senha para a nova.',
+            toast.info('Usuário existe', {
+              description: 'Enviando email para resetar senha...',
             });
             
-            // Usar o reset de senha via API
-            const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-              redirectTo: `${window.location.origin}/auth?mode=reset`,
-            });
+            const { error: resetError } = await resetPassword(email);
             
             if (resetError) {
               toast.error('Erro ao resetar senha', {
@@ -138,7 +130,7 @@ export default function Landing() {
               });
             } else {
               toast.success('Email de reset enviado!', {
-                description: 'Verifique seu email para redefinir sua senha. Ou tente criar uma nova conta.',
+                description: 'Verifique seu email para redefinir sua senha.',
               });
             }
             return;
@@ -151,33 +143,12 @@ export default function Landing() {
             return;
           }
 
-          // Se criou com sucesso
+          // Se criou com sucesso, o onAuthStateChange vai detectar e o useEffect vai redirecionar
           if (signUpData?.user) {
-            if (signUpData.session) {
-              toast.success('Conta criada com sucesso!', {
-                description: 'Bem-vindo ao Arena Play!',
-              });
-              navigate('/dashboard');
-              return;
-            }
-
-            // Tentar login novamente
-            const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
-              email,
-              password,
+            toast.success('Conta criada com sucesso!', {
+              description: 'Bem-vindo ao Arena Play!',
             });
-
-            if (!loginError && loginData.user) {
-              toast.success('Bem-vindo ao Arena Play!', {
-                description: 'Conta criada e login realizado!',
-              });
-              navigate('/dashboard');
-              return;
-            }
-
-            toast.success('Conta criada!', {
-              description: 'Clique em Entrar novamente para acessar.',
-            });
+            // O redirecionamento é feito pelo useEffect acima quando o user muda
           }
         } else {
           toast.error('Erro ao fazer login', {
@@ -187,12 +158,10 @@ export default function Landing() {
         return;
       }
 
-      if (data.user) {
-        toast.success('Bem-vindo ao Arena Play!', {
-          description: 'Redirecionando para o dashboard...',
-        });
-        navigate('/dashboard');
-      }
+      // Login bem sucedido - o useEffect vai redirecionar
+      toast.success('Bem-vindo ao Arena Play!', {
+        description: 'Redirecionando para o dashboard...',
+      });
     } catch (err) {
       toast.error('Erro inesperado', {
         description: 'Tente novamente em alguns instantes.',
