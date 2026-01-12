@@ -1138,6 +1138,57 @@ export type Database = {
         }
         Relationships: []
       }
+      user_payments: {
+        Row: {
+          amount_cents: number
+          created_at: string | null
+          credits_added: number | null
+          error_message: string | null
+          id: string
+          payment_method: string
+          pix_code: string | null
+          pix_expiration: string | null
+          pix_qr_code: string | null
+          status: string | null
+          stripe_charge_id: string | null
+          stripe_payment_intent_id: string | null
+          updated_at: string | null
+          user_id: string
+        }
+        Insert: {
+          amount_cents: number
+          created_at?: string | null
+          credits_added?: number | null
+          error_message?: string | null
+          id?: string
+          payment_method: string
+          pix_code?: string | null
+          pix_expiration?: string | null
+          pix_qr_code?: string | null
+          status?: string | null
+          stripe_charge_id?: string | null
+          stripe_payment_intent_id?: string | null
+          updated_at?: string | null
+          user_id: string
+        }
+        Update: {
+          amount_cents?: number
+          created_at?: string | null
+          credits_added?: number | null
+          error_message?: string | null
+          id?: string
+          payment_method?: string
+          pix_code?: string | null
+          pix_expiration?: string | null
+          pix_qr_code?: string | null
+          status?: string | null
+          stripe_charge_id?: string | null
+          stripe_payment_intent_id?: string | null
+          updated_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_roles: {
         Row: {
           created_at: string
