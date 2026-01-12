@@ -21,7 +21,8 @@ import {
   CheckCircle,
   X,
   Link,
-  RefreshCw
+  RefreshCw,
+  Smartphone
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -44,6 +45,7 @@ import { SocialContentDialog } from '@/components/media/SocialContentDialog';
 import { ExportPreviewDialog } from '@/components/media/ExportPreviewDialog';
 import { LinkVideoDialog } from '@/components/media/LinkVideoDialog';
 import { SocialSharePanel } from '@/components/media/SocialSharePanel';
+import { ClipPreviewModal } from '@/components/media/ClipPreviewModal';
 import { toast } from '@/hooks/use-toast';
 import { apiClient, normalizeStorageUrl } from '@/lib/apiClient';
 
@@ -81,6 +83,7 @@ export default function Media() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [activeHalfTab, setActiveHalfTab] = useState<string>('all');
   const [isSyncingVideos, setIsSyncingVideos] = useState(false);
+  const [previewClipId, setPreviewClipId] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
   
@@ -607,6 +610,18 @@ export default function Media() {
               eventId={shareClipId || undefined}
             />
 
+            {/* Clip Preview Modal - Responsive Device Simulator */}
+            <ClipPreviewModal
+              isOpen={!!previewClipId}
+              onClose={() => setPreviewClipId(null)}
+              clipUrl={clips.find(c => c.id === previewClipId)?.clipUrl || null}
+              clipTitle={clips.find(c => c.id === previewClipId)?.title || ''}
+              clipType={clips.find(c => c.id === previewClipId)?.type || ''}
+              timestamp={formatTimestamp(clips.find(c => c.id === previewClipId)?.totalSeconds || 0)}
+              matchHalf={clips.find(c => c.id === previewClipId)?.matchHalf}
+              posterUrl={getThumbnail(previewClipId || '')?.imageUrl}
+            />
+
             {/* Recording in progress warning */}
             {hasRecordingInProgress && (
               <Card variant="glass" className="border-warning/50 bg-warning/5">
@@ -919,6 +934,17 @@ export default function Media() {
                                   Reproduzir
                                 </>
                               )}
+                            </Button>
+                          )}
+                          {clip.clipUrl && (
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="flex-1"
+                              onClick={() => setPreviewClipId(clip.id)}
+                            >
+                              <Smartphone className="mr-1 h-3 w-3" />
+                              Preview
                             </Button>
                           )}
                           <Button 
