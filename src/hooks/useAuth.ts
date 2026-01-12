@@ -1,19 +1,53 @@
 /**
  * useAuth - Autenticação com Supabase real
- * Persiste sessão entre recarregamentos de página
+ * Sistema de roles: superadmin, org_admin, manager, uploader, viewer
  */
 import { useState, useEffect, useCallback } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 
-export type AppRole = 'admin' | 'user';
+export type AppRole = 'superadmin' | 'org_admin' | 'manager' | 'uploader' | 'viewer' | 'admin' | 'user';
 
 interface AuthState {
   user: User | null;
   session: Session | null;
   isLoading: boolean;
-  isAdmin: boolean;
   role: AppRole | null;
+  // Hierarquia de permissões
+  isSuperAdmin: boolean;
+  isOrgAdmin: boolean;
+  isManager: boolean;
+  isUploader: boolean;
+  isViewer: boolean;
+  // Atalhos de permissão
+  isAdmin: boolean; // org_admin ou superadmin
+  canUpload: boolean; // uploader, manager, org_admin, superadmin
+  canManage: boolean; // manager, org_admin, superadmin
+}
+
+const ROLE_HIERARCHY: Record<AppRole, number> = {
+  superadmin: 100,
+  org_admin: 80,
+  admin: 80, // legacy
+  manager: 60,
+  uploader: 40,
+  viewer: 20,
+  user: 20, // legacy
+};
+
+function getPermissionsFromRole(role: AppRole | null): Omit<AuthState, 'user' | 'session' | 'isLoading' | 'role'> {
+  const roleLevel = role ? ROLE_HIERARCHY[role] || 0 : 0;
+  
+  return {
+    isSuperAdmin: role === 'superadmin',
+    isOrgAdmin: roleLevel >= ROLE_HIERARCHY.org_admin,
+    isManager: roleLevel >= ROLE_HIERARCHY.manager,
+    isUploader: roleLevel >= ROLE_HIERARCHY.uploader,
+    isViewer: roleLevel >= ROLE_HIERARCHY.viewer,
+    isAdmin: roleLevel >= ROLE_HIERARCHY.org_admin,
+    canUpload: roleLevel >= ROLE_HIERARCHY.uploader,
+    canManage: roleLevel >= ROLE_HIERARCHY.manager,
+  };
 }
 
 export function useAuth() {
@@ -21,37 +55,86 @@ export function useAuth() {
     user: null,
     session: null,
     isLoading: true,
-    isAdmin: false,
     role: null,
+    ...getPermissionsFromRole(null),
   });
+
+  const fetchUserRole = useCallback(async (userId: string) => {
+    try {
+      const { data, error } = await supabase
+        .from('user_roles')
+        .select('role')
+        .eq('user_id', userId)
+        .single();
+
+      if (error) {
+        console.error('Erro ao buscar role do usuário:', error);
+        return 'viewer' as AppRole;
+      }
+
+      return (data?.role as AppRole) || 'viewer';
+    } catch (err) {
+      console.error('Exceção ao buscar role:', err);
+      return 'viewer' as AppRole;
+    }
+  }, []);
 
   useEffect(() => {
     // 1. Configurar listener de mudanças de auth PRIMEIRO
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event, session) => {
-        setAuthState({
+        // Update session state synchronously
+        setAuthState(prev => ({
+          ...prev,
           user: session?.user ?? null,
           session: session,
           isLoading: false,
-          isAdmin: true, // Por ora todos são admin
-          role: 'admin',
-        });
+        }));
+
+        // Fetch role asynchronously with setTimeout to avoid deadlock
+        if (session?.user) {
+          setTimeout(async () => {
+            const role = await fetchUserRole(session.user.id);
+            setAuthState(prev => ({
+              ...prev,
+              role,
+              ...getPermissionsFromRole(role),
+            }));
+          }, 0);
+        } else {
+          setAuthState(prev => ({
+            ...prev,
+            role: null,
+            ...getPermissionsFromRole(null),
+          }));
+        }
       }
     );
 
     // 2. DEPOIS verificar sessão existente
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setAuthState({
-        user: session?.user ?? null,
-        session: session,
-        isLoading: false,
-        isAdmin: true,
-        role: 'admin',
-      });
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      if (session?.user) {
+        const role = await fetchUserRole(session.user.id);
+        setAuthState({
+          user: session.user,
+          session: session,
+          isLoading: false,
+          role,
+          ...getPermissionsFromRole(role),
+        });
+      } else {
+        setAuthState({
+          user: null,
+          session: null,
+          isLoading: false,
+          role: null,
+          ...getPermissionsFromRole(null),
+        });
+      }
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [fetchUserRole]);
 
   const signUp = useCallback(async (email: string, password: string, displayName?: string) => {
     const { data, error } = await supabase.auth.signUp({
