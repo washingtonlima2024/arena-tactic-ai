@@ -55,9 +55,9 @@ const App = () => (
             <FloatingLivePlayer />
             <ClipSyncWrapper>
               <Routes>
-                <Route path="/welcome" element={<Landing />} />
+                <Route path="/" element={<Landing />} />
                 <Route path="/auth" element={<Auth />} />
-                <Route path="/" element={<RequireAuth><Index /></RequireAuth>} />
+                <Route path="/dashboard" element={<RequireAuth><Index /></RequireAuth>} />
                 <Route path="/matches" element={<RequireAuth><Matches /></RequireAuth>} />
                 <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
                 <Route path="/live" element={<RequireAuth><Live /></RequireAuth>} />

@@ -21,7 +21,7 @@ export function RequireAuth({ children, requireAdmin = false }: RequireAuthProps
   }
 
   if (!user) {
-    return <Navigate to="/auth" state={{ from: location }} replace />;
+    return <Navigate to="/" state={{ from: location }} replace />;
   }
 
   if (requireAdmin && !isAdmin) {

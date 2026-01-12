@@ -123,7 +123,7 @@ export default function Landing() {
         toast.success('Bem-vindo ao Arena Play!', {
           description: 'Redirecionando para o dashboard...',
         });
-        navigate('/');
+        navigate('/dashboard');
       }
     } catch (err) {
       toast.error('Erro inesperado', {
