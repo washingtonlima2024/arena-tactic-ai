@@ -1262,14 +1262,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      has_role: {
-        Args: {
-          _role: Database["public"]["Enums"]["app_role"]
-          _user_id: string
-        }
-        Returns: boolean
-      }
+      can_manage: { Args: never; Returns: boolean }
+      can_upload: { Args: never; Returns: boolean }
+      has_role:
+        | {
+            Args: {
+              _role: Database["public"]["Enums"]["app_role"]
+              _user_id: string
+            }
+            Returns: boolean
+          }
+        | { Args: { _role: string; _user_id: string }; Returns: boolean }
       is_admin: { Args: never; Returns: boolean }
+      is_org_admin: { Args: never; Returns: boolean }
+      is_superadmin: { Args: never; Returns: boolean }
     }
     Enums: {
       app_role: "admin" | "user"
