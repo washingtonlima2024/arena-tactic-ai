@@ -26,7 +26,7 @@ import arenaWordmark from '@/assets/arena-play-wordmark.png';
 import kakttusLogo from '@/assets/logo-kakttus.png';
 
 const navItems = [
-  { icon: LayoutDashboard, label: 'Início', path: '/' },
+  { icon: LayoutDashboard, label: 'Início', path: '/home' },
   { icon: Video, label: 'Partidas', path: '/matches' },
   { icon: Upload, label: 'Importar Vídeo', path: '/upload' },
   { icon: Radio, label: 'Ao Vivo', path: '/live' },
@@ -57,7 +57,7 @@ export function Sidebar() {
     >
       {/* Logo - Com link para home */}
       <div className="flex h-20 items-center justify-between border-b border-border px-4">
-        <Link to="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+        <Link to="/home" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
           <img 
             src={arenaIcon} 
             alt="Arena Play" 
