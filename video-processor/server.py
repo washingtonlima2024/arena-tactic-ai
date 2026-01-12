@@ -374,6 +374,141 @@ def sync_to_supabase_endpoint(match_id: str):
         return jsonify(result), 400
 
 
+def ensure_teams_in_supabase(home_team_id: Optional[str], away_team_id: Optional[str], session) -> bool:
+    """
+    Ensure both teams exist in Supabase before creating a match.
+    This prevents foreign key errors when syncing matches.
+    """
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        print(f"[TEAM-SYNC] ⚠ Supabase not configured")
+        return False
+    
+    headers = get_supabase_headers()
+    headers['Prefer'] = 'resolution=merge-duplicates,return=representation'
+    
+    synced = 0
+    for team_id in [home_team_id, away_team_id]:
+        if not team_id:
+            continue
+            
+        # Get team from local DB
+        team = session.query(Team).filter_by(id=team_id).first()
+        if not team:
+            print(f"[TEAM-SYNC] ⚠ Team {team_id} not found locally")
+            continue
+        
+        team_data = {
+            'id': team.id,
+            'name': team.name,
+            'short_name': team.short_name,
+            'primary_color': team.primary_color,
+            'secondary_color': team.secondary_color,
+            'logo_url': team.logo_url
+        }
+        
+        try:
+            response = requests.post(
+                f'{SUPABASE_URL}/rest/v1/teams',
+                json=team_data,
+                headers=headers,
+                timeout=15
+            )
+            if response.status_code in [200, 201, 409]:  # 409 = already exists (conflict)
+                synced += 1
+                print(f"[TEAM-SYNC] ✓ Team '{team.name}' synced to Supabase")
+            else:
+                print(f"[TEAM-SYNC] ⚠ Failed to sync team '{team.name}': {response.status_code} - {response.text[:100]}")
+        except Exception as e:
+            print(f"[TEAM-SYNC] ⚠ Error syncing team: {e}")
+    
+    return synced > 0
+
+
+def sync_new_match_to_supabase(match_data: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Sync a newly created match to Supabase Cloud immediately.
+    This is a lightweight sync that only syncs the match record (no events/videos).
+    
+    Args:
+        match_data: Dictionary with match data from to_dict()
+    
+    Returns:
+        Dict with success status
+    """
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        print(f"[SUPABASE-SYNC] ⚠ Supabase not configured")
+        return {'success': False, 'error': 'Supabase not configured'}
+    
+    try:
+        headers = get_supabase_headers()
+        headers['Prefer'] = 'resolution=merge-duplicates,return=representation'
+        
+        # Prepare match data - only include fields that exist in Supabase schema
+        supabase_match = {
+            'id': match_data['id'],
+            'home_team_id': match_data.get('home_team_id'),
+            'away_team_id': match_data.get('away_team_id'),
+            'home_score': match_data.get('home_score', 0),
+            'away_score': match_data.get('away_score', 0),
+            'match_date': match_data.get('match_date'),
+            'competition': match_data.get('competition'),
+            'venue': match_data.get('venue'),
+            'status': match_data.get('status', 'pending'),
+        }
+        
+        print(f"[SUPABASE-SYNC] Creating match in Supabase: {match_data['id']}")
+        
+        response = requests.post(
+            f'{SUPABASE_URL}/rest/v1/matches',
+            json=supabase_match,
+            headers=headers,
+            timeout=30
+        )
+        
+        if response.status_code in [200, 201]:
+            print(f"[SUPABASE-SYNC] ✓ Match created in Supabase")
+            return {'success': True}
+        elif response.status_code == 409:
+            print(f"[SUPABASE-SYNC] ✓ Match already exists in Supabase")
+            return {'success': True, 'already_exists': True}
+        else:
+            error_msg = f"Failed to create match: {response.status_code} - {response.text[:200]}"
+            print(f"[SUPABASE-SYNC] ✗ {error_msg}")
+            return {'success': False, 'error': error_msg}
+            
+    except Exception as e:
+        error_msg = f"Sync error: {str(e)}"
+        print(f"[SUPABASE-SYNC] ✗ {error_msg}")
+        return {'success': False, 'error': error_msg}
+
+
+@app.route('/api/matches/<match_id>/ensure-supabase', methods=['POST'])
+def ensure_match_in_supabase(match_id: str):
+    """
+    Ensure a match exists in Supabase Cloud.
+    Syncs teams, match, events and videos.
+    """
+    session = get_session()
+    try:
+        match = session.query(Match).filter_by(id=match_id).first()
+        if not match:
+            return jsonify({'error': 'Match not found locally'}), 404
+        
+        # Sync teams first to avoid FK errors
+        teams_synced = ensure_teams_in_supabase(match.home_team_id, match.away_team_id, session)
+        
+        # Full sync of match with events and videos
+        result = sync_match_to_supabase(match_id)
+        result['teams_synced'] = teams_synced
+        
+        if result.get('success'):
+            return jsonify(result)
+        else:
+            return jsonify(result), 400
+    finally:
+        session.close()
+
+
 # Diretório para vinhetas locais
 VIGNETTES_DIR = Path(__file__).parent / "vinhetas"
 VIGNETTES_DIR.mkdir(exist_ok=True)
@@ -1636,13 +1771,21 @@ def get_matches():
 
 @app.route('/api/matches', methods=['POST'])
 def create_match():
-    """Cria uma nova partida."""
+    """Cria uma nova partida e sincroniza automaticamente com Supabase Cloud."""
     data = request.json
     session = get_session()
     try:
+        # First ensure teams exist in Supabase (to avoid FK errors)
+        home_team_id = data.get('home_team_id')
+        away_team_id = data.get('away_team_id')
+        
+        if home_team_id or away_team_id:
+            ensure_teams_in_supabase(home_team_id, away_team_id, session)
+        
+        # Create match locally
         match = Match(
-            home_team_id=data.get('home_team_id'),
-            away_team_id=data.get('away_team_id'),
+            home_team_id=home_team_id,
+            away_team_id=away_team_id,
             home_score=data.get('home_score', 0),
             away_score=data.get('away_score', 0),
             competition=data.get('competition'),
@@ -1652,7 +1795,19 @@ def create_match():
         )
         session.add(match)
         session.commit()
-        return jsonify(match.to_dict(include_teams=True)), 201
+        
+        match_dict = match.to_dict(include_teams=True)
+        
+        # Immediately sync to Supabase Cloud
+        sync_result = sync_new_match_to_supabase(match_dict)
+        match_dict['supabase_synced'] = sync_result.get('success', False)
+        
+        if sync_result.get('success'):
+            print(f"[CREATE-MATCH] ✓ Match {match.id} created and synced to Supabase")
+        else:
+            print(f"[CREATE-MATCH] ⚠ Match {match.id} created but Supabase sync failed: {sync_result.get('error')}")
+        
+        return jsonify(match_dict), 201
     except Exception as e:
         session.rollback()
         return jsonify({'error': str(e)}), 400
