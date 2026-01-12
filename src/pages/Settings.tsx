@@ -12,6 +12,7 @@ import { TeamFormDialog } from '@/components/teams/TeamFormDialog';
 import { TeamCard } from '@/components/teams/TeamCard';
 import { useTeams, useCreateTeam, useUpdateTeam, useDeleteTeam, type Team } from '@/hooks/useTeams';
 import { useApiSettings, useUpsertApiSetting } from '@/hooks/useApiSettings';
+import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 import { 
   Settings as SettingsIcon, 
@@ -101,6 +102,7 @@ export default function Settings() {
   const [tempFolders, setTempFolders] = useState<{name: string; size_bytes: number}[]>([]);
   const [loadingTempFolders, setLoadingTempFolders] = useState(false);
   const [cleaningStorage, setCleaningStorage] = useState(false);
+  const [cleaningOrphans, setCleaningOrphans] = useState(false);
   const [showOpenaiKey, setShowOpenaiKey] = useState(false);
   const [showElevenlabsKey, setShowElevenlabsKey] = useState(false);
 
@@ -303,6 +305,25 @@ export default function Settings() {
       toast.error('Servidor não disponível');
     } finally {
       setCleaningStorage(false);
+    }
+  };
+
+  const handleCleanupOrphans = async () => {
+    setCleaningOrphans(true);
+    try {
+      const result = await apiClient.cleanupOrphanRecords();
+      if (result.success) {
+        const deleted = result.deleted || {};
+        const totalDeleted = Object.values(deleted).reduce((sum: number, val: number) => sum + (val || 0), 0);
+        toast.success(`Limpeza concluída! ${totalDeleted} registros órfãos removidos.`);
+      } else {
+        toast.error('Erro ao limpar registros órfãos');
+      }
+    } catch (error) {
+      console.error('Cleanup orphans error:', error);
+      toast.error('Servidor não disponível');
+    } finally {
+      setCleaningOrphans(false);
     }
   };
 
@@ -1332,6 +1353,40 @@ export default function Settings() {
 
                 <p className="text-xs text-muted-foreground">
                   Pastas temp-* são criadas durante uploads interrompidos. É seguro removê-las.
+                </p>
+
+                <Separator className="my-4" />
+
+                {/* Orphan Records Cleanup */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="font-medium">Registros Órfãos no Banco</p>
+                    <p className="text-sm text-muted-foreground">
+                      Remove eventos, vídeos e jobs sem partida associada
+                    </p>
+                  </div>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    onClick={handleCleanupOrphans}
+                    disabled={cleaningOrphans}
+                  >
+                    {cleaningOrphans ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Limpando...
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Limpar Órfãos
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                <p className="text-xs text-muted-foreground">
+                  Útil quando a deleção de partidas não removeu todos os registros relacionados.
                 </p>
               </CardContent>
             </Card>

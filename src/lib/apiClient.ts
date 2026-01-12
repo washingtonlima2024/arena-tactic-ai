@@ -615,6 +615,10 @@ export const apiClient = {
   
   deleteMatchStorage: (matchId: string) =>
     apiRequest<{ success: boolean }>(`/api/storage/${matchId}`, { method: 'DELETE' }),
+  
+  // ============== Maintenance ==============
+  cleanupOrphanRecords: () =>
+    apiRequest<{ success: boolean; deleted: Record<string, number>; message: string }>('/api/maintenance/cleanup-orphans', { method: 'POST' }),
 
   // ============== Local File Linking (Optimized for Local Environment) ==============
   // Links a local file path directly without uploading - much faster for large files
