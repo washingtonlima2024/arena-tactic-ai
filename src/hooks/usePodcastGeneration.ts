@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { apiClient } from '@/lib/apiClient';
+import { apiClient, normalizeStorageUrl } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 
 interface PodcastResult {
@@ -38,7 +38,7 @@ export function usePodcastGeneration() {
           if (type in loadedPodcasts) {
             loadedPodcasts[type] = {
               script: item.script || '',
-              audioUrl: item.audio_url || '',
+              audioUrl: normalizeStorageUrl(item.audio_url) || item.audio_url || '',
               podcastType: type,
               voice: item.voice || '',
             };
@@ -85,7 +85,7 @@ export function usePodcastGeneration() {
 
       const result: PodcastResult = {
         script: data.script,
-        audioUrl: data.audioUrl,
+        audioUrl: normalizeStorageUrl(data.audioUrl) || data.audioUrl,
         podcastType: podcastType,
         voice: data.voice,
       };
