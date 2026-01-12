@@ -8,33 +8,92 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigge
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Users, Search, MoreHorizontal, Edit, Shield, Building2 } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Users, Search, MoreHorizontal, Edit, Shield, Building2, Phone, MapPin, CreditCard, User } from 'lucide-react';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useOrganizations } from '@/hooks/useOrganizations';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { formatCpfCnpj, formatPhone, formatCep, BRAZILIAN_STATES } from '@/lib/validators';
+
+const ROLE_LABELS: Record<string, string> = {
+  superadmin: 'Super Admin',
+  org_admin: 'Admin Empresa',
+  admin: 'Admin',
+  manager: 'Gerente',
+  uploader: 'Operador',
+  viewer: 'Visualizador',
+  user: 'Usuário',
+};
+
+const ROLE_OPTIONS = [
+  { value: 'viewer', label: 'Visualizador' },
+  { value: 'uploader', label: 'Operador' },
+  { value: 'manager', label: 'Gerente' },
+  { value: 'org_admin', label: 'Admin Empresa' },
+  { value: 'superadmin', label: 'Super Admin' },
+];
+
+interface UserFormData {
+  role: string;
+  organization_id: string;
+  display_name: string;
+  phone: string;
+  cpf_cnpj: string;
+  address_cep: string;
+  address_street: string;
+  address_number: string;
+  address_complement: string;
+  address_neighborhood: string;
+  address_city: string;
+  address_state: string;
+  credits_balance: number;
+}
 
 export default function UsersManager() {
-  const { users, isLoading, updateUserRole, updateUserOrganization } = useAdminUsers();
+  const { users, isLoading, updateUserRole, updateUserOrganization, updateUserProfile } = useAdminUsers();
   const { organizations } = useOrganizations();
   const [searchTerm, setSearchTerm] = useState('');
   const [editingUser, setEditingUser] = useState<any>(null);
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<UserFormData>({
     role: '',
     organization_id: '',
+    display_name: '',
+    phone: '',
+    cpf_cnpj: '',
+    address_cep: '',
+    address_street: '',
+    address_number: '',
+    address_complement: '',
+    address_neighborhood: '',
+    address_city: '',
+    address_state: '',
+    credits_balance: 0,
   });
 
   const filteredUsers = users.filter(user =>
     user.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    user.display_name?.toLowerCase().includes(searchTerm.toLowerCase())
+    user.display_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    user.cpf_cnpj?.includes(searchTerm.replace(/\D/g, ''))
   );
 
   const handleEdit = (user: any) => {
     setEditingUser(user);
     setFormData({
-      role: user.role || 'user',
+      role: user.role || 'viewer',
       organization_id: user.organization_id || '',
+      display_name: user.display_name || '',
+      phone: user.phone ? formatPhone(user.phone) : '',
+      cpf_cnpj: user.cpf_cnpj ? formatCpfCnpj(user.cpf_cnpj) : '',
+      address_cep: user.address_cep ? formatCep(user.address_cep) : '',
+      address_street: user.address_street || '',
+      address_number: user.address_number || '',
+      address_complement: user.address_complement || '',
+      address_neighborhood: user.address_neighborhood || '',
+      address_city: user.address_city || '',
+      address_state: user.address_state || '',
+      credits_balance: user.credits_balance || 0,
     });
   };
 
@@ -42,12 +101,32 @@ export default function UsersManager() {
     if (!editingUser) return;
 
     try {
+      // Update role if changed
       if (formData.role !== editingUser.role) {
         await updateUserRole(editingUser.user_id, formData.role);
       }
+      
+      // Update organization if changed
       if (formData.organization_id !== editingUser.organization_id) {
         await updateUserOrganization(editingUser.user_id, formData.organization_id || null);
       }
+
+      // Update profile data
+      await updateUserProfile(editingUser.user_id, {
+        display_name: formData.display_name,
+        phone: formData.phone.replace(/\D/g, ''),
+        cpf_cnpj: formData.cpf_cnpj.replace(/\D/g, ''),
+        address_cep: formData.address_cep.replace(/\D/g, ''),
+        address_street: formData.address_street,
+        address_number: formData.address_number,
+        address_complement: formData.address_complement,
+        address_neighborhood: formData.address_neighborhood,
+        address_city: formData.address_city,
+        address_state: formData.address_state,
+        credits_balance: formData.credits_balance,
+        organization_id: formData.organization_id || null,
+      });
+
       toast({ title: 'Usuário atualizado com sucesso' });
       setEditingUser(null);
     } catch (error: any) {
@@ -59,6 +138,13 @@ export default function UsersManager() {
     if (!orgId) return 'Sem empresa';
     const org = organizations.find(o => o.id === orgId);
     return org?.name || 'Desconhecida';
+  };
+
+  const getRoleBadgeVariant = (role: string) => {
+    if (role === 'superadmin') return 'destructive';
+    if (role === 'org_admin' || role === 'admin') return 'default';
+    if (role === 'manager') return 'secondary';
+    return 'outline';
   };
 
   return (
@@ -80,7 +166,7 @@ export default function UsersManager() {
             <div className="relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
-                placeholder="Buscar usuários..."
+                placeholder="Buscar por nome, email ou CPF/CNPJ..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"
@@ -97,14 +183,18 @@ export default function UsersManager() {
               {searchTerm ? 'Nenhum usuário encontrado' : 'Nenhum usuário cadastrado'}
             </div>
           ) : (
-            <div className="rounded-md border">
+            <div className="rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
                     <TableHead>Usuário</TableHead>
+                    <TableHead>CPF/CNPJ</TableHead>
+                    <TableHead>Telefone</TableHead>
+                    <TableHead>Cidade/UF</TableHead>
+                    <TableHead>Créditos</TableHead>
                     <TableHead>Empresa</TableHead>
                     <TableHead>Papel</TableHead>
-                    <TableHead>Cadastrado em</TableHead>
+                    <TableHead>Cadastro</TableHead>
                     <TableHead className="w-[50px]"></TableHead>
                   </TableRow>
                 </TableHeader>
@@ -118,18 +208,38 @@ export default function UsersManager() {
                         </div>
                       </TableCell>
                       <TableCell>
+                        <span className="text-sm font-mono">
+                          {user.cpf_cnpj ? formatCpfCnpj(user.cpf_cnpj) : '-'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm">
+                          {user.phone ? formatPhone(user.phone) : '-'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <span className="text-sm">
+                          {user.address_city && user.address_state 
+                            ? `${user.address_city}/${user.address_state}` 
+                            : '-'}
+                        </span>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="outline" className="font-mono">
+                          <CreditCard className="h-3 w-3 mr-1" />
+                          {user.credits_balance || 0}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
                         <div className="flex items-center gap-1">
                           <Building2 className="h-4 w-4 text-muted-foreground" />
                           <span className="text-sm">{getOrgName(user.organization_id)}</span>
                         </div>
                       </TableCell>
                       <TableCell>
-                        <Badge variant={user.role === 'admin' ? 'default' : 'secondary'}>
-                          {user.role === 'admin' ? (
-                            <><Shield className="h-3 w-3 mr-1" /> Admin</>
-                          ) : (
-                            'Usuário'
-                          )}
+                        <Badge variant={getRoleBadgeVariant(user.role)}>
+                          {user.role === 'superadmin' && <Shield className="h-3 w-3 mr-1" />}
+                          {ROLE_LABELS[user.role] || user.role}
                         </Badge>
                       </TableCell>
                       <TableCell>
@@ -160,44 +270,224 @@ export default function UsersManager() {
       </Card>
 
       <Dialog open={!!editingUser} onOpenChange={(open) => !open && setEditingUser(null)}>
-        <DialogContent>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Editar Usuário</DialogTitle>
             <DialogDescription>
               {editingUser?.display_name || editingUser?.email}
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Papel</Label>
-              <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione o papel" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="user">Usuário</SelectItem>
-                  <SelectItem value="admin">Administrador</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Empresa</Label>
-              <Select value={formData.organization_id || 'none'} onValueChange={(value) => setFormData({ ...formData, organization_id: value === 'none' ? '' : value })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione uma empresa" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Sem empresa</SelectItem>
-                  {organizations.map(org => (
-                    <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          </div>
+          
+          <Tabs defaultValue="personal" className="w-full">
+            <TabsList className="grid w-full grid-cols-4">
+              <TabsTrigger value="personal" className="text-xs sm:text-sm">
+                <User className="h-4 w-4 mr-1 hidden sm:inline" />
+                Pessoal
+              </TabsTrigger>
+              <TabsTrigger value="address" className="text-xs sm:text-sm">
+                <MapPin className="h-4 w-4 mr-1 hidden sm:inline" />
+                Endereço
+              </TabsTrigger>
+              <TabsTrigger value="permissions" className="text-xs sm:text-sm">
+                <Shield className="h-4 w-4 mr-1 hidden sm:inline" />
+                Permissões
+              </TabsTrigger>
+              <TabsTrigger value="credits" className="text-xs sm:text-sm">
+                <CreditCard className="h-4 w-4 mr-1 hidden sm:inline" />
+                Créditos
+              </TabsTrigger>
+            </TabsList>
+
+            {/* Dados Pessoais */}
+            <TabsContent value="personal" className="space-y-4 py-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Nome</Label>
+                  <Input 
+                    value={formData.display_name} 
+                    onChange={(e) => setFormData({ ...formData, display_name: e.target.value })}
+                    placeholder="Nome completo"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Email</Label>
+                  <Input 
+                    value={editingUser?.email || ''} 
+                    disabled 
+                    className="bg-muted"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Telefone</Label>
+                  <Input 
+                    value={formData.phone} 
+                    onChange={(e) => setFormData({ ...formData, phone: formatPhone(e.target.value) })}
+                    placeholder="(00) 00000-0000"
+                    maxLength={15}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>CPF/CNPJ</Label>
+                  <Input 
+                    value={formData.cpf_cnpj} 
+                    onChange={(e) => setFormData({ ...formData, cpf_cnpj: formatCpfCnpj(e.target.value) })}
+                    placeholder="000.000.000-00"
+                    maxLength={18}
+                  />
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Endereço */}
+            <TabsContent value="address" className="space-y-4 py-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>CEP</Label>
+                  <Input 
+                    value={formData.address_cep} 
+                    onChange={(e) => setFormData({ ...formData, address_cep: formatCep(e.target.value) })}
+                    placeholder="00000-000"
+                    maxLength={9}
+                  />
+                </div>
+                <div className="space-y-2 col-span-2">
+                  <Label>Rua</Label>
+                  <Input 
+                    value={formData.address_street} 
+                    onChange={(e) => setFormData({ ...formData, address_street: e.target.value })}
+                    placeholder="Nome da rua"
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-4 gap-4">
+                <div className="space-y-2">
+                  <Label>Número</Label>
+                  <Input 
+                    value={formData.address_number} 
+                    onChange={(e) => setFormData({ ...formData, address_number: e.target.value })}
+                    placeholder="123"
+                  />
+                </div>
+                <div className="space-y-2 col-span-3">
+                  <Label>Complemento</Label>
+                  <Input 
+                    value={formData.address_complement} 
+                    onChange={(e) => setFormData({ ...formData, address_complement: e.target.value })}
+                    placeholder="Apto, Sala, Bloco..."
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label>Bairro</Label>
+                  <Input 
+                    value={formData.address_neighborhood} 
+                    onChange={(e) => setFormData({ ...formData, address_neighborhood: e.target.value })}
+                    placeholder="Bairro"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Cidade</Label>
+                  <Input 
+                    value={formData.address_city} 
+                    onChange={(e) => setFormData({ ...formData, address_city: e.target.value })}
+                    placeholder="Cidade"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Estado</Label>
+                  <Select 
+                    value={formData.address_state} 
+                    onValueChange={(value) => setFormData({ ...formData, address_state: value })}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="UF" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {BRAZILIAN_STATES.map((state) => (
+                        <SelectItem key={state.value} value={state.value}>
+                          {state.label} ({state.value})
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </TabsContent>
+
+            {/* Permissões */}
+            <TabsContent value="permissions" className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Papel no Sistema</Label>
+                <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione o papel" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ROLE_OPTIONS.map(opt => (
+                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {formData.role === 'superadmin' && 'Acesso total ao sistema, incluindo todas as empresas.'}
+                  {formData.role === 'org_admin' && 'Gerencia usuários e configurações da própria empresa.'}
+                  {formData.role === 'manager' && 'Gerencia partidas, times e relatórios.'}
+                  {formData.role === 'uploader' && 'Pode fazer upload de vídeos e iniciar análises.'}
+                  {formData.role === 'viewer' && 'Apenas visualização de dados.'}
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label>Empresa</Label>
+                <Select 
+                  value={formData.organization_id || 'none'} 
+                  onValueChange={(value) => setFormData({ ...formData, organization_id: value === 'none' ? '' : value })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione uma empresa" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Sem empresa</SelectItem>
+                    {organizations.map(org => (
+                      <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </TabsContent>
+
+            {/* Créditos */}
+            <TabsContent value="credits" className="space-y-4 py-4">
+              <div className="rounded-lg border p-4 bg-muted/30">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Saldo Atual</p>
+                    <p className="text-3xl font-bold text-primary">{formData.credits_balance}</p>
+                    <p className="text-xs text-muted-foreground">créditos disponíveis</p>
+                  </div>
+                  <CreditCard className="h-12 w-12 text-muted-foreground/30" />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Ajustar Saldo</Label>
+                <Input 
+                  type="number"
+                  value={formData.credits_balance} 
+                  onChange={(e) => setFormData({ ...formData, credits_balance: parseInt(e.target.value) || 0 })}
+                  min={0}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Defina o novo saldo de créditos do usuário. Cada análise de partida consome 1 crédito.
+                </p>
+              </div>
+            </TabsContent>
+          </Tabs>
+
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingUser(null)}>Cancelar</Button>
-            <Button onClick={handleSave}>Salvar</Button>
+            <Button onClick={handleSave}>Salvar Alterações</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

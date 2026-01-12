@@ -6577,6 +6577,34 @@ def update_user_organization(user_id):
         session.close()
 
 
+@app.route('/api/admin/users/<user_id>/profile', methods=['PUT'])
+def update_user_profile(user_id):
+    """Update a user's profile data."""
+    session = get_session()
+    try:
+        data = request.get_json()
+        
+        profile = session.query(Profile).filter_by(user_id=user_id).first()
+        if not profile:
+            return jsonify({'error': 'User profile not found'}), 404
+        
+        # Update all profile fields
+        for key in ['display_name', 'phone', 'cpf_cnpj', 'address_cep', 'address_street',
+                    'address_number', 'address_complement', 'address_neighborhood',
+                    'address_city', 'address_state', 'credits_balance', 'credits_monthly_quota',
+                    'organization_id']:
+            if key in data:
+                setattr(profile, key, data[key])
+        
+        profile.updated_at = datetime.utcnow()
+        session.commit()
+        
+        return jsonify(profile.to_dict())
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
 # ============== Credit Transactions ==============
 @app.route('/api/admin/credit-transactions', methods=['GET'])
 def get_credit_transactions():

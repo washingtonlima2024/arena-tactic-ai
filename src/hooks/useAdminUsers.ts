@@ -6,6 +6,17 @@ interface AdminUser {
   user_id: string;
   email: string | null;
   display_name: string | null;
+  phone: string | null;
+  cpf_cnpj: string | null;
+  address_cep: string | null;
+  address_street: string | null;
+  address_number: string | null;
+  address_complement: string | null;
+  address_neighborhood: string | null;
+  address_city: string | null;
+  address_state: string | null;
+  credits_balance: number | null;
+  credits_monthly_quota: number | null;
   organization_id: string | null;
   role: string;
   created_at: string;
@@ -45,11 +56,22 @@ export function useAdminUsers() {
     },
   });
 
+  const updateProfileMutation = useMutation({
+    mutationFn: async ({ userId, data }: { userId: string; data: Partial<AdminUser> }) => {
+      return await apiClient.admin.updateUserProfile(userId, data);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+    },
+  });
+
   return {
     users,
     isLoading,
     updateUserRole: (userId: string, role: string) => updateRoleMutation.mutateAsync({ userId, role }),
     updateUserOrganization: (userId: string, organizationId: string | null) => 
       updateOrganizationMutation.mutateAsync({ userId, organizationId }),
+    updateUserProfile: (userId: string, data: Partial<AdminUser>) =>
+      updateProfileMutation.mutateAsync({ userId, data }),
   };
 }

@@ -1054,6 +1054,10 @@ export const apiClient = {
       method: 'PUT', 
       body: JSON.stringify({ organization_id: organizationId }) 
     }),
+    updateUserProfile: (userId: string, data: any) => apiRequest<any>(`/api/admin/users/${userId}/profile`, { 
+      method: 'PUT', 
+      body: JSON.stringify(data) 
+    }),
 
     // Credit Transactions
     getCreditTransactions: (limit?: number) => apiRequest<any[]>(`/api/admin/credit-transactions${limit ? `?limit=${limit}` : ''}`),
