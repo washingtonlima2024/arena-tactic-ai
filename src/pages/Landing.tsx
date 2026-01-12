@@ -100,17 +100,69 @@ export default function Landing() {
     setIsLoading(true);
 
     try {
+      // Tentar fazer login
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password,
       });
 
       if (error) {
-        // If user doesn't exist, suggest signup
+        // Se credenciais inválidas, tentar criar a conta automaticamente
         if (error.message.includes('Invalid login credentials')) {
-          toast.error('Credenciais inválidas', {
-            description: 'Verifique seu email e senha ou crie uma nova conta.',
+          toast.info('Criando conta...', {
+            description: 'Usuário não encontrado, criando automaticamente.',
           });
+
+          // Criar usuário
+          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+              emailRedirectTo: `${window.location.origin}/dashboard`,
+              data: {
+                display_name: email.split('@')[0],
+              }
+            }
+          });
+
+          if (signUpError) {
+            toast.error('Erro ao criar conta', {
+              description: signUpError.message,
+            });
+            return;
+          }
+
+          // Se criou com sucesso, tentar login novamente
+          if (signUpData.user) {
+            // Se não precisa confirmar email, já está logado
+            if (signUpData.session) {
+              toast.success('Conta criada com sucesso!', {
+                description: 'Bem-vindo ao Arena Play!',
+              });
+              navigate('/dashboard');
+              return;
+            }
+
+            // Se precisa confirmar email, fazer login direto
+            const { data: loginData, error: loginError } = await supabase.auth.signInWithPassword({
+              email,
+              password,
+            });
+
+            if (loginError) {
+              toast.warning('Conta criada!', {
+                description: 'Verifique seu email para confirmar a conta, ou aguarde alguns segundos e tente novamente.',
+              });
+              return;
+            }
+
+            if (loginData.user) {
+              toast.success('Bem-vindo ao Arena Play!', {
+                description: 'Conta criada e login realizado!',
+              });
+              navigate('/dashboard');
+            }
+          }
         } else {
           toast.error('Erro ao fazer login', {
             description: error.message,
