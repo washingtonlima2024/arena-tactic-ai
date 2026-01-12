@@ -57,7 +57,7 @@ const App = () => (
               <Routes>
                 <Route path="/" element={<Landing />} />
                 <Route path="/auth" element={<Auth />} />
-                <Route path="/dashboard" element={<RequireAuth><Index /></RequireAuth>} />
+                <Route path="/home" element={<RequireAuth><Index /></RequireAuth>} />
                 <Route path="/matches" element={<RequireAuth><Matches /></RequireAuth>} />
                 <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
                 <Route path="/live" element={<RequireAuth><Live /></RequireAuth>} />
