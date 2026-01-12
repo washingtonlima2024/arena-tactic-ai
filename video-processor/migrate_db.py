@@ -11,6 +11,7 @@ DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'arena_play.db')
 # Lista de migrações pendentes
 # Cada migração define uma coluna que deve existir em uma tabela
 MIGRATIONS = [
+    # Match events
     {
         'table': 'match_events',
         'column': 'clip_pending',
@@ -36,7 +37,114 @@ MIGRATIONS = [
         'type': 'TEXT',
         'default': "'[]'"
     },
+    # Profile - new fields for complete registration
+    {
+        'table': 'profiles',
+        'column': 'phone',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'profiles',
+        'column': 'cpf_cnpj',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'profiles',
+        'column': 'address_cep',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'profiles',
+        'column': 'address_street',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'profiles',
+        'column': 'address_number',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'profiles',
+        'column': 'address_complement',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'profiles',
+        'column': 'address_neighborhood',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'profiles',
+        'column': 'address_city',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'profiles',
+        'column': 'address_state',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'profiles',
+        'column': 'credits_balance',
+        'type': 'INTEGER',
+        'default': '0'
+    },
+    {
+        'table': 'profiles',
+        'column': 'organization_id',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
 ]
+
+
+def create_profiles_table():
+    """Create profiles table if it doesn't exist."""
+    if not os.path.exists(DATABASE_PATH):
+        return
+    
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS profiles (
+                id TEXT PRIMARY KEY,
+                user_id TEXT UNIQUE,
+                email TEXT,
+                display_name TEXT,
+                avatar_url TEXT,
+                phone TEXT,
+                cpf_cnpj TEXT,
+                address_cep TEXT,
+                address_street TEXT,
+                address_number TEXT,
+                address_complement TEXT,
+                address_neighborhood TEXT,
+                address_city TEXT,
+                address_state TEXT,
+                credits_balance INTEGER DEFAULT 0,
+                credits_monthly_quota INTEGER DEFAULT 10,
+                organization_id TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        conn.commit()
+        print("  ✓ Tabela profiles verificada/criada")
+    except Exception as e:
+        print(f"  ⚠ Erro ao criar profiles: {e}")
+    finally:
+        conn.close()
 
 
 def create_transcription_jobs_table():
@@ -78,6 +186,7 @@ def create_transcription_jobs_table():
 
 
 # Execute table creation on import
+create_profiles_table()
 create_transcription_jobs_table()
 
 
