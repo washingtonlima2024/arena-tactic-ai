@@ -192,10 +192,10 @@ export default function Analysis() {
     selectedMatch?.away_team?.name
   );
 
-  // Get important events (goals, shots, key moments, tactical events)
+  // Get important events (goals, shots, key moments, tactical events) - excluding cards to avoid repetition
   const importantEvents = events.filter(e => 
     ['goal', 'shot', 'shot_on_target', 'penalty', 'corner', 'foul', 'free_kick', 'cross', 
-     'save', 'offside', 'yellow_card', 'red_card', 'high_press', 'transition', 'ball_recovery'].includes(e.event_type)
+     'save', 'offside', 'high_press', 'transition', 'ball_recovery'].includes(e.event_type)
   ).slice(0, 10);
 
   const handlePlayVideo = (eventId: string) => {
