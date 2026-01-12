@@ -167,9 +167,15 @@ export default function Audio() {
     );
   };
 
-  const handlePlayPodcast = (podcastType: PodcastType) => {
+  const handlePlayPodcast = async (podcastType: PodcastType) => {
     const podcast = podcasts[podcastType];
-    if (!podcast?.audioUrl) return;
+    
+    console.log('handlePlayPodcast called:', { podcastType, podcast, audioUrl: podcast?.audioUrl });
+    
+    if (!podcast?.audioUrl) {
+      console.error('No audio URL for podcast:', podcastType);
+      return;
+    }
 
     // Stop any currently playing podcast
     if (podcastAudioRef.current) {
@@ -182,12 +188,33 @@ export default function Audio() {
       return;
     }
 
-    const audio = document.createElement('audio') as HTMLAudioElement;
-    audio.src = podcast.audioUrl;
-    audio.addEventListener('ended', () => setPlayingPodcast(null));
-    audio.play();
-    podcastAudioRef.current = audio;
-    setPlayingPodcast(podcastType);
+    try {
+      const audio = document.createElement('audio') as HTMLAudioElement;
+      audio.src = podcast.audioUrl;
+      
+      audio.addEventListener('ended', () => {
+        console.log('Podcast audio ended');
+        setPlayingPodcast(null);
+      });
+      
+      audio.addEventListener('error', (e) => {
+        console.error('Audio playback error:', e, audio.error);
+        setPlayingPodcast(null);
+      });
+      
+      audio.addEventListener('canplaythrough', () => {
+        console.log('Audio can play through');
+      });
+
+      podcastAudioRef.current = audio;
+      setPlayingPodcast(podcastType);
+      
+      await audio.play();
+      console.log('Audio playback started successfully');
+    } catch (error) {
+      console.error('Error playing podcast:', error);
+      setPlayingPodcast(null);
+    }
   };
 
   const handleDownloadPodcast = (podcastType: PodcastType) => {
