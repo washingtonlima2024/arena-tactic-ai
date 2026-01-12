@@ -198,10 +198,28 @@ export default function Media() {
     const eventVideo = findVideoForEvent(event.minute, matchHalf, matchVideos);
     const canExtract = !!eventVideo;
     
-    // Calculate video-relative timestamp
-    const videoRelativeSeconds = eventVideo 
-      ? totalSeconds - ((eventVideo.start_minute ?? 0) * 60)
-      : totalSeconds;
+    // Check if video is a short clip (< 15 min)
+    const isClipVideo = eventVideo && (
+      eventVideo.video_type === 'clip' || 
+      (eventVideo.duration_seconds && eventVideo.duration_seconds < 900) // < 15 min
+    );
+    
+    // Calculate video-relative timestamp based on video type
+    let videoRelativeSeconds: number;
+    if (isClipVideo) {
+      // For short clips, use videoSecond directly if available, otherwise totalSeconds
+      // Don't subtract start_minute because clip videos start from 0
+      videoRelativeSeconds = videoSecond ?? totalSeconds;
+      // Ensure we don't exceed video duration
+      if (eventVideo.duration_seconds) {
+        videoRelativeSeconds = Math.min(videoRelativeSeconds, eventVideo.duration_seconds - 5);
+      }
+    } else {
+      // For full/half videos, calculate relative to video start
+      videoRelativeSeconds = eventVideo 
+        ? Math.max(0, totalSeconds - ((eventVideo.start_minute ?? 0) * 60))
+        : totalSeconds;
+    }
     
     return {
       id: event.id,
@@ -219,10 +237,11 @@ export default function Media() {
       matchHalf,
       canExtract, // Flag: can this clip be extracted?
       eventVideo, // The video to use for extraction
-      videoRelativeSeconds, // Timestamp relative to video start
+      videoRelativeSeconds, // Timestamp relative to video start (adjusted for clip videos)
       isManual: source === 'manual' || source === 'live-manual',
       clipPending: (event as any).clip_pending === true,
-      metadata: metadata
+      metadata: metadata,
+      isClipVideo // Flag to indicate short video
     };
   }) || [];
   
