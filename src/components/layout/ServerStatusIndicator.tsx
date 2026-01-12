@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Server, Settings, AlertTriangle, Link2, Copy } from 'lucide-react';
+import { Server, Settings, AlertTriangle, Link2, Copy, RefreshCw } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { checkLocalServerAvailable, hasServerUrlConfigured, getApiBase } from '@/lib/apiMode';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -16,10 +16,19 @@ interface ServerStatusIndicatorProps {
   collapsed?: boolean;
 }
 
-type ConnectionStatus = 'checking' | 'online' | 'offline' | 'not-configured';
+type ConnectionStatus = 'checking' | 'online' | 'offline' | 'not-configured' | 'outdated';
+
+interface ServerHealth {
+  version?: string;
+  build_date?: string;
+  functions_loaded?: boolean;
+  warning?: string;
+  critical_functions?: Record<string, boolean>;
+}
 
 export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps) {
   const [status, setStatus] = useState<ConnectionStatus>('checking');
+  const [serverHealth, setServerHealth] = useState<ServerHealth | null>(null);
   const [showQuickConfig, setShowQuickConfig] = useState(false);
   const [tunnelUrl, setTunnelUrl] = useState('');
   const navigate = useNavigate();
@@ -33,8 +42,27 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
         return;
       }
       
-      const available = await checkLocalServerAvailable();
-      setStatus(available ? 'online' : 'offline');
+      try {
+        const response = await fetch(`${getApiBase()}/health`, {
+          headers: { 'ngrok-skip-browser-warning': 'true' }
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setServerHealth(data);
+          
+          // Verificar se funções críticas estão carregadas
+          if (data.functions_loaded === false) {
+            setStatus('outdated');
+          } else {
+            setStatus('online');
+          }
+        } else {
+          setStatus('offline');
+        }
+      } catch {
+        setStatus('offline');
+      }
     };
 
     checkStatus();
@@ -84,8 +112,10 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
         return {
           color: 'bg-green-500',
           textColor: 'text-green-500',
-          label: 'Online',
-          tooltip: 'Servidor Python online',
+          label: serverHealth?.version ? `v${serverHealth.version}` : 'Online',
+          tooltip: serverHealth?.version 
+            ? `Servidor Python v${serverHealth.version} (${serverHealth.build_date})` 
+            : 'Servidor Python online',
           icon: Server,
           iconColor: 'text-primary',
           animate: false,
@@ -101,6 +131,17 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           iconColor: 'text-muted-foreground',
           animate: false,
           clickable: false
+        };
+      case 'outdated':
+        return {
+          color: 'bg-orange-500',
+          textColor: 'text-orange-500',
+          label: 'Desatualizado',
+          tooltip: serverHealth?.warning || 'Servidor precisa ser reiniciado para carregar novas funções',
+          icon: RefreshCw,
+          iconColor: 'text-orange-500',
+          animate: true,
+          clickable: true
         };
       case 'not-configured':
         return {
@@ -165,6 +206,18 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
       } else {
         setShowQuickConfig(true);
       }
+    } else if (status === 'outdated') {
+      // Mostrar toast com instruções para reiniciar
+      const missingFns = serverHealth?.critical_functions 
+        ? Object.entries(serverHealth.critical_functions)
+            .filter(([_, loaded]) => !loaded)
+            .map(([name]) => name)
+        : [];
+      
+      toast.error('Servidor Desatualizado', {
+        description: `Funções não carregadas: ${missingFns.join(', ')}. Reinicie o servidor Python (Ctrl+C e python server.py).`,
+        duration: 10000,
+      });
     }
   };
 

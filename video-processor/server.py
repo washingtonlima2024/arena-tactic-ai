@@ -3,6 +3,10 @@ Arena Play - Servidor API Local Completo
 Servidor Flask com SQLite para toda a funcionalidade do Arena Play.
 """
 
+# Versão do servidor - incrementar quando funções críticas são adicionadas
+SERVER_VERSION = "2.1.0"
+SERVER_BUILD_DATE = "2026-01-12"
+
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS
 import subprocess
@@ -739,9 +743,23 @@ def health_check():
     except:
         ffmpeg_ok = False
     
+    # Verificar funções críticas carregadas
+    critical_functions = {
+        '_transcribe_with_gemini': hasattr(ai_services, '_transcribe_with_gemini'),
+        'transcribe_large_video': hasattr(ai_services, 'transcribe_large_video'),
+        'analyze_match_events': hasattr(ai_services, 'analyze_match_events'),
+        'generate_event_clips': hasattr(ai_services, 'generate_event_clips'),
+    }
+    
+    all_functions_loaded = all(critical_functions.values())
+    
     response_data = {
         'status': 'ok',
+        'version': SERVER_VERSION,
+        'build_date': SERVER_BUILD_DATE,
         'ffmpeg': ffmpeg_ok,
+        'functions_loaded': all_functions_loaded,
+        'critical_functions': critical_functions,
         'paths': {
             'base_dir': get_base_dir(),
             'database': get_database_path(),
@@ -757,6 +775,11 @@ def health_check():
             'ollama': ai_services.OLLAMA_ENABLED
         }
     }
+    
+    # Aviso se servidor desatualizado
+    if not all_functions_loaded:
+        missing = [k for k, v in critical_functions.items() if not v]
+        response_data['warning'] = f"Servidor desatualizado! Funções não carregadas: {', '.join(missing)}. Reinicie o servidor."
     
     # Só inclui estatísticas completas do storage se não for modo light
     if not light_mode:
