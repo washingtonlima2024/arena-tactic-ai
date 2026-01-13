@@ -38,7 +38,9 @@ import {
   StopCircle,
   Radio,
   Cog,
-  AlertCircle
+  AlertCircle,
+  CloudOff,
+  Cloud
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -194,7 +196,7 @@ const EventRow = ({
 export default function Events() {
   const { isAdmin } = useAuth();
   const queryClient = useQueryClient();
-  const { analyzeWithTranscription, isAnalyzing: isRefining } = useMatchAnalysis();
+  const { analyzeWithTranscription, isAnalyzing: isRefining, ensureMatchSynced } = useMatchAnalysis();
   const { 
     isGenerating, 
     progress: clipProgress, 
@@ -220,6 +222,8 @@ export default function Events() {
   const [isProcessingMatch, setIsProcessingMatch] = useState(false);
   const [processingStep, setProcessingStep] = useState<string>('');
   const [isRegeneratingClips, setIsRegeneratingClips] = useState(false);
+  const [isSyncingMatch, setIsSyncingMatch] = useState(false);
+  const [matchSyncStatus, setMatchSyncStatus] = useState<'unknown' | 'synced' | 'local_only' | 'error'>('unknown');
   
   const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useMatchEvents(currentMatchId);
 
@@ -261,6 +265,31 @@ export default function Events() {
     } catch (error) {
       console.error('Erro ao limpar eventos:', error);
       toast.error('Erro ao limpar eventos');
+    }
+  };
+
+  // Handle manual sync to Cloud
+  const handleSyncToCloud = async () => {
+    if (!currentMatchId) return;
+    
+    setIsSyncingMatch(true);
+    try {
+      const result = await ensureMatchSynced(currentMatchId);
+      if (result) {
+        setMatchSyncStatus('synced');
+        toast.success('Partida sincronizada com Cloud!');
+        // Refetch para pegar dados do Cloud
+        refetchEvents();
+        queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
+      } else {
+        setMatchSyncStatus('error');
+        toast.error('Falha ao sincronizar com Cloud');
+      }
+    } catch (error: any) {
+      setMatchSyncStatus('error');
+      toast.error(`Erro de sincronização: ${error.message || 'Erro desconhecido'}`);
+    } finally {
+      setIsSyncingMatch(false);
     }
   };
 
@@ -883,6 +912,29 @@ export default function Events() {
         {/* Action Buttons - Clean and organized */}
         {isAdmin && currentMatchId && (
           <div className="flex flex-wrap items-center gap-2">
+            {/* Sync Status Indicator & Button */}
+            {matchSyncStatus === 'local_only' || matchSyncStatus === 'error' ? (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={handleSyncToCloud}
+                disabled={isSyncingMatch}
+                className="border-yellow-500/50 text-yellow-600 hover:bg-yellow-500/10"
+              >
+                {isSyncingMatch ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CloudOff className="mr-2 h-4 w-4" />
+                )}
+                Sincronizar Cloud
+              </Button>
+            ) : matchSyncStatus === 'synced' ? (
+              <Badge variant="outline" className="border-green-500/30 text-green-600 gap-1">
+                <Cloud className="h-3 w-3" />
+                Sincronizado
+              </Badge>
+            ) : null}
+
             {/* Process Match Button - only when no events */}
             {events.length === 0 && matchVideos && matchVideos.length > 0 && (
               <Button 

@@ -326,6 +326,20 @@ export const apiClient = {
   createMatch: (match: any) => apiRequest<any>('/api/matches', { method: 'POST', body: JSON.stringify(match) }),
   updateMatch: (id: string, match: any) => apiRequest<any>(`/api/matches/${id}`, { method: 'PUT', body: JSON.stringify(match) }),
   deleteMatch: (id: string) => apiRequest<any>(`/api/matches/${id}`, { method: 'DELETE' }),
+  
+  // Garante que a partida existe no Supabase Cloud (sincroniza do SQLite se necessário)
+  ensureMatchInSupabase: async (matchId: string): Promise<{ success: boolean; synced: boolean; message: string }> => {
+    try {
+      const result = await apiRequest<{ success: boolean; synced: boolean; message: string }>(
+        `/api/matches/${matchId}/ensure-supabase`,
+        { method: 'POST' }
+      );
+      return result;
+    } catch (error: any) {
+      console.error('[API] Erro ao sincronizar partida com Supabase:', error);
+      return { success: false, synced: false, message: error.message || 'Erro ao sincronizar' };
+    }
+  },
 
   // ============== Events ==============
   getMatchEvents: (matchId: string) => apiRequest<any[]>(`/api/matches/${matchId}/events`),
