@@ -2480,6 +2480,20 @@ def get_thumbnails():
         if match_id:
             query = query.filter_by(match_id=match_id)
         thumbnails = query.order_by(Thumbnail.created_at.desc()).all()
+        
+        # Log para diagnóstico
+        if match_id:
+            print(f"[THUMBNAILS] GET match_id={match_id}: {len(thumbnails)} encontradas")
+            if len(thumbnails) == 0:
+                # Verificar se existem eventos com clips para esta partida
+                events_with_clips = session.query(MatchEvent).filter(
+                    MatchEvent.match_id == match_id,
+                    MatchEvent.clip_url.isnot(None)
+                ).count()
+                print(f"[THUMBNAILS] ⚠ Nenhuma thumbnail, mas {events_with_clips} eventos têm clips")
+        else:
+            print(f"[THUMBNAILS] GET all: {len(thumbnails)} encontradas")
+        
         return jsonify([t.to_dict() for t in thumbnails])
     finally:
         session.close()
@@ -2504,6 +2518,129 @@ def create_thumbnail():
     except Exception as e:
         session.rollback()
         return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+@app.route('/api/matches/<match_id>/regenerate-thumbnails', methods=['POST'])
+def regenerate_match_thumbnails(match_id):
+    """
+    Regenera thumbnails para todos os eventos de uma partida que têm clips.
+    Útil quando thumbnails não foram geradas automaticamente.
+    """
+    print(f"\n[REGEN-THUMBNAILS] Iniciando para partida {match_id}")
+    
+    session = get_session()
+    try:
+        # Buscar todos os eventos com clip_url
+        events = session.query(MatchEvent).filter(
+            MatchEvent.match_id == match_id,
+            MatchEvent.clip_url.isnot(None),
+            MatchEvent.clip_url != ''
+        ).all()
+        
+        if not events:
+            return jsonify({
+                'success': False,
+                'message': 'Nenhum evento com clip encontrado',
+                'events_count': 0
+            })
+        
+        print(f"[REGEN-THUMBNAILS] Encontrados {len(events)} eventos com clips")
+        
+        generated = 0
+        errors = 0
+        results = []
+        
+        for event in events:
+            try:
+                clip_url = event.clip_url
+                
+                # Converter URL para path local
+                if '/api/storage/' in clip_url:
+                    relative_path = clip_url.split('/api/storage/')[-1]
+                    parts = relative_path.strip('/').split('/')
+                    if len(parts) >= 3:
+                        local_match_id = parts[0]
+                        subfolder = parts[1]
+                        filename = '/'.join(parts[2:])
+                        clip_path = get_file_path(local_match_id, subfolder, filename)
+                        
+                        if clip_path and os.path.exists(clip_path):
+                            thumb_url = generate_thumbnail_from_clip(
+                                clip_path=clip_path,
+                                match_id=match_id,
+                                event_id=event.id,
+                                event_type=event.event_type,
+                                minute=event.minute or 0
+                            )
+                            
+                            if thumb_url:
+                                generated += 1
+                                results.append({
+                                    'event_id': event.id,
+                                    'event_type': event.event_type,
+                                    'minute': event.minute,
+                                    'thumbnail_url': thumb_url,
+                                    'status': 'success'
+                                })
+                            else:
+                                errors += 1
+                                results.append({
+                                    'event_id': event.id,
+                                    'event_type': event.event_type,
+                                    'minute': event.minute,
+                                    'status': 'failed',
+                                    'error': 'FFmpeg failed to extract frame'
+                                })
+                        else:
+                            errors += 1
+                            results.append({
+                                'event_id': event.id,
+                                'event_type': event.event_type,
+                                'minute': event.minute,
+                                'status': 'failed',
+                                'error': f'Clip not found: {clip_path}'
+                            })
+                    else:
+                        errors += 1
+                        results.append({
+                            'event_id': event.id,
+                            'status': 'failed',
+                            'error': 'Invalid clip URL format'
+                        })
+                else:
+                    errors += 1
+                    results.append({
+                        'event_id': event.id,
+                        'status': 'skipped',
+                        'error': 'Non-local clip URL'
+                    })
+                    
+            except Exception as e:
+                errors += 1
+                results.append({
+                    'event_id': event.id,
+                    'status': 'error',
+                    'error': str(e)
+                })
+        
+        print(f"[REGEN-THUMBNAILS] Concluído: {generated} geradas, {errors} erros")
+        
+        return jsonify({
+            'success': True,
+            'message': f'{generated} thumbnails geradas, {errors} erros',
+            'generated': generated,
+            'errors': errors,
+            'total_events': len(events),
+            'results': results
+        })
+        
+    except Exception as e:
+        print(f"[REGEN-THUMBNAILS] Erro: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
     finally:
         session.close()
 
@@ -3183,6 +3320,8 @@ def generate_thumbnail_from_clip(
     Returns:
         URL of the generated thumbnail or None
     """
+    print(f"[THUMBNAIL] Iniciando geração - clip: {clip_path}, match: {match_id}, event_id: {event_id}, type: {event_type}, min: {minute}")
+    
     try:
         if not os.path.exists(clip_path):
             print(f"[THUMBNAIL] ⚠ Clip não existe: {clip_path}")
@@ -3192,6 +3331,9 @@ def generate_thumbnail_from_clip(
         clip_duration = get_video_duration_seconds(clip_path)
         if clip_duration <= 0:
             clip_duration = 5.0  # Default to 5 seconds
+            print(f"[THUMBNAIL] Usando duração padrão: {clip_duration}s")
+        else:
+            print(f"[THUMBNAIL] Duração do clip: {clip_duration}s")
         
         # Extract frame at the middle of the clip (where the event likely is)
         # For a 10s clip, extract at 5s mark
@@ -3206,6 +3348,7 @@ def generate_thumbnail_from_clip(
         # Get images folder path
         images_folder = get_subfolder_path(match_id, 'images')
         thumb_path = str(images_folder / thumb_filename)
+        print(f"[THUMBNAIL] Salvando em: {thumb_path}")
         
         # Extract frame using FFmpeg
         cmd = [
@@ -3218,10 +3361,13 @@ def generate_thumbnail_from_clip(
             thumb_path
         ]
         
+        print(f"[THUMBNAIL] Executando FFmpeg: {' '.join(cmd[:6])}...")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         
         if result.returncode == 0 and os.path.exists(thumb_path):
             thumb_size = os.path.getsize(thumb_path)
+            print(f"[THUMBNAIL] Arquivo gerado: {thumb_size/1024:.1f}KB")
+            
             if thumb_size > 1000:  # At least 1KB
                 thumb_url = f"http://localhost:5000/api/storage/{match_id}/images/{thumb_filename}"
                 
@@ -3229,30 +3375,53 @@ def generate_thumbnail_from_clip(
                 if event_id:
                     try:
                         session = get_session()
-                        thumbnail = Thumbnail(
-                            match_id=match_id,
-                            event_id=event_id,
-                            event_type=event_type,
-                            image_url=thumb_url,
-                            title=f"{event_type} - {minute}'"
-                        )
-                        session.add(thumbnail)
+                        
+                        # Verificar se já existe thumbnail para este evento
+                        existing = session.query(Thumbnail).filter_by(event_id=event_id).first()
+                        if existing:
+                            print(f"[THUMBNAIL] Atualizando thumbnail existente para evento {event_id}")
+                            existing.image_url = thumb_url
+                            existing.event_type = event_type
+                            existing.title = f"{event_type} - {minute}'"
+                        else:
+                            print(f"[THUMBNAIL] Criando novo thumbnail para evento {event_id}")
+                            thumbnail = Thumbnail(
+                                match_id=match_id,
+                                event_id=event_id,
+                                event_type=event_type,
+                                image_url=thumb_url,
+                                title=f"{event_type} - {minute}'"
+                            )
+                            session.add(thumbnail)
+                        
                         session.commit()
+                        print(f"[THUMBNAIL] ✓ Salvo no banco: {thumb_url}")
                         session.close()
                     except Exception as db_err:
                         print(f"[THUMBNAIL] ⚠ Erro ao salvar no banco: {db_err}")
+                        import traceback
+                        traceback.print_exc()
+                else:
+                    print(f"[THUMBNAIL] ⚠ event_id não fornecido, thumbnail não salvo no banco")
                 
+                print(f"[THUMBNAIL] ✓ Gerada com sucesso: {thumb_url}")
                 return thumb_url
             else:
                 print(f"[THUMBNAIL] ⚠ Thumbnail muito pequena ({thumb_size} bytes), removendo")
                 os.remove(thumb_path)
         else:
-            print(f"[THUMBNAIL] ⚠ FFmpeg falhou: {result.stderr[:200] if result.stderr else 'Unknown error'}")
+            stderr_msg = result.stderr[:300] if result.stderr else 'Unknown error'
+            print(f"[THUMBNAIL] ⚠ FFmpeg falhou (code {result.returncode}): {stderr_msg}")
         
         return None
         
+    except subprocess.TimeoutExpired:
+        print(f"[THUMBNAIL] ⚠ Timeout ao gerar thumbnail")
+        return None
     except Exception as e:
         print(f"[THUMBNAIL] Erro: {e}")
+        import traceback
+        traceback.print_exc()
         return None
 
 

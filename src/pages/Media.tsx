@@ -488,6 +488,47 @@ export default function Media() {
                 )}
               </div>
               <div className="flex gap-2">
+                {/* Regenerate thumbnails button */}
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={async () => {
+                    if (!matchId) return;
+                    toast({ title: "Regenerando capas...", description: "Aguarde o processamento" });
+                    try {
+                      const result = await apiClient.regenerateThumbnails(matchId);
+                      if (result.generated > 0) {
+                        toast({ 
+                          title: "Capas regeneradas", 
+                          description: `${result.generated} capa(s) gerada(s)${result.errors > 0 ? `, ${result.errors} erro(s)` : ''}` 
+                        });
+                        // Reload thumbnails
+                        queryClient.invalidateQueries({ queryKey: ['thumbnails', matchId] });
+                      } else if (result.errors > 0) {
+                        toast({ 
+                          title: "Falha ao gerar capas", 
+                          description: `${result.errors} erro(s) - verifique se os clips existem`, 
+                          variant: "destructive" 
+                        });
+                      } else {
+                        toast({ 
+                          title: "Nenhum clip para gerar capas", 
+                          description: "Extraia os clips primeiro" 
+                        });
+                      }
+                    } catch (error) {
+                      toast({ 
+                        title: "Erro ao regenerar capas", 
+                        description: String(error), 
+                        variant: "destructive" 
+                      });
+                    }
+                  }}
+                >
+                  <Image className="h-3 w-3 mr-1" />
+                  Regenerar Capas
+                </Button>
+
                 {/* Sync videos button */}
                 <Button 
                   variant="outline" 

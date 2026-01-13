@@ -397,6 +397,21 @@ export const apiClient = {
   // ============== Thumbnails ==============
   getThumbnails: (matchId?: string) => apiRequest<any[]>(`/api/thumbnails${matchId ? `?match_id=${matchId}` : ''}`),
   createThumbnail: (thumbnail: any) => apiRequest<any>('/api/thumbnails', { method: 'POST', body: JSON.stringify(thumbnail) }),
+  regenerateThumbnails: (matchId: string) => apiRequest<{
+    success: boolean;
+    message: string;
+    generated: number;
+    errors: number;
+    total_events: number;
+    results: Array<{
+      event_id: string;
+      event_type?: string;
+      minute?: number;
+      thumbnail_url?: string;
+      status: string;
+      error?: string;
+    }>;
+  }>(`/api/matches/${matchId}/regenerate-thumbnails`, { method: 'POST' }),
 
   // ============== Settings ==============
   getSettings: () => apiRequest<any[]>('/api/settings'),
