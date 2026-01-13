@@ -67,10 +67,26 @@ export function ReprocessOptionsDialog({
   const [selectedTab, setSelectedTab] = useState('existing');
   const [activeHalf, setActiveHalf] = useState<'first' | 'second' | 'full'>('full');
 
-  // Load existing transcriptions when dialog opens
+  // CRITICAL: Reset ALL state when dialog opens or match changes to prevent data contamination
   useEffect(() => {
-    if (open && match?.id) {
-      loadExistingTranscriptions();
+    if (open) {
+      console.log('[ReprocessOptions] Dialog aberto - resetando estados para match:', match?.id);
+      console.log('[ReprocessOptions] Match:', match?.home_team?.name, 'vs', match?.away_team?.name);
+      
+      // Reset manual text fields - CRITICAL to prevent data contamination between matches
+      setManualText({ first: '', second: '', full: '' });
+      
+      // Reset other options to defaults
+      setUseExisting({ first: true, second: true });
+      setSelectedTab('existing');
+      setActiveHalf('full');
+      setExistingTranscriptions(null);
+      setIsLoading(true);
+      
+      // Then load existing transcriptions for the NEW match
+      if (match?.id) {
+        loadExistingTranscriptions();
+      }
     }
   }, [open, match?.id]);
 

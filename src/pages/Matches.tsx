@@ -351,6 +351,63 @@ export default function Matches() {
           console.log(`[Reprocess] ✓ Usando transcrição EXISTENTE para ${halfLabel}`);
         }
         
+        // ═══════════════════════════════════════════════════════════════
+        // VALIDAÇÃO DE INTEGRIDADE: Verificar se transcrição pertence a esta partida
+        // ═══════════════════════════════════════════════════════════════
+        if (transcriptionText) {
+          const homeTeamName = matchToReprocess.home_team?.name || '';
+          const awayTeamName = matchToReprocess.away_team?.name || '';
+          
+          console.log('[Reprocess] ========================================');
+          console.log('[Reprocess] VALIDAÇÃO DE INTEGRIDADE DA TRANSCRIÇÃO');
+          console.log('[Reprocess] Time Casa:', homeTeamName);
+          console.log('[Reprocess] Time Visitante:', awayTeamName);
+          console.log('[Reprocess] Fonte:', options.manualTranscription[halfKey as 'first' | 'second'] ? 'MANUAL específico' : 
+                      options.manualTranscription.full ? 'MANUAL (full)' : 'EXISTENTE');
+          console.log('[Reprocess] Preview (100 chars):', transcriptionText.substring(0, 100));
+          
+          // Verificar se a transcrição menciona pelo menos um dos times
+          const lowerText = transcriptionText.toLowerCase();
+          const homeWords = homeTeamName.toLowerCase().split(' ').filter(w => w.length > 3);
+          const awayWords = awayTeamName.toLowerCase().split(' ').filter(w => w.length > 3);
+          
+          const hasHomeTeam = homeWords.some(word => lowerText.includes(word));
+          const hasAwayTeam = awayWords.some(word => lowerText.includes(word));
+          
+          console.log('[Reprocess] Palavras buscadas (casa):', homeWords.join(', '));
+          console.log('[Reprocess] Palavras buscadas (visitante):', awayWords.join(', '));
+          console.log('[Reprocess] Encontrou time da casa:', hasHomeTeam);
+          console.log('[Reprocess] Encontrou time visitante:', hasAwayTeam);
+          
+          if (!hasHomeTeam && !hasAwayTeam && (homeWords.length > 0 || awayWords.length > 0)) {
+            console.warn('[Reprocess] ⚠️ ALERTA: Transcrição não menciona nenhum dos times!');
+            console.log('[Reprocess] ========================================');
+            
+            const confirmContinue = window.confirm(
+              `⚠️ ATENÇÃO: A transcrição não parece mencionar os times desta partida:\n\n` +
+              `Partida: ${homeTeamName} vs ${awayTeamName}\n\n` +
+              `Isso pode indicar que você está usando a transcrição de outro jogo.\n\n` +
+              `Deseja continuar mesmo assim?`
+            );
+            
+            if (!confirmContinue) {
+              console.warn('[Reprocess] Transcrição rejeitada pelo usuário - possível contaminação');
+              toast({
+                title: "Operação cancelada",
+                description: "Transcrição rejeitada - verifique se está usando o arquivo correto.",
+                variant: "destructive"
+              });
+              setIsReprocessing(false);
+              setReprocessProgress({ stage: '', progress: 0 });
+              return;
+            }
+            console.log('[Reprocess] Usuário confirmou continuar apesar do alerta');
+          } else {
+            console.log('[Reprocess] ✓ Validação OK - transcrição parece pertencer a esta partida');
+          }
+          console.log('[Reprocess] ========================================');
+        }
+        
         // Se não tem transcrição, precisa transcrever
         if (!transcriptionText) {
           setReprocessProgress({ 
