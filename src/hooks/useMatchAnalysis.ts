@@ -34,27 +34,35 @@ export function useMatchAnalysis() {
   // Garante que a partida existe no Supabase antes de análise
   const ensureMatchSynced = useCallback(async (matchId: string): Promise<boolean> => {
     try {
-      console.log('[useMatchAnalysis] Verificando sync da partida:', matchId);
+      console.log('[SYNC] ========================================');
+      console.log('[SYNC] Iniciando sincronização da partida:', matchId);
+      console.log('[SYNC] ========================================');
       
-      // Tenta sync via servidor Python primeiro
+      // Etapa 1: Tenta sync via servidor Python primeiro
+      console.log('[SYNC] Etapa 1: Tentando sync via servidor Python...');
       const result = await apiClient.ensureMatchInSupabase(matchId);
+      console.log('[SYNC] Resposta do servidor:', JSON.stringify(result, null, 2));
       
       if (result.success) {
         if (result.synced) {
-          console.log('[useMatchAnalysis] ✓ Partida sincronizada com sucesso via servidor');
+          console.log('[SYNC] ✓ Partida sincronizada com sucesso via servidor Python');
         } else {
-          console.log('[useMatchAnalysis] ✓ Partida já estava sincronizada');
+          console.log('[SYNC] ✓ Partida já estava sincronizada no Cloud');
         }
         return true;
       }
       
       // Se servidor Python falhar, tenta criar diretamente no Supabase
-      console.warn('[useMatchAnalysis] Servidor Python falhou, tentando sync direto...');
+      console.warn('[SYNC] ⚠ Servidor Python falhou:', result.message || 'Sem detalhes');
+      console.log('[SYNC] Etapa 2: Tentando sync direto via Supabase client...');
       
       // Buscar dados da partida do servidor local
+      console.log('[SYNC] Etapa 2.1: Buscando dados da partida no servidor local...');
       const matchData = await apiClient.get(`/api/matches/${matchId}`);
+      console.log('[SYNC] Dados da partida:', matchData ? 'OK' : 'NÃO ENCONTRADA');
+      
       if (!matchData) {
-        console.error('[useMatchAnalysis] Partida não encontrada no servidor local');
+        console.error('[SYNC] ✗ Partida não encontrada no servidor local');
         return false;
       }
       
@@ -64,11 +72,15 @@ export function useMatchAnalysis() {
       // Primeiro, garantir que os times existam no Supabase
       const homeTeamId = matchData.home_team_id;
       const awayTeamId = matchData.away_team_id;
+      console.log('[SYNC] IDs dos times - Casa:', homeTeamId, '| Visitante:', awayTeamId);
       
+      // Etapa 2.2: Sincronizar time da casa
       if (homeTeamId) {
+        console.log('[SYNC] Etapa 2.2: Buscando dados do time da casa...');
         const homeTeamData = await apiClient.get(`/api/teams/${homeTeamId}`);
         if (homeTeamData) {
-          await supabase.from('teams').upsert({
+          console.log('[SYNC] Upserting time da casa:', homeTeamData.name);
+          const { error: homeError } = await supabase.from('teams').upsert({
             id: homeTeamId,
             name: homeTeamData.name,
             short_name: homeTeamData.short_name,
@@ -76,13 +88,23 @@ export function useMatchAnalysis() {
             primary_color: homeTeamData.primary_color,
             secondary_color: homeTeamData.secondary_color
           }, { onConflict: 'id' });
+          if (homeError) {
+            console.error('[SYNC] ⚠ Erro ao upsert time da casa:', homeError);
+          } else {
+            console.log('[SYNC] ✓ Time da casa sincronizado');
+          }
+        } else {
+          console.warn('[SYNC] ⚠ Time da casa não encontrado no servidor local');
         }
       }
       
+      // Etapa 2.3: Sincronizar time visitante
       if (awayTeamId && awayTeamId !== homeTeamId) {
+        console.log('[SYNC] Etapa 2.3: Buscando dados do time visitante...');
         const awayTeamData = await apiClient.get(`/api/teams/${awayTeamId}`);
         if (awayTeamData) {
-          await supabase.from('teams').upsert({
+          console.log('[SYNC] Upserting time visitante:', awayTeamData.name);
+          const { error: awayError } = await supabase.from('teams').upsert({
             id: awayTeamId,
             name: awayTeamData.name,
             short_name: awayTeamData.short_name,
@@ -90,11 +112,19 @@ export function useMatchAnalysis() {
             primary_color: awayTeamData.primary_color,
             secondary_color: awayTeamData.secondary_color
           }, { onConflict: 'id' });
+          if (awayError) {
+            console.error('[SYNC] ⚠ Erro ao upsert time visitante:', awayError);
+          } else {
+            console.log('[SYNC] ✓ Time visitante sincronizado');
+          }
+        } else {
+          console.warn('[SYNC] ⚠ Time visitante não encontrado no servidor local');
         }
       }
       
-      // Agora criar a partida
-      const { error } = await supabase.from('matches').upsert({
+      // Etapa 2.4: Sincronizar a partida
+      console.log('[SYNC] Etapa 2.4: Upserting partida no Supabase...');
+      const matchUpsertData = {
         id: matchId,
         home_team_id: homeTeamId || null,
         away_team_id: awayTeamId || null,
@@ -104,17 +134,23 @@ export function useMatchAnalysis() {
         competition: matchData.competition || null,
         venue: matchData.venue || null,
         status: matchData.status || 'pending'
-      }, { onConflict: 'id' });
+      };
+      console.log('[SYNC] Dados para upsert:', JSON.stringify(matchUpsertData, null, 2));
+      
+      const { error } = await supabase.from('matches').upsert(matchUpsertData, { onConflict: 'id' });
       
       if (error) {
-        console.error('[useMatchAnalysis] Erro ao criar partida no Supabase:', error);
+        console.error('[SYNC] ✗ Erro ao criar partida no Supabase:', error);
+        console.error('[SYNC] Detalhes do erro:', JSON.stringify(error, null, 2));
         return false;
       }
       
-      console.log('[useMatchAnalysis] ✓ Partida sincronizada diretamente no Supabase');
+      console.log('[SYNC] ✓ Partida sincronizada diretamente no Supabase');
+      console.log('[SYNC] ========================================');
       return true;
     } catch (error) {
-      console.error('[useMatchAnalysis] Erro no sync:', error);
+      console.error('[SYNC] ✗ Erro fatal no sync:', error);
+      console.error('[SYNC] Stack:', error instanceof Error ? error.stack : 'N/A');
       return false;
     }
   }, []);
