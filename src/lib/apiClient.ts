@@ -498,10 +498,13 @@ export const apiClient = {
     // ═══════════════════════════════════════════════════════════════
     console.log('[analyzeMatchViaEdgeFunction] Sincronizando partida antes da análise...');
     
+    // Generate proper UUIDs for fallback teams if matchData not provided
+    const generateUUID = () => crypto.randomUUID();
+    
     const syncPayload = {
       id: data.matchId,
-      home_team: data.matchData?.home_team || { id: data.matchId + '-home', name: data.homeTeam },
-      away_team: data.matchData?.away_team || { id: data.matchId + '-away', name: data.awayTeam },
+      home_team: data.matchData?.home_team || { id: generateUUID(), name: data.homeTeam },
+      away_team: data.matchData?.away_team || { id: generateUUID(), name: data.awayTeam },
       home_score: data.matchData?.home_score || 0,
       away_score: data.matchData?.away_score || 0,
       match_date: data.matchData?.match_date || new Date().toISOString(),
