@@ -3,7 +3,7 @@ import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 
 export interface AnalysisProgress {
-  stage: 'idle' | 'uploading' | 'transcribing' | 'analyzing' | 'complete' | 'error';
+  stage: 'idle' | 'uploading' | 'transcribing' | 'analyzing' | 'syncing' | 'complete' | 'error';
   progress: number;
   message: string;
   usedFallback?: boolean;
@@ -31,6 +31,30 @@ export function useMatchAnalysis() {
     setIsAnalyzing(false);
   }, []);
 
+  // Garante que a partida existe no Supabase antes de análise
+  const ensureMatchSynced = useCallback(async (matchId: string): Promise<boolean> => {
+    try {
+      console.log('[useMatchAnalysis] Verificando sync da partida:', matchId);
+      const result = await apiClient.ensureMatchInSupabase(matchId);
+      
+      if (!result.success) {
+        console.warn('[useMatchAnalysis] Falha ao sincronizar partida:', result.message);
+        return false;
+      }
+      
+      if (result.synced) {
+        console.log('[useMatchAnalysis] ✓ Partida sincronizada com sucesso');
+      } else {
+        console.log('[useMatchAnalysis] ✓ Partida já estava sincronizada');
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('[useMatchAnalysis] Erro no sync:', error);
+      return false;
+    }
+  }, []);
+
   const analyzeWithTranscription = useCallback(async ({
     matchId,
     transcription,
@@ -56,6 +80,16 @@ export function useMatchAnalysis() {
     }
 
     setIsAnalyzing(true);
+    
+    // PASSO 1: Garantir que a partida existe no Supabase Cloud antes de analisar
+    setProgress({ stage: 'syncing', progress: 10, message: 'Sincronizando partida com Cloud...' });
+    
+    const syncSuccess = await ensureMatchSynced(matchId);
+    if (!syncSuccess) {
+      toast.warning('Partida não sincronizada - eventos podem não ser salvos no Cloud');
+    }
+    
+    // PASSO 2: Analisar transcrição
     setProgress({ stage: 'analyzing', progress: 50, message: 'Analisando transcrição com IA...' });
 
     try {
@@ -111,7 +145,7 @@ export function useMatchAnalysis() {
     } finally {
       setIsAnalyzing(false);
     }
-  }, []);
+  }, [ensureMatchSynced]);
 
   const transcribeAndAnalyze = useCallback(async ({
     matchId,
@@ -174,6 +208,7 @@ export function useMatchAnalysis() {
   return {
     analyzeWithTranscription,
     transcribeAndAnalyze,
+    ensureMatchSynced,
     progress,
     isAnalyzing,
     resetProgress
