@@ -66,64 +66,122 @@ export default function Matches() {
   // Função para garantir que partida está sincronizada com Cloud
   const ensureMatchSynced = async (matchId: string, match: Match): Promise<boolean> => {
     try {
-      console.log('[Reprocess] Verificando sync da partida:', matchId);
+      console.log('[Reprocess] ========================================');
+      console.log('[Reprocess] INICIANDO SYNC DA PARTIDA');
+      console.log('[Reprocess] Match ID:', matchId);
       
       // Tenta sync via servidor Python primeiro
-      const result = await apiClient.ensureMatchInSupabase(matchId);
-      
-      if (result.success) {
-        console.log('[Reprocess] ✓ Partida sincronizada via servidor');
-        return true;
+      try {
+        const result = await apiClient.ensureMatchInSupabase(matchId);
+        
+        if (result.success) {
+          console.log('[Reprocess] ✓ Partida sincronizada via servidor Python');
+          
+          // Verificar se realmente existe no Cloud
+          const { data: verifyMatch, error: verifyError } = await supabase
+            .from('matches')
+            .select('id')
+            .eq('id', matchId)
+            .single();
+          
+          if (!verifyError && verifyMatch) {
+            console.log('[Reprocess] ✓ Verificação: partida confirmada no Cloud');
+            // Aguardar propagação
+            await new Promise(resolve => setTimeout(resolve, 500));
+            return true;
+          } else {
+            console.warn('[Reprocess] ⚠ Servidor retornou sucesso, mas partida não encontrada no Cloud');
+          }
+        }
+      } catch (serverError) {
+        console.warn('[Reprocess] Servidor Python não disponível:', serverError);
       }
       
-      // Se servidor Python falhar, tenta criar diretamente no Supabase
-      console.warn('[Reprocess] Servidor Python falhou, tentando sync direto...');
+      // FALLBACK: Usar Edge Function sync-match (tem SERVICE_ROLE_KEY)
+      console.log('[Reprocess] Usando Edge Function sync-match como fallback...');
       
-      // Garantir que os times existam no Supabase
-      if (match.home_team) {
-        await supabase.from('teams').upsert({
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
+      
+      if (!supabaseUrl || !supabaseKey) {
+        console.error('[Reprocess] ✗ Supabase não configurado');
+        return false;
+      }
+      
+      const syncPayload = {
+        id: matchId,
+        home_team: match.home_team ? {
           id: match.home_team.id,
           name: match.home_team.name,
           short_name: match.home_team.short_name,
           logo_url: match.home_team.logo_url,
           primary_color: match.home_team.primary_color,
           secondary_color: match.home_team.secondary_color
-        }, { onConflict: 'id' });
-      }
-      
-      if (match.away_team && match.away_team.id !== match.home_team?.id) {
-        await supabase.from('teams').upsert({
+        } : null,
+        away_team: match.away_team ? {
           id: match.away_team.id,
           name: match.away_team.name,
           short_name: match.away_team.short_name,
           logo_url: match.away_team.logo_url,
           primary_color: match.away_team.primary_color,
           secondary_color: match.away_team.secondary_color
-        }, { onConflict: 'id' });
-      }
-      
-      // Criar a partida no Supabase
-      const { error } = await supabase.from('matches').upsert({
-        id: matchId,
-        home_team_id: match.home_team?.id || null,
-        away_team_id: match.away_team?.id || null,
+        } : null,
         home_score: match.home_score || 0,
         away_score: match.away_score || 0,
         match_date: match.match_date || new Date().toISOString(),
         competition: match.competition || null,
         venue: match.venue || null,
         status: match.status || 'pending'
-      }, { onConflict: 'id' });
+      };
       
-      if (error) {
-        console.error('[Reprocess] Erro ao criar partida no Supabase:', error);
+      console.log('[Reprocess] Enviando para sync-match:', JSON.stringify(syncPayload, null, 2));
+      
+      const syncResponse = await fetch(`${supabaseUrl}/functions/v1/sync-match`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify(syncPayload),
+      });
+      
+      const syncResult = await syncResponse.json();
+      console.log('[Reprocess] Edge Function sync-match resposta:', syncResult);
+      
+      if (!syncResult.success) {
+        console.error('[Reprocess] ✗ Edge Function sync-match falhou:', syncResult.error);
         return false;
       }
       
-      console.log('[Reprocess] ✓ Partida sincronizada diretamente no Supabase');
+      console.log('[Reprocess] ✓ Edge Function sync-match: sucesso');
+      
+      // VERIFICAÇÃO FINAL: Confirmar que partida existe no Cloud
+      console.log('[Reprocess] Verificando existência da partida no Cloud...');
+      
+      // Aguardar propagação antes de verificar
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      const { data: verifyMatch, error: verifyError } = await supabase
+        .from('matches')
+        .select('id, home_team_id, away_team_id')
+        .eq('id', matchId)
+        .single();
+      
+      if (verifyError || !verifyMatch) {
+        console.error('[Reprocess] ✗ FALHA CRÍTICA: Partida não encontrada após sync!');
+        console.error('[Reprocess] Erro:', verifyError);
+        return false;
+      }
+      
+      console.log('[Reprocess] ✓ VERIFICAÇÃO FINAL: Partida confirmada no Cloud');
+      console.log('[Reprocess]   - ID:', verifyMatch.id);
+      console.log('[Reprocess]   - Home Team ID:', verifyMatch.home_team_id);
+      console.log('[Reprocess]   - Away Team ID:', verifyMatch.away_team_id);
+      console.log('[Reprocess] ========================================');
+      
       return true;
     } catch (error) {
-      console.error('[Reprocess] Erro no sync:', error);
+      console.error('[Reprocess] ✗ Erro fatal no sync:', error);
       return false;
     }
   };

@@ -73,6 +73,43 @@ serve(async (req) => {
 
     const supabase = createClient(supabaseUrl, supabaseKey);
 
+    // ═══════════════════════════════════════════════════════════════
+    // PRE-CHECK: VERIFY MATCH EXISTS BEFORE ANALYSIS
+    // ═══════════════════════════════════════════════════════════════
+    console.log('[PRE-CHECK] Verificando se partida existe no Supabase...');
+    
+    const { data: existingMatch, error: matchCheckError } = await supabase
+      .from('matches')
+      .select('id, home_team_id, away_team_id, status')
+      .eq('id', matchId)
+      .single();
+
+    if (matchCheckError || !existingMatch) {
+      console.error('[PRE-CHECK] ✗ PARTIDA NÃO EXISTE NO SUPABASE!');
+      console.error('[PRE-CHECK] Match ID:', matchId);
+      console.error('[PRE-CHECK] Erro:', matchCheckError);
+      console.error('[PRE-CHECK] SOLUÇÃO: Sincronize a partida com o Cloud ANTES de chamar analyze-match');
+      
+      return new Response(
+        JSON.stringify({
+          success: false,
+          error: `Match ${matchId} not found in database. Please sync the match first before analysis.`,
+          code: 'MATCH_NOT_SYNCED',
+          matchId: matchId
+        }),
+        { 
+          status: 400, 
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' } 
+        }
+      );
+    }
+
+    console.log('[PRE-CHECK] ✓ Partida encontrada no Supabase');
+    console.log('[PRE-CHECK]   - ID:', existingMatch.id);
+    console.log('[PRE-CHECK]   - Home Team ID:', existingMatch.home_team_id);
+    console.log('[PRE-CHECK]   - Away Team ID:', existingMatch.away_team_id);
+    console.log('[PRE-CHECK]   - Status:', existingMatch.status);
+
     // IMPROVED: System prompt with Few-Shot Learning examples + EXPLICIT GOAL DETECTION
     const systemPrompt = `Você é um NARRADOR VETERANO de futebol brasileiro com 30 anos de experiência.
 Sua missão CRÍTICA é extrair ABSOLUTAMENTE TODOS os eventos da narração, especialmente GOLS.
