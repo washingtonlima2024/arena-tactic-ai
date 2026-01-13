@@ -262,47 +262,72 @@ export default function VideoUpload() {
   // Ref to track if we've already loaded existing videos (prevents multiple loads)
   const hasLoadedExistingVideos = useRef(false);
   
-  // Reset the flag when match changes
+  // Track previous match ID to only reset when it actually changes
+  const prevMatchIdRef = useRef<string | null>(null);
+  
+  // Reset the flag when match actually changes (not just re-renders)
   useEffect(() => {
-    hasLoadedExistingVideos.current = false;
+    if (activeMatchId !== prevMatchIdRef.current) {
+      console.log('[Upload] Match ID mudou de', prevMatchIdRef.current, 'para', activeMatchId);
+      
+      // Limpar segmentos ao mudar de partida (mas não na primeira carga)
+      if (prevMatchIdRef.current !== null) {
+        setSegments([]);
+      }
+      
+      prevMatchIdRef.current = activeMatchId;
+      hasLoadedExistingVideos.current = false;
+    }
   }, [activeMatchId]);
 
   // Auto-load existing videos as segments when page loads with a match ID
   useEffect(() => {
-    // Only load ONCE and if no segments are in progress
+    // Only load ONCE
     if (existingVideos && 
         existingVideos.length > 0 && 
-        !hasLoadedExistingVideos.current &&
-        segments.filter(s => s.status !== 'error').length === 0) {
+        !hasLoadedExistingVideos.current) {
       
       console.log('[Upload] Carregando vídeos existentes:', existingVideos.length);
       hasLoadedExistingVideos.current = true;
       
-      const loadedSegments: VideoSegment[] = existingVideos.map((video: any) => ({
-        id: video.id,  // Use database ID to avoid duplicates
-        name: video.file_name || 'Vídeo',
-        url: video.file_url,
-        size: 0,
-        videoType: (video.video_type || 'full') as VideoType,
-        title: video.file_name?.replace(/\.[^/.]+$/, '') || 'Vídeo',
-        durationSeconds: video.duration_seconds,
-        startMinute: video.start_minute ?? 0,
-        endMinute: video.end_minute ?? 90,
-        progress: 100,
-        status: 'complete' as const,
-        isLink: false,
-        half: video.video_type === 'second_half' ? 'second' : 
-              video.video_type === 'first_half' ? 'first' : undefined,
-      }));
-      
-      setSegments(loadedSegments);
-      
-      toast({
-        title: `${loadedSegments.length} vídeo(s) carregado(s)`,
-        description: "Clique em 'Iniciar Análise' para processar.",
+      // Mesclar com segmentos existentes, removendo duplicatas
+      setSegments(prev => {
+        // IDs dos segmentos que já existem
+        const existingIds = new Set(prev.map(s => s.id));
+        const existingUrls = new Set(prev.map(s => s.url).filter(Boolean));
+        
+        // Filtrar apenas vídeos novos do banco
+        const newFromDb: VideoSegment[] = existingVideos
+          .filter((video: any) => !existingIds.has(video.id) && !existingUrls.has(video.file_url))
+          .map((video: any): VideoSegment => ({
+            id: video.id,  // Use database ID to avoid duplicates
+            name: video.file_name || 'Vídeo',
+            url: video.file_url,
+            size: 0,
+            videoType: (video.video_type || 'full') as VideoType,
+            title: video.file_name?.replace(/\.[^/.]+$/, '') || 'Vídeo',
+            durationSeconds: video.duration_seconds,
+            startMinute: video.start_minute ?? 0,
+            endMinute: video.end_minute ?? 90,
+            progress: 100,
+            status: 'complete' as const,
+            isLink: false,
+            half: video.video_type === 'second_half' ? 'second' as const : 
+                  video.video_type === 'first_half' ? 'first' as const : undefined,
+          }));
+        
+        if (newFromDb.length > 0) {
+          toast({
+            title: `${newFromDb.length} vídeo(s) carregado(s)`,
+            description: "Clique em 'Iniciar Análise' para processar.",
+          });
+        }
+        
+        console.log('[Upload] Adicionando', newFromDb.length, 'vídeos (existentes:', prev.length, ')');
+        return [...prev, ...newFromDb];
       });
     }
-  }, [existingVideos]); // Removed segments.length dependency to prevent re-runs
+  }, [existingVideos]);
 
   // Detect video duration using HTML5 video element
   const detectVideoDuration = (file: File): Promise<number> => {
@@ -368,7 +393,15 @@ export default function VideoUpload() {
       uploadStartTime: Date.now(),
     };
 
-    setSegments(prev => [...prev, newSegment]);
+    // Verificar duplicatas antes de adicionar
+    setSegments(prev => {
+      const isDuplicate = prev.some(s => s.name === newSegment.name);
+      if (isDuplicate) {
+        console.log('[Upload] Segmento duplicado ignorado:', newSegment.name);
+        return prev;
+      }
+      return [...prev, newSegment];
+    });
 
     // Show immediate feedback
     toast({
@@ -626,7 +659,20 @@ export default function VideoUpload() {
         half: newLinkType === 'first_half' ? 'first' : newLinkType === 'second_half' ? 'second' : undefined,
       };
 
-      setSegments(prev => [...prev, newSegment]);
+      // Verificar duplicatas antes de adicionar
+      setSegments(prev => {
+        const isDuplicate = prev.some(s => s.url === newSegment.url);
+        if (isDuplicate) {
+          console.log('[Upload] Link duplicado ignorado:', newSegment.url);
+          toast({
+            title: "Link já adicionado",
+            description: "Este link já está na lista.",
+            variant: "destructive"
+          });
+          return prev;
+        }
+        return [...prev, newSegment];
+      });
       setNewLinkInput('');
       setNewLinkTitle('');
       setNewStartMinute('');
@@ -787,6 +833,20 @@ export default function VideoUpload() {
       full: { start: 0, end: 90 },
     }[videoType];
 
+    // Verificar se arquivo já está na lista (usando ref para evitar stale closure)
+    const alreadyExists = segmentsRef.current.some(s => 
+      s.name === file.name || (s.url && s.url.includes(file.path))
+    );
+    if (alreadyExists) {
+      console.log('[Upload] Arquivo já está na lista:', file.name);
+      toast({
+        title: "Arquivo já adicionado",
+        description: `${file.name} já está na lista.`,
+      });
+      setShowLocalBrowser(false);
+      return;
+    }
+
     // Add segment immediately as "linking"
     const newSegment: VideoSegment = {
       id: segmentId,
@@ -814,8 +874,8 @@ export default function VideoUpload() {
 
       // Check if video already existed (no duplicate created)
       if (result.already_exists) {
-        // Check if this video is already in segments list
-        const alreadyInList = segments.some(s => s.id === result.video.id);
+        // Check if this video is already in segments list - usar ref para evitar closure stale
+        const alreadyInList = segmentsRef.current.some(s => s.id === result.video.id);
         
         if (alreadyInList) {
           // Remove the temporary segment - video already exists
