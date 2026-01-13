@@ -35,19 +35,83 @@ export function useMatchAnalysis() {
   const ensureMatchSynced = useCallback(async (matchId: string): Promise<boolean> => {
     try {
       console.log('[useMatchAnalysis] Verificando sync da partida:', matchId);
+      
+      // Tenta sync via servidor Python primeiro
       const result = await apiClient.ensureMatchInSupabase(matchId);
       
-      if (!result.success) {
-        console.warn('[useMatchAnalysis] Falha ao sincronizar partida:', result.message);
+      if (result.success) {
+        if (result.synced) {
+          console.log('[useMatchAnalysis] ✓ Partida sincronizada com sucesso via servidor');
+        } else {
+          console.log('[useMatchAnalysis] ✓ Partida já estava sincronizada');
+        }
+        return true;
+      }
+      
+      // Se servidor Python falhar, tenta criar diretamente no Supabase
+      console.warn('[useMatchAnalysis] Servidor Python falhou, tentando sync direto...');
+      
+      // Buscar dados da partida do servidor local
+      const matchData = await apiClient.get(`/api/matches/${matchId}`);
+      if (!matchData) {
+        console.error('[useMatchAnalysis] Partida não encontrada no servidor local');
         return false;
       }
       
-      if (result.synced) {
-        console.log('[useMatchAnalysis] ✓ Partida sincronizada com sucesso');
-      } else {
-        console.log('[useMatchAnalysis] ✓ Partida já estava sincronizada');
+      // Importar supabase client dinamicamente para evitar dependência circular
+      const { supabase } = await import('@/integrations/supabase/client');
+      
+      // Primeiro, garantir que os times existam no Supabase
+      const homeTeamId = matchData.home_team_id;
+      const awayTeamId = matchData.away_team_id;
+      
+      if (homeTeamId) {
+        const homeTeamData = await apiClient.get(`/api/teams/${homeTeamId}`);
+        if (homeTeamData) {
+          await supabase.from('teams').upsert({
+            id: homeTeamId,
+            name: homeTeamData.name,
+            short_name: homeTeamData.short_name,
+            logo_url: homeTeamData.logo_url,
+            primary_color: homeTeamData.primary_color,
+            secondary_color: homeTeamData.secondary_color
+          }, { onConflict: 'id' });
+        }
       }
       
+      if (awayTeamId && awayTeamId !== homeTeamId) {
+        const awayTeamData = await apiClient.get(`/api/teams/${awayTeamId}`);
+        if (awayTeamData) {
+          await supabase.from('teams').upsert({
+            id: awayTeamId,
+            name: awayTeamData.name,
+            short_name: awayTeamData.short_name,
+            logo_url: awayTeamData.logo_url,
+            primary_color: awayTeamData.primary_color,
+            secondary_color: awayTeamData.secondary_color
+          }, { onConflict: 'id' });
+        }
+      }
+      
+      // Agora criar a partida
+      const { error } = await supabase.from('matches').upsert({
+        id: matchId,
+        home_team_id: homeTeamId || null,
+        away_team_id: awayTeamId || null,
+        home_score: matchData.home_score || 0,
+        away_score: matchData.away_score || 0,
+        match_date: matchData.match_date || new Date().toISOString(),
+        competition: matchData.competition || null,
+        venue: matchData.venue || null,
+        status: matchData.status || 'pending'
+      }, { onConflict: 'id' });
+      
+      if (error) {
+        console.error('[useMatchAnalysis] Erro ao criar partida no Supabase:', error);
+        return false;
+      }
+      
+      console.log('[useMatchAnalysis] ✓ Partida sincronizada diretamente no Supabase');
       return true;
     } catch (error) {
       console.error('[useMatchAnalysis] Erro no sync:', error);
@@ -86,7 +150,10 @@ export function useMatchAnalysis() {
     
     const syncSuccess = await ensureMatchSynced(matchId);
     if (!syncSuccess) {
-      toast.warning('Partida não sincronizada - eventos podem não ser salvos no Cloud');
+      toast.error('Não foi possível sincronizar partida com Cloud. Eventos não serão salvos.');
+      setProgress({ stage: 'error', progress: 0, message: 'Falha ao sincronizar com Cloud' });
+      setIsAnalyzing(false);
+      return null;
     }
     
     // PASSO 2: Analisar transcrição
