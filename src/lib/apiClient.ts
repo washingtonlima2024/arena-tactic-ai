@@ -415,6 +415,17 @@ export const apiClient = {
     autoClip?: boolean;
     includeSubtitles?: boolean;
     skipValidation?: boolean;
+    // Match data for sync when using Edge Function fallback
+    matchData?: {
+      home_team?: { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string; secondary_color?: string };
+      away_team?: { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string; secondary_color?: string };
+      home_score?: number;
+      away_score?: number;
+      match_date?: string;
+      competition?: string;
+      venue?: string;
+      status?: string;
+    };
   }) => {
     const body = {
       matchId: data.matchId,
@@ -463,6 +474,17 @@ export const apiClient = {
     autoClip?: boolean;
     includeSubtitles?: boolean;
     skipValidation?: boolean;
+    // Match data for sync (optional but recommended)
+    matchData?: {
+      home_team?: { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string; secondary_color?: string };
+      away_team?: { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string; secondary_color?: string };
+      home_score?: number;
+      away_score?: number;
+      match_date?: string;
+      competition?: string;
+      venue?: string;
+      status?: string;
+    };
   }) => {
     const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
     const supabaseKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY;
@@ -471,6 +493,52 @@ export const apiClient = {
       throw new Error('Supabase não configurado para fallback');
     }
     
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 1: ALWAYS sync match before analysis via Edge Function
+    // ═══════════════════════════════════════════════════════════════
+    console.log('[analyzeMatchViaEdgeFunction] Sincronizando partida antes da análise...');
+    
+    const syncPayload = {
+      id: data.matchId,
+      home_team: data.matchData?.home_team || { id: data.matchId + '-home', name: data.homeTeam },
+      away_team: data.matchData?.away_team || { id: data.matchId + '-away', name: data.awayTeam },
+      home_score: data.matchData?.home_score || 0,
+      away_score: data.matchData?.away_score || 0,
+      match_date: data.matchData?.match_date || new Date().toISOString(),
+      competition: data.matchData?.competition || null,
+      venue: data.matchData?.venue || null,
+      status: data.matchData?.status || 'analyzing'
+    };
+    
+    try {
+      const syncResponse = await fetch(`${supabaseUrl}/functions/v1/sync-match`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${supabaseKey}`,
+        },
+        body: JSON.stringify(syncPayload),
+      });
+      
+      const syncResult = await syncResponse.json();
+      
+      if (!syncResult.success) {
+        console.error('[analyzeMatchViaEdgeFunction] ✗ Sync falhou:', syncResult.error);
+        throw new Error(`Failed to sync match before analysis: ${syncResult.error}`);
+      }
+      
+      console.log('[analyzeMatchViaEdgeFunction] ✓ Partida sincronizada com sucesso');
+      
+      // Aguardar propagação
+      await new Promise(resolve => setTimeout(resolve, 500));
+    } catch (syncError) {
+      console.error('[analyzeMatchViaEdgeFunction] ✗ Erro no sync:', syncError);
+      throw new Error(`Failed to sync match: ${syncError instanceof Error ? syncError.message : 'Unknown error'}`);
+    }
+    
+    // ═══════════════════════════════════════════════════════════════
+    // STEP 2: Call analyze-match Edge Function
+    // ═══════════════════════════════════════════════════════════════
     const body = {
       matchId: data.matchId,
       transcription: data.transcription,

@@ -412,7 +412,32 @@ export default function Matches() {
             awayTeam: matchToReprocess.away_team?.name || 'Time Visitante',
             gameStartMinute,
             gameEndMinute,
-            halfType
+            halfType,
+            // Passar dados do match para sync no fallback Edge Function
+            matchData: {
+              home_team: matchToReprocess.home_team ? {
+                id: matchToReprocess.home_team.id,
+                name: matchToReprocess.home_team.name,
+                short_name: matchToReprocess.home_team.short_name,
+                logo_url: matchToReprocess.home_team.logo_url,
+                primary_color: matchToReprocess.home_team.primary_color,
+                secondary_color: matchToReprocess.home_team.secondary_color
+              } : undefined,
+              away_team: matchToReprocess.away_team ? {
+                id: matchToReprocess.away_team.id,
+                name: matchToReprocess.away_team.name,
+                short_name: matchToReprocess.away_team.short_name,
+                logo_url: matchToReprocess.away_team.logo_url,
+                primary_color: matchToReprocess.away_team.primary_color,
+                secondary_color: matchToReprocess.away_team.secondary_color
+              } : undefined,
+              home_score: matchToReprocess.home_score || 0,
+              away_score: matchToReprocess.away_score || 0,
+              match_date: matchToReprocess.match_date,
+              competition: matchToReprocess.competition,
+              venue: matchToReprocess.venue,
+              status: matchToReprocess.status
+            }
           });
           
           const eventsCount = analysisResult?.eventsDetected || analysisResult?.eventsCreated || 0;
