@@ -2963,15 +2963,22 @@ def analyze_match():
                         video_url = target_video.file_url
                         video_path = None
                         
-                        # Check if local URL
-                        if video_url.startswith('/api/storage/') or 'localhost' in video_url:
-                            clean_url = video_url.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '')
-                            parts = clean_url.strip('/').split('/')
-                            if len(parts) >= 5 and parts[0] == 'api' and parts[1] == 'storage':
-                                local_match_id = parts[2]
-                                subfolder = parts[3]
-                                filename = '/'.join(parts[4:])
+                        # Check if local URL - aceita qualquer URL que contenha /api/storage/
+                        # Isso permite tunnels (cloudflare, ngrok), IPs externos, etc.
+                        if '/api/storage/' in video_url or video_url.startswith('/api/storage/'):
+                            # Extrair path relativo a partir de /api/storage/
+                            if '/api/storage/' in video_url:
+                                relative_path = video_url.split('/api/storage/')[-1]
+                            else:
+                                relative_path = video_url.replace('/api/storage/', '', 1)
+                            
+                            parts = relative_path.strip('/').split('/')
+                            if len(parts) >= 3:
+                                local_match_id = parts[0]
+                                subfolder = parts[1]
+                                filename = '/'.join(parts[2:])
                                 video_path = get_file_path(local_match_id, subfolder, filename)
+                                print(f"[ANALYZE-MATCH] Resolved video path: {video_path} (from URL: {video_url[:80]}...)")
                         
                         if video_path and os.path.exists(video_path):
                             print(f"[ANALYZE-MATCH] Video encontrado: {video_path}")
