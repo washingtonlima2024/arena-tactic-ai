@@ -77,32 +77,64 @@ export default function Audio() {
     }
   }, [matchId, selectedVoice]);
 
-  // Audio player controls
+  // Audio player controls - recreate audio element when URL changes
   useEffect(() => {
-    if (narration?.audioUrl && !audioRef.current) {
-      const audio = document.createElement('audio') as HTMLAudioElement;
-      audio.src = narration.audioUrl;
-      audioRef.current = audio;
-      
-      audio.addEventListener('loadedmetadata', () => {
-        setDuration(audio.duration);
-      });
-      
-      audio.addEventListener('timeupdate', () => {
-        setCurrentTime(audio.currentTime);
-      });
-      
-      audio.addEventListener('ended', () => {
-        setIsPlaying(false);
-        setCurrentTime(0);
-      });
+    // Clean up previous audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.removeAttribute('src');
+      audioRef.current = null;
     }
     
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setDuration(0);
+    
+    if (!narration?.audioUrl) return;
+    
+    const audio = document.createElement('audio') as HTMLAudioElement;
+    audio.crossOrigin = 'anonymous';
+    audio.preload = 'metadata';
+    
+    const handleLoadedMetadata = () => {
+      console.log('Audio loaded, duration:', audio.duration);
+      setDuration(audio.duration);
+    };
+    
+    const handleTimeUpdate = () => {
+      setCurrentTime(audio.currentTime);
+    };
+    
+    const handleEnded = () => {
+      setIsPlaying(false);
+      setCurrentTime(0);
+    };
+    
+    const handleError = (e: Event) => {
+      console.error('Audio load error:', audio.error, e);
+    };
+    
+    const handleCanPlay = () => {
+      console.log('Audio can play');
+    };
+    
+    audio.addEventListener('loadedmetadata', handleLoadedMetadata);
+    audio.addEventListener('timeupdate', handleTimeUpdate);
+    audio.addEventListener('ended', handleEnded);
+    audio.addEventListener('error', handleError);
+    audio.addEventListener('canplay', handleCanPlay);
+    
+    audio.src = narration.audioUrl;
+    audioRef.current = audio;
+    
     return () => {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
+      audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
+      audio.removeEventListener('timeupdate', handleTimeUpdate);
+      audio.removeEventListener('ended', handleEnded);
+      audio.removeEventListener('error', handleError);
+      audio.removeEventListener('canplay', handleCanPlay);
+      audio.pause();
+      audio.removeAttribute('src');
     };
   }, [narration?.audioUrl]);
 
@@ -180,6 +212,7 @@ export default function Audio() {
     // Stop any currently playing podcast
     if (podcastAudioRef.current) {
       podcastAudioRef.current.pause();
+      podcastAudioRef.current.removeAttribute('src');
       podcastAudioRef.current = null;
     }
 
@@ -190,7 +223,8 @@ export default function Audio() {
 
     try {
       const audio = document.createElement('audio') as HTMLAudioElement;
-      audio.src = podcast.audioUrl;
+      audio.crossOrigin = 'anonymous';
+      audio.preload = 'auto';
       
       audio.addEventListener('ended', () => {
         console.log('Podcast audio ended');
@@ -206,6 +240,8 @@ export default function Audio() {
         console.log('Audio can play through');
       });
 
+      // Set src before assigning ref
+      audio.src = podcast.audioUrl;
       podcastAudioRef.current = audio;
       setPlayingPodcast(podcastType);
       
