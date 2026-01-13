@@ -2790,6 +2790,10 @@ def analyze_match():
         # Determine match_half based on halfType
         match_half = 'first_half' if half_type == 'first' else 'second_half'
         
+        # Define segment_start_minute EARLY for video second calculation
+        # This ensures the variable is available throughout the analysis
+        segment_start_minute = game_start_minute if half_type == 'first' else 45
+        
         # SCORE VALIDATION: Calculate scores from detected goal events
         # This ensures score accuracy matches actual goals detected
         home_score = 0
@@ -2855,10 +2859,7 @@ def analyze_match():
         session = get_session()
         saved_events = []
         
-        # Define segment_start_minute for video second calculation
-        # This is the match minute where the video segment starts
-        segment_start_minute = game_start_minute if half_type == 'first' else 45
-        
+        # segment_start_minute already defined above after match_half
         # IMPORTANT: Delete existing events for this half to avoid duplicates
         try:
             deleted_count = session.query(MatchEvent).filter_by(
