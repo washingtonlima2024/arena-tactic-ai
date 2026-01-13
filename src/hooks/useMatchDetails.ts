@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient, isLocalServerAvailable } from '@/lib/apiClient';
 import { getEventHalf } from '@/lib/eventHelpers';
-
+import { supabase } from '@/integrations/supabase/client';
 export interface MatchWithDetails {
   id: string;
   home_team_id: string;
@@ -135,22 +135,41 @@ export function useMatchEvents(matchId: string | null) {
 
       let events: MatchEvent[] = [];
 
-      // Buscar do servidor local
+      // 1. Tentar buscar do servidor local primeiro
       const serverUp = await isLocalServerAvailable();
       console.log('[useMatchEvents] Servidor local disponível:', serverUp);
 
-      if (!serverUp) {
-        console.warn('[useMatchEvents] Servidor local indisponível - retornando array vazio');
-        return [];
+      if (serverUp) {
+        try {
+          const localEvents = await apiClient.getMatchEvents(matchId);
+          console.log('[useMatchEvents] Eventos do servidor local:', localEvents.length);
+          events = localEvents as MatchEvent[];
+        } catch (localError) {
+          console.error('[useMatchEvents] Erro no servidor local:', localError);
+        }
       }
 
-      try {
-        const localEvents = await apiClient.getMatchEvents(matchId);
-        console.log('[useMatchEvents] Eventos do servidor local:', localEvents.length);
-        events = localEvents as MatchEvent[];
-      } catch (localError) {
-        console.error('[useMatchEvents] Erro no servidor local:', localError);
-        return [];
+      // 2. FALLBACK: Se não há eventos locais, buscar do Supabase Cloud
+      if (events.length === 0) {
+        console.log('[useMatchEvents] Sem eventos locais, tentando Cloud fallback...');
+        try {
+          const { data: cloudEvents, error } = await supabase
+            .from('match_events')
+            .select('*')
+            .eq('match_id', matchId)
+            .order('minute', { ascending: true });
+          
+          if (!error && cloudEvents && cloudEvents.length > 0) {
+            console.log('[useMatchEvents] ✓ Eventos do Cloud:', cloudEvents.length);
+            events = cloudEvents as MatchEvent[];
+          } else if (error) {
+            console.error('[useMatchEvents] Erro no Cloud fallback:', error);
+          } else {
+            console.log('[useMatchEvents] Nenhum evento encontrado no Cloud');
+          }
+        } catch (cloudError) {
+          console.error('[useMatchEvents] Erro no Cloud fallback:', cloudError);
+        }
       }
 
       console.log(`[useMatchEvents] Total: ${events.length} eventos`);
