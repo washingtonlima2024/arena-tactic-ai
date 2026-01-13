@@ -24,6 +24,19 @@ from typing import Optional, Dict, Any
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
 
+# Log de verificação de configuração Supabase na inicialização
+print(f"[STARTUP] Arena Play Server v{SERVER_VERSION} ({SERVER_BUILD_DATE})")
+print(f"[STARTUP] Supabase configurado: {bool(SUPABASE_URL and SUPABASE_SERVICE_KEY)}")
+if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+    print(f"[STARTUP] ✓ SUPABASE_URL: {SUPABASE_URL[:50]}...")
+    print(f"[STARTUP] ✓ SUPABASE_SERVICE_KEY: {'*' * 20}... (configurado)")
+else:
+    if not SUPABASE_URL:
+        print(f"[STARTUP] ⚠ SUPABASE_URL não configurado")
+    if not SUPABASE_SERVICE_KEY:
+        print(f"[STARTUP] ⚠ SUPABASE_SERVICE_KEY não configurado")
+    print(f"[STARTUP] ⚠ Sincronização com Cloud desabilitada - configure as variáveis no .env")
+
 # Import local modules
 from database import init_db, get_session, Session
 from models import (
