@@ -2860,16 +2860,28 @@ def analyze_match():
             session.rollback()
         try:
             for event_data in events:
+                # Validate and ensure 'second' exists (CRITICAL for precise clips)
+                if 'second' not in event_data or event_data.get('second') is None:
+                    event_data['second'] = 0
+                    print(f"[ANALYZE-MATCH] ⚠ Evento sem 'second', usando 0: {event_data.get('description', '')[:30]}")
+                
+                # Validate second range (0-59)
+                event_second = event_data.get('second', 0)
+                if event_second < 0 or event_second > 59:
+                    event_second = max(0, min(59, event_second))
+                    event_data['second'] = event_second
+                    print(f"[ANALYZE-MATCH] ⚠ 'second' fora do range, corrigido para {event_second}")
+                
                 # Adjust minute based on half type
                 raw_minute = event_data.get('minute', 0)
                 if half_type == 'second' and raw_minute < 45:
                     raw_minute = raw_minute + 45
                 
                 # Calculate videoSecond for precise clip extraction
-                event_second = event_data.get('second', 0)
                 original_minute = event_data.get('minute', 0)
                 # videoSecond is the position in the video file (relative to segment start)
                 video_second = (original_minute - segment_start_minute) * 60 + event_second
+                print(f"[ANALYZE-MATCH] ⏱️ Evento {event_data.get('event_type')}: {original_minute}:{event_second:02d} → videoSecond={video_second}")
                 
                 event = MatchEvent(
                     match_id=match_id,

@@ -96,29 +96,32 @@ PALAVRAS-CHAVE PARA GOLS (NUNCA IGNORE):
 EXEMPLOS DE EXTRAÇÃO (FEW-SHOT LEARNING):
 ═══════════════════════════════════════════════════════════════
 
+⏱️ IMPORTANTE: A transcrição tem TIMESTAMPS no formato [MM:SS]!
+→ EXTRAIA O TEMPO EXATO de cada evento em MINUTO e SEGUNDO!
+
 EXEMPLO 1 - GOL NORMAL:
-Narração: "GOOOOOL do Brasil! Neymar chuta e a bola entra!"
-→ { minute: X, event_type: "goal", team: "home", description: "GOOOOL! Neymar marca!", isOwnGoal: false }
+Transcrição: "[23:45] GOOOOOL do Brasil! Neymar chuta e a bola entra!"
+→ { minute: 23, second: 45, event_type: "goal", team: "home", description: "GOOOOL! Neymar marca!", isOwnGoal: false }
 
 EXEMPLO 2 - GOL COM EMOÇÃO:
-Narração: "PRA DENTRO! É GOLAÇO! Que pintura!"
-→ { minute: X, event_type: "goal", team: "home/away", description: "GOLAÇO! Pintura de gol!", isOwnGoal: false }
+Transcrição: "[35:12] PRA DENTRO! É GOLAÇO! Que pintura!"
+→ { minute: 35, second: 12, event_type: "goal", team: "home", description: "GOLAÇO! Pintura de gol!", isOwnGoal: false }
 
 EXEMPLO 3 - GOL CONTRA:
-Narração: "Que azar! Gol contra! O zagueiro mandou contra!"
-→ { minute: X, event_type: "goal", team: "home", description: "GOL CONTRA! Zagueiro falha!", isOwnGoal: true }
+Transcrição: "[40:30] Que azar! Gol contra! O zagueiro mandou contra!"
+→ { minute: 40, second: 30, event_type: "goal", team: "home", description: "GOL CONTRA! Zagueiro falha!", isOwnGoal: true }
 
 EXEMPLO 4 - CARTÃO AMARELO:
-Narração: "Cartão amarelo para o lateral"
-→ { minute: X, event_type: "yellow_card", team: "away", description: "Amarelo para o lateral" }
+Transcrição: "[28:55] Cartão amarelo para o lateral"
+→ { minute: 28, second: 55, event_type: "yellow_card", team: "away", description: "Amarelo para o lateral" }
 
 EXEMPLO 5 - DEFESA DIFÍCIL:
-Narração: "Que defesa! O goleiro salva!"
-→ { minute: X, event_type: "save", team: "away", description: "Defesa espetacular!" }
+Transcrição: "[15:08] Que defesa! O goleiro salva!"
+→ { minute: 15, second: 8, event_type: "save", team: "away", description: "Defesa espetacular!" }
 
 EXEMPLO 6 - CHANCE PERDIDA:
-Narração: "Quase! Passou perto da trave!"
-→ { minute: X, event_type: "chance", team: "home", description: "Bola raspando a trave!" }
+Transcrição: "[32:22] Quase! Passou perto da trave!"
+→ { minute: 32, second: 22, event_type: "chance", team: "home", description: "Bola raspando a trave!" }
 
 ═══════════════════════════════════════════════════════════════
 REGRAS CRÍTICAS:
@@ -128,16 +131,18 @@ REGRAS CRÍTICAS:
 2. Cada vez que o narrador menciona um gol, CONTE COMO +1 NO PLACAR
 3. GOLS CONTRA: isOwnGoal=true quando marcam em seu próprio gol
 4. TIME CORRETO: Analise contexto para saber quem atacava
-5. MINUTOS: Estime progressivamente (início 2'-15', meio 20'-35', fim 40'-47')
+5. ⏱️ TEMPO PRECISO: Extraia MINUTO e SEGUNDO do timestamp [MM:SS]!
+   - minute: número do minuto (0-90)
+   - second: número do segundo (0-59) - OBRIGATÓRIO!
 6. DESCRIÇÕES: Máximo 60 caracteres, capture a EMOÇÃO!
 
 TIPOS DE EVENTOS:
 goal, shot, save, foul, yellow_card, red_card, corner, offside, substitution, chance, penalty
 
 TIMES DA PARTIDA:
-- HOME (casa): ${homeTeam}
-- AWAY (visitante): ${awayTeam}
-- Período: ${matchHalf === 'first' ? '1º Tempo' : '2º Tempo'} (${gameStartMinute}' - ${gameEndMinute}')`;
+- HOME (casa): \${homeTeam}
+- AWAY (visitante): \${awayTeam}
+- Período: \${matchHalf === 'first' ? '1º Tempo' : '2º Tempo'} (\${gameStartMinute}' - \${gameEndMinute}')`;
 
     // IMPROVED: User prompt with Chain-of-Thought + EXPLICIT GOAL COUNTING
     const userPrompt = `⚽⚽⚽ MISSÃO CRÍTICA: ENCONTRAR TODOS OS GOLS! ⚽⚽⚽
@@ -168,12 +173,14 @@ ${transcription}
 □ homeScore + awayScore = total de gols detectados?
 □ Cada gol tem team: "home" ou "away" correto?
 □ Gols contra têm isOwnGoal: true?
+□ ⏱️ CADA evento tem "minute" E "second" preenchidos do timestamp [MM:SS]?
 
 LEMBRE-SE:
-- Gols de ${homeTeam} → homeScore++
-- Gols de ${awayTeam} → awayScore++  
-- Gol contra de ${homeTeam} → awayScore++ (isOwnGoal=true, team="home")
-- Gol contra de ${awayTeam} → homeScore++ (isOwnGoal=true, team="away")
+- Gols de \${homeTeam} → homeScore++
+- Gols de \${awayTeam} → awayScore++  
+- Gol contra de \${homeTeam} → awayScore++ (isOwnGoal=true, team="home")
+- Gol contra de \${awayTeam} → homeScore++ (isOwnGoal=true, team="away")
+- ⏱️ O SEGUNDO é OBRIGATÓRIO para precisão nos clips!
 ═══════════════════════════════════════════════════════════════`;
 
     // Retry logic for API calls
@@ -211,8 +218,8 @@ LEMBRE-SE:
                         items: {
                           type: "object",
                           properties: {
-                            minute: { type: "number", description: "Minuto do evento no jogo" },
-                            second: { type: "number", description: "Segundo do evento (0-59)" },
+                            minute: { type: "number", description: "Minuto do evento - extraído do timestamp [MM:SS] da transcrição" },
+                            second: { type: "number", description: "Segundo do evento (0-59) - OBRIGATÓRIO para precisão de clips!" },
                             event_type: { 
                               type: "string", 
                               enum: ["goal", "shot", "save", "foul", "yellow_card", "red_card", "corner", "offside", "substitution", "chance", "penalty"],
@@ -222,7 +229,7 @@ LEMBRE-SE:
                             team: { type: "string", enum: ["home", "away"], description: "Time que fez o evento" },
                             isOwnGoal: { type: "boolean", description: "Se é gol contra (true se jogador marca em seu próprio gol)" }
                           },
-                          required: ["minute", "event_type", "description", "team"],
+                          required: ["minute", "second", "event_type", "description", "team"],
                           additionalProperties: false
                         }
                       },

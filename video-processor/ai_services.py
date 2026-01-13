@@ -881,29 +881,32 @@ PALAVRAS-CHAVE PARA GOLS (NUNCA IGNORE):
 EXEMPLOS DE EXTRAÇÃO (FEW-SHOT LEARNING):
 ═══════════════════════════════════════════════════════════════
 
+⏱️ IMPORTANTE: A transcrição tem TIMESTAMPS no formato [MM:SS]!
+→ EXTRAIA O TEMPO EXATO de cada evento em MINUTO e SEGUNDO!
+
 EXEMPLO 1 - GOL NORMAL:
-Narração: "GOOOOOL do Brasil! Neymar chuta e a bola entra!"
-→ {{"minute": 23, "event_type": "goal", "team": "home", "description": "GOOOOL! Neymar marca!", "isOwnGoal": false, "is_highlight": true}}
+Transcrição: "[23:45] GOOOOOL do Brasil! Neymar chuta e a bola entra!"
+→ {{"minute": 23, "second": 45, "event_type": "goal", "team": "home", "description": "GOOOOL! Neymar marca!", "isOwnGoal": false, "is_highlight": true}}
 
 EXEMPLO 2 - GOL COM EMOÇÃO:
-Narração: "PRA DENTRO! É GOLAÇO! Que pintura!"
-→ {{"minute": 35, "event_type": "goal", "team": "home", "description": "GOLAÇO! Pintura de gol!", "isOwnGoal": false, "is_highlight": true}}
+Transcrição: "[35:12] PRA DENTRO! É GOLAÇO! Que pintura!"
+→ {{"minute": 35, "second": 12, "event_type": "goal", "team": "home", "description": "GOLAÇO! Pintura de gol!", "isOwnGoal": false, "is_highlight": true}}
 
 EXEMPLO 3 - GOL CONTRA:
-Narração: "Que azar! Gol contra! O zagueiro mandou contra!"
-→ {{"minute": 40, "event_type": "goal", "team": "home", "description": "GOL CONTRA! Zagueiro falha!", "isOwnGoal": true, "is_highlight": true}}
+Transcrição: "[40:30] Que azar! Gol contra! O zagueiro mandou contra!"
+→ {{"minute": 40, "second": 30, "event_type": "goal", "team": "home", "description": "GOL CONTRA! Zagueiro falha!", "isOwnGoal": true, "is_highlight": true}}
 
 EXEMPLO 4 - CARTÃO AMARELO:
-Narração: "Cartão amarelo para o lateral"
-→ {{"minute": 28, "event_type": "yellow_card", "team": "away", "description": "Amarelo para o lateral", "is_highlight": true}}
+Transcrição: "[28:55] Cartão amarelo para o lateral"
+→ {{"minute": 28, "second": 55, "event_type": "yellow_card", "team": "away", "description": "Amarelo para o lateral", "is_highlight": true}}
 
 EXEMPLO 5 - DEFESA DIFÍCIL:
-Narração: "Que defesa! O goleiro salva!"
-→ {{"minute": 15, "event_type": "save", "team": "away", "description": "Defesa espetacular!", "is_highlight": false}}
+Transcrição: "[15:08] Que defesa! O goleiro salva!"
+→ {{"minute": 15, "second": 8, "event_type": "save", "team": "away", "description": "Defesa espetacular!", "is_highlight": false}}
 
 EXEMPLO 6 - CHANCE PERDIDA:
-Narração: "Quase! Passou perto da trave!"
-→ {{"minute": 32, "event_type": "chance", "team": "home", "description": "Bola raspando a trave!", "is_highlight": true}}
+Transcrição: "[32:22] Quase! Passou perto da trave!"
+→ {{"minute": 32, "second": 22, "event_type": "chance", "team": "home", "description": "Bola raspando a trave!", "is_highlight": true}}
 
 ═══════════════════════════════════════════════════════════════
 REGRAS CRÍTICAS:
@@ -913,7 +916,9 @@ REGRAS CRÍTICAS:
 2. Cada vez que o narrador menciona um gol, CONTE COMO +1 NO PLACAR
 3. GOLS CONTRA: isOwnGoal=true quando marcam em seu próprio gol
 4. TIME CORRETO: Analise contexto para saber quem atacava
-5. MINUTOS: Devem estar entre {game_start_minute} e {game_end_minute}
+5. ⏱️ TEMPO PRECISO: Extraia MINUTO e SEGUNDO do timestamp [MM:SS]!
+   - minute: número do minuto (0-90)
+   - second: número do segundo (0-59)
 6. DESCRIÇÕES: Máximo 60 caracteres, capture a EMOÇÃO!
 
 TIPOS DE EVENTOS:
@@ -924,7 +929,7 @@ TIMES DA PARTIDA:
 - AWAY (visitante): {away_team}
 - Período: {half_desc}
 
-FORMATO DE SAÍDA: Retorne APENAS um array JSON válido, sem explicações."""
+FORMATO DE SAÍDA: Retorne APENAS um array JSON válido com minute E second, sem explicações."""
 
     user_prompt = f"""⚽⚽⚽ MISSÃO CRÍTICA: ENCONTRAR TODOS OS GOLS E EVENTOS! ⚽⚽⚽
 
@@ -970,6 +975,7 @@ TRANSCRIÇÃO COMPLETA (LEIA COM ATENÇÃO):
 □ Retornou pelo menos 15-30 eventos para um tempo completo?
 □ Cada gol tem team: "home" ou "away" correto?
 □ Gols contra têm isOwnGoal: true?
+□ ⏱️ CADA evento tem "minute" E "second" preenchidos do timestamp [MM:SS]?
 □ Incluiu cartões, faltas, chances, defesas?
 
 LEMBRE-SE:
@@ -977,6 +983,7 @@ LEMBRE-SE:
 - Gols de {away_team} → team: "away"
 - Gol contra de {home_team} → team: "home", isOwnGoal: true
 - Gol contra de {away_team} → team: "away", isOwnGoal: true
+- ⏱️ O SEGUNDO é OBRIGATÓRIO para precisão nos clips!
 
 RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL.
 ═══════════════════════════════════════════════════════════════"""
