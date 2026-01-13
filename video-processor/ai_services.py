@@ -516,43 +516,121 @@ def call_openai(
     return data.get('choices', [{}])[0].get('message', {}).get('content')
 
 
-def text_to_speech(text: str, voice: str = 'nova') -> Optional[bytes]:
+def text_to_speech_elevenlabs(text: str, voice_id: str = 'JBFqnCBsd6RMkjVDRZzb') -> Optional[bytes]:
     """
-    Convert text to speech using OpenAI TTS.
+    Convert text to speech using ElevenLabs TTS API.
     
     Args:
         text: Text to convert
-        voice: Voice to use (alloy, echo, fable, onyx, nova, shimmer)
+        voice_id: ElevenLabs voice ID (default: George - professional narrator)
     
     Returns:
         Audio data as bytes or None on error
     """
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY not configured")
-    
-    # Truncate text if too long
-    text = text[:4000]
-    
-    response = requests.post(
-        f'{OPENAI_API_URL}/audio/speech',
-        headers={
-            'Authorization': f'Bearer {OPENAI_API_KEY}',
-            'Content-Type': 'application/json'
-        },
-        json={
-            'model': 'tts-1',
-            'input': text,
-            'voice': voice,
-            'response_format': 'mp3'
-        },
-        timeout=120
-    )
-    
-    if not response.ok:
-        print(f"OpenAI TTS error: {response.status_code} - {response.text}")
+    if not ELEVENLABS_API_KEY:
+        print("[ElevenLabs TTS] API key not configured")
         return None
     
-    return response.content
+    # Truncate text if too long (ElevenLabs limit is ~5000 chars)
+    text = text[:5000]
+    
+    try:
+        print(f"[ElevenLabs TTS] Gerando áudio com {len(text)} caracteres...")
+        
+        response = requests.post(
+            f'https://api.elevenlabs.io/v1/text-to-speech/{voice_id}',
+            headers={
+                'xi-api-key': ELEVENLABS_API_KEY,
+                'Content-Type': 'application/json',
+                'Accept': 'audio/mpeg'
+            },
+            json={
+                'text': text,
+                'model_id': 'eleven_multilingual_v2',
+                'voice_settings': {
+                    'stability': 0.5,
+                    'similarity_boost': 0.75,
+                    'style': 0.5,
+                    'use_speaker_boost': True
+                }
+            },
+            timeout=180
+        )
+        
+        if not response.ok:
+            print(f"[ElevenLabs TTS] Erro {response.status_code}: {response.text[:200]}")
+            return None
+        
+        print(f"[ElevenLabs TTS] ✓ Áudio gerado: {len(response.content)} bytes")
+        return response.content
+        
+    except Exception as e:
+        print(f"[ElevenLabs TTS] Erro: {e}")
+        return None
+
+
+# Map friendly voice names to ElevenLabs voice IDs
+ELEVENLABS_VOICES = {
+    'narrator': 'JBFqnCBsd6RMkjVDRZzb',      # George - professional narrator
+    'commentator': 'nPczCjzI2devNBz1zQrb',   # Brian - technical voice
+    'dynamic': 'TX3LPaxmHKxFdv7VOQHJ',       # Liam - energetic
+    'alloy': 'EXAVITQu4vr4xnSDxMaL',         # Sarah
+    'nova': 'pFZP5JQG7iQjIQuC4Bku',          # Lily
+    'onyx': 'cjVigY5qzO86Huf0OWal',          # Eric
+    'echo': 'IKne3meq5aSn9XLyUdCD',          # Charlie
+    'fable': 'Xb7hH8MSUJpSbSDYk0k2',         # Alice
+    'shimmer': 'cgSgspJ2msm6clMCkdW9',       # Jessica
+}
+
+
+def text_to_speech(text: str, voice: str = 'nova') -> Optional[bytes]:
+    """
+    Convert text to speech using available TTS provider.
+    Tries OpenAI first, falls back to ElevenLabs if not available.
+    
+    Args:
+        text: Text to convert
+        voice: Voice to use (narrator, commentator, dynamic, or OpenAI voices)
+    
+    Returns:
+        Audio data as bytes or None on error
+    """
+    # Try OpenAI first if configured
+    if OPENAI_API_KEY and OPENAI_ENABLED:
+        try:
+            # Truncate text if too long
+            truncated = text[:4000]
+            
+            response = requests.post(
+                f'{OPENAI_API_URL}/audio/speech',
+                headers={
+                    'Authorization': f'Bearer {OPENAI_API_KEY}',
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'model': 'tts-1',
+                    'input': truncated,
+                    'voice': voice if voice in ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] else 'nova',
+                    'response_format': 'mp3'
+                },
+                timeout=120
+            )
+            
+            if response.ok:
+                print(f"[OpenAI TTS] ✓ Áudio gerado: {len(response.content)} bytes")
+                return response.content
+            else:
+                print(f"[OpenAI TTS] Erro {response.status_code}, tentando ElevenLabs...")
+        except Exception as e:
+            print(f"[OpenAI TTS] Falha: {e}, tentando ElevenLabs...")
+    
+    # Fallback to ElevenLabs
+    if ELEVENLABS_API_KEY and ELEVENLABS_ENABLED:
+        voice_id = ELEVENLABS_VOICES.get(voice, ELEVENLABS_VOICES.get('narrator'))
+        return text_to_speech_elevenlabs(text, voice_id)
+    
+    print("[TTS] Nenhum provedor de TTS disponível (OpenAI ou ElevenLabs)")
+    return None
 
 
 def transcribe_audio(audio_path: str, language: str = 'pt') -> Optional[str]:
