@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { apiClient, isLocalServerAvailable } from '@/lib/apiClient';
 import { getEventHalf } from '@/lib/eventHelpers';
 import { supabase } from '@/integrations/supabase/client';
+
 export interface MatchWithDetails {
   id: string;
   home_team_id: string;
@@ -78,6 +79,72 @@ export interface AnalysisResult {
   }[];
 }
 
+// Helper function to fetch events with fallback to Supabase Cloud
+async function fetchEventsWithFallback(matchId: string): Promise<any[]> {
+  let events: any[] = [];
+
+  // 1. Try local server first
+  const serverUp = await isLocalServerAvailable();
+  if (serverUp) {
+    try {
+      const localEvents = await apiClient.getMatchEvents(matchId);
+      if (localEvents && localEvents.length > 0) {
+        console.log(`[fetchEvents] ✓ ${localEvents.length} eventos do servidor local`);
+        return localEvents;
+      }
+    } catch (err) {
+      console.warn('[fetchEvents] Erro no servidor local:', err);
+    }
+  }
+
+  // 2. Fallback to Supabase Cloud
+  console.log('[fetchEvents] Tentando fallback para Cloud...');
+  try {
+    const { data: cloudEvents, error } = await supabase
+      .from('match_events')
+      .select('*')
+      .eq('match_id', matchId)
+      .order('minute', { ascending: true });
+    
+    if (!error && cloudEvents && cloudEvents.length > 0) {
+      console.log(`[fetchEvents] ✓ ${cloudEvents.length} eventos do Cloud`);
+      return cloudEvents;
+    }
+  } catch (cloudError) {
+    console.error('[fetchEvents] Erro no Cloud fallback:', cloudError);
+  }
+
+  return events;
+}
+
+// Helper function to calculate scores from goal events
+function calculateScoresFromGoals(
+  goalEvents: any[], 
+  homeTeamName?: string | null, 
+  awayTeamName?: string | null
+): { homeGoals: number; awayGoals: number } {
+  let homeGoals = 0;
+  let awayGoals = 0;
+
+  goalEvents.forEach((goal: any) => {
+    const metadata = goal.metadata as Record<string, any> | null;
+    const team = metadata?.team || metadata?.scoring_team;
+    const isOwnGoal = metadata?.isOwnGoal === true;
+
+    if (isOwnGoal) {
+      // Own goal: opposite team scores
+      if (team === 'home') awayGoals++;
+      else if (team === 'away') homeGoals++;
+    } else {
+      // Normal goal
+      if (team === 'home' || team === homeTeamName) homeGoals++;
+      else if (team === 'away' || team === awayTeamName) awayGoals++;
+    }
+  });
+
+  return { homeGoals, awayGoals };
+}
+
 export function useMatchDetails(matchId: string | null) {
   return useQuery({
     queryKey: ['match-details', matchId],
@@ -86,33 +153,22 @@ export function useMatchDetails(matchId: string | null) {
       const data = await apiClient.getMatch(matchId);
       const match = data as MatchWithDetails;
       
-      // ALWAYS calculate scores from goal events for consistency
       const dbHomeScore = match.home_score ?? 0;
       const dbAwayScore = match.away_score ?? 0;
       
+      // ALWAYS calculate scores from goal events (with Cloud fallback)
       try {
-        const events = await apiClient.getMatchEvents(matchId);
+        const events = await fetchEventsWithFallback(matchId);
         const goalEvents = events.filter((e: any) => e.event_type === 'goal');
         
         if (goalEvents.length > 0) {
-          let homeGoals = 0;
-          let awayGoals = 0;
+          const { homeGoals, awayGoals } = calculateScoresFromGoals(
+            goalEvents,
+            match.home_team?.name,
+            match.away_team?.name
+          );
           
-          goalEvents.forEach((goal: any) => {
-            const metadata = goal.metadata as Record<string, any> | null;
-            const team = metadata?.team || metadata?.scoring_team;
-            const isOwnGoal = metadata?.isOwnGoal === true;
-            
-            if (isOwnGoal) {
-              if (team === 'home') awayGoals++;
-              else if (team === 'away') homeGoals++;
-            } else {
-              if (team === 'home' || team === match.home_team?.name) homeGoals++;
-              else if (team === 'away' || team === match.away_team?.name) awayGoals++;
-            }
-          });
-          
-          console.log(`[Score] Match ${matchId}: calculated ${homeGoals}-${awayGoals} from ${goalEvents.length} goal events (DB was ${dbHomeScore}-${dbAwayScore})`);
+          console.log(`[Score] Match ${matchId}: ${homeGoals}-${awayGoals} (${goalEvents.length} gols, DB era ${dbHomeScore}-${dbAwayScore})`);
           return { ...match, home_score: homeGoals, away_score: awayGoals };
         }
       } catch {
@@ -286,48 +342,35 @@ export function useAllCompletedMatches() {
       const matches = await apiClient.getMatches();
       
       // Filter for completed/live/analyzed/analyzing matches
-      // Include 'analyzing' to show matches that are being processed
       const filteredMatches = matches.filter((m: any) => 
         ['completed', 'live', 'analyzed', 'analyzing'].includes(m.status)
       );
       
-      // Calculate scores from goals if needed
+      // Calculate scores from goals with Cloud fallback
       const matchesWithScores = await Promise.all(
         filteredMatches.map(async (match: any) => {
           const dbHomeScore = match.home_score ?? 0;
           const dbAwayScore = match.away_score ?? 0;
           
-          // ALWAYS calculate scores from goal events for consistency
           try {
-            const events = await apiClient.getMatchEvents(match.id);
+            // Use the helper with Cloud fallback
+            const events = await fetchEventsWithFallback(match.id);
             const goalEvents = events.filter((e: any) => e.event_type === 'goal');
             
             if (goalEvents.length > 0) {
-              let homeGoals = 0;
-              let awayGoals = 0;
+              const { homeGoals, awayGoals } = calculateScoresFromGoals(
+                goalEvents,
+                match.home_team?.name,
+                match.away_team?.name
+              );
               
-              goalEvents.forEach((goal: any) => {
-                const metadata = goal.metadata as Record<string, any> | null;
-                const team = metadata?.team || metadata?.scoring_team;
-                const isOwnGoal = metadata?.isOwnGoal === true;
-                
-                if (isOwnGoal) {
-                  if (team === 'home') awayGoals++;
-                  else if (team === 'away') homeGoals++;
-                } else {
-                  if (team === 'home' || team === match.home_team?.name) homeGoals++;
-                  else if (team === 'away' || team === match.away_team?.name) awayGoals++;
-                }
-              });
-              
-              console.log(`[Score] Match ${match.id}: calculated ${homeGoals}-${awayGoals} from ${goalEvents.length} goal events (DB was ${dbHomeScore}-${dbAwayScore})`);
+              console.log(`[Score] Match ${match.id}: ${homeGoals}-${awayGoals} (${goalEvents.length} gols, DB era ${dbHomeScore}-${dbAwayScore})`);
               return { ...match, home_score: homeGoals, away_score: awayGoals, _calculated: true };
             }
           } catch {
             // Fallback to DB values on error
           }
           
-          // Fallback to DB values only if no goal events found
           return { ...match, home_score: dbHomeScore, away_score: dbAwayScore };
         })
       );
