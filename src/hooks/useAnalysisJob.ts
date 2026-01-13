@@ -77,6 +77,16 @@ export function useStartAnalysis() {
     gameStartMinute?: number;
     gameEndMinute?: number;
     halfType?: 'first' | 'second';
+    matchData?: {
+      home_team?: { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string; secondary_color?: string };
+      away_team?: { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string; secondary_color?: string };
+      home_score?: number;
+      away_score?: number;
+      match_date?: string;
+      competition?: string;
+      venue?: string;
+      status?: string;
+    };
   }) => {
     setIsLoading(true);
     
@@ -100,7 +110,8 @@ export function useStartAnalysis() {
         gameEndMinute: params.gameEndMinute ?? (halfType === 'second' ? 90 : 45),
         halfType: halfType,
         autoClip: true,
-        includeSubtitles: true
+        includeSubtitles: true,
+        matchData: params.matchData
       });
 
       if (!data?.success) {
