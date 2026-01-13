@@ -63,6 +63,24 @@ export function useNarrationGeneration() {
         throw new Error(data.error);
       }
 
+      // Check if audio was actually generated
+      if (!data.audioUrl) {
+        toast({
+          title: "Script gerado, mas sem áudio",
+          description: "O provedor de TTS (OpenAI/ElevenLabs) não está configurado no servidor. Reinicie o servidor após configurar.",
+          variant: "destructive",
+        });
+        
+        // Still save the script for display
+        setNarration({
+          script: data.script,
+          audioUrl: '',
+          voice: data.voice,
+        });
+        
+        return null;
+      }
+
       const result = {
         script: data.script,
         audioUrl: normalizeStorageUrl(data.audioUrl) || data.audioUrl,
