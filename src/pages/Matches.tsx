@@ -32,6 +32,7 @@ import { apiClient } from '@/lib/apiClient';
 import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { ReprocessOptionsDialog } from '@/components/matches/ReprocessOptionsDialog';
+import { supabase } from '@/integrations/supabase/client';
 
 export default function Matches() {
   const navigate = useNavigate();
@@ -60,6 +61,71 @@ export default function Matches() {
   const handleOpenReprocessDialog = (match: Match) => {
     setMatchToReprocess(match);
     setShowReprocessDialog(true);
+  };
+
+  // Função para garantir que partida está sincronizada com Cloud
+  const ensureMatchSynced = async (matchId: string, match: Match): Promise<boolean> => {
+    try {
+      console.log('[Reprocess] Verificando sync da partida:', matchId);
+      
+      // Tenta sync via servidor Python primeiro
+      const result = await apiClient.ensureMatchInSupabase(matchId);
+      
+      if (result.success) {
+        console.log('[Reprocess] ✓ Partida sincronizada via servidor');
+        return true;
+      }
+      
+      // Se servidor Python falhar, tenta criar diretamente no Supabase
+      console.warn('[Reprocess] Servidor Python falhou, tentando sync direto...');
+      
+      // Garantir que os times existam no Supabase
+      if (match.home_team) {
+        await supabase.from('teams').upsert({
+          id: match.home_team.id,
+          name: match.home_team.name,
+          short_name: match.home_team.short_name,
+          logo_url: match.home_team.logo_url,
+          primary_color: match.home_team.primary_color,
+          secondary_color: match.home_team.secondary_color
+        }, { onConflict: 'id' });
+      }
+      
+      if (match.away_team && match.away_team.id !== match.home_team?.id) {
+        await supabase.from('teams').upsert({
+          id: match.away_team.id,
+          name: match.away_team.name,
+          short_name: match.away_team.short_name,
+          logo_url: match.away_team.logo_url,
+          primary_color: match.away_team.primary_color,
+          secondary_color: match.away_team.secondary_color
+        }, { onConflict: 'id' });
+      }
+      
+      // Criar a partida no Supabase
+      const { error } = await supabase.from('matches').upsert({
+        id: matchId,
+        home_team_id: match.home_team?.id || null,
+        away_team_id: match.away_team?.id || null,
+        home_score: match.home_score || 0,
+        away_score: match.away_score || 0,
+        match_date: match.match_date || new Date().toISOString(),
+        competition: match.competition || null,
+        venue: match.venue || null,
+        status: match.status || 'pending'
+      }, { onConflict: 'id' });
+      
+      if (error) {
+        console.error('[Reprocess] Erro ao criar partida no Supabase:', error);
+        return false;
+      }
+      
+      console.log('[Reprocess] ✓ Partida sincronizada diretamente no Supabase');
+      return true;
+    } catch (error) {
+      console.error('[Reprocess] Erro no sync:', error);
+      return false;
+    }
   };
 
   const handleReprocess = async (options: {
@@ -106,6 +172,21 @@ export default function Matches() {
     const matchId = matchToReprocess.id;
     
     try {
+      // 0. NOVO: Garantir que partida está sincronizada com Cloud
+      setReprocessProgress({ stage: 'Sincronizando com Cloud...', progress: 1 });
+      const syncSuccess = await ensureMatchSynced(matchId, matchToReprocess);
+      if (!syncSuccess) {
+        toast({
+          title: "Erro de sincronização",
+          description: "Não foi possível sincronizar a partida com o Cloud. Eventos não serão salvos.",
+          variant: "destructive"
+        });
+        setIsReprocessing(false);
+        setReprocessProgress({ stage: '', progress: 0 });
+        return;
+      }
+      console.log('[Reprocess] ✓ Partida sincronizada, prosseguindo com análise...');
+      
       // 1. Sincronizar e buscar vídeos do match
       setReprocessProgress({ stage: 'Sincronizando vídeos do storage...', progress: 3 });
       try {
