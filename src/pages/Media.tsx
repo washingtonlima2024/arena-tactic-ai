@@ -88,7 +88,7 @@ export default function Media() {
 
   const queryClient = useQueryClient();
   
-  const { thumbnails, extractFrameFromVideo, isExtracting, getThumbnail, extractingIds } = useThumbnailGeneration(matchId);
+  const { thumbnails, extractFrameFromVideo, isExtracting, getThumbnail, extractingIds, extractAllFrames, hasThumbnail } = useThumbnailGeneration(matchId);
   
   // Clip generation hook for FFmpeg extraction
   const { 
@@ -529,6 +529,54 @@ export default function Media() {
                   )}
                   Sincronizar
                 </Button>
+                {/* Generate all thumbnails button */}
+                {clips.length > 0 && clips.some(c => c.clipUrl || matchVideo) && clips.some(c => !hasThumbnail(c.id)) && (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={async () => {
+                      // Extract frames from clips that have clipUrl or from main video
+                      const clipsToExtract = clips.filter(c => !hasThumbnail(c.id) && (c.clipUrl || matchVideo));
+                      
+                      for (const clip of clipsToExtract) {
+                        // Prefer clip URL if available
+                        if (clip.clipUrl) {
+                          await extractFrameFromVideo({
+                            eventId: clip.id,
+                            eventType: clip.type,
+                            videoUrl: clip.clipUrl,
+                            timestamp: 3, // 3s into the clip (after buffer)
+                            matchId: matchId
+                          });
+                        } else if (matchVideo) {
+                          await extractFrameFromVideo({
+                            eventId: clip.id,
+                            eventType: clip.type,
+                            videoUrl: matchVideo.file_url,
+                            timestamp: clip.totalSeconds,
+                            matchId: matchId
+                          });
+                        }
+                        // Small delay between extractions
+                        await new Promise(resolve => setTimeout(resolve, 300));
+                      }
+                      
+                      toast({
+                        title: "Capas geradas",
+                        description: `${clipsToExtract.length} capa(s) extraída(s) dos vídeos`
+                      });
+                    }}
+                    disabled={Array.from(extractingIds).length > 0}
+                  >
+                    {Array.from(extractingIds).length > 0 ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <Image className="mr-2 h-4 w-4" />
+                    )}
+                    Gerar Capas ({clips.filter(c => !hasThumbnail(c.id) && (c.clipUrl || matchVideo)).length})
+                  </Button>
+                )}
+                
                 {/* Extract video clips button - only for clips with canExtract */}
                 {matchVideo && clips.length > 0 && clips.some(c => !c.clipUrl && c.canExtract) && (
                   <Button 
