@@ -11,11 +11,12 @@ interface SoccerPlayerModelProps {
   teamColor: string;
   number?: number;
   isMoving?: boolean;
-  team: 'home' | 'away';
+  team: 'home' | 'away' | 'referee' | 'linesman';
   intensity?: number;
   onDrag?: (newPosition: [number, number, number]) => void;
   isDraggable?: boolean;
   showNumber?: boolean;
+  facingDirection?: 'left' | 'right' | 'up' | 'down';
 }
 
 // Preload the model for better performance
@@ -28,7 +29,7 @@ try {
 function SoccerPlayerModelInner({
   position,
   rotation = [0, 0, 0],
-  scale = 0.008,
+  scale = 0.005,
   teamColor,
   number,
   isMoving = false,
@@ -36,7 +37,8 @@ function SoccerPlayerModelInner({
   intensity = 0.7,
   onDrag,
   isDraggable = false,
-  showNumber = true
+  showNumber = true,
+  facingDirection = 'right'
 }: SoccerPlayerModelProps) {
   const groupRef = useRef<THREE.Group>(null);
   const modelRef = useRef<THREE.Group>(null);
@@ -176,7 +178,14 @@ function SoccerPlayerModelInner({
         <primitive 
           object={clonedObj} 
           scale={[scale, scale, scale]}
-          rotation={[-Math.PI / 2, 0, Math.PI]} // Adjust orientation
+          rotation={[
+            -Math.PI / 2, 
+            0, 
+            facingDirection === 'left' ? 0 : 
+            facingDirection === 'right' ? Math.PI : 
+            facingDirection === 'up' ? Math.PI / 2 : 
+            -Math.PI / 2 // down
+          ]}
           position={[0, 0, 0]}
         />
       </group>
@@ -235,7 +244,7 @@ function PlayerFallback({
   position: [number, number, number]; 
   teamColor: string;
   number?: number;
-  team: 'home' | 'away';
+  team: 'home' | 'away' | 'referee' | 'linesman';
 }) {
   const groupRef = useRef<THREE.Group>(null);
   

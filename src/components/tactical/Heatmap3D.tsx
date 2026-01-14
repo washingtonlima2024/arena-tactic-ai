@@ -1051,12 +1051,33 @@ function FieldScene({
       {/* Soccer ball at center */}
       <SoccerBall position={[0, 0, 0]} />
 
-      {/* Referee */}
-      <RefereeFigure position={[1.5, 0, 0]} />
+      {/* Referee - using OBJ model with yellow/black color */}
+      <SoccerPlayerModel
+        position={[1.5, 0, 0]}
+        team="referee"
+        teamColor="#ffcc00"
+        scale={0.004}
+        showNumber={false}
+        facingDirection="up"
+      />
 
-      {/* Linesmen (assistant referees) */}
-      <LinesmanFigure position={[0, 0, -3.4]} side="left" />
-      <LinesmanFigure position={[0, 0, 3.4]} side="right" />
+      {/* Linesmen (assistant referees) - using OBJ model */}
+      <SoccerPlayerModel
+        position={[0, 0, -3.4]}
+        team="linesman"
+        teamColor="#ffcc00"
+        scale={0.004}
+        showNumber={false}
+        facingDirection="right"
+      />
+      <SoccerPlayerModel
+        position={[0, 0, 3.4]}
+        team="linesman"
+        teamColor="#ffcc00"
+        scale={0.004}
+        showNumber={false}
+        facingDirection="right"
+      />
 
       {/* Heat zones - Volumetric 3D clouds */}
       {heatZones.map((zone, idx) => (
@@ -1068,7 +1089,7 @@ function FieldScene({
         />
       ))}
 
-      {/* Home players - using OBJ 3D model */}
+      {/* Home players - using OBJ 3D model, facing RIGHT (toward away goal) */}
       {homePlayers.map((player, idx) => (
         <SoccerPlayerModel
           key={`home-${idx}-${player.number}`}
@@ -1081,10 +1102,12 @@ function FieldScene({
           onDrag={(pos) => onHomePlayerDrag(idx, pos)}
           isMoving={(player.intensity || 0.7) > 0.5}
           showNumber={true}
+          scale={0.004}
+          facingDirection="right"
         />
       ))}
 
-      {/* Away players - using OBJ 3D model */}
+      {/* Away players - using OBJ 3D model, facing LEFT (toward home goal) */}
       {awayPlayers.map((player, idx) => (
         <SoccerPlayerModel
           key={`away-${idx}-${player.number}`}
@@ -1097,6 +1120,8 @@ function FieldScene({
           onDrag={(pos) => onAwayPlayerDrag(idx, pos)}
           isMoving={(player.intensity || 0.7) > 0.5}
           showNumber={true}
+          scale={0.004}
+          facingDirection="left"
         />
       ))}
     </group>
