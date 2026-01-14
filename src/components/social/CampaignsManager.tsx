@@ -52,6 +52,7 @@ const PLATFORMS = [
   { id: 'linkedin', name: 'LinkedIn', color: 'bg-blue-700' },
   { id: 'youtube', name: 'YouTube', color: 'bg-red-600' },
   { id: 'tiktok', name: 'TikTok', color: 'bg-gray-900' },
+  { id: 'whatsapp', name: 'WhatsApp Business', color: 'bg-green-500' },
 ];
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
