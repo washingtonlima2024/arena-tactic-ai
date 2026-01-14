@@ -286,14 +286,13 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   const fetchPlaylists = async () => {
     setLoadingPlaylists(true);
     try {
-      // ONLY show playlists that are COMPILED (have video_url)
+      // Show ALL playlists (compiled first, then pending)
       let query = supabase
         .from('playlists')
-        .select('*, team:teams(name, primary_color)')
-        .not('video_url', 'is', null); // Only compiled playlists
+        .select('*, team:teams(name, primary_color)');
 
-      if (selectedMatchId) {
-        query = query.eq('match_id', selectedMatchId);
+      if (selectedMatchId || matchId) {
+        query = query.eq('match_id', selectedMatchId || matchId);
       }
 
       const { data, error } = await query
@@ -301,7 +300,15 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
         .limit(50);
 
       if (error) throw error;
-      setPlaylists((data as unknown as Playlist[]) || []);
+      
+      // Sort: compiled playlists first
+      const sorted = (data || []).sort((a: any, b: any) => {
+        if (a.video_url && !b.video_url) return -1;
+        if (!a.video_url && b.video_url) return 1;
+        return 0;
+      });
+      
+      setPlaylists((sorted as unknown as Playlist[]) || []);
     } catch (error) {
       console.error('Error fetching playlists:', error);
     } finally {
@@ -375,14 +382,14 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   };
 
   const handleSelectPlaylist = (playlist: Playlist) => {
-    setSelectedPlaylistId(playlist.id);
-    setSelectedClipId(null);
     if (playlist.video_url) {
+      setSelectedPlaylistId(playlist.id);
+      setSelectedClipId(null);
       onChange(playlist.video_url, 'video');
     } else {
       toast({ 
         title: 'Playlist não compilada', 
-        description: 'Esta playlist ainda não foi compilada.',
+        description: 'Vá para a página de Mídia para compilar esta playlist.',
         variant: 'destructive' 
       });
     }
@@ -514,7 +521,7 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
             <span className="hidden sm:inline">Playlists</span>
             {playlists.length > 0 && (
               <Badge variant="secondary" className="text-[9px] px-1 h-4 min-w-4">
-                {playlists.length}
+                {playlists.filter(p => p.video_url).length}/{playlists.length}
               </Badge>
             )}
           </TabsTrigger>
