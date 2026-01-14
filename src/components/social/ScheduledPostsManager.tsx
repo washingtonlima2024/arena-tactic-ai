@@ -17,7 +17,8 @@ import {
   Linkedin,
   Youtube,
   Sparkles,
-  CalendarClock
+  CalendarClock,
+  MessageCircle
 } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -32,6 +33,7 @@ import { toast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
 import { format, isPast, isToday, isTomorrow, addDays, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
+import { MediaSourceSelector } from './MediaSourceSelector';
 
 // X (Twitter) icon component
 const XIcon = ({ className }: { className?: string }) => (
@@ -73,6 +75,7 @@ const PLATFORMS = [
   { id: 'linkedin', name: 'LinkedIn', icon: Linkedin, color: 'text-blue-700', bgColor: 'bg-blue-700' },
   { id: 'youtube', name: 'YouTube', icon: Youtube, color: 'text-red-600', bgColor: 'bg-red-600' },
   { id: 'tiktok', name: 'TikTok', icon: TikTokIcon, color: 'text-foreground', bgColor: 'bg-black' },
+  { id: 'whatsapp', name: 'WhatsApp', icon: MessageCircle, color: 'text-green-500', bgColor: 'bg-green-500' },
 ];
 
 const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }> = {
@@ -558,15 +561,11 @@ export function ScheduledPostsManager() {
               </p>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="media_url">URL da Mídia (opcional)</Label>
-              <Input
-                id="media_url"
-                placeholder="https://..."
-                value={formData.media_url}
-                onChange={(e) => setFormData(prev => ({ ...prev, media_url: e.target.value }))}
-              />
-            </div>
+            <MediaSourceSelector
+              value={formData.media_url}
+              mediaType={formData.media_type}
+              onChange={(url, type) => setFormData(prev => ({ ...prev, media_url: url, media_type: type }))}
+            />
 
             <div className="space-y-2">
               <Label className="flex items-center gap-2">
