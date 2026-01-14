@@ -1017,20 +1017,6 @@ export default function MatchDashboard() {
           </div>
           
           <div className="flex flex-wrap items-center gap-2">
-            {/* Match Selector */}
-            <Select value={selectedMatchId || ''} onValueChange={setSelectedMatchId}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="Selecione a partida" />
-              </SelectTrigger>
-              <SelectContent>
-                {matches?.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    {m.home_team?.short_name || 'CAS'} × {m.away_team?.short_name || 'VIS'}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-
             {/* Period Selector */}
             <Select value={period} onValueChange={(v) => setPeriod(v as PeriodKey)}>
               <SelectTrigger className="w-[140px]">
