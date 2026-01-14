@@ -387,32 +387,6 @@ export default function Analysis() {
             </p>
           </div>
           <div className="flex gap-2">
-            <Select 
-              value={currentMatchId || ''} 
-              onValueChange={(value) => {
-                setSelectedMatch(value);
-                setSelectedEventForPlay(null); // Reset event selection
-              }}
-            >
-              <SelectTrigger className="w-64">
-                <SelectValue placeholder="Selecionar partida" />
-              </SelectTrigger>
-              <SelectContent>
-                {matches.map(match => (
-                  <SelectItem key={match.id} value={match.id}>
-                    <div className="flex items-center gap-2">
-                      <span>{match.home_team?.short_name || 'Casa'} vs {match.away_team?.short_name || 'Visitante'}</span>
-                      {match.status === 'live' && (
-                        <Badge variant="destructive" className="text-xs px-1.5 py-0 gap-1 animate-pulse">
-                          <Radio className="h-2.5 w-2.5" />
-                          AO VIVO
-                        </Badge>
-                      )}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Button 
               variant="destructive" 
               size="sm"
