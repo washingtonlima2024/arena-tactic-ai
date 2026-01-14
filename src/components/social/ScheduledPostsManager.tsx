@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { 
   Calendar,
   Clock,
@@ -87,6 +88,8 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }>
 };
 
 export function ScheduledPostsManager() {
+  const [searchParams] = useSearchParams();
+  const matchId = searchParams.get('match') || undefined;
   const [posts, setPosts] = useState<ScheduledPost[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -564,6 +567,7 @@ export function ScheduledPostsManager() {
             <MediaSourceSelector
               value={formData.media_url}
               mediaType={formData.media_type}
+              matchId={matchId}
               onChange={(url, type) => setFormData(prev => ({ ...prev, media_url: url, media_type: type }))}
             />
 
