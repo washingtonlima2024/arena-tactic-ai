@@ -158,11 +158,11 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   const fetchEventsWithClips = async () => {
     setLoadingEvents(true);
     try {
-      // Show all events that are highlights or have clips ready
+      // ONLY show clips that are READY (have clip_url)
       let query = supabase
         .from('match_events')
         .select('id, event_type, description, minute, clip_url, match_id, is_highlight')
-        .in('event_type', ['goal', 'penalty', 'yellow_card', 'red_card', 'save', 'highlight', 'shot_on_target']);
+        .not('clip_url', 'is', null); // Only clips that are ready
 
       if (selectedMatchId) {
         query = query.eq('match_id', selectedMatchId);
@@ -184,10 +184,11 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   const fetchPlaylists = async () => {
     setLoadingPlaylists(true);
     try {
-      // Show all playlists for the match (ready or pending compilation)
+      // ONLY show playlists that are COMPILED (have video_url)
       let query = supabase
         .from('playlists')
-        .select('*, team:teams(name, primary_color)');
+        .select('*, team:teams(name, primary_color)')
+        .not('video_url', 'is', null); // Only compiled playlists
 
       if (selectedMatchId) {
         query = query.eq('match_id', selectedMatchId);
@@ -325,18 +326,12 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
     return `${home} x ${away}${date ? ` (${date})` : ''}`;
   };
 
-  // Count ready clips vs pending
-  const readyClipsCount = events.filter(e => e.clip_url).length;
-  const pendingClipsCount = events.filter(e => !e.clip_url).length;
+  // All clips in the list are ready (we filtered in the query)
+  const readyClipsCount = events.length;
 
   // Navigate to media page to generate clips
   const goToMediaPage = () => {
     navigate(`/media?match=${selectedMatchId || matchId}`);
-  };
-
-  // Navigate to events page to analyze match
-  const goToEventsPage = () => {
-    navigate(`/events?match=${selectedMatchId || matchId}`);
   };
 
   return (
@@ -352,16 +347,21 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
           <TabsList className="grid grid-cols-2 w-full">
             <TabsTrigger value="clip" className="text-xs gap-1">
               <Scissors className="h-3 w-3" />
-              Clips
-              {events.length > 0 && (
+              Clips Prontos
+              {readyClipsCount > 0 && (
                 <Badge variant="secondary" className="ml-1 text-[10px] px-1">
-                  {readyClipsCount}/{events.length}
+                  {readyClipsCount}
                 </Badge>
               )}
             </TabsTrigger>
             <TabsTrigger value="playlist" className="text-xs gap-1">
               <ListVideo className="h-3 w-3" />
               Playlists
+              {playlists.length > 0 && (
+                <Badge variant="secondary" className="ml-1 text-[10px] px-1">
+                  {playlists.length}
+                </Badge>
+              )}
             </TabsTrigger>
           </TabsList>
         ) : (
@@ -466,115 +466,73 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
           ) : events.length === 0 ? (
-            <Card className="border-dashed border-amber-500/30 bg-amber-500/5">
+            <Card className="border-dashed border-muted">
               <CardContent className="flex flex-col items-center justify-center py-6">
-                <AlertCircle className="h-8 w-8 text-amber-500 mb-2" />
+                <Scissors className="h-8 w-8 text-muted-foreground mb-2" />
                 <p className="text-sm font-medium text-center mb-1">
                   {selectedMatchId || matchId
-                    ? 'Esta partida ainda não foi analisada'
+                    ? 'Nenhum clip pronto'
                     : 'Selecione uma partida'}
                 </p>
                 <p className="text-xs text-muted-foreground text-center mb-3">
                   {selectedMatchId || matchId
-                    ? 'Vá para a página de Eventos para processar os lances'
+                    ? 'Gere clips na página de Mídia'
                     : 'Escolha uma partida para ver os clips disponíveis'}
                 </p>
                 {(selectedMatchId || matchId) && (
                   <Button 
                     variant="outline" 
                     size="sm" 
-                    onClick={goToEventsPage}
+                    onClick={goToMediaPage}
                     className="gap-2"
                   >
                     <ExternalLink className="h-3 w-3" />
-                    Ir para Eventos
+                    Ir para Mídia
                   </Button>
                 )}
               </CardContent>
             </Card>
           ) : (
-            <>
-              {/* Stats bar when there are clips */}
-              {pendingClipsCount > 0 && (
-                <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg text-xs">
-                  <span className="text-muted-foreground">
-                    <Check className="h-3 w-3 inline mr-1 text-primary" />
-                    {readyClipsCount} prontos
-                    {pendingClipsCount > 0 && (
-                      <span className="ml-2">
-                        <Clock className="h-3 w-3 inline mr-1" />
-                        {pendingClipsCount} pendentes
-                      </span>
-                    )}
-                  </span>
-                  <Button 
-                    variant="ghost" 
-                    size="sm" 
-                    onClick={goToMediaPage}
-                    className="h-6 text-xs gap-1"
+            <ScrollArea className="h-[200px] border rounded-lg">
+              <div className="p-2 space-y-1">
+                {events.map((event) => (
+                  <button
+                    key={event.id}
+                    type="button"
+                    onClick={() => handleSelectClip(event)}
+                    className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors ${
+                      selectedEventId === event.id 
+                        ? 'bg-primary/10 border border-primary' 
+                        : 'hover:bg-muted'
+                    }`}
                   >
-                    <ExternalLink className="h-3 w-3" />
-                    Gerar clips
-                  </Button>
-                </div>
-              )}
-              
-              <ScrollArea className="h-[200px] border rounded-lg">
-                <div className="p-2 space-y-1">
-                  {events.map((event) => (
-                    <button
-                      key={event.id}
-                      type="button"
-                      onClick={() => handleSelectClip(event)}
-                      className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors ${
-                        selectedEventId === event.id 
-                          ? 'bg-primary/10 border border-primary' 
-                          : 'hover:bg-muted'
-                      } ${!event.clip_url ? 'opacity-50 cursor-not-allowed' : ''}`}
-                    >
-                      <div className={`h-8 w-8 rounded flex items-center justify-center shrink-0 ${
-                        event.clip_url ? 'bg-primary/20' : 'bg-muted'
-                      }`}>
-                        {event.clip_url ? (
-                          <Play className="h-4 w-4 text-primary" />
-                        ) : (
-                          <Clock className="h-4 w-4 text-muted-foreground" />
+                    <div className="h-8 w-8 rounded flex items-center justify-center shrink-0 bg-primary/20">
+                      <Play className="h-4 w-4 text-primary" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium truncate">
+                          {getEventTypeLabel(event.event_type)}
+                        </span>
+                        {event.minute !== null && (
+                          <Badge variant="outline" className="text-xs">
+                            {event.minute}'
+                          </Badge>
                         )}
                       </div>
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm font-medium truncate">
-                            {getEventTypeLabel(event.event_type)}
-                          </span>
-                          {event.minute !== null && (
-                            <Badge variant="outline" className="text-xs">
-                              {event.minute}'
-                            </Badge>
-                          )}
-                          {event.clip_url ? (
-                            <Badge className="text-[10px] bg-primary/20 text-primary border-0">
-                              Pronto
-                            </Badge>
-                          ) : (
-                            <Badge variant="secondary" className="text-[10px]">
-                              Pendente
-                            </Badge>
-                          )}
-                        </div>
-                        {event.description && (
-                          <p className="text-xs text-muted-foreground truncate">
-                            {event.description}
-                          </p>
-                        )}
-                      </div>
-                      {selectedEventId === event.id && event.clip_url && (
-                        <Check className="h-4 w-4 text-primary shrink-0" />
+                      {event.description && (
+                        <p className="text-xs text-muted-foreground truncate">
+                          {event.description}
+                        </p>
                       )}
-                    </button>
-                  ))}
-                </div>
-              </ScrollArea>
-            </>
+                    </div>
+                    {selectedEventId === event.id && (
+                      <Check className="h-4 w-4 text-primary shrink-0" />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </ScrollArea>
           )}
         </TabsContent>
 
