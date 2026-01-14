@@ -327,21 +327,68 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
 
   const getEventTypeLabel = (type: string) => {
     const labels: Record<string, string> = {
-      goal: '⚽ Gol',
-      penalty: '🎯 Pênalti',
-      yellow_card: '🟨 Cartão Amarelo',
-      red_card: '🟥 Cartão Vermelho',
-      foul: '⚠️ Falta',
-      corner: '📐 Escanteio',
-      offside: '🚩 Impedimento',
-      save: '🧤 Defesa',
-      substitution: '🔄 Substituição',
-      highlight: '⭐ Destaque',
-      shot: '🎯 Chute',
-      shot_on_target: '🎯 Chute no Gol',
+      goal: 'Gol',
+      penalty: 'Pênalti',
+      yellow_card: 'Cartão Amarelo',
+      red_card: 'Cartão Vermelho',
+      foul: 'Falta',
+      corner: 'Escanteio',
+      offside: 'Impedimento',
+      save: 'Defesa',
+      substitution: 'Substituição',
+      highlight: 'Destaque',
+      shot: 'Chute',
+      shot_on_target: 'Chute no Gol',
     };
     return labels[type] || type;
   };
+
+  const getEventCategoryIcon = (type: string) => {
+    const icons: Record<string, string> = {
+      goal: '⚽',
+      penalty: '🎯',
+      yellow_card: '🟨',
+      red_card: '🟥',
+      foul: '⚠️',
+      save: '🧤',
+      shot: '🎯',
+      shot_on_target: '🎯',
+      highlight: '⭐',
+    };
+    return icons[type] || '📹';
+  };
+
+  const getCategoryLabel = (category: string) => {
+    const labels: Record<string, { label: string; icon: string }> = {
+      goals: { label: 'GOLS', icon: '⚽' },
+      shots: { label: 'FINALIZAÇÕES', icon: '🎯' },
+      cards: { label: 'CARTÕES', icon: '🟨' },
+      defensive: { label: 'JOGADAS DEFENSIVAS', icon: '🧤' },
+      highlights: { label: 'DESTAQUES', icon: '⭐' },
+    };
+    return labels[category] || { label: category.toUpperCase(), icon: '📹' };
+  };
+
+  // Group clips by category
+  const groupedClips = clips.reduce((acc, clip) => {
+    let category = 'highlights';
+    if (clip.event_type === 'goal' || clip.event_type === 'penalty') {
+      category = 'goals';
+    } else if (clip.event_type === 'shot' || clip.event_type === 'shot_on_target') {
+      category = 'shots';
+    } else if (clip.event_type === 'yellow_card' || clip.event_type === 'red_card') {
+      category = 'cards';
+    } else if (clip.event_type === 'save' || clip.event_type === 'foul') {
+      category = 'defensive';
+    }
+    
+    if (!acc[category]) acc[category] = [];
+    acc[category].push(clip);
+    return acc;
+  }, {} as Record<string, ClipWithThumbnail[]>);
+
+  // Order categories
+  const categoryOrder = ['goals', 'shots', 'cards', 'defensive', 'highlights'];
 
   const clearMedia = () => {
     setUrlInput('');
@@ -518,53 +565,81 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
               </CardContent>
             </Card>
           ) : (
-            <ScrollArea className="h-[240px] border rounded-lg">
-              <div className="p-2 space-y-1">
-                {clips.map((clip) => (
-                  <button
-                    key={clip.id}
-                    type="button"
-                    onClick={() => handleSelectClip(clip)}
-                    className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors ${
-                      selectedClipId === clip.id 
-                        ? 'bg-primary/10 border border-primary' 
-                        : 'hover:bg-muted'
-                    }`}
-                  >
-                    {/* Thumbnail/Cover */}
-                    <div className="h-12 w-16 rounded overflow-hidden shrink-0 bg-muted flex items-center justify-center">
-                      {clip.thumbnail_url ? (
-                        <img 
-                          src={clip.thumbnail_url} 
-                          alt={clip.event_type}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <Play className="h-5 w-5 text-muted-foreground" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate">
-                          {getEventTypeLabel(clip.event_type)}
-                        </span>
-                        {clip.minute !== null && (
-                          <Badge variant="outline" className="text-xs">
-                            {clip.minute}'
-                          </Badge>
-                        )}
+            <ScrollArea className="h-[300px] border rounded-lg bg-background/50">
+              <div className="p-3 space-y-4">
+                {categoryOrder.map((category) => {
+                  const categoryClips = groupedClips[category];
+                  if (!categoryClips || categoryClips.length === 0) return null;
+                  
+                  const { label, icon } = getCategoryLabel(category);
+                  
+                  return (
+                    <div key={category} className="space-y-2">
+                      {/* Category Header */}
+                      <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+                        <span>{icon}</span>
+                        <span>{label}</span>
                       </div>
-                      {clip.description && (
-                        <p className="text-xs text-muted-foreground truncate">
-                          {clip.description}
-                        </p>
-                      )}
+                      
+                      {/* Clips in this category */}
+                      <div className="space-y-1">
+                        {categoryClips.map((clip) => (
+                          <button
+                            key={clip.id}
+                            type="button"
+                            onClick={() => handleSelectClip(clip)}
+                            className={`w-full flex items-center gap-3 p-2 rounded-lg text-left transition-colors ${
+                              selectedClipId === clip.id 
+                                ? 'bg-primary/10 ring-1 ring-primary' 
+                                : 'hover:bg-muted/50'
+                            }`}
+                          >
+                            {/* Selection Circle */}
+                            <div className={`h-5 w-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                              selectedClipId === clip.id 
+                                ? 'border-primary bg-primary' 
+                                : 'border-muted-foreground/30'
+                            }`}>
+                              {selectedClipId === clip.id && (
+                                <Check className="h-3 w-3 text-primary-foreground" />
+                              )}
+                            </div>
+                            
+                            {/* Thumbnail */}
+                            <div className="h-12 w-20 rounded overflow-hidden shrink-0 bg-muted relative">
+                              {clip.thumbnail_url ? (
+                                <img 
+                                  src={clip.thumbnail_url} 
+                                  alt={clip.event_type}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <div className="h-full w-full flex items-center justify-center bg-muted">
+                                  <Film className="h-5 w-5 text-muted-foreground" />
+                                </div>
+                              )}
+                            </div>
+                            
+                            {/* Info */}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">
+                                {clip.description || `${getEventTypeLabel(clip.event_type)}!`}
+                              </p>
+                              <p className="text-xs text-muted-foreground">
+                                {clip.minute !== null ? `${clip.minute}'` : ''} • 15 segundos
+                              </p>
+                            </div>
+                            
+                            {/* Play Icon */}
+                            <div className="shrink-0">
+                              <Play className="h-5 w-5 text-muted-foreground" />
+                            </div>
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                    {selectedClipId === clip.id && (
-                      <Check className="h-4 w-4 text-primary shrink-0" />
-                    )}
-                  </button>
-                ))}
+                  );
+                })}
               </div>
             </ScrollArea>
           )}
