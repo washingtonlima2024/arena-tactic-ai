@@ -27,27 +27,24 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-interface PlaylistClip {
+export interface PlaylistClip {
   id: string;
   title: string;
   type: string;
-  startTime: number;
-  endTime: number;
-  description: string;
-  minute: number;
-  clipUrl?: string | null;
+  duration?: number;
+  thumbnailUrl?: string;
 }
 
-interface PlaylistConfig {
+export interface PlaylistConfig {
   name: string;
   targetDuration: number;
   format: '9:16' | '16:9' | '1:1' | '4:5';
   includeOpening: boolean;
   includeTransitions: boolean;
   includeClosing: boolean;
-  openingDurationMs: number;
-  transitionDurationMs: number;
-  closingDurationMs: number;
+  openingDuration: number;
+  transitionDuration: number;
+  closingDuration: number;
 }
 
 interface PlaylistConfigDialogProps {
@@ -55,7 +52,7 @@ interface PlaylistConfigDialogProps {
   onOpenChange: (open: boolean) => void;
   clips: PlaylistClip[];
   teamName: string;
-  onConfirm: (config: PlaylistConfig) => void;
+  onCompile: (config: PlaylistConfig) => void;
 }
 
 const FORMAT_OPTIONS = [
@@ -70,7 +67,7 @@ export function PlaylistConfigDialog({
   onOpenChange,
   clips,
   teamName,
-  onConfirm,
+  onCompile,
 }: PlaylistConfigDialogProps) {
   const [config, setConfig] = useState<PlaylistConfig>({
     name: `${teamName} - Highlights ${new Date().toLocaleDateString('pt-BR')}`,
@@ -79,17 +76,17 @@ export function PlaylistConfigDialog({
     includeOpening: true,
     includeTransitions: true,
     includeClosing: true,
-    openingDurationMs: 4000,
-    transitionDurationMs: 1500,
-    closingDurationMs: 3000,
+    openingDuration: 4000,
+    transitionDuration: 1500,
+    closingDuration: 3000,
   });
 
   // Calculate time distribution
   const calculation = useMemo(() => {
-    const openingSeconds = config.includeOpening ? config.openingDurationMs / 1000 : 0;
-    const closingSeconds = config.includeClosing ? config.closingDurationMs / 1000 : 0;
+    const openingSeconds = config.includeOpening ? config.openingDuration / 1000 : 0;
+    const closingSeconds = config.includeClosing ? config.closingDuration / 1000 : 0;
     const transitionSeconds = config.includeTransitions 
-      ? (clips.length > 1 ? (clips.length - 1) * (config.transitionDurationMs / 1000) : 0) 
+      ? (clips.length > 1 ? (clips.length - 1) * (config.transitionDuration / 1000) : 0) 
       : 0;
     
     const vignetteTotal = openingSeconds + closingSeconds + transitionSeconds;
@@ -109,7 +106,7 @@ export function PlaylistConfigDialog({
   }, [config, clips.length]);
 
   const handleConfirm = () => {
-    onConfirm(config);
+    onCompile(config);
     onOpenChange(false);
   };
 
@@ -212,7 +209,7 @@ export function PlaylistConfigDialog({
                 <div>
                   <div className="font-medium text-sm">Abertura</div>
                   <div className="text-xs text-muted-foreground">
-                    Introdução com dados da partida ({config.openingDurationMs / 1000}s)
+                    Introdução com dados da partida ({config.openingDuration / 1000}s)
                   </div>
                 </div>
                 <Switch
@@ -225,7 +222,7 @@ export function PlaylistConfigDialog({
                 <div>
                   <div className="font-medium text-sm">Transições</div>
                   <div className="text-xs text-muted-foreground">
-                    Efeitos entre clips ({config.transitionDurationMs / 1000}s cada)
+                    Efeitos entre clips ({config.transitionDuration / 1000}s cada)
                   </div>
                 </div>
                 <Switch
@@ -238,7 +235,7 @@ export function PlaylistConfigDialog({
                 <div>
                   <div className="font-medium text-sm">Encerramento</div>
                   <div className="text-xs text-muted-foreground">
-                    Créditos e logo ArenaPlay ({config.closingDurationMs / 1000}s)
+                    Créditos e logo ArenaPlay ({config.closingDuration / 1000}s)
                   </div>
                 </div>
                 <Switch

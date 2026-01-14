@@ -23,12 +23,15 @@ import {
   Twitter,
   Send,
   Loader2,
-  Server
+  Server,
+  ListVideo
 } from 'lucide-react';
 import { toast } from '@/hooks/use-toast';
 import JSZip from 'jszip';
 import { apiClient } from '@/lib/apiClient';
 import { LocalServerConfig } from './LocalServerConfig';
+import { PlaylistConfigDialog, type PlaylistConfig } from './PlaylistConfigDialog';
+import { supabase } from '@/integrations/supabase/client';
 
 interface Clip {
   id: string;
@@ -82,6 +85,8 @@ export function TeamPlaylist({
   const [pendingExport, setPendingExport] = useState<PlaylistItem[]>([]);
   const [isExporting, setIsExporting] = useState(false);
   const [exportProgress, setExportProgress] = useState<string>('');
+  const [showPlaylistConfig, setShowPlaylistConfig] = useState(false);
+  const [isSavingPlaylist, setIsSavingPlaylist] = useState(false);
   
   // Local server config
   const [serverUrl, setServerUrl] = useState(() => 
@@ -626,6 +631,20 @@ export function TeamPlaylist({
               )}
               {isExporting ? 'Exportando...' : `Exportar (${selectedCount})`}
             </Button>
+            <Button 
+              variant="outline" 
+              className="flex-1" 
+              size="sm"
+              onClick={() => setShowPlaylistConfig(true)}
+              disabled={selectedCount === 0 || isSavingPlaylist}
+            >
+              {isSavingPlaylist ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <ListVideo className="mr-2 h-4 w-4" />
+              )}
+              Compilar Playlist
+            </Button>
           </div>
           
           {/* Social Media Buttons */}
@@ -662,6 +681,66 @@ export function TeamPlaylist({
             </Button>
           </div>
         </div>
+        
+        {/* Playlist Config Dialog */}
+        <PlaylistConfigDialog
+          open={showPlaylistConfig}
+          onOpenChange={setShowPlaylistConfig}
+          clips={selectedItems.map(item => ({
+            id: item.id,
+            title: item.title,
+            type: item.type,
+            duration: item.endTime - item.startTime,
+            thumbnailUrl: getThumbnail(item.id)?.imageUrl
+          }))}
+          teamName={team.name}
+          onCompile={async (config: PlaylistConfig) => {
+            setIsSavingPlaylist(true);
+            try {
+              const { data: { user } } = await supabase.auth.getUser();
+              if (!user) {
+                toast({ title: "Faça login para salvar playlists", variant: "destructive" });
+                return;
+              }
+              
+              // Save playlist to database
+              const { error } = await supabase.from('playlists').insert({
+                match_id: matchId,
+                team_id: team.id,
+                name: config.name,
+                clip_ids: selectedItems.map(c => c.id),
+                target_duration_seconds: config.targetDuration,
+                actual_duration_seconds: config.targetDuration,
+                include_opening: config.includeOpening,
+                include_transitions: config.includeTransitions,
+                include_closing: config.includeClosing,
+                opening_duration_ms: config.openingDuration,
+                transition_duration_ms: config.transitionDuration,
+                closing_duration_ms: config.closingDuration,
+                format: config.format,
+                status: 'ready',
+                created_by: user.id
+              });
+              
+              if (error) throw error;
+              
+              toast({ 
+                title: "Playlist salva!", 
+                description: `"${config.name}" está pronta para uso nas redes sociais`
+              });
+              setShowPlaylistConfig(false);
+            } catch (error) {
+              console.error('Erro ao salvar playlist:', error);
+              toast({ 
+                title: "Erro ao salvar", 
+                description: String(error), 
+                variant: "destructive" 
+              });
+            } finally {
+              setIsSavingPlaylist(false);
+            }
+          }}
+        />
       </CardContent>
 
       {/* Dialog de Extração On-Demand */}
