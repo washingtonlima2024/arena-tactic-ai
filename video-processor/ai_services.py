@@ -2065,14 +2065,21 @@ def _transcribe_gemini_chunks(audio_path: str, tmpdir: str, match_id: str = None
                 all_text.append(chunk_text)
                 successful_chunks += 1
                 
-                # Add SRT entries with adjusted timestamps
-                paragraphs = [p.strip() for p in chunk_text.split('\n') if p.strip()]
-                para_duration = chunk_duration / max(len(paragraphs), 1)
+                # Add SRT entries with adjusted timestamps - split by words, not paragraphs
+                all_words = chunk_text.split()
+                segment_size = 10  # Words per subtitle line
+                segments_in_chunk = max(1, len(all_words) // segment_size)
+                time_per_segment = chunk_duration / segments_in_chunk
                 
-                for j, para in enumerate(paragraphs):
-                    seg_start = time_offset + (j * para_duration)
-                    seg_end = seg_start + para_duration
-                    all_srt.append(f"{srt_index}\n{_format_srt_time(seg_start)} --> {_format_srt_time(seg_end)}\n{para}\n")
+                for j in range(0, len(all_words), segment_size):
+                    word_chunk = all_words[j:j + segment_size]
+                    if not word_chunk:
+                        continue
+                    
+                    segment_text = ' '.join(word_chunk)
+                    seg_start = time_offset + ((j // segment_size) * time_per_segment)
+                    seg_end = seg_start + time_per_segment
+                    all_srt.append(f"{srt_index}\n{_format_srt_time(seg_start)} --> {_format_srt_time(seg_end)}\n{segment_text}\n")
                     srt_index += 1
                 
                 print(f"[GeminiChunks] ✓ Chunk {i+1} transcrito: {len(chunk_text)} chars")
@@ -2216,15 +2223,34 @@ Se houver múltiplos falantes, separe as falas com quebras de linha.'''
         if not text:
             return {"error": "Gemini não retornou transcrição", "success": False}
         
-        # Generate simple SRT (without precise timestamps)
+        # Generate segmented SRT (Gemini doesn't provide timestamps, so we estimate)
+        # Split text into smaller segments (~8-12 words each) for better readability
         srt_lines = []
-        paragraphs = [p.strip() for p in text.split('\n') if p.strip()]
-        for i, para in enumerate(paragraphs, 1):
-            start_sec = i * 5
-            end_sec = (i + 1) * 5
+        all_words = text.split()
+        segment_size = 10  # Words per subtitle line (similar to ElevenLabs)
+        total_words = len(all_words)
+        
+        # Estimate audio duration based on average speaking rate (150 words per minute)
+        # This is an approximation since Gemini doesn't give us actual timestamps
+        estimated_duration = max(60, (total_words / 150) * 60)  # At least 60 seconds
+        
+        segment_count = max(1, total_words // segment_size)
+        time_per_segment = estimated_duration / segment_count
+        
+        srt_index = 1
+        for i in range(0, total_words, segment_size):
+            chunk_words = all_words[i:i + segment_size]
+            if not chunk_words:
+                continue
+            
+            chunk_text = ' '.join(chunk_words)
+            start_sec = (i // segment_size) * time_per_segment
+            end_sec = start_sec + time_per_segment
+            
             start = _format_srt_time(start_sec)
             end = _format_srt_time(end_sec)
-            srt_lines.append(f"{i}\n{start} --> {end}\n{para}\n")
+            srt_lines.append(f"{srt_index}\n{start} --> {end}\n{chunk_text}\n")
+            srt_index += 1
         
         srt_content = '\n'.join(srt_lines)
         
