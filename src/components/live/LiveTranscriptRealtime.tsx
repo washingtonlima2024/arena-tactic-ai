@@ -50,7 +50,7 @@ export const LiveTranscriptRealtime = ({
 }: LiveTranscriptRealtimeProps) => {
   const { toast } = useToast();
   // Audio source: "mic" for microphone (ElevenLabs), "video" for video audio (Whisper)
-  const [audioSource, setAudioSource] = useState<"mic" | "video">("mic");
+  const [audioSource, setAudioSource] = useState<"mic" | "video">("video");
   const [transcriptionLanguage, setTranscriptionLanguage] = useState<string>("pt");
   
   // Use useState instead of useRef for re-rendering
