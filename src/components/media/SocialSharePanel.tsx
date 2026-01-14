@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -7,6 +7,7 @@ import { Label } from '@/components/ui/label';
 import { Calendar } from '@/components/ui/calendar';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { 
   X, 
   Instagram, 
@@ -18,7 +19,8 @@ import {
   Clock,
   Check,
   Share2,
-  Video
+  Video,
+  Megaphone
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
@@ -26,6 +28,12 @@ import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { supabase } from '@/integrations/supabase/client';
 import { useAuth } from '@/hooks/useAuth';
+
+interface Campaign {
+  id: string;
+  name: string;
+  status: string;
+}
 
 // Social networks configuration
 const SOCIAL_NETWORKS = [
@@ -111,6 +119,32 @@ export function SocialSharePanel({
   const [scheduleTime, setScheduleTime] = useState('12:00');
   const [caption, setCaption] = useState('');
   const [isSharing, setIsSharing] = useState(false);
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string>('none');
+
+  // Fetch active campaigns
+  useEffect(() => {
+    if (isOpen && user) {
+      fetchActiveCampaigns();
+    }
+  }, [isOpen, user]);
+
+  const fetchActiveCampaigns = async () => {
+    if (!user) return;
+    try {
+      const { data, error } = await supabase
+        .from('social_campaigns')
+        .select('id, name, status')
+        .eq('user_id', user.id)
+        .in('status', ['active', 'draft'])
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      setCampaigns(data || []);
+    } catch (error) {
+      console.error('Error fetching campaigns:', error);
+    }
+  };
 
   if (!isOpen) return null;
 
@@ -175,6 +209,7 @@ export function SocialSharePanel({
           status: 'scheduled',
           match_id: matchId || null,
           event_id: eventId || null,
+          campaign_id: selectedCampaignId !== 'none' ? selectedCampaignId : null,
         }));
 
         const { error } = await supabase
@@ -302,7 +337,34 @@ export function SocialSharePanel({
               </div>
             </div>
 
-            {/* Clip Preview */}
+            {/* Campaign Selector */}
+            {campaigns.length > 0 && (
+              <div className="space-y-2">
+                <Label className="flex items-center gap-2 text-sm font-medium">
+                  <Megaphone className="h-4 w-4 text-primary" />
+                  Campanha (opcional)
+                </Label>
+                <Select value={selectedCampaignId} onValueChange={setSelectedCampaignId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Vincular a uma campanha..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Nenhuma campanha</SelectItem>
+                    {campaigns.map((campaign) => (
+                      <SelectItem key={campaign.id} value={campaign.id}>
+                        <div className="flex items-center gap-2">
+                          <span>{campaign.name}</span>
+                          <Badge variant={campaign.status === 'active' ? 'default' : 'secondary'} className="text-[10px]">
+                            {campaign.status === 'active' ? 'Ativa' : 'Rascunho'}
+                          </Badge>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             {clipUrl && (
               <div className="space-y-2">
                 <Label className="text-sm font-medium">Mídia Selecionada</Label>
