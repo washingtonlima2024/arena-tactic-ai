@@ -412,6 +412,32 @@ export const apiClient = {
       error?: string;
     }>;
   }>(`/api/matches/${matchId}/regenerate-thumbnails`, { method: 'POST' }),
+  
+  // Diagnose thumbnails - find events with clip but no thumbnail
+  diagnoseThumbnails: (matchId: string) => apiRequest<{
+    total_events_with_clip: number;
+    total_thumbnails: number;
+    missing_thumbnails: number;
+    missing_events: Array<{
+      event_id: string;
+      event_type: string;
+      minute: number;
+      second?: number;
+      description?: string;
+      clip_url: string;
+      match_half?: string;
+    }>;
+    coverage_percent: number;
+  }>(`/api/matches/${matchId}/diagnose-thumbnails`),
+  
+  // Sync thumbnails - generate missing thumbnails from clips
+  syncThumbnails: (matchId: string) => apiRequest<{
+    success: boolean;
+    total_missing: number;
+    generated: number;
+    failed: number;
+    message: string;
+  }>(`/api/matches/${matchId}/sync-thumbnails`, { method: 'POST' }),
 
   // ============== Settings ==============
   getSettings: () => apiRequest<any[]>('/api/settings'),

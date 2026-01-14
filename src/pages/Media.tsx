@@ -84,6 +84,7 @@ export default function Media() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [activeHalfTab, setActiveHalfTab] = useState<string>('all');
   const [isSyncingVideos, setIsSyncingVideos] = useState(false);
+  const [isSyncingThumbnails, setIsSyncingThumbnails] = useState(false);
   const [previewClipId, setPreviewClipId] = useState<string | null>(null);
 
   const queryClient = useQueryClient();
@@ -527,6 +528,66 @@ export default function Media() {
                 >
                   <Image className="h-3 w-3 mr-1" />
                   Regenerar Capas
+                </Button>
+                
+                {/* Sync missing thumbnails button */}
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={async () => {
+                    if (!matchId) return;
+                    setIsSyncingThumbnails(true);
+                    try {
+                      // First diagnose to see how many are missing
+                      const diagnosis = await apiClient.diagnoseThumbnails(matchId);
+                      
+                      if (diagnosis.missing_thumbnails === 0) {
+                        toast({ 
+                          title: "Todas as capas OK", 
+                          description: `${diagnosis.total_thumbnails} capa(s) encontrada(s) - cobertura 100%` 
+                        });
+                        return;
+                      }
+                      
+                      toast({ 
+                        title: "Sincronizando capas...", 
+                        description: `${diagnosis.missing_thumbnails} capa(s) faltando` 
+                      });
+                      
+                      // Sync missing thumbnails
+                      const result = await apiClient.syncThumbnails(matchId);
+                      
+                      if (result.generated > 0) {
+                        toast({ 
+                          title: "Capas sincronizadas", 
+                          description: `${result.generated} capa(s) gerada(s)${result.failed > 0 ? `, ${result.failed} erro(s)` : ''}` 
+                        });
+                        queryClient.invalidateQueries({ queryKey: ['thumbnails', matchId] });
+                      } else if (result.failed > 0) {
+                        toast({ 
+                          title: "Falha na sincronização", 
+                          description: `${result.failed} erro(s) - verifique se os clips existem`, 
+                          variant: "destructive" 
+                        });
+                      }
+                    } catch (error) {
+                      toast({ 
+                        title: "Erro ao sincronizar capas", 
+                        description: String(error), 
+                        variant: "destructive" 
+                      });
+                    } finally {
+                      setIsSyncingThumbnails(false);
+                    }
+                  }}
+                  disabled={isSyncingThumbnails}
+                >
+                  {isSyncingThumbnails ? (
+                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-3 w-3 mr-1" />
+                  )}
+                  Sincronizar Capas
                 </Button>
 
                 {/* Sync videos button */}
