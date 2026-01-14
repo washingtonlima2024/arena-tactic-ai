@@ -585,10 +585,10 @@ export const apiClient = {
   },
 
   generateNarration: (data: any) =>
-    apiRequest<any>('/api/generate-narration', { method: 'POST', body: JSON.stringify(data) }),
+    apiRequestLongRunning<any>('/api/generate-narration', { method: 'POST', body: JSON.stringify(data) }),
 
   generatePodcast: (data: any) =>
-    apiRequest<any>('/api/generate-podcast', { method: 'POST', body: JSON.stringify(data) }),
+    apiRequestLongRunning<any>('/api/generate-podcast', { method: 'POST', body: JSON.stringify(data) }),
 
   chatbot: (data: { message: string; matchContext?: any; conversationHistory?: any[]; withAudio?: boolean }) =>
     apiRequest<{ text: string; audioContent?: string }>('/api/chatbot', { method: 'POST', body: JSON.stringify(data) }),

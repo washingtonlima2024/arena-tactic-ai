@@ -28,8 +28,10 @@ from typing import Optional, Dict, Any
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
 
-# Log de verificação de configuração Supabase na inicialização
+# Log de verificação de configuração na inicialização
 print(f"[STARTUP] Arena Play Server v{SERVER_VERSION} ({SERVER_BUILD_DATE})")
+print(f"[STARTUP] Arquivo .env existe: {'✓' if os.path.exists('.env') else '✗'}")
+print(f"[STARTUP] LOVABLE_API_KEY: {'✓ configurada' if os.environ.get('LOVABLE_API_KEY') else '✗ não configurada'}")
 print(f"[STARTUP] Supabase configurado: {bool(SUPABASE_URL and SUPABASE_SERVICE_KEY)}")
 if SUPABASE_URL and SUPABASE_SERVICE_KEY:
     print(f"[STARTUP] ✓ SUPABASE_URL: {SUPABASE_URL[:50]}...")
