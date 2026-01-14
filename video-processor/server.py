@@ -3314,7 +3314,12 @@ def generate_thumbnail_from_clip(
     minute: int = 0
 ) -> str:
     """
-    Extract a frame from a clip to use as thumbnail.
+    Extract a frame from a clip to use as thumbnail WITH styled overlay.
+    
+    Generates a thumbnail with:
+    - Event type badge (bottom-left, colored by type)
+    - Minute badge (bottom-right, black with green accent)
+    - Gradient overlay at bottom
     
     Args:
         clip_path: Path to the clip video file
@@ -3328,6 +3333,41 @@ def generate_thumbnail_from_clip(
     """
     print(f"[THUMBNAIL] Iniciando geração - clip: {clip_path}, match: {match_id}, event_id: {event_id}, type: {event_type}, min: {minute}")
     
+    # Event type labels in Portuguese
+    EVENT_LABELS = {
+        'goal': 'GOL',
+        'shot': 'CHUTE',
+        'shot_on_target': 'CHUTE NO GOL',
+        'foul': 'FALTA',
+        'corner': 'ESCANTEIO',
+        'offside': 'IMPEDIMENTO',
+        'yellow_card': 'CARTÃO AMARELO',
+        'red_card': 'CARTÃO VERMELHO',
+        'substitution': 'SUBSTITUIÇÃO',
+        'penalty': 'PÊNALTI',
+        'free_kick': 'TIRO LIVRE',
+        'save': 'DEFESA',
+        'clearance': 'CORTE',
+        'tackle': 'DESARME',
+        'pass': 'PASSE',
+        'cross': 'CRUZAMENTO',
+        'interception': 'INTERCEPTAÇÃO',
+    }
+    
+    # Badge colors by event type (hex without #)
+    EVENT_COLORS = {
+        'goal': '10b981',        # Green
+        'shot': 'f59e0b',        # Orange
+        'shot_on_target': 'f59e0b',
+        'save': '3b82f6',        # Blue
+        'foul': 'ef4444',        # Red
+        'yellow_card': 'eab308', # Yellow
+        'red_card': 'dc2626',    # Dark red
+        'corner': '8b5cf6',      # Purple
+        'penalty': 'ec4899',     # Pink
+        'offside': '6366f1',     # Indigo
+    }
+    
     try:
         if not os.path.exists(clip_path):
             print(f"[THUMBNAIL] ⚠ Clip não existe: {clip_path}")
@@ -3336,13 +3376,12 @@ def generate_thumbnail_from_clip(
         # Get clip duration
         clip_duration = get_video_duration_seconds(clip_path)
         if clip_duration <= 0:
-            clip_duration = 5.0  # Default to 5 seconds
+            clip_duration = 5.0
             print(f"[THUMBNAIL] Usando duração padrão: {clip_duration}s")
         else:
             print(f"[THUMBNAIL] Duração do clip: {clip_duration}s")
         
-        # Extract frame at the middle of the clip (where the event likely is)
-        # For a 10s clip, extract at 5s mark
+        # Extract frame at the middle of the clip
         frame_time = clip_duration / 2
         
         # Generate thumbnail filename
@@ -3354,21 +3393,80 @@ def generate_thumbnail_from_clip(
         # Get images folder path
         images_folder = get_subfolder_path(match_id, 'images')
         thumb_path = str(images_folder / thumb_filename)
+        temp_frame_path = str(images_folder / f"_temp_frame_{event_id[:8] if event_id else 'x'}.jpg")
         print(f"[THUMBNAIL] Salvando em: {thumb_path}")
         
-        # Extract frame using FFmpeg
+        # Get event label
+        event_label = EVENT_LABELS.get(event_type, event_type.upper().replace('_', ' '))
+        badge_color = EVENT_COLORS.get(event_type, '10b981')
+        
+        # Build FFmpeg filter for styled overlay
+        # This creates: gradient bottom, event type badge (bottom-left), minute badge (bottom-right)
+        filters = []
+        
+        # 1. Bottom gradient overlay
+        filters.append(
+            "drawbox=x=0:y=ih-120:w=iw:h=120:color=black@0.5:t=fill"
+        )
+        
+        # 2. Event type badge (bottom-left)
+        # Background box
+        filters.append(
+            f"drawbox=x=20:y=ih-70:w=text_w+30:h=50:color=0x{badge_color}:t=fill"
+        )
+        
+        # 3. Event type text
+        # Using drawtext with escape
+        escaped_label = event_label.replace("'", "\\'").replace(":", "\\:")
+        filters.append(
+            f"drawtext=text='{escaped_label}':fontsize=28:fontcolor=white:x=35:y=ih-55:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        )
+        
+        # 4. Minute badge (bottom-right) 
+        # Black background with green accent
+        filters.append(
+            "drawbox=x=iw-100:y=ih-70:w=80:h=50:color=black@0.9:t=fill"
+        )
+        filters.append(
+            "drawbox=x=iw-100:y=ih-65:w=4:h=40:color=0x10b981:t=fill"
+        )
+        
+        # 5. Minute text
+        minute_text = f"{minute}'"
+        filters.append(
+            f"drawtext=text='{minute_text}':fontsize=32:fontcolor=white:x=iw-80:y=ih-55:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+        )
+        
+        # Combine all filters
+        vf_string = ','.join(filters)
+        
+        # Extract frame with overlay using FFmpeg
         cmd = [
             'ffmpeg', '-y',
             '-ss', str(frame_time),
             '-i', clip_path,
             '-vframes', '1',
-            '-q:v', '2',  # High quality JPEG
-            '-vf', 'scale=640:-1',  # Resize to 640px width, maintain aspect
+            '-q:v', '2',
+            '-vf', f'scale=1280:-1,{vf_string}',
             thumb_path
         ]
         
-        print(f"[THUMBNAIL] Executando FFmpeg: {' '.join(cmd[:6])}...")
+        print(f"[THUMBNAIL] Executando FFmpeg com overlay estilizado...")
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        # If styled version fails, try simple extraction
+        if result.returncode != 0 or not os.path.exists(thumb_path):
+            print(f"[THUMBNAIL] ⚠ Overlay falhou, tentando extração simples...")
+            cmd_simple = [
+                'ffmpeg', '-y',
+                '-ss', str(frame_time),
+                '-i', clip_path,
+                '-vframes', '1',
+                '-q:v', '2',
+                '-vf', 'scale=1280:-1',
+                thumb_path
+            ]
+            result = subprocess.run(cmd_simple, capture_output=True, text=True, timeout=30)
         
         if result.returncode == 0 and os.path.exists(thumb_path):
             thumb_size = os.path.getsize(thumb_path)
@@ -3382,13 +3480,13 @@ def generate_thumbnail_from_clip(
                     try:
                         session = get_session()
                         
-                        # Verificar se já existe thumbnail para este evento
+                        # Check if thumbnail already exists
                         existing = session.query(Thumbnail).filter_by(event_id=event_id).first()
                         if existing:
                             print(f"[THUMBNAIL] Atualizando thumbnail existente para evento {event_id}")
                             existing.image_url = thumb_url
                             existing.event_type = event_type
-                            existing.title = f"{event_type} - {minute}'"
+                            existing.title = f"{event_label} - {minute}'"
                         else:
                             print(f"[THUMBNAIL] Criando novo thumbnail para evento {event_id}")
                             thumbnail = Thumbnail(
@@ -3396,7 +3494,7 @@ def generate_thumbnail_from_clip(
                                 event_id=event_id,
                                 event_type=event_type,
                                 image_url=thumb_url,
-                                title=f"{event_type} - {minute}'"
+                                title=f"{event_label} - {minute}'"
                             )
                             session.add(thumbnail)
                         

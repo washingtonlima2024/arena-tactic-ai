@@ -116,6 +116,7 @@ export interface ClipGenerationProgress {
   currentEvent?: string;
   completedCount?: number;
   totalCount?: number;
+  thumbnailsGenerated?: number; // Counter for generated thumbnails
 }
 
 // Helper: Convert minute + second to milliseconds
@@ -529,16 +530,23 @@ export function useClipGeneration() {
         message: 'Gerando capa do clip...'
       }));
 
+      let thumbnailGenerated = false;
       try {
-        await extractThumbnailFromClip(clipBlob, {
+        const thumbnailUrl = await extractThumbnailFromClip(clipBlob, {
           eventId: config.eventId,
           eventType: config.eventType,
           eventMinute: config.eventMinute,
           matchId: config.matchId
         });
-        console.log('Thumbnail gerada automaticamente para evento:', config.eventId);
+        
+        if (thumbnailUrl) {
+          thumbnailGenerated = true;
+          console.log('[ClipGen] ✓ Thumbnail gerada automaticamente:', config.eventId, '->', thumbnailUrl);
+        } else {
+          console.warn('[ClipGen] ⚠ Thumbnail retornou null para evento:', config.eventId);
+        }
       } catch (thumbError) {
-        console.warn('Erro ao gerar thumbnail automática:', thumbError);
+        console.error('[ClipGen] ✗ Erro ao gerar thumbnail automática:', thumbError);
         // Continue - thumbnail generation is not critical
       }
 
@@ -546,7 +554,8 @@ export function useClipGeneration() {
         ...prev,
         stage: 'complete',
         progress: 100,
-        message: 'Clip e capa gerados com sucesso!'
+        message: thumbnailGenerated ? 'Clip e capa gerados com sucesso!' : 'Clip gerado (capa falhou)',
+        thumbnailsGenerated: (prev.thumbnailsGenerated || 0) + (thumbnailGenerated ? 1 : 0)
       }));
 
       return clipUrl;
@@ -687,13 +696,14 @@ export function useClipGeneration() {
         completedCount++;
       }
 
-      setProgress({
+      setProgress(prev => ({
         stage: 'complete',
         progress: 100,
-        message: `${completedCount} clips gerados com sucesso!`,
+        message: `${completedCount} clips gerados com sucesso! (${prev.thumbnailsGenerated || 0} capas)`,
         completedCount,
-        totalCount: eventsToProcess.length
-      });
+        totalCount: eventsToProcess.length,
+        thumbnailsGenerated: prev.thumbnailsGenerated || 0
+      }));
 
     } catch (error) {
       console.error('Erro na geração em lote:', error);
