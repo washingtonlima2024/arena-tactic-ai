@@ -13,7 +13,8 @@ import {
   Loader2,
   Link2,
   Calendar,
-  Megaphone
+  Megaphone,
+  MessageCircle
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -135,6 +136,20 @@ const SOCIAL_NETWORKS: SocialNetwork[] = [
     fields: [
       { key: 'access_token', label: 'Access Token', type: 'password', placeholder: 'Token de acesso' },
       { key: 'account_id', label: 'Open ID', type: 'text', placeholder: 'Open ID do usuário' }
+    ]
+  },
+  {
+    id: 'whatsapp',
+    name: 'WhatsApp Business',
+    icon: MessageCircle,
+    color: 'text-green-500',
+    bgColor: 'bg-green-500',
+    description: 'Envie mensagens e mídias via API',
+    docUrl: 'https://developers.facebook.com/docs/whatsapp/cloud-api',
+    fields: [
+      { key: 'access_token', label: 'Access Token', type: 'password', placeholder: 'Token de acesso permanente' },
+      { key: 'account_id', label: 'Phone Number ID', type: 'text', placeholder: 'ID do número de telefone' },
+      { key: 'account_name', label: 'Número de Telefone', type: 'text', placeholder: '+55 11 99999-9999' }
     ]
   }
 ];
