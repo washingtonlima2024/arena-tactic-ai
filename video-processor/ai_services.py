@@ -2118,12 +2118,31 @@ def _transcribe_gemini_chunks(audio_path: str, tmpdir: str, match_id: str = None
 
 
 
-def _transcribe_with_gemini(audio_path: str, match_id: str = None) -> Dict[str, Any]:
+def _get_audio_duration(audio_path: str) -> float:
+    """Get audio duration in seconds using ffprobe."""
+    try:
+        probe_cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                     '-of', 'default=noprint_wrappers=1:nokey=1', audio_path]
+        result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        duration = float(result.stdout.strip())
+        print(f"[AudioDuration] Duração real do áudio: {duration:.2f}s ({duration/60:.1f}min)")
+        return duration
+    except Exception as e:
+        print(f"[AudioDuration] ⚠ Falha ao obter duração: {e}")
+        return None
+
+
+def _transcribe_with_gemini(audio_path: str, match_id: str = None, audio_duration: float = None) -> Dict[str, Any]:
     """
     Transcribe audio using Google Gemini via Lovable AI Gateway.
     
     Works for files up to ~20MB. Converts audio to base64 and sends
     to the Gemini model for transcription.
+    
+    Args:
+        audio_path: Path to the audio file
+        match_id: Optional match ID for reference
+        audio_duration: Real audio duration in seconds (from ffprobe) for accurate SRT timing
     """
     import base64
     
@@ -2223,19 +2242,25 @@ Se houver múltiplos falantes, separe as falas com quebras de linha.'''
         if not text:
             return {"error": "Gemini não retornou transcrição", "success": False}
         
-        # Generate segmented SRT (Gemini doesn't provide timestamps, so we estimate)
+        # Generate segmented SRT with real audio duration for accurate timing
         # Split text into smaller segments (~8-12 words each) for better readability
         srt_lines = []
         all_words = text.split()
         segment_size = 10  # Words per subtitle line (similar to ElevenLabs)
         total_words = len(all_words)
         
-        # Estimate audio duration based on average speaking rate (150 words per minute)
-        # This is an approximation since Gemini doesn't give us actual timestamps
-        estimated_duration = max(60, (total_words / 150) * 60)  # At least 60 seconds
+        # Use real audio duration if provided, otherwise estimate
+        if audio_duration and audio_duration > 0:
+            actual_duration = audio_duration
+            print(f"[GeminiSRT] Usando duração real: {actual_duration:.2f}s")
+        else:
+            # Fallback: estimate based on speaking rate (150 words per minute)
+            actual_duration = max(60, (total_words / 150) * 60)
+            print(f"[GeminiSRT] ⚠ Usando duração estimada: {actual_duration:.2f}s (sem ffprobe)")
         
         segment_count = max(1, total_words // segment_size)
-        time_per_segment = estimated_duration / segment_count
+        time_per_segment = actual_duration / segment_count
+        print(f"[GeminiSRT] {total_words} palavras / {segment_count} segmentos = {time_per_segment:.2f}s por segmento")
         
         srt_index = 1
         for i in range(0, total_words, segment_size):
@@ -2389,10 +2414,13 @@ def transcribe_large_video(
         if gemini_available:
             print(f"[Transcribe] 🌐 Usando Google Gemini para transcrição...")
             
+            # Obter duração real do áudio para sincronização precisa do SRT
+            real_audio_duration = _get_audio_duration(audio_path)
+            
             # Gemini tem limite de 20MB por arquivo, então dividimos se necessário
             if audio_size_mb <= 20:
-                # Arquivo pequeno: transcrever diretamente
-                transcription_result = _transcribe_with_gemini(audio_path, match_id)
+                # Arquivo pequeno: transcrever diretamente com duração real
+                transcription_result = _transcribe_with_gemini(audio_path, match_id, real_audio_duration)
             else:
                 # Arquivo grande: dividir em chunks e transcrever cada um
                 print(f"[Transcribe] Áudio grande ({audio_size_mb:.1f}MB), dividindo em chunks...")
