@@ -572,6 +572,93 @@ export type Database = {
           },
         ]
       }
+      playlists: {
+        Row: {
+          actual_duration_seconds: number | null
+          clip_ids: string[]
+          closing_duration_ms: number | null
+          created_at: string | null
+          created_by: string | null
+          description: string | null
+          format: string | null
+          id: string
+          include_closing: boolean | null
+          include_opening: boolean | null
+          include_transitions: boolean | null
+          match_id: string | null
+          name: string
+          opening_duration_ms: number | null
+          status: string | null
+          target_duration_seconds: number
+          team_id: string | null
+          thumbnail_url: string | null
+          transition_duration_ms: number | null
+          updated_at: string | null
+          video_url: string | null
+        }
+        Insert: {
+          actual_duration_seconds?: number | null
+          clip_ids: string[]
+          closing_duration_ms?: number | null
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          format?: string | null
+          id?: string
+          include_closing?: boolean | null
+          include_opening?: boolean | null
+          include_transitions?: boolean | null
+          match_id?: string | null
+          name: string
+          opening_duration_ms?: number | null
+          status?: string | null
+          target_duration_seconds?: number
+          team_id?: string | null
+          thumbnail_url?: string | null
+          transition_duration_ms?: number | null
+          updated_at?: string | null
+          video_url?: string | null
+        }
+        Update: {
+          actual_duration_seconds?: number | null
+          clip_ids?: string[]
+          closing_duration_ms?: number | null
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          format?: string | null
+          id?: string
+          include_closing?: boolean | null
+          include_opening?: boolean | null
+          include_transitions?: boolean | null
+          match_id?: string | null
+          name?: string
+          opening_duration_ms?: number | null
+          status?: string | null
+          target_duration_seconds?: number
+          team_id?: string | null
+          thumbnail_url?: string | null
+          transition_duration_ms?: number | null
+          updated_at?: string | null
+          video_url?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "playlists_match_id_fkey"
+            columns: ["match_id"]
+            isOneToOne: false
+            referencedRelation: "matches"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "playlists_team_id_fkey"
+            columns: ["team_id"]
+            isOneToOne: false
+            referencedRelation: "teams"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_url: string | null
