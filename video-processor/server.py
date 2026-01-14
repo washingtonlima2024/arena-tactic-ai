@@ -8319,20 +8319,30 @@ def regenerate_match_clips(match_id):
         events_first = [e for e in events if e.match_half == 'first' or (e.minute or 0) <= 45]
         events_second = [e for e in events if e.match_half == 'second' or (e.minute or 0) > 45]
         
+        # Helper function to find video files
+        def find_video_in_folders(match_id: str, folders: list) -> str:
+            """Search for video files in multiple folders."""
+            for folder_path in folders:
+                if folder_path and folder_path.exists():
+                    for ext in ['.mp4', '.mov', '.webm', '.mkv']:
+                        for f in folder_path.glob(f'*{ext}'):
+                            # Skip chunk files (from live recording)
+                            if 'chunk-' not in f.name and 'segment-' not in f.name:
+                                return str(f)
+            return None
+        
         # Processar primeiro tempo
         if events_first and ('first_half' in videos_by_type or 'full' in videos_by_type):
             video = videos_by_type.get('first_half', videos_by_type.get('full', [None]))[0]
             if video:
-                video_path = None
-                # Resolver caminho do vídeo
-                from storage import get_video_subfolder_path
-                video_folder = get_video_subfolder_path(match_id, 'first_half')
-                for ext in ['.mp4', '.mov', '.webm', '.mkv']:
-                    for f in video_folder.glob(f'*{ext}'):
-                        video_path = str(f)
-                        break
-                    if video_path:
-                        break
+                # Search in multiple folders: first_half, full, and root videos (live)
+                from storage import get_video_subfolder_path, get_subfolder_path
+                search_folders = [
+                    get_video_subfolder_path(match_id, 'first_half'),
+                    get_video_subfolder_path(match_id, 'full'),
+                    get_subfolder_path(match_id, 'videos'),  # Live videos in root
+                ]
+                video_path = find_video_in_folders(match_id, search_folders)
                 
                 if video_path and os.path.exists(video_path):
                     events_dicts = []
@@ -8368,15 +8378,14 @@ def regenerate_match_clips(match_id):
         if events_second and ('second_half' in videos_by_type or 'full' in videos_by_type):
             video = videos_by_type.get('second_half', videos_by_type.get('full', [None]))[0]
             if video:
-                video_path = None
-                from storage import get_video_subfolder_path
-                video_folder = get_video_subfolder_path(match_id, 'second_half')
-                for ext in ['.mp4', '.mov', '.webm', '.mkv']:
-                    for f in video_folder.glob(f'*{ext}'):
-                        video_path = str(f)
-                        break
-                    if video_path:
-                        break
+                # Search in multiple folders: second_half, full, and root videos (live)
+                from storage import get_video_subfolder_path, get_subfolder_path
+                search_folders = [
+                    get_video_subfolder_path(match_id, 'second_half'),
+                    get_video_subfolder_path(match_id, 'full'),
+                    get_subfolder_path(match_id, 'videos'),  # Live videos in root
+                ]
+                video_path = find_video_in_folders(match_id, search_folders)
                 
                 if video_path and os.path.exists(video_path):
                     events_dicts = []
