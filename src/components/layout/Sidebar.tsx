@@ -15,7 +15,7 @@ import {
   Layers,
   Share2
 } from 'lucide-react';
-import { NavLink, Link } from 'react-router-dom';
+import { NavLink, Link, useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useSidebarContext } from '@/contexts/SidebarContext';
@@ -24,6 +24,9 @@ import { ServerStatusIndicator } from './ServerStatusIndicator';
 import arenaIcon from '@/assets/arena-play-icon.png';
 import arenaWordmark from '@/assets/arena-play-wordmark.png';
 import kakttusLogo from '@/assets/logo-kakttus.png';
+
+// Pages that should preserve the match parameter
+const MATCH_CONTEXT_PAGES = ['/events', '/analysis', '/media', '/audio', '/field', '/dashboard'];
 
 const navItems = [
   { icon: LayoutDashboard, label: 'Início', path: '/home' },
@@ -47,6 +50,16 @@ const adminItems = [
 export function Sidebar() {
   const { isAdmin } = useAuth();
   const { collapsed, toggle } = useSidebarContext();
+  const [searchParams] = useSearchParams();
+  const currentMatchId = searchParams.get('match') || sessionStorage.getItem('arena_selected_match');
+
+  // Helper to build path with match parameter for context pages
+  const getNavPath = (basePath: string) => {
+    if (MATCH_CONTEXT_PAGES.includes(basePath) && currentMatchId) {
+      return `${basePath}?match=${currentMatchId}`;
+    }
+    return basePath;
+  };
 
   return (
     <aside
@@ -79,7 +92,7 @@ export function Sidebar() {
           {navItems.map((item) => (
             <li key={item.path}>
               <NavLink
-                to={item.path}
+                to={getNavPath(item.path)}
                 className={({ isActive }) =>
                   cn(
                     "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",

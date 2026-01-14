@@ -19,7 +19,7 @@ export function ProjectSelector() {
   const { selectedMatch, matches, isLoading, setSelectedMatch } = useMatchSelection();
 
   // Pages that use match context
-  const matchContextPages = ['/events', '/analysis', '/media', '/audio', '/field'];
+  const matchContextPages = ['/events', '/analysis', '/media', '/audio', '/field', '/dashboard'];
   const isOnMatchPage = matchContextPages.some(page => location.pathname.startsWith(page));
 
   const handleSelectMatch = (matchId: string) => {
