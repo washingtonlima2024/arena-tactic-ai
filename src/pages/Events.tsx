@@ -800,10 +800,9 @@ export default function Events() {
   }
 
   return (
-    <AppLayout>
+    <AppLayout key={currentMatchId}>
       <div className="space-y-6">
         {/* Header */}
-        {/* Header com seletor de partida */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h1 className="font-display text-3xl font-bold">Eventos da Partida</h1>
@@ -818,29 +817,6 @@ export default function Events() {
             >
               <RefreshCw className="h-4 w-4" />
             </Button>
-            <Select 
-              value={currentMatchId || ''} 
-              onValueChange={(value) => setSelectedMatch(value)}
-            >
-              <SelectTrigger className="w-64">
-                <SelectValue placeholder="Selecionar partida" />
-              </SelectTrigger>
-              <SelectContent>
-                {matches.map(match => (
-                  <SelectItem key={match.id} value={match.id}>
-                    <div className="flex items-center gap-2">
-                      <span>{match.home_team?.short_name || 'Casa'} vs {match.away_team?.short_name || 'Visitante'}</span>
-                      {match.status === 'live' && (
-                        <Badge variant="destructive" className="text-xs px-1.5 py-0 gap-1 animate-pulse">
-                          <Radio className="h-2.5 w-2.5" />
-                          AO VIVO
-                        </Badge>
-                      )}
-                    </div>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
         </div>
 

@@ -273,7 +273,7 @@ export default function Dashboard() {
   };
 
   return (
-    <AppLayout>
+    <AppLayout key={currentMatchId}>
       <div className="space-y-8">
         {/* Hero Section */}
         <section className="relative -mx-6 -mt-6 overflow-hidden">
