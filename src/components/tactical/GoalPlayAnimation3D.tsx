@@ -1,4 +1,4 @@
-import { useRef, useMemo, useState, useCallback, useEffect } from 'react';
+import { useRef, useMemo, useState, useCallback, useEffect, Suspense } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { OrbitControls, Html, Line, Text } from '@react-three/drei';
 import * as THREE from 'three';
@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
 import { Play, Pause, RotateCcw, FastForward, Rewind, Maximize2 } from 'lucide-react';
+import { SoccerPlayerModel } from './SoccerPlayerModel';
 
 interface PlayerPosition {
   id: string;
@@ -545,17 +546,19 @@ function AnimatedPlayScene({
   
   return (
     <OfficialField3DScene showGoalCelebration={showGoalCelebration} goalPosition={goalPosition}>
-      {/* Players */}
+      {/* Players - using OBJ 3D model */}
       {frame.players.map((player, idx) => {
         const pos = metersTo3D(player.x, player.y);
         return (
-          <AnimatedPlayer3D
+          <SoccerPlayerModel
             key={player.id}
             position={pos}
             team={player.team}
             number={player.number}
             teamColor={player.team === 'home' ? homeTeamColor : awayTeamColor}
             isMoving={true}
+            showNumber={true}
+            scale={0.012}
           />
         );
       })}
