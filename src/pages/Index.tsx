@@ -65,36 +65,48 @@ export default function Dashboard() {
     enabled: !!currentMatchId
   });
   
-  // Fetch stats from database
-  const { data: stats } = useQuery({
-    queryKey: ['dashboard-stats', currentMatchId],
+  // Fetch global stats (all matches)
+  const { data: globalStats } = useQuery({
+    queryKey: ['dashboard-global-stats'],
     queryFn: async () => {
-      const [matches, events, jobs] = await Promise.all([
+      const [matches, jobs] = await Promise.all([
         apiClient.getMatches(),
-        currentMatchId ? apiClient.getMatchEvents(currentMatchId) : Promise.resolve([]),
         apiClient.getAnalysisJobs()
       ]);
       
       const totalMatches = matches?.length || 0;
       const analyzedMatches = jobs?.filter((j: any) => j.status === 'completed').length || 0;
-      const totalEvents = events?.length || 0;
-      const totalGoals = events?.filter((e: any) => e.event_type === 'goal').length || 0;
-      const totalShots = events?.filter((e: any) => 
-        e.event_type === 'shot' || 
-        e.event_type === 'shot_on_target' || 
-        e.event_type === 'Finalização'
-      ).length || 0;
       
       return {
         totalMatches,
-        analyzedMatches,
-        totalEvents,
-        totalGoals,
-        totalShots,
-        accuracyRate: 94
+        analyzedMatches
       };
     }
   });
+  
+  // Calculate match-specific stats from matchEvents (already fetched above)
+  const matchStats = useMemo(() => {
+    const totalEvents = matchEvents.length;
+    const totalGoals = matchEvents.filter(e => e.event_type === 'goal').length;
+    const totalShots = matchEvents.filter(e => 
+      e.event_type === 'shot' || 
+      e.event_type === 'shot_on_target' || 
+      e.event_type === 'Finalização'
+    ).length;
+    const totalFouls = matchEvents.filter(e => e.event_type === 'foul').length;
+    const totalCards = matchEvents.filter(e => 
+      e.event_type === 'yellow_card' || 
+      e.event_type === 'red_card'
+    ).length;
+    
+    return {
+      totalEvents,
+      totalGoals,
+      totalShots,
+      totalFouls,
+      totalCards
+    };
+  }, [matchEvents]);
   
   // Generate heat zones and players from real events
   const { heatZones, homePlayers, awayPlayers } = useEventHeatZones(
@@ -295,28 +307,28 @@ export default function Dashboard() {
         <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
           <StatCard
             title="Partidas Analisadas"
-            value={stats?.analyzedMatches || 0}
-            subtitle={`de ${stats?.totalMatches || 0} total`}
+            value={globalStats?.analyzedMatches || 0}
+            subtitle={`de ${globalStats?.totalMatches || 0} total`}
             icon={Video}
             trend={{ value: 12, isPositive: true }}
           />
           <StatCard
-            title="Gols Registrados"
-            value={stats?.totalGoals || 0}
-            subtitle={`${stats?.totalShots || 0} finalizações`}
+            title="Gols na Partida"
+            value={matchStats.totalGoals}
+            subtitle={`${matchStats.totalShots} finalizações`}
             icon={Activity}
             trend={{ value: 8, isPositive: true }}
           />
           <StatCard
-            title="Eventos Detectados"
-            value={(stats?.totalEvents || 0).toLocaleString()}
-            subtitle="Faltas, cartões, escanteios..."
+            title="Eventos na Partida"
+            value={matchStats.totalEvents.toLocaleString()}
+            subtitle={`${matchStats.totalFouls} faltas • ${matchStats.totalCards} cartões`}
             icon={BarChart3}
             trend={{ value: 23, isPositive: true }}
           />
           <StatCard
             title="Taxa de Precisão"
-            value={`${stats?.accuracyRate || 94}%`}
+            value="94%"
             subtitle="Detecção de eventos"
             icon={TrendingUp}
           />
