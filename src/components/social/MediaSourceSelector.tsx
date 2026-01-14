@@ -484,55 +484,56 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   };
 
   return (
-    <div className="space-y-3">
-      <Label className="flex items-center gap-2">
-        <Film className="h-4 w-4 text-primary" />
-        Mídia do Post {!isInternalMode && '(opcional)'}
+    <div className="space-y-2">
+      <Label className="flex items-center gap-1.5 text-xs">
+        <Film className="h-3.5 w-3.5 text-primary" />
+        Mídia {!isInternalMode && '(opcional)'}
       </Label>
 
       <Tabs value={sourceType} onValueChange={(v) => setSourceType(v as MediaSourceType)}>
-        <TabsList className="grid grid-cols-4 w-full">
-          <TabsTrigger value="url" className="text-xs gap-1">
+        <TabsList className="grid grid-cols-4 w-full h-8">
+          <TabsTrigger value="url" className="text-[10px] gap-1 px-1.5">
             <Link2 className="h-3 w-3" />
-            Link
+            <span className="hidden sm:inline">Link</span>
           </TabsTrigger>
-          <TabsTrigger value="upload" className="text-xs gap-1">
+          <TabsTrigger value="upload" className="text-[10px] gap-1 px-1.5">
             <Upload className="h-3 w-3" />
-            Upload
+            <span className="hidden sm:inline">Upload</span>
           </TabsTrigger>
-          <TabsTrigger value="clip" className="text-xs gap-1">
+          <TabsTrigger value="clip" className="text-[10px] gap-1 px-1.5">
             <Scissors className="h-3 w-3" />
-            Clips
+            <span className="hidden sm:inline">Clips</span>
             {readyClipsCount > 0 && (
-              <Badge variant="secondary" className="ml-1 text-[10px] px-1">
+              <Badge variant="secondary" className="text-[9px] px-1 h-4 min-w-4">
                 {readyClipsCount}
               </Badge>
             )}
           </TabsTrigger>
-          <TabsTrigger value="playlist" className="text-xs gap-1">
+          <TabsTrigger value="playlist" className="text-[10px] gap-1 px-1.5">
             <ListVideo className="h-3 w-3" />
-            Playlists
+            <span className="hidden sm:inline">Playlists</span>
             {playlists.length > 0 && (
-              <Badge variant="secondary" className="ml-1 text-[10px] px-1">
+              <Badge variant="secondary" className="text-[9px] px-1 h-4 min-w-4">
                 {playlists.length}
               </Badge>
             )}
           </TabsTrigger>
         </TabsList>
 
-        <TabsContent value="url" className="space-y-2 mt-3">
+        <TabsContent value="url" className="space-y-1.5 mt-2">
           <Input
             placeholder="https://..."
+            className="h-8 text-xs"
             value={urlInput}
             onChange={(e) => handleUrlChange(e.target.value)}
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-[10px] text-muted-foreground">
             Cole o link de uma imagem ou vídeo
           </p>
         </TabsContent>
 
-        <TabsContent value="upload" className="mt-3">
-          <div className="border-2 border-dashed rounded-lg p-6 text-center hover:border-primary/50 transition-colors">
+        <TabsContent value="upload" className="mt-2">
+          <div className="border-2 border-dashed rounded-lg p-4 text-center hover:border-primary/50 transition-colors">
             <input
               type="file"
               accept="image/*,video/*"
@@ -543,49 +544,43 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
             />
             <label htmlFor="media-upload" className="cursor-pointer">
               {uploading ? (
-                <div className="flex flex-col items-center gap-2">
-                  <Loader2 className="h-8 w-8 text-primary animate-spin" />
-                  <span className="text-sm text-muted-foreground">Enviando...</span>
+                <div className="flex items-center justify-center gap-2">
+                  <Loader2 className="h-5 w-5 text-primary animate-spin" />
+                  <span className="text-xs text-muted-foreground">Enviando...</span>
                 </div>
               ) : (
-                <div className="flex flex-col items-center gap-2">
-                  <Upload className="h-8 w-8 text-muted-foreground" />
-                  <span className="text-sm font-medium">Clique para enviar</span>
-                  <span className="text-xs text-muted-foreground">Imagem ou vídeo do computador</span>
+                <div className="flex items-center justify-center gap-2">
+                  <Upload className="h-5 w-5 text-muted-foreground" />
+                  <span className="text-xs font-medium">Clique para enviar</span>
                 </div>
               )}
             </label>
           </div>
         </TabsContent>
 
-        <TabsContent value="clip" className="mt-3 space-y-3">
+        <TabsContent value="clip" className="mt-2 space-y-2">
           {/* Match Selector - only when no matchId provided */}
           {!matchId && (
             <Select 
               value={selectedMatchId || ''} 
               onValueChange={(v) => setSelectedMatchId(v || undefined)}
             >
-              <SelectTrigger>
+              <SelectTrigger className="h-8 text-xs">
                 <SelectValue placeholder="Selecione uma partida..." />
               </SelectTrigger>
               <SelectContent>
                 {loadingMatches ? (
-                  <div className="flex items-center justify-center p-4">
+                  <div className="flex items-center justify-center p-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
                   </div>
                 ) : (
                   matches.map((match) => (
-                    <SelectItem key={match.id} value={match.id}>
-                      <div className="flex items-center gap-2">
+                    <SelectItem key={match.id} value={match.id} className="text-xs">
+                      <div className="flex items-center gap-1.5">
                         <span>{getMatchLabel(match)}</span>
                         {match.clips_count !== undefined && match.clips_count > 0 && (
-                          <Badge className="text-[10px] bg-primary/20 text-primary border-0">
-                            {match.clips_count} clips
-                          </Badge>
-                        )}
-                        {match.events_count !== undefined && match.events_count > 0 && match.clips_count === 0 && (
-                          <Badge variant="secondary" className="text-[10px]">
-                            {match.events_count} eventos
+                          <Badge className="text-[9px] px-1 h-4 bg-primary/20 text-primary border-0">
+                            {match.clips_count}
                           </Badge>
                         )}
                       </div>
@@ -597,29 +592,22 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
           )}
 
           {loadingClips ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           ) : clips.length === 0 ? (
             <Card className="border-dashed border-muted">
-              <CardContent className="flex flex-col items-center justify-center py-6">
-                <Scissors className="h-8 w-8 text-muted-foreground mb-2" />
-                <p className="text-sm font-medium text-center mb-1">
-                  {selectedMatchId || matchId
-                    ? 'Nenhum clip pronto'
-                    : 'Selecione uma partida'}
-                </p>
-                <p className="text-xs text-muted-foreground text-center mb-3">
-                  {selectedMatchId || matchId
-                    ? 'Gere clips na página de Mídia'
-                    : 'Escolha uma partida para ver os clips disponíveis'}
+              <CardContent className="flex flex-col items-center justify-center py-4">
+                <Scissors className="h-6 w-6 text-muted-foreground mb-1.5" />
+                <p className="text-xs font-medium text-center mb-0.5">
+                  {selectedMatchId || matchId ? 'Nenhum clip pronto' : 'Selecione uma partida'}
                 </p>
                 {(selectedMatchId || matchId) && (
                   <Button 
                     variant="outline" 
-                    size="sm" 
+                    size="sm"
+                    className="h-7 text-[10px] gap-1 mt-2"
                     onClick={goToMediaPage}
-                    className="gap-2"
                   >
                     <ExternalLink className="h-3 w-3" />
                     Ir para Mídia
@@ -628,104 +616,76 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
               </CardContent>
             </Card>
           ) : (
-            <ScrollArea className="h-[300px] border rounded-lg bg-background/50">
-              <div className="p-3 space-y-4">
-                {categoryOrder.map((category) => {
-                  const categoryClips = groupedClips[category];
-                  if (!categoryClips || categoryClips.length === 0) return null;
-                  
-                  const { label, icon } = getCategoryLabel(category);
-                  
-                  return (
-                    <div key={category} className="space-y-2">
-                      {/* Category Header */}
-                      <div className="flex items-center gap-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide">
-                        <span>{icon}</span>
-                        <span>{label}</span>
-                      </div>
-                      
-                      {/* Clips in this category */}
-                      <div className="space-y-1">
-                        {categoryClips.map((clip) => (
-                          <button
-                            key={clip.id}
-                            type="button"
-                            onClick={() => handleSelectClip(clip)}
-                            className={`w-full flex items-center gap-3 p-2 rounded-lg text-left transition-colors ${
-                              selectedClipId === clip.id 
-                                ? 'bg-primary/10 ring-1 ring-primary' 
-                                : 'hover:bg-muted/50'
-                            }`}
-                          >
-                            {/* Selection Circle */}
-                            <div className={`h-5 w-5 rounded-full border-2 flex items-center justify-center shrink-0 ${
-                              selectedClipId === clip.id 
-                                ? 'border-primary bg-primary' 
-                                : 'border-muted-foreground/30'
-                            }`}>
-                              {selectedClipId === clip.id && (
-                                <Check className="h-3 w-3 text-primary-foreground" />
-                              )}
-                            </div>
-                            
-                            {/* Thumbnail */}
-                            <div className="h-12 w-20 rounded overflow-hidden shrink-0 bg-muted relative">
-                              {clip.thumbnail_url ? (
-                                <img 
-                                  src={clip.thumbnail_url} 
-                                  alt={clip.event_type}
-                                  className="h-full w-full object-cover"
-                                />
-                              ) : (
-                                <div className="h-full w-full flex items-center justify-center bg-muted">
-                                  <Film className="h-5 w-5 text-muted-foreground" />
-                                </div>
-                              )}
-                            </div>
-                            
-                            {/* Info */}
-                            <div className="flex-1 min-w-0">
-                              <p className="text-sm font-medium truncate">
-                                {clip.description || `${getEventTypeLabel(clip.event_type)}!`}
-                              </p>
-                              <p className="text-xs text-muted-foreground">
-                                {clip.minute !== null ? `${clip.minute}'` : ''} • 15 segundos
-                              </p>
-                            </div>
-                            
-                            {/* Play Icon */}
-                            <div className="shrink-0">
-                              <Play className="h-5 w-5 text-muted-foreground" />
-                            </div>
-                          </button>
-                        ))}
-                      </div>
+            <ScrollArea className="h-[180px] border rounded-lg bg-background/50">
+              <div className="p-2 grid grid-cols-2 gap-1.5">
+                {clips.map((clip) => (
+                  <button
+                    key={clip.id}
+                    type="button"
+                    onClick={() => handleSelectClip(clip)}
+                    className={`flex items-center gap-1.5 p-1.5 rounded-md text-left transition-colors ${
+                      selectedClipId === clip.id 
+                        ? 'bg-primary/10 ring-1 ring-primary' 
+                        : 'hover:bg-muted/50'
+                    }`}
+                  >
+                    {/* Compact Thumbnail */}
+                    <div className="h-8 w-12 rounded overflow-hidden shrink-0 bg-muted relative">
+                      {clip.thumbnail_url ? (
+                        <img 
+                          src={clip.thumbnail_url} 
+                          alt={clip.event_type}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="h-full w-full flex items-center justify-center bg-muted">
+                          <Film className="h-3 w-3 text-muted-foreground" />
+                        </div>
+                      )}
+                      {selectedClipId === clip.id && (
+                        <div className="absolute inset-0 bg-primary/20 flex items-center justify-center">
+                          <Check className="h-3 w-3 text-primary" />
+                        </div>
+                      )}
                     </div>
-                  );
-                })}
+                    
+                    {/* Compact Info */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[10px] font-medium truncate leading-tight">
+                        {getEventTypeLabel(clip.event_type)}
+                      </p>
+                      <p className="text-[9px] text-muted-foreground">
+                        {clip.minute !== null ? `${clip.minute}'` : ''}
+                      </p>
+                    </div>
+                    
+                    {/* Type Icon */}
+                    <span className="text-xs shrink-0">{getEventCategoryIcon(clip.event_type)}</span>
+                  </button>
+                ))}
               </div>
             </ScrollArea>
           )}
         </TabsContent>
 
-        <TabsContent value="playlist" className="mt-3 space-y-3">
+        <TabsContent value="playlist" className="mt-2 space-y-2">
           {/* Match Selector - only when no matchId provided */}
           {!matchId && (
             <Select 
               value={selectedMatchId || ''} 
               onValueChange={(v) => setSelectedMatchId(v || undefined)}
             >
-              <SelectTrigger>
+              <SelectTrigger className="h-8 text-xs">
                 <SelectValue placeholder="Selecione uma partida..." />
               </SelectTrigger>
               <SelectContent>
                 {loadingMatches ? (
-                  <div className="flex items-center justify-center p-4">
+                  <div className="flex items-center justify-center p-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
                   </div>
                 ) : (
                   matches.map((match) => (
-                    <SelectItem key={match.id} value={match.id}>
+                    <SelectItem key={match.id} value={match.id} className="text-xs">
                       {getMatchLabel(match)}
                     </SelectItem>
                   ))
@@ -735,29 +695,22 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
           )}
 
           {loadingPlaylists ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-6 w-6 animate-spin text-primary" />
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-5 w-5 animate-spin text-primary" />
             </div>
           ) : playlists.length === 0 ? (
             <Card className="border-dashed border-muted">
-              <CardContent className="flex flex-col items-center justify-center py-6">
-                <ListVideo className="h-8 w-8 text-muted-foreground mb-2" />
-                <p className="text-sm font-medium text-center mb-1">
-                  {selectedMatchId || matchId
-                    ? 'Nenhuma playlist criada'
-                    : 'Selecione uma partida'}
-                </p>
-                <p className="text-xs text-muted-foreground text-center mb-3">
-                  {selectedMatchId || matchId
-                    ? 'Crie compilações na página de Mídia'
-                    : 'Escolha uma partida para ver as playlists'}
+              <CardContent className="flex flex-col items-center justify-center py-4">
+                <ListVideo className="h-6 w-6 text-muted-foreground mb-1.5" />
+                <p className="text-xs font-medium text-center mb-0.5">
+                  {selectedMatchId || matchId ? 'Nenhuma playlist' : 'Selecione uma partida'}
                 </p>
                 {(selectedMatchId || matchId) && (
                   <Button 
                     variant="outline" 
-                    size="sm" 
+                    size="sm"
+                    className="h-7 text-[10px] gap-1 mt-2"
                     onClick={goToMediaPage}
-                    className="gap-2"
                   >
                     <ExternalLink className="h-3 w-3" />
                     Ir para Mídia
@@ -766,21 +719,21 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
               </CardContent>
             </Card>
           ) : (
-            <ScrollArea className="h-[200px] border rounded-lg">
-              <div className="p-2 space-y-1">
+            <ScrollArea className="h-[150px] border rounded-lg">
+              <div className="p-1.5 space-y-1">
                 {playlists.map((playlist) => (
                   <button
                     key={playlist.id}
                     type="button"
                     onClick={() => handleSelectPlaylist(playlist)}
-                    className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors ${
+                    className={`w-full flex items-center gap-2 p-1.5 rounded-md text-left transition-colors ${
                       selectedPlaylistId === playlist.id 
-                        ? 'bg-primary/10 border border-primary' 
-                        : 'hover:bg-muted'
+                        ? 'bg-primary/10 ring-1 ring-primary' 
+                        : 'hover:bg-muted/50'
                     } ${!playlist.video_url ? 'opacity-60' : ''}`}
                   >
                     <div 
-                      className={`h-10 w-14 rounded flex items-center justify-center shrink-0 overflow-hidden ${
+                      className={`h-8 w-12 rounded flex items-center justify-center shrink-0 overflow-hidden ${
                         playlist.video_url ? 'bg-primary/20' : 'bg-muted'
                       }`}
                       style={playlist.team?.primary_color ? { 
@@ -794,40 +747,28 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
                           className="h-full w-full object-cover"
                         />
                       ) : playlist.video_url ? (
-                        <Play className="h-5 w-5 text-primary" />
+                        <Play className="h-3 w-3 text-primary" />
                       ) : (
-                        <Clock className="h-5 w-5 text-muted-foreground" />
+                        <Clock className="h-3 w-3 text-muted-foreground" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate">
-                          {playlist.name}
-                        </span>
-                        {!playlist.video_url && (
-                          <Badge variant="secondary" className="text-xs">
-                            Não compilada
-                          </Badge>
-                        )}
-                        {playlist.video_url && (
-                          <Badge className="text-xs bg-primary/20 text-primary border-0">
-                            Pronta
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span className="flex items-center gap-1">
-                          <Clock className="h-3 w-3" />
-                          {formatDuration(playlist.actual_duration_seconds || playlist.target_duration_seconds)}
-                        </span>
-                        <Badge variant="outline" className="text-[10px] px-1">
-                          {playlist.format}
-                        </Badge>
+                      <p className="text-[10px] font-medium truncate leading-tight">
+                        {playlist.name}
+                      </p>
+                      <div className="flex items-center gap-1.5 text-[9px] text-muted-foreground">
+                        <span>{formatDuration(playlist.actual_duration_seconds || playlist.target_duration_seconds)}</span>
+                        <span>•</span>
                         <span>{playlist.clip_ids?.length || 0} clips</span>
                       </div>
                     </div>
                     {selectedPlaylistId === playlist.id && playlist.video_url && (
-                      <Check className="h-4 w-4 text-primary shrink-0" />
+                      <Check className="h-3 w-3 text-primary shrink-0" />
+                    )}
+                    {playlist.video_url && !selectedPlaylistId && (
+                      <Badge className="text-[8px] px-1 h-4 bg-primary/20 text-primary border-0 shrink-0">
+                        Pronta
+                      </Badge>
                     )}
                   </button>
                 ))}
@@ -837,42 +778,38 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
         </TabsContent>
       </Tabs>
 
-      {/* Selected Media Preview */}
+      {/* Compact Selected Media Preview */}
       {value && (
-        <Card className="bg-muted/30">
-          <CardContent className="flex items-center gap-3 p-3">
-            <div className="h-12 w-16 rounded bg-muted flex items-center justify-center shrink-0 overflow-hidden">
+        <div className="flex items-center gap-2 p-2 rounded-md bg-muted/30 border">
+          <div className="h-8 w-12 rounded bg-muted flex items-center justify-center shrink-0 overflow-hidden">
+            {mediaType === 'image' ? (
+              <img src={value} alt="Preview" className="h-full w-full object-cover" />
+            ) : (
+              <Film className="h-3 w-3 text-muted-foreground" />
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <Badge variant="secondary" className="text-[9px] px-1 h-4">
               {mediaType === 'image' ? (
-                <img src={value} alt="Preview" className="h-full w-full object-cover" />
+                <><ImageIcon className="h-2.5 w-2.5 mr-0.5" /> Imagem</>
               ) : (
-                <Film className="h-5 w-5 text-muted-foreground" />
+                <><Film className="h-2.5 w-2.5 mr-0.5" /> Vídeo</>
               )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <Badge variant="secondary" className="text-xs">
-                  {mediaType === 'image' ? (
-                    <><ImageIcon className="h-3 w-3 mr-1" /> Imagem</>
-                  ) : (
-                    <><Film className="h-3 w-3 mr-1" /> Vídeo</>
-                  )}
-                </Badge>
-              </div>
-              <p className="text-xs text-muted-foreground truncate mt-1">
-                {value}
-              </p>
-            </div>
-            <Button 
-              type="button"
-              variant="ghost" 
-              size="icon" 
-              className="h-8 w-8 shrink-0"
-              onClick={clearMedia}
-            >
-              <X className="h-4 w-4" />
-            </Button>
-          </CardContent>
-        </Card>
+            </Badge>
+            <p className="text-[9px] text-muted-foreground truncate mt-0.5">
+              {value.split('/').pop()?.substring(0, 30)}...
+            </p>
+          </div>
+          <Button 
+            type="button"
+            variant="ghost" 
+            size="icon" 
+            className="h-6 w-6 shrink-0"
+            onClick={clearMedia}
+          >
+            <X className="h-3 w-3" />
+          </Button>
+        </div>
       )}
     </div>
   );

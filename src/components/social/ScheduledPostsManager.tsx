@@ -518,7 +518,7 @@ export function ScheduledPostsManager() {
 
       {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="sm:max-w-3xl max-h-[85vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {editingPost ? 'Editar Post Agendado' : 'Agendar Novo Post'}
@@ -528,90 +528,98 @@ export function ScheduledPostsManager() {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <Label>Plataforma *</Label>
-              <div className="grid grid-cols-3 gap-2">
-                {PLATFORMS.map(platform => {
-                  const Icon = platform.icon;
-                  return (
-                    <Button
-                      key={platform.id}
-                      type="button"
-                      variant={formData.platform === platform.id ? 'default' : 'outline'}
-                      className="justify-start"
-                      onClick={() => setFormData(prev => ({ ...prev, platform: platform.id }))}
-                    >
-                      <Icon className="h-4 w-4 mr-2" />
-                      {platform.name}
-                    </Button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="content">Conteúdo *</Label>
-              <Textarea
-                id="content"
-                placeholder="Escreva o texto do post..."
-                rows={4}
-                value={formData.content}
-                onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
-              />
-              <p className="text-xs text-muted-foreground text-right">
-                {formData.content.length} caracteres
-              </p>
-            </div>
-
-            <MediaSourceSelector
-              value={formData.media_url}
-              mediaType={formData.media_type}
-              matchId={matchId}
-              onChange={(url, type) => setFormData(prev => ({ ...prev, media_url: url, media_type: type }))}
-            />
-
-            <div className="space-y-2">
-              <Label className="flex items-center gap-2">
-                <CalendarClock className="h-4 w-4 text-primary" />
-                Data e Hora *
-              </Label>
-              <DateTimePicker
-                date={formData.scheduled_at || undefined}
-                onDateChange={(date) => setFormData(prev => ({ ...prev, scheduled_at: date || null }))}
-                placeholder="Selecionar data e hora"
-                minDate={startOfDay(new Date())}
-              />
-            </div>
-
-            {campaigns.length > 0 && (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 py-4">
+            {/* Left Column - Content */}
+            <div className="space-y-4">
               <div className="space-y-2">
-                <Label>Campanha (opcional)</Label>
-                <Select 
-                  value={formData.campaign_id || 'none'} 
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, campaign_id: value === 'none' ? '' : value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Selecionar campanha" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Nenhuma</SelectItem>
-                    {campaigns.map(campaign => (
-                      <SelectItem key={campaign.id} value={campaign.id}>
-                        {campaign.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                <Label className="text-xs">Plataforma *</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {PLATFORMS.map(platform => {
+                    const Icon = platform.icon;
+                    return (
+                      <Button
+                        key={platform.id}
+                        type="button"
+                        variant={formData.platform === platform.id ? 'default' : 'outline'}
+                        size="sm"
+                        className="h-8 px-2.5"
+                        onClick={() => setFormData(prev => ({ ...prev, platform: platform.id }))}
+                      >
+                        <Icon className="h-3.5 w-3.5 mr-1.5" />
+                        <span className="text-xs">{platform.name}</span>
+                      </Button>
+                    );
+                  })}
+                </div>
               </div>
-            )}
+
+              <div className="space-y-2">
+                <Label htmlFor="content" className="text-xs">Conteúdo *</Label>
+                <Textarea
+                  id="content"
+                  placeholder="Escreva o texto do post..."
+                  rows={3}
+                  className="resize-none"
+                  value={formData.content}
+                  onChange={(e) => setFormData(prev => ({ ...prev, content: e.target.value }))}
+                />
+                <p className="text-[10px] text-muted-foreground text-right">
+                  {formData.content.length} caracteres
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="flex items-center gap-1.5 text-xs">
+                    <CalendarClock className="h-3.5 w-3.5 text-primary" />
+                    Data/Hora *
+                  </Label>
+                  <DateTimePicker
+                    date={formData.scheduled_at || undefined}
+                    onDateChange={(date) => setFormData(prev => ({ ...prev, scheduled_at: date || null }))}
+                    placeholder="Selecionar"
+                    minDate={startOfDay(new Date())}
+                  />
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Campanha</Label>
+                  <Select 
+                    value={formData.campaign_id || 'none'} 
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, campaign_id: value === 'none' ? '' : value }))}
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Nenhuma" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Nenhuma</SelectItem>
+                      {campaigns.map(campaign => (
+                        <SelectItem key={campaign.id} value={campaign.id}>
+                          {campaign.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column - Media */}
+            <div>
+              <MediaSourceSelector
+                value={formData.media_url}
+                mediaType={formData.media_type}
+                matchId={matchId}
+                onChange={(url, type) => setFormData(prev => ({ ...prev, media_url: url, media_type: type }))}
+              />
+            </div>
           </div>
 
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>
+          <DialogFooter className="border-t pt-4">
+            <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)}>
               Cancelar
             </Button>
-            <Button variant="arena" onClick={handleSubmit}>
+            <Button variant="arena" size="sm" onClick={handleSubmit}>
               {editingPost ? 'Salvar' : 'Agendar'}
             </Button>
           </DialogFooter>
