@@ -11,11 +11,19 @@ export { getApiBase };
 // Check if local server is available
 let serverAvailable: boolean | null = null;
 let lastServerCheck = 0;
-const SERVER_CHECK_INTERVAL = 30000; // 30 seconds
+const SERVER_CHECK_INTERVAL_ONLINE = 30000; // 30s when online
+const SERVER_CHECK_INTERVAL_OFFLINE = 3000; // 3s when offline (fast recovery)
+let recoveryCheckActive = false;
 
 export async function isLocalServerAvailable(): Promise<boolean> {
   const now = Date.now();
-  if (serverAvailable !== null && (now - lastServerCheck) < SERVER_CHECK_INTERVAL) {
+  
+  // Use shorter interval when offline for faster auto-recovery
+  const checkInterval = serverAvailable === false 
+    ? SERVER_CHECK_INTERVAL_OFFLINE 
+    : SERVER_CHECK_INTERVAL_ONLINE;
+  
+  if (serverAvailable !== null && (now - lastServerCheck) < checkInterval) {
     return serverAvailable;
   }
   
@@ -30,20 +38,66 @@ export async function isLocalServerAvailable(): Promise<boolean> {
     });
     clearTimeout(timeout);
     
+    const wasOffline = serverAvailable === false;
     serverAvailable = response.ok;
     lastServerCheck = now;
+    
+    // If server came back online, dispatch event for UI components
+    if (wasOffline && serverAvailable) {
+      console.log('[ApiClient] 🟢 Servidor reconectado automaticamente');
+      window.dispatchEvent(new CustomEvent('server-reconnected'));
+    }
+    
     return serverAvailable;
   } catch {
+    const wasOnline = serverAvailable === true;
     serverAvailable = false;
     lastServerCheck = now;
+    
+    // Start recovery check if server went offline
+    if (wasOnline && !recoveryCheckActive) {
+      startRecoveryCheck();
+    }
+    
     return false;
   }
+}
+
+// Background recovery check - polls server when offline
+function startRecoveryCheck(): void {
+  if (recoveryCheckActive) return;
+  recoveryCheckActive = true;
+  
+  console.log('[ApiClient] 🔄 Iniciando verificação de recuperação automática');
+  
+  const checkRecovery = async () => {
+    if (serverAvailable === true) {
+      recoveryCheckActive = false;
+      console.log('[ApiClient] ✅ Recuperação concluída');
+      return;
+    }
+    
+    // Force a fresh check
+    lastServerCheck = 0;
+    await isLocalServerAvailable();
+    
+    // Continue checking if still offline
+    if (serverAvailable === false) {
+      setTimeout(checkRecovery, SERVER_CHECK_INTERVAL_OFFLINE);
+    } else {
+      recoveryCheckActive = false;
+    }
+  };
+  
+  // Start after short delay
+  setTimeout(checkRecovery, SERVER_CHECK_INTERVAL_OFFLINE);
 }
 
 // Reset server availability cache (para forçar nova verificação)
 export function resetServerAvailability(): void {
   serverAvailable = null;
   lastServerCheck = 0;
+  recoveryCheckActive = false;
 }
 
 // Erro customizado para servidor offline
