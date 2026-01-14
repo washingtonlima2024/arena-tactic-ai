@@ -13,6 +13,7 @@ interface MatchEvent {
   description: string;
   team: 'home' | 'away';
   isOwnGoal?: boolean;
+  _autoFixed?: boolean;
 }
 
 interface AnalysisResult {
@@ -130,6 +131,38 @@ PALAVRAS-CHAVE PARA GOLS (NUNCA IGNORE):
 - "GOL CONTRA", "PRÓPRIO GOL" → É GOL COM isOwnGoal: true!
 
 ═══════════════════════════════════════════════════════════════
+⚠️ ATENÇÃO ESPECIAL: GOLS CONTRA (MUITO IMPORTANTE!)
+═══════════════════════════════════════════════════════════════
+
+COMO IDENTIFICAR GOL CONTRA NA NARRAÇÃO BRASILEIRA:
+- "Gol contra do {TIME}" → O {TIME} COMETEU O ERRO
+- "Gol contra! O zagueiro do {TIME} falhou" → O {TIME} ERROU
+- "{TIME} fez gol contra" → O {TIME} COMETEU O ERRO
+- "Próprio gol de jogador do {TIME}" → O {TIME} ERROU
+- "Mandou contra", "Jogou contra", "Entrou contra" → GOL CONTRA!
+
+REGRA CRÍTICA PARA GOLS CONTRA:
+→ team = TIME QUE COMETEU O ERRO (não quem se beneficiou!)
+→ isOwnGoal = true (OBRIGATÓRIO!)
+→ O PLACAR VAI PARA O ADVERSÁRIO!
+
+EXEMPLO ESPECÍFICO - Partida: ${homeTeam} vs ${awayTeam}
+
+CASO A - "Gol contra do ${homeTeam}":
+Narração: "[25:30] GOL CONTRA! Zagueiro do ${homeTeam} cortou mal e a bola entrou!"
+→ { minute: 25, second: 30, event_type: "goal", team: "home", isOwnGoal: true, description: "GOL CONTRA! Zagueiro falha!" }
+→ QUEM GANHA O PONTO: ${awayTeam} (adversário)
+
+CASO B - "Gol contra do ${awayTeam}":
+Narração: "[38:15] Gol contra! O lateral do ${awayTeam} mandou contra!"
+→ { minute: 38, second: 15, event_type: "goal", team: "away", isOwnGoal: true, description: "GOL CONTRA! Lateral falha!" }
+→ QUEM GANHA O PONTO: ${homeTeam} (adversário)
+
+NUNCA CONFUNDA:
+❌ ERRADO: "Gol contra do ${homeTeam}" com team: "away" 
+✅ CORRETO: "Gol contra do ${homeTeam}" com team: "home", isOwnGoal: true
+
+═══════════════════════════════════════════════════════════════
 EXEMPLOS DE EXTRAÇÃO (FEW-SHOT LEARNING):
 ═══════════════════════════════════════════════════════════════
 
@@ -137,16 +170,17 @@ EXEMPLOS DE EXTRAÇÃO (FEW-SHOT LEARNING):
 → EXTRAIA O TEMPO EXATO de cada evento em MINUTO e SEGUNDO!
 
 EXEMPLO 1 - GOL NORMAL:
-Transcrição: "[23:45] GOOOOOL do Brasil! Neymar chuta e a bola entra!"
-→ { minute: 23, second: 45, event_type: "goal", team: "home", description: "GOOOOL! Neymar marca!", isOwnGoal: false }
+Transcrição: "[23:45] GOOOOOL do ${homeTeam}! Atacante chuta e a bola entra!"
+→ { minute: 23, second: 45, event_type: "goal", team: "home", description: "GOOOOL! Atacante marca!", isOwnGoal: false }
 
-EXEMPLO 2 - GOL COM EMOÇÃO:
-Transcrição: "[35:12] PRA DENTRO! É GOLAÇO! Que pintura!"
-→ { minute: 35, second: 12, event_type: "goal", team: "home", description: "GOLAÇO! Pintura de gol!", isOwnGoal: false }
+EXEMPLO 2 - GOL DO VISITANTE:
+Transcrição: "[35:12] PRA DENTRO! Gol do ${awayTeam}! Que pintura!"
+→ { minute: 35, second: 12, event_type: "goal", team: "away", description: "GOLAÇO! Pintura de gol!", isOwnGoal: false }
 
-EXEMPLO 3 - GOL CONTRA:
-Transcrição: "[40:30] Que azar! Gol contra! O zagueiro mandou contra!"
+EXEMPLO 3 - GOL CONTRA (ATENÇÃO!):
+Transcrição: "[40:30] Que azar! Gol contra do ${homeTeam}! O zagueiro mandou contra!"
 → { minute: 40, second: 30, event_type: "goal", team: "home", description: "GOL CONTRA! Zagueiro falha!", isOwnGoal: true }
+→ NOTA: O ponto vai para ${awayTeam} porque ${homeTeam} errou!
 
 EXEMPLO 4 - CARTÃO AMARELO:
 Transcrição: "[28:55] Cartão amarelo para o lateral"
@@ -385,6 +419,38 @@ LEMBRE-SE:
 
     console.log('Eventos detectados (antes da validação):', analysisResult.events?.length || 0);
     console.log('Placar reportado pela IA:', analysisResult.homeScore, 'x', analysisResult.awayScore);
+
+    // ═══════════════════════════════════════════════════════════════
+    // OWN GOAL VALIDATION: Auto-detect own goals from description
+    // ═══════════════════════════════════════════════════════════════
+    const ownGoalKeywords = [
+      'gol contra', 'próprio gol', 'contra o próprio', 
+      'mandou contra', 'entrou contra', 'jogou contra',
+      'own goal', 'autogol', 'contra sua'
+    ];
+
+    for (const event of (analysisResult.events || [])) {
+      if (event.event_type === 'goal') {
+        const description = (event.description || '').toLowerCase();
+        const hasOwnGoalText = ownGoalKeywords.some(term => description.includes(term));
+        
+        // If description mentions own goal but isOwnGoal is false, auto-fix
+        if (hasOwnGoalText && !event.isOwnGoal) {
+          console.warn(`⚠️ AUTO-FIX: Gol contra detectado na descrição mas isOwnGoal=false!`);
+          console.warn(`   Descrição: ${event.description}`);
+          console.warn(`   Corrigindo para isOwnGoal=true`);
+          event.isOwnGoal = true;
+          event._autoFixed = true;
+        }
+        
+        // Log goal details for debugging
+        const beneficiary = event.team === 'home' ? 'away' : 'home';
+        console.log(`⚽ GOL: Min ${event.minute}' - Time: ${event.team} - OwnGoal: ${event.isOwnGoal || false}`);
+        if (event.isOwnGoal) {
+          console.log(`⚽ → Ponto vai para: ${beneficiary} (adversário)`);
+        }
+      }
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // SCORE VALIDATION: Ensure score matches goal count
