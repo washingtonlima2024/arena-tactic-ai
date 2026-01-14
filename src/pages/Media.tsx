@@ -304,7 +304,7 @@ export default function Media() {
   }
 
   return (
-    <AppLayout>
+    <AppLayout key={matchId}>
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -315,24 +315,6 @@ export default function Media() {
             </p>
           </div>
           <div className="flex gap-3">
-            <Select 
-              value={matchId} 
-              onValueChange={(value) => {
-                setSelectedMatch(value);
-                setPlayingClipId(null);
-              }}
-            >
-              <SelectTrigger className="w-[280px]">
-                <SelectValue placeholder="Selecione uma partida" />
-              </SelectTrigger>
-              <SelectContent>
-                {matches?.map((match) => (
-                  <SelectItem key={match.id} value={match.id}>
-                    {match.home_team?.name || 'Time Casa'} vs {match.away_team?.name || 'Time Fora'}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Button 
               variant="arena"
               onClick={async () => {
