@@ -381,48 +381,34 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
       </Label>
 
       <Tabs value={sourceType} onValueChange={(v) => setSourceType(v as MediaSourceType)}>
-        {/* Show simplified tabs when in internal mode (matchId provided) */}
-        {isInternalMode ? (
-          <TabsList className="grid grid-cols-2 w-full">
-            <TabsTrigger value="clip" className="text-xs gap-1">
-              <Scissors className="h-3 w-3" />
-              Clips Prontos
-              {readyClipsCount > 0 && (
-                <Badge variant="secondary" className="ml-1 text-[10px] px-1">
-                  {readyClipsCount}
-                </Badge>
-              )}
-            </TabsTrigger>
-            <TabsTrigger value="playlist" className="text-xs gap-1">
-              <ListVideo className="h-3 w-3" />
-              Playlists
-              {playlists.length > 0 && (
-                <Badge variant="secondary" className="ml-1 text-[10px] px-1">
-                  {playlists.length}
-                </Badge>
-              )}
-            </TabsTrigger>
-          </TabsList>
-        ) : (
-          <TabsList className="grid grid-cols-4 w-full">
-            <TabsTrigger value="url" className="text-xs gap-1">
-              <Link2 className="h-3 w-3" />
-              Link
-            </TabsTrigger>
-            <TabsTrigger value="upload" className="text-xs gap-1">
-              <Upload className="h-3 w-3" />
-              Upload
-            </TabsTrigger>
-            <TabsTrigger value="clip" className="text-xs gap-1">
-              <Scissors className="h-3 w-3" />
-              Clips
-            </TabsTrigger>
-            <TabsTrigger value="playlist" className="text-xs gap-1">
-              <ListVideo className="h-3 w-3" />
-              Playlist
-            </TabsTrigger>
-          </TabsList>
-        )}
+        <TabsList className="grid grid-cols-4 w-full">
+          <TabsTrigger value="url" className="text-xs gap-1">
+            <Link2 className="h-3 w-3" />
+            Link
+          </TabsTrigger>
+          <TabsTrigger value="upload" className="text-xs gap-1">
+            <Upload className="h-3 w-3" />
+            Upload
+          </TabsTrigger>
+          <TabsTrigger value="clip" className="text-xs gap-1">
+            <Scissors className="h-3 w-3" />
+            Clips
+            {readyClipsCount > 0 && (
+              <Badge variant="secondary" className="ml-1 text-[10px] px-1">
+                {readyClipsCount}
+              </Badge>
+            )}
+          </TabsTrigger>
+          <TabsTrigger value="playlist" className="text-xs gap-1">
+            <ListVideo className="h-3 w-3" />
+            Playlists
+            {playlists.length > 0 && (
+              <Badge variant="secondary" className="ml-1 text-[10px] px-1">
+                {playlists.length}
+              </Badge>
+            )}
+          </TabsTrigger>
+        </TabsList>
 
         <TabsContent value="url" className="space-y-2 mt-3">
           <Input
