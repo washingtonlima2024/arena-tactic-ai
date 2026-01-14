@@ -168,48 +168,111 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
     
     setLoadingClips(true);
     try {
-      // 1. Fetch events with clip_url from Supabase
-      const { data: events, error } = await supabase
-        .from('match_events')
-        .select('id, event_type, description, minute, clip_url, match_id, is_highlight')
-        .eq('match_id', targetMatchId)
-        .not('clip_url', 'is', null)
-        .in('event_type', ['goal', 'penalty', 'yellow_card', 'red_card', 'save', 'highlight', 'shot_on_target'])
-        .order('minute', { ascending: true });
-
-      if (error) throw error;
-
-      // 2. Try to fetch thumbnails from local server storage
-      let thumbnailMap: Record<string, string> = {};
+      // 1. Fetch physical clips from local server (same as Media page)
+      let clipsByHalf: { first_half: any[]; second_half: any[]; full: any[]; extra: any[] } | null = null;
+      let imagesResult: { files: any[] } | null = null;
+      
       try {
-        const imagesResult = await apiClient.listSubfolderFiles(targetMatchId, 'images');
-        if (imagesResult?.files) {
-          // Map event IDs to their thumbnail URLs
-          for (const file of imagesResult.files) {
-            // Thumbnails are named: {event_type}-{minute}m-{timestamp}.jpg or cover-{event_id}.jpg
-            const eventId = events?.find(e => {
-              const filename = file.filename.toLowerCase();
-              // Check if thumbnail matches this event by minute and type
-              return filename.includes(`${e.event_type}-${e.minute}m`) ||
-                     filename.includes(e.id.substring(0, 8));
-            })?.id;
-            
-            if (eventId) {
-              thumbnailMap[eventId] = normalizeStorageUrl(file.url) || file.url;
-            }
-          }
-        }
+        clipsByHalf = await apiClient.getClipsByHalf(targetMatchId);
+        imagesResult = await apiClient.listSubfolderFiles(targetMatchId, 'images');
       } catch (e) {
-        // Local server not available, continue without thumbnails
-        console.log('Could not fetch thumbnails from local server:', e);
+        console.log('Local server not available:', e);
       }
 
-      // 3. Merge events with thumbnails
-      const clipsWithThumbnails: ClipWithThumbnail[] = (events || []).map(event => ({
-        ...event,
-        clip_url: normalizeStorageUrl(event.clip_url) || event.clip_url,
-        thumbnail_url: thumbnailMap[event.id] || null
-      }));
+      // 2. Fetch events from Supabase for metadata (description, type, minute)
+      const { data: events } = await supabase
+        .from('match_events')
+        .select('id, event_type, description, minute, clip_url, match_id, is_highlight, metadata')
+        .eq('match_id', targetMatchId)
+        .in('event_type', ['goal', 'penalty', 'yellow_card', 'red_card', 'save', 'highlight', 'shot_on_target', 'foul', 'corner', 'offside'])
+        .order('minute', { ascending: true });
+
+      // 3. Build thumbnail map from local images
+      const thumbnailMap: Record<string, string> = {};
+      const thumbnailByMinute: Record<string, string> = {};
+      
+      if (imagesResult?.files) {
+        for (const file of imagesResult.files) {
+          const filename = file.filename.toLowerCase();
+          const normalizedUrl = normalizeStorageUrl(file.url) || file.url;
+          
+          // Extract minute from filename (e.g., goal-24m-xxx.jpg)
+          const minuteMatch = filename.match(/-(\d+)m[-\.]/);
+          if (minuteMatch) {
+            const minute = minuteMatch[1];
+            const eventType = filename.split('-')[0];
+            thumbnailByMinute[`${eventType}-${minute}`] = normalizedUrl;
+          }
+        }
+      }
+
+      // 4. Combine clips from local server with Supabase metadata
+      const allPhysicalClips = [
+        ...(clipsByHalf?.first_half || []),
+        ...(clipsByHalf?.second_half || []),
+        ...(clipsByHalf?.full || []),
+        ...(clipsByHalf?.extra || [])
+      ];
+
+      const clipsWithThumbnails: ClipWithThumbnail[] = [];
+      const processedMinutes = new Set<string>();
+
+      // First: Add clips from local server with metadata from Supabase
+      for (const clip of allPhysicalClips) {
+        const filename = clip.filename?.toLowerCase() || '';
+        
+        // Extract event type and minute from filename (e.g., goal-24m-1234567890.mp4)
+        const parts = filename.split('-');
+        const eventType = parts[0] || 'highlight';
+        const minuteMatch = filename.match(/-(\d+)m[-\.]/);
+        const clipMinute = minuteMatch ? parseInt(minuteMatch[1]) : null;
+        
+        // Find matching event in Supabase
+        const matchingEvent = events?.find(e => 
+          e.minute === clipMinute && 
+          (e.event_type === eventType || eventType === 'highlight')
+        ) || events?.find(e => e.minute === clipMinute);
+
+        const clipId = matchingEvent?.id || `local-${filename}`;
+        const key = `${eventType}-${clipMinute}`;
+        
+        if (processedMinutes.has(key)) continue;
+        processedMinutes.add(key);
+
+        clipsWithThumbnails.push({
+          id: clipId,
+          event_type: matchingEvent?.event_type || eventType,
+          description: matchingEvent?.description || `${getEventTypeLabel(eventType)} ${clipMinute ? `(${clipMinute}')` : ''}`,
+          minute: clipMinute,
+          clip_url: normalizeStorageUrl(clip.url) || clip.url,
+          match_id: targetMatchId,
+          is_highlight: matchingEvent?.is_highlight,
+          thumbnail_url: thumbnailByMinute[key] || null
+        });
+      }
+
+      // Second: Add any Supabase events with clip_url not found in local server
+      for (const event of (events || [])) {
+        if (!event.clip_url) continue;
+        
+        const key = `${event.event_type}-${event.minute}`;
+        if (processedMinutes.has(key)) continue;
+        processedMinutes.add(key);
+
+        clipsWithThumbnails.push({
+          id: event.id,
+          event_type: event.event_type,
+          description: event.description,
+          minute: event.minute,
+          clip_url: normalizeStorageUrl(event.clip_url) || event.clip_url,
+          match_id: targetMatchId,
+          is_highlight: event.is_highlight,
+          thumbnail_url: thumbnailByMinute[key] || null
+        });
+      }
+
+      // Sort by minute
+      clipsWithThumbnails.sort((a, b) => (a.minute || 0) - (b.minute || 0));
 
       setClips(clipsWithThumbnails);
     } catch (error) {
