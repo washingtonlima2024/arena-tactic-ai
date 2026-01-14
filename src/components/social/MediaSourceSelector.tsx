@@ -34,6 +34,7 @@ interface MatchEvent {
   minute: number | null;
   clip_url: string | null;
   match_id: string;
+  is_highlight?: boolean | null;
 }
 
 interface Match {
@@ -122,10 +123,11 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   const fetchEventsWithClips = async () => {
     setLoadingEvents(true);
     try {
+      // Show all events that are highlights or have clips ready
       let query = supabase
         .from('match_events')
-        .select('id, event_type, description, minute, clip_url, match_id')
-        .not('clip_url', 'is', null);
+        .select('id, event_type, description, minute, clip_url, match_id, is_highlight')
+        .in('event_type', ['goal', 'penalty', 'yellow_card', 'red_card', 'save', 'highlight', 'shot_on_target']);
 
       if (selectedMatchId) {
         query = query.eq('match_id', selectedMatchId);
@@ -147,11 +149,10 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   const fetchPlaylists = async () => {
     setLoadingPlaylists(true);
     try {
+      // Show all playlists for the match (ready or pending compilation)
       let query = supabase
         .from('playlists')
-        .select('*, team:teams(name, primary_color)')
-        .eq('status', 'ready')
-        .not('video_url', 'is', null);
+        .select('*, team:teams(name, primary_color)');
 
       if (selectedMatchId) {
         query = query.eq('match_id', selectedMatchId);
@@ -222,18 +223,30 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   };
 
   const handleSelectClip = (event: MatchEvent) => {
+    setSelectedEventId(event.id);
+    setSelectedPlaylistId(null);
     if (event.clip_url) {
-      setSelectedEventId(event.id);
-      setSelectedPlaylistId(null);
       onChange(event.clip_url, 'video');
+    } else {
+      toast({ 
+        title: 'Clip não gerado', 
+        description: 'Este clip ainda não foi processado. Gere na página de Eventos.',
+        variant: 'destructive' 
+      });
     }
   };
 
   const handleSelectPlaylist = (playlist: Playlist) => {
+    setSelectedPlaylistId(playlist.id);
+    setSelectedEventId(null);
     if (playlist.video_url) {
-      setSelectedPlaylistId(playlist.id);
-      setSelectedEventId(null);
       onChange(playlist.video_url, 'video');
+    } else {
+      toast({ 
+        title: 'Playlist não compilada', 
+        description: 'Esta playlist ainda não foi compilada.',
+        variant: 'destructive' 
+      });
     }
   };
 
@@ -397,10 +410,16 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
                       selectedEventId === event.id 
                         ? 'bg-primary/10 border border-primary' 
                         : 'hover:bg-muted'
-                    }`}
+                    } ${!event.clip_url ? 'opacity-60' : ''}`}
                   >
-                    <div className="h-8 w-8 rounded bg-muted flex items-center justify-center shrink-0">
-                      <Play className="h-4 w-4" />
+                    <div className={`h-8 w-8 rounded flex items-center justify-center shrink-0 ${
+                      event.clip_url ? 'bg-primary/20' : 'bg-muted'
+                    }`}>
+                      {event.clip_url ? (
+                        <Play className="h-4 w-4 text-primary" />
+                      ) : (
+                        <Clock className="h-4 w-4 text-muted-foreground" />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
@@ -412,6 +431,11 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
                             {event.minute}'
                           </Badge>
                         )}
+                        {!event.clip_url && (
+                          <Badge variant="secondary" className="text-xs">
+                            Pendente
+                          </Badge>
+                        )}
                       </div>
                       {event.description && (
                         <p className="text-xs text-muted-foreground truncate">
@@ -419,7 +443,7 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
                         </p>
                       )}
                     </div>
-                    {selectedEventId === event.id && (
+                    {selectedEventId === event.id && event.clip_url && (
                       <Check className="h-4 w-4 text-primary shrink-0" />
                     )}
                   </button>
@@ -484,10 +508,12 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
                       selectedPlaylistId === playlist.id 
                         ? 'bg-primary/10 border border-primary' 
                         : 'hover:bg-muted'
-                    }`}
+                    } ${!playlist.video_url ? 'opacity-60' : ''}`}
                   >
                     <div 
-                      className="h-10 w-14 rounded bg-muted flex items-center justify-center shrink-0 overflow-hidden"
+                      className={`h-10 w-14 rounded flex items-center justify-center shrink-0 overflow-hidden ${
+                        playlist.video_url ? 'bg-primary/20' : 'bg-muted'
+                      }`}
                       style={playlist.team?.primary_color ? { 
                         backgroundColor: `${playlist.team.primary_color}20` 
                       } : undefined}
@@ -498,8 +524,10 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
                           alt={playlist.name}
                           className="h-full w-full object-cover"
                         />
+                      ) : playlist.video_url ? (
+                        <Play className="h-5 w-5 text-primary" />
                       ) : (
-                        <ListVideo className="h-5 w-5 text-muted-foreground" />
+                        <Clock className="h-5 w-5 text-muted-foreground" />
                       )}
                     </div>
                     <div className="flex-1 min-w-0">
@@ -507,6 +535,16 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
                         <span className="text-sm font-medium truncate">
                           {playlist.name}
                         </span>
+                        {!playlist.video_url && (
+                          <Badge variant="secondary" className="text-xs">
+                            Não compilada
+                          </Badge>
+                        )}
+                        {playlist.video_url && (
+                          <Badge className="text-xs bg-primary/20 text-primary border-0">
+                            Pronta
+                          </Badge>
+                        )}
                       </div>
                       <div className="flex items-center gap-2 text-xs text-muted-foreground">
                         <span className="flex items-center gap-1">
@@ -519,7 +557,7 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
                         <span>{playlist.clip_ids?.length || 0} clips</span>
                       </div>
                     </div>
-                    {selectedPlaylistId === playlist.id && (
+                    {selectedPlaylistId === playlist.id && playlist.video_url && (
                       <Check className="h-4 w-4 text-primary shrink-0" />
                     )}
                   </button>
