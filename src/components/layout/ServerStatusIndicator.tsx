@@ -112,7 +112,20 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
     checkStatus();
     const interval = setInterval(checkStatus, 10000);
 
-    return () => clearInterval(interval);
+    // Listen for auto-recovery event from apiClient
+    const handleServerReconnected = () => {
+      console.log('[ServerStatus] Servidor reconectado automaticamente');
+      setStatus('checking');
+      checkStatus();
+      toast.success('Servidor reconectado automaticamente!');
+    };
+    
+    window.addEventListener('server-reconnected', handleServerReconnected);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('server-reconnected', handleServerReconnected);
+    };
   }, [checkStatus]);
 
   const handleQuickConnect = () => {
