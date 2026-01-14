@@ -3,9 +3,13 @@ Arena Play - Servidor API Local Completo
 Servidor Flask com SQLite para toda a funcionalidade do Arena Play.
 """
 
+# Carregar variáveis de ambiente do .env ANTES de qualquer acesso
+from dotenv import load_dotenv
+load_dotenv()
+
 # Versão do servidor - incrementar quando funções críticas são adicionadas
-SERVER_VERSION = "2.1.0"
-SERVER_BUILD_DATE = "2026-01-12"
+SERVER_VERSION = "2.1.1"
+SERVER_BUILD_DATE = "2026-01-13"
 
 from flask import Flask, request, jsonify, send_file, send_from_directory
 from flask_cors import CORS

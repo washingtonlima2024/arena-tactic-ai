@@ -10,6 +10,10 @@ import requests
 import re
 from typing import Optional, List, Dict, Any, Tuple
 
+# Carregar variáveis de ambiente do .env
+from dotenv import load_dotenv
+load_dotenv()
+
 # Known Brazilian and international teams for transcription validation
 KNOWN_TEAMS = [
     # Série A
@@ -121,6 +125,15 @@ LOCAL_WHISPER_MODEL = os.environ.get('LOCAL_WHISPER_MODEL', 'base')
 LOVABLE_API_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions'
 OPENAI_API_URL = 'https://api.openai.com/v1'
 GOOGLE_API_URL = 'https://generativelanguage.googleapis.com/v1beta'
+
+# Log de verificação das chaves na inicialização
+print(f"\n[AI Services] ========== API Keys Status ==========")
+print(f"[AI Services] LOVABLE_API_KEY: {'✓ configurada' if LOVABLE_API_KEY else '✗ não configurada'}")
+print(f"[AI Services] OPENAI_API_KEY: {'✓ configurada' if OPENAI_API_KEY else '✗ não configurada'}")
+print(f"[AI Services] ELEVENLABS_API_KEY: {'✓ configurada' if ELEVENLABS_API_KEY else '✗ não configurada'}")
+print(f"[AI Services] GOOGLE_API_KEY: {'✓ configurada' if GOOGLE_API_KEY else '✗ não configurada'}")
+print(f"[AI Services] LOCAL_WHISPER: {'✓ disponível' if LOCAL_WHISPER_ENABLED else '✗ não disponível'}")
+print(f"[AI Services] =====================================\n")
 
 # Faster-Whisper model cache (singleton)
 _whisper_model = None
