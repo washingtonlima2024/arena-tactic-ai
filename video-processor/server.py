@@ -5515,6 +5515,209 @@ def _format_srt_time(seconds: float) -> str:
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
 
+# ============================================================================
+# LIVE MATCH VIDEO MERGE ENDPOINT
+# ============================================================================
+
+@app.route('/api/matches/<match_id>/merge-live-video', methods=['POST'])
+def merge_live_video(match_id: str):
+    """
+    Merge live recording video chunks into a single optimized MP4.
+    
+    This endpoint receives video chunks uploaded during live recording
+    and concatenates them using FFmpeg into a properly seekable MP4.
+    
+    Input JSON:
+    - chunk_urls: List of URLs to video chunks (optional - will list from storage if not provided)
+    - output_filename: Desired output filename (default: live-merged.mp4)
+    
+    Returns:
+    - success: Boolean
+    - video_url: URL of the merged video
+    - video_id: ID of the created video record
+    - duration_seconds: Total duration
+    """
+    data = request.json or {}
+    chunk_urls = data.get('chunk_urls', [])
+    output_filename = data.get('output_filename', f'live-merged-{int(time_module.time())}.mp4')
+    
+    print(f"\n{'='*60}")
+    print(f"[MERGE-LIVE] Merging live video for match {match_id}")
+    print(f"[MERGE-LIVE] Provided chunks: {len(chunk_urls)}")
+    print(f"{'='*60}")
+    
+    session = get_session()
+    try:
+        # Verify match exists
+        match = session.query(Match).filter_by(id=match_id).first()
+        if not match:
+            return jsonify({'error': 'Match not found'}), 404
+        
+        # If no chunks provided, list video files from storage
+        if not chunk_urls:
+            video_folder = get_subfolder_path(match_id, 'videos')
+            if video_folder.exists():
+                chunk_files = sorted([
+                    f for f in video_folder.iterdir() 
+                    if f.is_file() and 
+                    (f.suffix.lower() in ['.webm', '.mp4']) and
+                    ('chunk-' in f.name or 'segment-' in f.name)
+                ], key=lambda x: x.stat().st_mtime)
+                
+                chunk_urls = [f"/api/storage/{match_id}/videos/{f.name}" for f in chunk_files]
+                print(f"[MERGE-LIVE] Found {len(chunk_urls)} chunks in storage")
+        
+        if not chunk_urls:
+            return jsonify({'error': 'No video chunks found'}), 400
+        
+        with tempfile.TemporaryDirectory() as tmpdir:
+            chunk_paths = []
+            
+            # Download/copy all chunks
+            for i, url in enumerate(chunk_urls):
+                print(f"[MERGE-LIVE] Processing chunk {i+1}/{len(chunk_urls)}: {url}")
+                
+                # Resolve local storage URL
+                if '/api/storage/' in url:
+                    parts = url.split('/api/storage/')[-1].split('/')
+                    if len(parts) >= 3:
+                        chunk_match_id = parts[0]
+                        subfolder = parts[1]
+                        filename = '/'.join(parts[2:])
+                        local_path = get_file_path(chunk_match_id, subfolder, filename)
+                        
+                        if local_path and os.path.exists(local_path):
+                            chunk_paths.append(str(local_path))
+                            continue
+                
+                # Download external URL
+                chunk_path = os.path.join(tmpdir, f'chunk_{i:04d}.webm')
+                if download_video(url, chunk_path):
+                    chunk_paths.append(chunk_path)
+                else:
+                    print(f"[MERGE-LIVE] ⚠ Failed to download chunk {i+1}")
+            
+            if len(chunk_paths) < 1:
+                return jsonify({'error': 'No valid chunks could be processed'}), 400
+            
+            print(f"[MERGE-LIVE] Merging {len(chunk_paths)} chunks...")
+            
+            # Create concat file for FFmpeg
+            concat_file = os.path.join(tmpdir, 'concat.txt')
+            with open(concat_file, 'w') as f:
+                for path in chunk_paths:
+                    # Escape single quotes in path
+                    escaped_path = path.replace("'", "'\\''")
+                    f.write(f"file '{escaped_path}'\n")
+            
+            # Output path
+            output_path = os.path.join(tmpdir, output_filename)
+            
+            # Run FFmpeg concat with re-encoding for proper seeking
+            cmd = [
+                'ffmpeg', '-y',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', concat_file,
+                '-c:v', 'libx264',
+                '-preset', 'fast',
+                '-crf', '23',
+                '-c:a', 'aac',
+                '-b:a', '128k',
+                '-movflags', '+faststart',  # Enable fast seeking
+                '-max_muxing_queue_size', '1024',
+                output_path
+            ]
+            
+            print(f"[MERGE-LIVE] Running FFmpeg: {' '.join(cmd[:10])}...")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+            
+            if result.returncode != 0:
+                print(f"[MERGE-LIVE] ⚠ FFmpeg error: {result.stderr[:500]}")
+                return jsonify({'error': f'FFmpeg merge failed: {result.stderr[:200]}'}), 500
+            
+            if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
+                return jsonify({'error': 'Merged video is invalid'}), 500
+            
+            # Get duration
+            duration = get_video_duration_seconds(output_path)
+            file_size = os.path.getsize(output_path)
+            
+            print(f"[MERGE-LIVE] ✓ Merged video: {file_size / (1024*1024):.2f} MB, {duration:.1f}s")
+            
+            # Save to storage
+            with open(output_path, 'rb') as f:
+                video_data = f.read()
+            
+            file_result = save_file(match_id, 'videos', video_data, output_filename.replace('.mp4', ''), 'mp4')
+            video_url = file_result['url']
+            
+            # Create or update video record
+            existing_video = session.query(Video).filter_by(
+                match_id=match_id, 
+                video_type='full'
+            ).first()
+            
+            if existing_video:
+                existing_video.file_url = video_url
+                existing_video.file_name = 'Transmissão ao vivo (merged)'
+                existing_video.duration_seconds = int(duration) if duration > 0 else None
+                existing_video.status = 'completed'
+                video_id = existing_video.id
+            else:
+                new_video = Video(
+                    match_id=match_id,
+                    file_url=video_url,
+                    file_name='Transmissão ao vivo (merged)',
+                    video_type='full',
+                    status='completed',
+                    duration_seconds=int(duration) if duration > 0 else None,
+                    start_minute=0,
+                    end_minute=int(duration / 60) if duration > 0 else None
+                )
+                session.add(new_video)
+                session.flush()
+                video_id = new_video.id
+            
+            session.commit()
+            
+            # Optionally delete original chunks to save space
+            if data.get('delete_chunks', False):
+                for url in chunk_urls:
+                    if '/api/storage/' in url:
+                        parts = url.split('/api/storage/')[-1].split('/')
+                        if len(parts) >= 3:
+                            try:
+                                chunk_path = get_file_path(parts[0], parts[1], '/'.join(parts[2:]))
+                                if chunk_path and os.path.exists(chunk_path):
+                                    os.remove(chunk_path)
+                            except:
+                                pass
+            
+            print(f"[MERGE-LIVE] ✓ Complete! Video ID: {video_id}")
+            
+            return jsonify({
+                'success': True,
+                'video_url': video_url,
+                'video_id': video_id,
+                'duration_seconds': duration,
+                'file_size_mb': round(file_size / (1024*1024), 2),
+                'chunks_merged': len(chunk_paths)
+            })
+            
+    except subprocess.TimeoutExpired:
+        print(f"[MERGE-LIVE] ⚠ FFmpeg timeout")
+        return jsonify({'error': 'Video merge timed out'}), 500
+    except Exception as e:
+        session.rollback()
+        print(f"[MERGE-LIVE] ⚠ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
 
 def extract_live_events_endpoint():
     """Extract live events from transcript."""
