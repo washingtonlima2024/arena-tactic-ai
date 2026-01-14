@@ -1949,7 +1949,41 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         setVideoUploadProgress(100);
         console.log('[finishMatch] Video saved:', videoUrl);
         
-        // STEP 1.5: Extract video cover thumbnail (3s frame)
+        // STEP 1.5: Merge WebM chunks into optimized MP4 on backend
+        if (videoUrl && matchId && chunksToUse.length > 1) {
+          try {
+            console.log('[finishMatch] Merging video chunks on backend...');
+            toast({ 
+              title: "Otimizando vídeo...", 
+              description: "Convertendo para formato otimizado" 
+            });
+            
+            const mergeResult = await apiClient.mergeLiveVideo(matchId, {
+              output_filename: `live-${Date.now()}.mp4`
+            });
+            
+            if (mergeResult.success && mergeResult.video_url) {
+              videoUrl = mergeResult.video_url;
+              if (mergeResult.video_id) {
+                videoId = mergeResult.video_id;
+              }
+              console.log('[finishMatch] Video merged to MP4:', videoUrl);
+              
+              // Update video record with merged URL
+              if (videoId) {
+                await apiClient.updateVideo(videoId, {
+                  file_url: videoUrl,
+                  duration_seconds: mergeResult.duration_seconds || recordingTime,
+                  status: 'completed'
+                });
+              }
+            }
+          } catch (mergeError) {
+            console.warn('[finishMatch] Merge failed, using original WebM:', mergeError);
+          }
+        }
+        
+        // STEP 1.6: Extract video cover thumbnail (3s frame)
         if (videoUrl && matchId) {
           try {
             console.log('[finishMatch] Extracting video cover thumbnail...');
