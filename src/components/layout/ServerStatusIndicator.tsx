@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Server, Settings, AlertTriangle, Link2, Copy, RefreshCw, Wifi, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { checkLocalServerAvailable, hasServerUrlConfigured, getApiBase } from '@/lib/apiMode';
+import { checkLocalServerAvailable, hasServerUrlConfigured, getApiBase, clearTunnelCache, checkAndRecoverConnection } from '@/lib/apiMode';
 import { resetServerAvailability } from '@/lib/apiClient';
 import { useNavigate, useLocation } from 'react-router-dom';
 import {
@@ -74,12 +74,11 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
     resetServerAvailability();
     
     const MAX_RETRIES = 3;
-    const RETRY_DELAY = 2000; // 2 seconds
+    const RETRY_DELAY = 2000;
     
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
       toast.info(`Tentativa ${attempt}/${MAX_RETRIES}...`);
       
-      // Reset cache antes de cada tentativa
       resetServerAvailability();
       
       try {
@@ -89,23 +88,35 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           setStatus('online');
           setIsReconnecting(false);
           toast.success('Servidor reconectado!');
-          await checkStatus(); // Atualizar detalhes completos
+          await checkStatus();
           return;
         }
       } catch {
         // Continuar para próxima tentativa
       }
       
-      // Aguardar antes da próxima tentativa (exceto na última)
       if (attempt < MAX_RETRIES) {
         await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
       }
     }
     
-    // Todas as tentativas falharam
-    setStatus('offline');
+    // Todas as tentativas falharam - verificar se é túnel expirado
+    const apiUrl = getApiBase();
+    const isUsingTunnel = apiUrl?.includes('trycloudflare.com') || apiUrl?.includes('ngrok');
+    
+    if (isUsingTunnel) {
+      // Limpar cache do túnel expirado e mostrar config
+      clearTunnelCache();
+      resetServerAvailability();
+      setStatus('not-configured');
+      setShowQuickConfig(true);
+      toast.error('Túnel expirado! Configure a nova URL do servidor.');
+    } else {
+      setStatus('offline');
+      toast.error('Servidor não disponível. Verifique se o Python está rodando.');
+    }
+    
     setIsReconnecting(false);
-    toast.error('Servidor não disponível. Verifique se o Python está rodando.');
   }, [checkStatus]);
 
   useEffect(() => {
@@ -120,11 +131,21 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
       toast.success('Servidor reconectado automaticamente!');
     };
     
+    // Listen for tunnel expired event
+    const handleTunnelExpired = () => {
+      console.log('[ServerStatus] Túnel expirado detectado');
+      setStatus('not-configured');
+      setShowQuickConfig(true);
+      toast.warning('Túnel expirado! Configure a nova URL.');
+    };
+    
     window.addEventListener('server-reconnected', handleServerReconnected);
+    window.addEventListener('tunnel-expired', handleTunnelExpired);
 
     return () => {
       clearInterval(interval);
       window.removeEventListener('server-reconnected', handleServerReconnected);
+      window.removeEventListener('tunnel-expired', handleTunnelExpired);
     };
   }, [checkStatus]);
 

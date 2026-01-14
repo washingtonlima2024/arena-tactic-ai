@@ -115,3 +115,46 @@ export const checkLocalServerAvailable = async (): Promise<boolean> => {
     return false;
   }
 };
+
+/**
+ * Limpa URLs de túneis salvos quando não estão funcionando.
+ * Isso permite que o sistema detecte automaticamente uma nova URL.
+ */
+export const clearTunnelCache = (): void => {
+  const cloudflareTunnel = localStorage.getItem('cloudflare_tunnel_url');
+  const ngrokTunnel = localStorage.getItem('ngrok_fallback_url');
+  
+  if (cloudflareTunnel) {
+    console.log('[ApiMode] Limpando túnel Cloudflare expirado:', cloudflareTunnel);
+    localStorage.removeItem('cloudflare_tunnel_url');
+  }
+  if (ngrokTunnel) {
+    console.log('[ApiMode] Limpando túnel Ngrok expirado:', ngrokTunnel);
+    localStorage.removeItem('ngrok_fallback_url');
+  }
+};
+
+/**
+ * Verifica se o servidor está disponível e, se não, limpa URLs de túneis expirados.
+ * Retorna true se o servidor estiver disponível após a verificação.
+ */
+export const checkAndRecoverConnection = async (): Promise<boolean> => {
+  const available = await checkLocalServerAvailable();
+  
+  if (!available) {
+    // Se falhou e estamos usando túnel, pode ser que expirou
+    const apiUrl = getApiBase();
+    const isUsingTunnel = apiUrl.includes('trycloudflare.com') || apiUrl.includes('ngrok');
+    
+    if (isUsingTunnel) {
+      console.log('[ApiMode] Túnel não responde, limpando cache...');
+      clearTunnelCache();
+      
+      // Notificar UI que precisa de reconfiguração
+      window.dispatchEvent(new CustomEvent('tunnel-expired'));
+      return false;
+    }
+  }
+  
+  return available;
+};
