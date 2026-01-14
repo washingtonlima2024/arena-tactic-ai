@@ -65,17 +65,26 @@ export default function Dashboard() {
     enabled: !!currentMatchId
   });
   
-  // Fetch global stats (all matches)
+  // Fetch global stats from Cloud (Supabase) for consistency
   const { data: globalStats } = useQuery({
     queryKey: ['dashboard-global-stats'],
     queryFn: async () => {
-      const [matches, jobs] = await Promise.all([
-        apiClient.getMatches(),
-        apiClient.getAnalysisJobs()
-      ]);
+      const { supabase } = await import('@/integrations/supabase/client');
+      
+      // Get all matches with completed/analyzing status
+      const { data: matches } = await supabase
+        .from('matches')
+        .select('id, status')
+        .in('status', ['completed', 'analyzing', 'analyzed', 'live']);
+      
+      // Get completed analysis jobs
+      const { data: jobs } = await supabase
+        .from('analysis_jobs')
+        .select('id, status')
+        .eq('status', 'completed');
       
       const totalMatches = matches?.length || 0;
-      const analyzedMatches = jobs?.filter((j: any) => j.status === 'completed').length || 0;
+      const analyzedMatches = jobs?.length || 0;
       
       return {
         totalMatches,
@@ -308,23 +317,20 @@ export default function Dashboard() {
           <StatCard
             title="Partidas Analisadas"
             value={globalStats?.analyzedMatches || 0}
-            subtitle={`de ${globalStats?.totalMatches || 0} total`}
+            subtitle={`de ${globalStats?.totalMatches || 0} partidas`}
             icon={Video}
-            trend={{ value: 12, isPositive: true }}
           />
           <StatCard
             title="Gols na Partida"
             value={matchStats.totalGoals}
             subtitle={`${matchStats.totalShots} finalizações`}
             icon={Activity}
-            trend={{ value: 8, isPositive: true }}
           />
           <StatCard
             title="Eventos na Partida"
             value={matchStats.totalEvents.toLocaleString()}
             subtitle={`${matchStats.totalFouls} faltas • ${matchStats.totalCards} cartões`}
             icon={BarChart3}
-            trend={{ value: 23, isPositive: true }}
           />
           <StatCard
             title="Taxa de Precisão"
