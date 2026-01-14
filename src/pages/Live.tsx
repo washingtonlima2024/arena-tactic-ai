@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -30,6 +30,9 @@ const Live = () => {
   const [selectedMatchId, setSelectedMatchId] = useState<string | null>(null);
   const [showFinishDialog, setShowFinishDialog] = useState(false);
   const [showSummaryDialog, setShowSummaryDialog] = useState(false);
+  
+  // Track if we're navigating away to prevent state updates after unmount
+  const isUnmountingRef = useRef(false);
   
   // Video element state - for stream mode
   const [videoElement, setVideoElement] = useState<HTMLVideoElement | null>(null);
@@ -87,6 +90,20 @@ const Live = () => {
   } = useLiveBroadcastContext();
 
   const hasVideoSource = streamUrl || cameraStream;
+
+  // Cleanup when leaving the page
+  useEffect(() => {
+    return () => {
+      console.log('[Live] Page unmounting, cleaning up resources...');
+      isUnmountingRef.current = true;
+      
+      // If still recording, stop to clean up all resources
+      if (isRecording) {
+        console.log('[Live] Stopping recording due to page unmount');
+        stopRecording();
+      }
+    };
+  }, [isRecording, stopRecording]);
 
   // Convert approved events for the analysis hook
   const analysisEvents = useMemo(() => {
