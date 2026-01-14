@@ -3400,6 +3400,26 @@ def generate_thumbnail_from_clip(
         event_label = EVENT_LABELS.get(event_type, event_type.upper().replace('_', ' '))
         badge_color = EVENT_COLORS.get(event_type, '10b981')
         
+        # Find available font - fallback for different systems
+        def get_available_font():
+            font_paths = [
+                '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',  # Linux
+                '/usr/share/fonts/truetype/freefont/FreeSansBold.ttf',   # Linux fallback
+                '/System/Library/Fonts/Supplemental/Arial Bold.ttf',     # macOS
+                '/Library/Fonts/Arial Bold.ttf',                          # macOS alt
+                'C:\\Windows\\Fonts\\arialbd.ttf',                        # Windows
+                '/usr/share/fonts/TTF/DejaVuSans-Bold.ttf',              # Arch Linux
+            ]
+            for path in font_paths:
+                if os.path.exists(path):
+                    print(f"[THUMBNAIL] Usando fonte: {path}")
+                    return path
+            print("[THUMBNAIL] ⚠ Nenhuma fonte encontrada, usando padrão do FFmpeg")
+            return None
+        
+        font_path = get_available_font()
+        font_param = f":fontfile={font_path}" if font_path else ""
+        
         # Build FFmpeg filter for styled overlay
         # This creates: gradient bottom, event type badge (bottom-left), minute badge (bottom-right)
         filters = []
@@ -3419,7 +3439,7 @@ def generate_thumbnail_from_clip(
         # Using drawtext with escape
         escaped_label = event_label.replace("'", "\\'").replace(":", "\\:")
         filters.append(
-            f"drawtext=text='{escaped_label}':fontsize=28:fontcolor=white:x=35:y=ih-55:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+            f"drawtext=text='{escaped_label}':fontsize=28:fontcolor=white:x=35:y=ih-55{font_param}"
         )
         
         # 4. Minute badge (bottom-right) 
@@ -3434,7 +3454,7 @@ def generate_thumbnail_from_clip(
         # 5. Minute text
         minute_text = f"{minute}'"
         filters.append(
-            f"drawtext=text='{minute_text}':fontsize=32:fontcolor=white:x=iw-80:y=ih-55:fontfile=/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+            f"drawtext=text='{minute_text}':fontsize=32:fontcolor=white:x=iw-80:y=ih-55{font_param}"
         )
         
         # Combine all filters
@@ -8289,6 +8309,149 @@ def diagnose_match_clips(match_id):
         return jsonify(issues)
         
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# ENDPOINT DE DIAGNÓSTICO DE THUMBNAILS
+# ═══════════════════════════════════════════════════════════════════════════
+@app.route('/api/matches/<match_id>/diagnose-thumbnails', methods=['GET'])
+def diagnose_match_thumbnails(match_id):
+    """
+    Diagnostica eventos que têm clip_url mas não têm thumbnail.
+    
+    Retorna:
+    - Eventos com clip mas sem thumbnail
+    - Estatísticas de thumbnails
+    """
+    session = get_session()
+    try:
+        # Buscar todos os eventos com clip
+        events_with_clip = session.query(MatchEvent).filter(
+            MatchEvent.match_id == match_id,
+            MatchEvent.clip_url.isnot(None)
+        ).all()
+        
+        # Buscar thumbnails existentes
+        thumbnails = session.query(Thumbnail).filter(
+            Thumbnail.match_id == match_id
+        ).all()
+        
+        thumb_event_ids = {t.event_id for t in thumbnails}
+        
+        # Eventos com clip mas sem thumbnail
+        missing = []
+        for e in events_with_clip:
+            if e.id not in thumb_event_ids:
+                missing.append({
+                    'event_id': e.id,
+                    'event_type': e.event_type,
+                    'minute': e.minute,
+                    'second': e.second,
+                    'description': e.description,
+                    'clip_url': e.clip_url,
+                    'match_half': e.match_half
+                })
+        
+        return jsonify({
+            'total_events_with_clip': len(events_with_clip),
+            'total_thumbnails': len(thumbnails),
+            'missing_thumbnails': len(missing),
+            'missing_events': missing,
+            'coverage_percent': round(len(thumbnails) / max(len(events_with_clip), 1) * 100, 1)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/matches/<match_id>/sync-thumbnails', methods=['POST'])
+def sync_match_thumbnails(match_id):
+    """
+    Sincroniza thumbnails para clips existentes que estão sem capa.
+    Gera thumbnails faltantes automaticamente.
+    """
+    session = get_session()
+    generated = 0
+    failed = 0
+    
+    try:
+        # Buscar eventos com clip mas sem thumbnail
+        events_with_clip = session.query(MatchEvent).filter(
+            MatchEvent.match_id == match_id,
+            MatchEvent.clip_url.isnot(None)
+        ).all()
+        
+        thumbnails = session.query(Thumbnail).filter(
+            Thumbnail.match_id == match_id
+        ).all()
+        
+        thumb_event_ids = {t.event_id for t in thumbnails}
+        
+        # Filtrar eventos sem thumbnail
+        missing_events = [e for e in events_with_clip if e.id not in thumb_event_ids]
+        
+        print(f"[SYNC-THUMBS] Encontrados {len(missing_events)} eventos sem thumbnail")
+        
+        for event in missing_events:
+            try:
+                # Resolver caminho do clip
+                clip_url = event.clip_url
+                
+                # Extrair caminho do arquivo a partir da URL
+                # URL pode ser /api/storage/MATCH_ID/clips/FILENAME ou http://...
+                clip_path = None
+                
+                if '/api/storage/' in clip_url:
+                    # Extrair path relativo
+                    parts = clip_url.split('/api/storage/')[-1].split('/')
+                    if len(parts) >= 3:
+                        # match_id/clips/filename
+                        clip_folder = get_subfolder_path(match_id, 'clips')
+                        clip_filename = parts[-1]
+                        clip_path = str(clip_folder / clip_filename)
+                
+                if not clip_path or not os.path.exists(clip_path):
+                    print(f"[SYNC-THUMBS] ⚠ Clip não encontrado para evento {event.id}: {clip_url}")
+                    failed += 1
+                    continue
+                
+                print(f"[SYNC-THUMBS] Gerando thumbnail para {event.event_type} min {event.minute}")
+                
+                # Gerar thumbnail
+                thumb_url = generate_thumbnail_from_clip(
+                    clip_path=clip_path,
+                    match_id=match_id,
+                    event_id=event.id,
+                    event_type=event.event_type,
+                    minute=event.minute or 0
+                )
+                
+                if thumb_url:
+                    generated += 1
+                    print(f"[SYNC-THUMBS] ✓ Thumbnail gerada: {thumb_url}")
+                else:
+                    failed += 1
+                    print(f"[SYNC-THUMBS] ⚠ Falha ao gerar thumbnail para evento {event.id}")
+                    
+            except Exception as e:
+                print(f"[SYNC-THUMBS] Erro ao processar evento {event.id}: {e}")
+                failed += 1
+        
+        return jsonify({
+            'success': True,
+            'total_missing': len(missing_events),
+            'generated': generated,
+            'failed': failed,
+            'message': f'{generated} thumbnails sincronizadas'
+        })
+        
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
     finally:
         session.close()

@@ -143,33 +143,56 @@ async function extractThumbnailFromClip(
     matchId: string;
   }
 ): Promise<string | null> {
+  console.log('[Thumbnail] 🎬 Iniciando extração para evento:', config.eventId, 'tipo:', config.eventType, 'minuto:', config.eventMinute);
+  
   return new Promise((resolve) => {
     const video = document.createElement('video');
     video.muted = true;
     video.preload = 'metadata';
     
     const objectUrl = URL.createObjectURL(clipBlob);
+    let timeoutId: ReturnType<typeof setTimeout>;
+    let resolved = false;
     
     const cleanup = () => {
+      if (timeoutId) clearTimeout(timeoutId);
       URL.revokeObjectURL(objectUrl);
       video.remove();
     };
     
+    const safeResolve = (value: string | null) => {
+      if (resolved) return;
+      resolved = true;
+      cleanup();
+      resolve(value);
+    };
+    
     video.onloadedmetadata = () => {
-      // Seek to 3 seconds (where the event actually happens after the buffer)
-      video.currentTime = Math.min(3, video.duration - 0.1);
+      try {
+        console.log('[Thumbnail] ✓ Metadados carregados - duração:', video.duration?.toFixed(2) + 's', 'dimensões:', video.videoWidth, 'x', video.videoHeight);
+        // Seek to 3 seconds (where the event actually happens after the buffer)
+        const seekTime = Math.min(3, video.duration - 0.1);
+        console.log('[Thumbnail] Buscando frame em:', seekTime.toFixed(2) + 's');
+        video.currentTime = seekTime;
+      } catch (err) {
+        console.error('[Thumbnail] ⚠ Erro ao processar metadados:', err);
+        safeResolve(null);
+      }
     };
     
     video.onseeked = async () => {
       try {
+        console.log('[Thumbnail] ✓ Frame capturado em:', video.currentTime?.toFixed(2) + 's');
+        
         const canvas = document.createElement('canvas');
         canvas.width = video.videoWidth || 1280;
         canvas.height = video.videoHeight || 720;
         
         const ctx = canvas.getContext('2d');
         if (!ctx) {
-          cleanup();
-          resolve(null);
+          console.error('[Thumbnail] ⚠ Falha ao obter contexto 2D do canvas');
+          canvas.remove();
+          safeResolve(null);
           return;
         }
         
@@ -258,24 +281,31 @@ async function extractThumbnailFromClip(
         ctx.fillText(minuteText, minuteBadgeX + 15 * scale, badgeY + badgeHeight / 2);
         
         // Convert to blob and upload
+        console.log('[Thumbnail] Gerando blob da imagem...');
         const imageBlob = await new Promise<Blob | null>((res) => {
           canvas.toBlob((b) => res(b), 'image/jpeg', 0.90);
         });
         
         if (!imageBlob) {
-          cleanup();
+          console.error('[Thumbnail] ⚠ Falha ao gerar blob da imagem');
           canvas.remove();
-          resolve(null);
+          safeResolve(null);
           return;
         }
         
+        console.log('[Thumbnail] ✓ Blob gerado:', (imageBlob.size / 1024).toFixed(1) + 'KB');
+        
         // Upload to local storage
         const fileName = `${config.eventId}-frame.jpg`;
+        console.log('[Thumbnail] Fazendo upload:', fileName);
         const uploadResult = await apiClient.uploadBlob(config.matchId, 'images', imageBlob, fileName);
         const imageUrl = uploadResult.url;
         const title = `${eventLabel} - ${minute}'`;
         
+        console.log('[Thumbnail] ✓ Upload concluído:', imageUrl);
+        
         // Save to database
+        console.log('[Thumbnail] Salvando no banco de dados...');
         await apiClient.createThumbnail({
           event_id: config.eventId,
           match_id: config.matchId,
@@ -284,26 +314,26 @@ async function extractThumbnailFromClip(
           title
         });
         
-        cleanup();
+        console.log('[Thumbnail] ✓✓ Thumbnail gerada com sucesso para evento:', config.eventId);
+        
         canvas.remove();
-        resolve(imageUrl);
+        safeResolve(imageUrl);
       } catch (err) {
-        console.error('Error extracting thumbnail:', err);
-        cleanup();
-        resolve(null);
+        console.error('[Thumbnail] ⚠ Erro ao extrair thumbnail:', err);
+        safeResolve(null);
       }
     };
     
-    video.onerror = () => {
-      cleanup();
-      resolve(null);
+    video.onerror = (e) => {
+      console.error('[Thumbnail] ⚠ Erro ao carregar vídeo:', e);
+      safeResolve(null);
     };
     
-    // Set timeout
-    setTimeout(() => {
-      cleanup();
-      resolve(null);
-    }, 10000);
+    // Set timeout - increased to 20s for larger clips
+    timeoutId = setTimeout(() => {
+      console.warn('[Thumbnail] ⚠ TIMEOUT após 20s para evento:', config.eventId);
+      safeResolve(null);
+    }, 20000);
     
     video.src = objectUrl;
     video.load();
