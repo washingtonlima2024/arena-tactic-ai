@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAllCompletedMatches, MatchWithDetails } from '@/hooks/useMatchDetails';
 
 const STORAGE_KEY = 'arena_selected_match';
@@ -22,10 +23,15 @@ interface UseMatchSelectionResult {
  * Ensures consistent behavior across Events, Analysis, and Media pages.
  * 
  * Priority: URL param > sessionStorage > first match in list
+ * 
+ * IMPORTANT: This hook now invalidates relevant queries when match changes,
+ * ensuring all pages update immediately without needing page navigation.
  */
 export function useMatchSelection(): UseMatchSelectionResult {
   const [searchParams, setSearchParams] = useSearchParams();
+  const queryClient = useQueryClient();
   const matchIdFromUrl = searchParams.get('match');
+  const previousMatchId = useRef<string | null>(null);
   
   const { data: matches = [], isLoading: matchesLoading } = useAllCompletedMatches();
   
@@ -53,6 +59,35 @@ export function useMatchSelection(): UseMatchSelectionResult {
     
     return null;
   }, [matchIdFromUrl, matches]);
+
+  // Invalidate queries when match changes
+  useEffect(() => {
+    if (currentMatchId && previousMatchId.current && currentMatchId !== previousMatchId.current) {
+      console.log('[MatchSelection] Match changed from', previousMatchId.current, 'to', currentMatchId);
+      
+      // Invalidate all match-related queries to force refetch
+      queryClient.invalidateQueries({ queryKey: ['match-events'] });
+      queryClient.invalidateQueries({ queryKey: ['match-videos'] });
+      queryClient.invalidateQueries({ queryKey: ['match'] });
+      queryClient.invalidateQueries({ queryKey: ['event-thumbnails'] });
+      queryClient.invalidateQueries({ queryKey: ['analysis-jobs'] });
+      queryClient.invalidateQueries({ queryKey: ['analysis-job-source'] });
+      queryClient.invalidateQueries({ queryKey: ['clips'] });
+      queryClient.invalidateQueries({ queryKey: ['playlists'] });
+      queryClient.invalidateQueries({ queryKey: ['generated-audio'] });
+      queryClient.invalidateQueries({ queryKey: ['chatbot-conversations'] });
+      
+      // Dispatch custom event for components that need direct notification
+      window.dispatchEvent(new CustomEvent('match-selection-changed', { 
+        detail: { 
+          previousMatchId: previousMatchId.current, 
+          newMatchId: currentMatchId 
+        } 
+      }));
+    }
+    
+    previousMatchId.current = currentMatchId;
+  }, [currentMatchId, queryClient]);
 
   // Auto-set URL when entering page without match param
   useEffect(() => {
