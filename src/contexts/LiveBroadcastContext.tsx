@@ -1688,24 +1688,59 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
   // Stop recording
   const stopRecording = useCallback(() => {
+    console.log('[stopRecording] Stopping recording and cleaning up all resources...');
+    
+    // Stop audio recorder
     if (mediaRecorderRef.current) {
-      mediaRecorderRef.current.stop();
+      try {
+        if (mediaRecorderRef.current.state !== 'inactive') {
+          mediaRecorderRef.current.stop();
+        }
+        mediaRecorderRef.current = null;
+      } catch (e) {
+        console.warn('[stopRecording] Error stopping media recorder:', e);
+      }
     }
+    
+    // Clear transcription interval
     if (transcriptionIntervalRef.current) {
       clearInterval(transcriptionIntervalRef.current);
+      transcriptionIntervalRef.current = null;
     }
+    
+    // Clear auto-save interval
     if (autoSaveIntervalRef.current) {
       clearInterval(autoSaveIntervalRef.current);
+      autoSaveIntervalRef.current = null;
     }
     
+    // Clear timer interval
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    
+    // Stop audio stream tracks
+    if (audioStreamRef.current) {
+      try {
+        audioStreamRef.current.getTracks().forEach(track => track.stop());
+        audioStreamRef.current = null;
+      } catch (e) {
+        console.warn('[stopRecording] Error stopping audio stream:', e);
+      }
+    }
+    
+    // Stop video recording (handles video-specific cleanup)
     stopVideoRecording();
     
+    // Save transcript before finishing
     if (transcriptBuffer.trim()) {
       saveTranscriptToDatabase();
     }
     
     setIsRecording(false);
     setIsPaused(false);
+    console.log('[stopRecording] All resources cleaned up');
   }, [transcriptBuffer, saveTranscriptToDatabase, stopVideoRecording]);
 
   // Pause recording

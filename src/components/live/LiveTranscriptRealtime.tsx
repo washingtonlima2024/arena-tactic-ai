@@ -299,6 +299,8 @@ export const LiveTranscriptRealtime = ({
 
   // Connect/disconnect based on recording state and audio source
   useEffect(() => {
+    let isMounted = true;
+    
     const connectWithDelay = async () => {
       if (isRecording) {
         // Reset state when starting
@@ -315,6 +317,9 @@ export const LiveTranscriptRealtime = ({
           
           // Add small delay to prevent race conditions
           await new Promise(resolve => setTimeout(resolve, 300));
+          
+          // Check if still mounted before connecting
+          if (!isMounted) return;
           
           // Connect microphone
           if (!scribe.isConnected && !scribe.isConnecting) {
@@ -333,6 +338,9 @@ export const LiveTranscriptRealtime = ({
           // Add small delay to prevent race conditions
           await new Promise(resolve => setTimeout(resolve, 300));
           
+          // Check if still mounted before connecting
+          if (!isMounted) return;
+          
           // Connect to video audio
           if (!videoTranscription.isConnected && !videoTranscription.isConnecting) {
             videoTranscription.connect(videoElement);
@@ -350,6 +358,25 @@ export const LiveTranscriptRealtime = ({
     };
     
     connectWithDelay();
+    
+    // Cleanup on unmount - disconnect all transcription services
+    return () => {
+      isMounted = false;
+      console.log('[LiveTranscriptRealtime] Cleanup on unmount');
+      
+      // Force disconnect both services to prevent orphaned connections
+      try {
+        scribe.disconnect();
+      } catch (e) {
+        console.warn('[LiveTranscriptRealtime] Error disconnecting scribe:', e);
+      }
+      
+      try {
+        videoTranscription.disconnect();
+      } catch (e) {
+        console.warn('[LiveTranscriptRealtime] Error disconnecting video transcription:', e);
+      }
+    };
   }, [isRecording, audioSource, videoElement]);
 
   // Get active transcription state

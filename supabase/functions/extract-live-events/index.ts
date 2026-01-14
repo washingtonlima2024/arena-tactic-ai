@@ -46,7 +46,7 @@ serve(async (req) => {
       );
     }
 
-    const systemPrompt = `Você é um detector de eventos de futebol ao vivo analisando a transcrição de um narrador.
+const systemPrompt = `Você é um detector de eventos de futebol ao vivo analisando a transcrição de um narrador.
 Sua tarefa é identificar eventos importantes mencionados na narração.
 
 Para cada evento detectado, você DEVE retornar:
@@ -75,6 +75,12 @@ REGRAS IMPORTANTES:
 3. Retorne um array vazio se não houver eventos claros
 4. Cada evento deve ter alta confiança (>0.7) para ser incluído
 
+**REGRA CRÍTICA PARA GOLS:**
+- SOMENTE registre um gol se o time mencionado for EXATAMENTE o time da casa OU o time visitante
+- Se a narração mencionar um gol de outro time (ex: "gol do Flamengo" quando os times são São Paulo x Corinthians), IGNORE completamente
+- Comentários sobre outros jogos ou resultados de outros times NÃO devem gerar eventos
+- Valide que a ação pertence AO JOGO ATUAL antes de registrar qualquer evento
+
 Retorne APENAS um JSON válido no formato:
 {
   "events": [
@@ -90,11 +96,16 @@ Retorne APENAS um JSON válido no formato:
 
     const userPrompt = `Transcrição do narrador: "${transcript}"
 
-Contexto:
+Contexto ATUAL DO JOGO (use APENAS estes times):
 - Time da casa: ${homeTeam || "Casa"}
 - Time visitante: ${awayTeam || "Fora"}
 - Placar atual: ${currentScore?.home || 0} x ${currentScore?.away || 0}
 - Minuto aproximado: ${currentMinute || 0}'
+
+ATENÇÃO CRÍTICA: 
+- SOMENTE identifique eventos que acontecem NESTE jogo entre "${homeTeam || "Casa"}" e "${awayTeam || "Fora"}"
+- Se o narrador comentar sobre outros jogos ou outros times, IGNORE completamente
+- Um gol só é válido se for de "${homeTeam || "Casa"}" ou "${awayTeam || "Fora"}"
 
 Analise a transcrição e identifique eventos. Retorne APENAS o JSON.`;
 
@@ -151,9 +162,46 @@ Analise a transcrição e identifique eventos. Retorne APENAS o JSON.`;
       console.error(`[extract-live-events] JSON parse error:`, parseError);
     }
 
-    // Validate and sanitize events
+    // Validate and sanitize events - filter goals mentioning external teams
+    const homeTeamLower = (homeTeam || '').toLowerCase().trim();
+    const awayTeamLower = (awayTeam || '').toLowerCase().trim();
+    
+    // Common Brazilian team names for detection
+    const knownTeams = [
+      'flamengo', 'palmeiras', 'santos', 'corinthians', 'são paulo', 'sao paulo',
+      'grêmio', 'gremio', 'inter', 'internacional', 'cruzeiro', 'atlético', 'atletico',
+      'vasco', 'botafogo', 'fluminense', 'bahia', 'fortaleza', 'ceará', 'ceara',
+      'athletico', 'bragantino', 'cuiabá', 'cuiaba', 'goiás', 'goias', 'américa', 'america',
+      'coritiba', 'juventude', 'chapecoense', 'sport', 'vitória', 'vitoria'
+    ];
+    
     const validEvents = (parsedEvents.events || [])
-      .filter((e: any) => e.type && e.confidence >= 0.7)
+      .filter((e: any) => {
+        if (!e.type || e.confidence < 0.7) return false;
+        
+        // For goal events, validate that they belong to the current game
+        if (e.type.includes('goal')) {
+          const description = (e.description || '').toLowerCase();
+          
+          // Check if description mentions either team playing
+          const mentionsHomeTeam = homeTeamLower && description.includes(homeTeamLower);
+          const mentionsAwayTeam = awayTeamLower && description.includes(awayTeamLower);
+          
+          // Check if description mentions an external team
+          const externalTeamMentioned = knownTeams.find(team => {
+            const isCurrentTeam = team === homeTeamLower || team === awayTeamLower;
+            return !isCurrentTeam && description.includes(team);
+          });
+          
+          // If mentions external team but not current teams, reject
+          if (externalTeamMentioned && !mentionsHomeTeam && !mentionsAwayTeam) {
+            console.log(`[extract-live-events] Filtered goal mentioning external team "${externalTeamMentioned}": ${e.description}`);
+            return false;
+          }
+        }
+        
+        return true;
+      })
       .map((e: any) => ({
         type: e.type,
         description: e.description || e.type,
