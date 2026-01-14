@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
+import { apiClient } from "@/lib/apiClient";
 
 interface UseVideoAudioTranscriptionOptions {
   onTranscript?: (text: string) => void;
@@ -159,7 +160,8 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
               await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
               continue;
             }
-            return;
+            // Fall through to backend fallback
+            break;
           }
           
           data = response.data;
@@ -172,10 +174,16 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
               await new Promise(resolve => setTimeout(resolve, 3000 * retryCount));
               continue;
             }
-            return;
+            // Fall through to backend fallback
+            break;
           }
           
-          break; // Success, exit retry loop
+          // Success, exit retry loop
+          if (data?.success && data?.text) {
+            break;
+          }
+          
+          break;
         } catch (err) {
           console.error("Transcription request error:", err);
           retryCount++;
@@ -183,7 +191,22 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
             await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
             continue;
           }
-          return;
+          // Fall through to backend fallback
+          break;
+        }
+      }
+
+      // Fallback to backend Python server if edge function failed
+      if (!data?.success || !data?.text) {
+        console.log("[VideoAudioTranscription] Edge function failed, trying backend fallback...");
+        try {
+          const backendResult = await apiClient.transcribeAudio({ audio: base64Audio, language });
+          if (backendResult?.text) {
+            data = { success: true, text: backendResult.text };
+            console.log("[VideoAudioTranscription] Backend fallback succeeded");
+          }
+        } catch (backendErr) {
+          console.warn("[VideoAudioTranscription] Backend fallback also failed:", backendErr);
         }
       }
 
