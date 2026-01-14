@@ -38,9 +38,7 @@ import {
   Trash2,
   HardDrive,
   RefreshCw,
-  Wifi,
-  Terminal,
-  Copy
+  Wifi
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { getApiMode, setApiMode, type ApiMode } from '@/lib/apiMode';
@@ -1205,6 +1203,7 @@ export default function Settings() {
                       onClick={async () => {
                         setDetectingCloudflare(true);
                         try {
+                          // Try to detect cloudflare via local server
                           const baseUrl = 'http://localhost:5000';
                           const response = await fetch(`${baseUrl}/api/detect-cloudflare`, {
                             signal: AbortSignal.timeout(5000)
@@ -1264,49 +1263,6 @@ export default function Settings() {
                       </Button>
                     )}
                   </div>
-                  
-                  {/* Comando para iniciar automaticamente */}
-                  <div className="rounded-lg border border-orange-500/20 bg-orange-500/5 p-3 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <Terminal className="h-4 w-4 text-orange-500" />
-                      <span className="text-xs font-medium text-orange-600">Iniciar Túnel Automaticamente</span>
-                    </div>
-                    <p className="text-xs text-muted-foreground">
-                      Adicione este código no <code className="bg-muted px-1 rounded">server.py</code> para iniciar o túnel junto com o servidor:
-                    </p>
-                    <div className="relative">
-                      <pre className="text-[10px] bg-muted/50 p-2 rounded overflow-x-auto font-mono">
-{`import subprocess
-
-# Iniciar Cloudflare Tunnel automaticamente
-subprocess.Popen([
-    r"C:\\Tools\\cloudflared\\cloudflared.exe",
-    "tunnel", "--url", "http://localhost:5000"
-])`}
-                      </pre>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="absolute top-1 right-1 h-6 w-6"
-                        onClick={() => {
-                          navigator.clipboard.writeText(`import subprocess
-
-# Iniciar Cloudflare Tunnel automaticamente
-subprocess.Popen([
-    r"C:\\Tools\\cloudflared\\cloudflared.exe",
-    "tunnel", "--url", "http://localhost:5000"
-])`);
-                          toast.success('Código copiado!');
-                        }}
-                      >
-                        <Copy className="h-3 w-3" />
-                      </Button>
-                    </div>
-                    <p className="text-[10px] text-muted-foreground">
-                      💡 Ajuste o caminho do <code className="bg-muted px-0.5 rounded">cloudflared.exe</code> conforme sua instalação.
-                    </p>
-                  </div>
-                  
                   <div className={`rounded-lg border p-3 ${cloudflareUrl ? 'border-orange-500/30 bg-orange-500/5' : 'border-muted bg-muted/30'}`}>
                     <div className="flex items-center gap-2">
                       {cloudflareUrl ? (
