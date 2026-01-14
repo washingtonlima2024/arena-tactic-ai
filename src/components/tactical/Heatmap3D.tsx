@@ -1,9 +1,10 @@
-import { useRef, useMemo, useState, useCallback } from 'react';
+import { useRef, useMemo, useState, useCallback, Suspense } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, Html } from '@react-three/drei';
 import * as THREE from 'three';
 import { WebGLWrapper } from '@/components/ui/WebGLWrapper';
 import { OfficialFootballField } from './OfficialFootballField';
+import { SoccerPlayerModel } from './SoccerPlayerModel';
 
 interface Player {
   x: number;
@@ -1067,9 +1068,9 @@ function FieldScene({
         />
       ))}
 
-      {/* Home players */}
+      {/* Home players - using OBJ 3D model */}
       {homePlayers.map((player, idx) => (
-        <AnimatedPlayerFigure
+        <SoccerPlayerModel
           key={`home-${idx}-${player.number}`}
           position={convertPosition(player.x, player.y)}
           number={player.number}
@@ -1078,12 +1079,14 @@ function FieldScene({
           intensity={player.intensity || 0.7}
           isDraggable={editable && isLocked}
           onDrag={(pos) => onHomePlayerDrag(idx, pos)}
+          isMoving={(player.intensity || 0.7) > 0.5}
+          showNumber={true}
         />
       ))}
 
-      {/* Away players */}
+      {/* Away players - using OBJ 3D model */}
       {awayPlayers.map((player, idx) => (
-        <AnimatedPlayerFigure
+        <SoccerPlayerModel
           key={`away-${idx}-${player.number}`}
           position={convertPosition(player.x, player.y)}
           number={player.number}
@@ -1092,6 +1095,8 @@ function FieldScene({
           intensity={player.intensity || 0.7}
           isDraggable={editable && isLocked}
           onDrag={(pos) => onAwayPlayerDrag(idx, pos)}
+          isMoving={(player.intensity || 0.7) > 0.5}
+          showNumber={true}
         />
       ))}
     </group>
