@@ -466,10 +466,18 @@ def move_file(match_id: str, source_subfolder: str, source_filename: str,
 def delete_match_storage(match_id: str) -> bool:
     """Delete all storage for a match."""
     match_path = STORAGE_DIR / match_id
+    print(f"[delete_match_storage] Attempting to delete: {match_path.absolute()}")
     if match_path.exists():
-        shutil.rmtree(match_path)
-        return True
-    return False
+        try:
+            shutil.rmtree(match_path)
+            print(f"[delete_match_storage] ✓ Successfully deleted: {match_path}")
+            return True
+        except Exception as e:
+            print(f"[delete_match_storage] ✗ Error deleting {match_path}: {e}")
+            return False
+    else:
+        print(f"[delete_match_storage] Path does not exist: {match_path}")
+        return False
 
 
 def get_video_subfolder_path(match_id: str, video_type: str) -> Path:

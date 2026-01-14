@@ -868,14 +868,47 @@ export const apiClient = {
   },
 
   uploadBlob: async (matchId: string, subfolder: string, blob: Blob, filename: string): Promise<{ url: string; filename: string; match_id: string; subfolder: string }> => {
-    const formData = new FormData();
-    formData.append('file', blob, filename);
-    const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
-      method: 'POST',
-      body: formData,
-    });
-    if (!response.ok) throw new Error('Upload failed');
-    return response.json();
+    // Verify server is available before upload
+    const serverUp = await isLocalServerAvailable();
+    if (!serverUp) {
+      throw new LocalServerOfflineError();
+    }
+    
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes timeout
+    
+    try {
+      const formData = new FormData();
+      formData.append('file', blob, filename);
+      
+      console.log(`[uploadBlob] Uploading ${filename} (${(blob.size / 1024).toFixed(1)}KB) to ${matchId}/${subfolder}`);
+      
+      const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
+        method: 'POST',
+        body: formData,
+        signal: controller.signal,
+      });
+      
+      clearTimeout(timeoutId);
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        console.error(`[uploadBlob] Upload failed: ${response.status} - ${errorText}`);
+        throw new Error(`Upload failed: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log(`[uploadBlob] Upload success: ${result.url}`);
+      return result;
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        console.error('[uploadBlob] Upload timeout');
+        throw new Error('Upload expirou - conexão lenta ou arquivo muito grande');
+      }
+      console.error('[uploadBlob] Upload error:', error);
+      throw error;
+    }
   },
 
   deleteMatchFile: (matchId: string, subfolder: string, filename: string) =>

@@ -282,12 +282,20 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
   // Save transcript to database
   const saveTranscriptToDatabase = useCallback(async (matchId?: string) => {
-    if (!transcriptBuffer.trim()) return;
+    if (!transcriptBuffer.trim()) {
+      console.log('[saveTranscript] No transcript to save');
+      return;
+    }
     
     const targetMatchId = matchId || tempMatchIdRef.current;
-    if (!targetMatchId) return;
+    if (!targetMatchId) {
+      console.log('[saveTranscript] No match ID available');
+      return;
+    }
     
     setIsSavingTranscript(true);
+    const transcriptText = transcriptBuffer.trim();
+    console.log(`[saveTranscript] Saving ${transcriptText.length} chars to match ${targetMatchId}`);
     
     try {
       // Get existing transcript
@@ -296,26 +304,34 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
       if (existing) {
         await apiClient.updateAudio(existing.id, {
-          script: transcriptBuffer.trim(),
+          script: transcriptText,
           updated_at: new Date().toISOString(),
         });
+        console.log(`[saveTranscript] ✓ Updated existing transcript (ID: ${existing.id})`);
       } else {
-        await apiClient.createAudio({
+        const result = await apiClient.createAudio({
           match_id: targetMatchId,
           audio_type: "live_transcript",
-          script: transcriptBuffer.trim(),
+          script: transcriptText,
           voice: "whisper",
         });
+        console.log(`[saveTranscript] ✓ Created new transcript (ID: ${result?.id || 'unknown'})`);
       }
 
       setLastSavedAt(new Date());
-      console.log("Transcript auto-saved at", new Date().toISOString());
     } catch (error) {
-      console.error("Error saving transcript:", error);
+      console.error("[saveTranscript] ✗ Error saving transcript:", error);
+      // Show toast on error so user knows transcription isn't being saved
+      toast({
+        title: "Erro ao salvar transcrição",
+        description: "Verifique a conexão com o servidor",
+        variant: "destructive",
+        duration: 3000,
+      });
     } finally {
       setIsSavingTranscript(false);
     }
-  }, [transcriptBuffer]);
+  }, [transcriptBuffer, toast]);
 
   // Timer effect
   useEffect(() => {
