@@ -1320,6 +1320,30 @@ export const apiClient = {
     }, 1800000); // 30 minutos para partida completa
   },
 
+  /**
+   * Generate SRT file for a live match video by transcribing the final merged MP4.
+   * Creates properly timed subtitles from the audio transcription.
+   */
+  generateLiveSrt: async (matchId: string): Promise<{
+    success: boolean;
+    srt_url: string;
+    txt_url: string;
+    duration_seconds: number;
+    word_count: number;
+  }> => {
+    await ensureServerAvailable();
+    
+    return apiRequestLongRunning<{
+      success: boolean;
+      srt_url: string;
+      txt_url: string;
+      duration_seconds: number;
+      word_count: number;
+    }>(`/api/matches/${matchId}/generate-live-srt`, {
+      method: 'POST'
+    }, 600000); // 10 minutos
+  },
+
   // ============== Admin API (Local) ==============
   admin: {
     // Organizations

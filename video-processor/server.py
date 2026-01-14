@@ -5561,7 +5561,7 @@ def merge_live_video(match_id: str):
                     f for f in video_folder.iterdir() 
                     if f.is_file() and 
                     (f.suffix.lower() in ['.webm', '.mp4']) and
-                    ('chunk-' in f.name or 'segment-' in f.name)
+                    ('chunk-' in f.name or 'segment-' in f.name or f.name.startswith('live-'))
                 ], key=lambda x: x.stat().st_mtime)
                 
                 chunk_urls = [f"/api/storage/{match_id}/videos/{f.name}" for f in chunk_files]
@@ -5716,6 +5716,214 @@ def merge_live_video(match_id: str):
         return jsonify({'error': str(e)}), 500
     finally:
         session.close()
+
+
+# ============================================================================
+# LIVE MATCH SRT GENERATION ENDPOINT
+# ============================================================================
+
+@app.route('/api/matches/<match_id>/generate-live-srt', methods=['POST'])
+def generate_live_srt(match_id: str):
+    """
+    Generate SRT file for a live match video by transcribing the final merged MP4.
+    
+    This endpoint:
+    1. Finds the merged MP4 video for the match
+    2. Extracts audio from the video
+    3. Transcribes the audio using AI
+    4. Generates a properly timed SRT file
+    5. Saves the SRT and TXT files to storage
+    
+    Returns:
+    - success: Boolean
+    - srt_url: URL of the generated SRT file
+    - txt_url: URL of the plain text transcription
+    - duration_seconds: Video duration
+    - word_count: Number of words in transcription
+    """
+    print(f"\n{'='*60}")
+    print(f"[GENERATE-LIVE-SRT] Starting for match {match_id}")
+    print(f"{'='*60}")
+    
+    session = get_session()
+    try:
+        # Find the match
+        match = session.query(Match).filter_by(id=match_id).first()
+        if not match:
+            return jsonify({'error': 'Match not found'}), 404
+        
+        # Find the video (preferably the merged MP4)
+        video = session.query(Video).filter_by(
+            match_id=match_id
+        ).filter(
+            Video.file_url.isnot(None)
+        ).order_by(
+            # Prefer completed videos, then by most recent
+            Video.status.desc(),
+            Video.created_at.desc()
+        ).first()
+        
+        if not video or not video.file_url:
+            return jsonify({'error': 'No video found for match'}), 404
+        
+        print(f"[GENERATE-LIVE-SRT] Found video: {video.file_url}")
+        
+        # Resolve video path
+        video_path = None
+        video_url = video.file_url
+        
+        if '/api/storage/' in video_url:
+            parts = video_url.split('/api/storage/')[-1].split('/')
+            if len(parts) >= 3:
+                video_path = get_file_path(parts[0], parts[1], '/'.join(parts[2:]))
+        
+        if not video_path or not os.path.exists(video_path):
+            # Try downloading
+            with tempfile.TemporaryDirectory() as tmpdir:
+                video_path = os.path.join(tmpdir, 'video.mp4')
+                if not download_video(video_url, video_path):
+                    return jsonify({'error': 'Could not access video file'}), 500
+        
+        print(f"[GENERATE-LIVE-SRT] Video path: {video_path}")
+        
+        # Get video duration
+        duration = get_video_duration_seconds(str(video_path))
+        if not duration or duration <= 0:
+            duration = video.duration_seconds or 0
+        
+        print(f"[GENERATE-LIVE-SRT] Video duration: {duration}s")
+        
+        if duration <= 0:
+            return jsonify({'error': 'Could not determine video duration'}), 400
+        
+        # Extract audio from video
+        with tempfile.TemporaryDirectory() as tmpdir:
+            audio_path = os.path.join(tmpdir, 'audio.mp3')
+            
+            cmd = [
+                'ffmpeg', '-y',
+                '-i', str(video_path),
+                '-vn',
+                '-acodec', 'mp3',
+                '-ar', '16000',
+                '-ac', '1',
+                '-b:a', '64k',
+                audio_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            
+            if result.returncode != 0 or not os.path.exists(audio_path):
+                print(f"[GENERATE-LIVE-SRT] ⚠ Audio extraction failed: {result.stderr[:200] if result.stderr else 'Unknown'}")
+                return jsonify({'error': 'Audio extraction failed'}), 500
+            
+            print(f"[GENERATE-LIVE-SRT] Audio extracted: {os.path.getsize(audio_path) / 1024:.1f}KB")
+            
+            # Transcribe audio
+            with open(audio_path, 'rb') as f:
+                audio_data = f.read()
+            
+            # Use AI transcription
+            transcription_result = ai_services.transcribe_audio(audio_data, video_duration=duration)
+            
+            if not transcription_result.get('success') or not transcription_result.get('text'):
+                print(f"[GENERATE-LIVE-SRT] ⚠ Transcription failed: {transcription_result.get('error', 'Unknown')}")
+                return jsonify({'error': 'Transcription failed'}), 500
+            
+            transcription_text = transcription_result['text']
+            word_count = len(transcription_text.split())
+            
+            print(f"[GENERATE-LIVE-SRT] Transcription complete: {word_count} words")
+            
+            # Generate SRT content
+            srt_content = _generate_srt_from_transcription(transcription_text, duration)
+            
+            # Save SRT file
+            srt_folder = get_subfolder_path(match_id, 'srt')
+            srt_filename = 'live-transcription.srt'
+            srt_path = srt_folder / srt_filename
+            
+            with open(srt_path, 'w', encoding='utf-8') as f:
+                f.write(srt_content)
+            
+            srt_url = f"/api/storage/{match_id}/srt/{srt_filename}"
+            
+            # Save TXT file
+            txt_folder = get_subfolder_path(match_id, 'texts')
+            txt_filename = 'live-transcription.txt'
+            txt_path = txt_folder / txt_filename
+            
+            with open(txt_path, 'w', encoding='utf-8') as f:
+                f.write(transcription_text)
+            
+            txt_url = f"/api/storage/{match_id}/texts/{txt_filename}"
+            
+            print(f"[GENERATE-LIVE-SRT] ✓ SRT saved: {srt_url}")
+            print(f"[GENERATE-LIVE-SRT] ✓ TXT saved: {txt_url}")
+            
+            return jsonify({
+                'success': True,
+                'srt_url': srt_url,
+                'txt_url': txt_url,
+                'duration_seconds': duration,
+                'word_count': word_count
+            })
+            
+    except subprocess.TimeoutExpired:
+        print(f"[GENERATE-LIVE-SRT] ⚠ Timeout during processing")
+        return jsonify({'error': 'Processing timeout'}), 500
+    except Exception as e:
+        print(f"[GENERATE-LIVE-SRT] ⚠ Error: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+def _generate_srt_from_transcription(text: str, duration: float) -> str:
+    """
+    Generate SRT content from transcription text with proper timing.
+    
+    Distributes text segments proportionally across the video duration.
+    """
+    if not text or duration <= 0:
+        return ""
+    
+    # Split text into words
+    words = text.split()
+    if not words:
+        return ""
+    
+    # Target ~10 words per subtitle segment for readability
+    words_per_segment = 10
+    segments = []
+    
+    for i in range(0, len(words), words_per_segment):
+        segment_words = words[i:i + words_per_segment]
+        segments.append(' '.join(segment_words))
+    
+    if not segments:
+        return ""
+    
+    # Calculate timing for each segment
+    segment_duration = duration / len(segments)
+    srt_lines = []
+    
+    for i, segment in enumerate(segments):
+        start_time = i * segment_duration
+        end_time = min((i + 1) * segment_duration, duration)
+        
+        # Format timestamps
+        start_str = _format_srt_time(start_time)
+        end_str = _format_srt_time(end_time)
+        
+        srt_lines.append(f"{i + 1}")
+        srt_lines.append(f"{start_str} --> {end_str}")
+        srt_lines.append(segment)
+        srt_lines.append("")
+    
+    return '\n'.join(srt_lines)
 
 
 

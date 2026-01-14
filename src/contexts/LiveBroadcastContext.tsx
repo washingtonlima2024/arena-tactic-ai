@@ -1977,6 +1977,27 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
                   status: 'completed'
                 });
               }
+              
+              // Generate SRT from the merged video (in background)
+              console.log('[finishMatch] Generating SRT from merged video...');
+              toast({ 
+                title: "Gerando legendas...", 
+                description: "Transcrevendo o vídeo para gerar legendas" 
+              });
+              
+              apiClient.generateLiveSrt(matchId)
+                .then((srtResult) => {
+                  if (srtResult.success) {
+                    console.log('[finishMatch] SRT generated:', srtResult.srt_url);
+                    toast({ 
+                      title: "Legendas prontas!", 
+                      description: `${srtResult.word_count} palavras transcritas` 
+                    });
+                  }
+                })
+                .catch(err => {
+                  console.warn('[finishMatch] SRT generation failed:', err);
+                });
             }
           } catch (mergeError) {
             console.warn('[finishMatch] Merge failed, using original WebM:', mergeError);
@@ -2023,9 +2044,12 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       
       if (pendingClipsCount > 0) {
         toast({ 
-          title: "Partida salva!", 
-          description: `Gerando ${pendingClipsCount} clips no servidor...` 
+          title: "Gerando clips...", 
+          description: `Aguarde, gerando ${pendingClipsCount} clips no servidor...` 
         });
+        
+        // Wait a bit for the merged video to be fully available
+        await new Promise(resolve => setTimeout(resolve, 2000));
         
         // Delegate to backend - non-blocking
         apiClient.regenerateClips(matchId)
