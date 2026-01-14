@@ -18,17 +18,11 @@ import {
   Loader2
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
-import { useAllCompletedMatches, useMatchEvents, useMatchAnalysis } from '@/hooks/useMatchDetails';
+import { useMatchEvents, useMatchAnalysis } from '@/hooks/useMatchDetails';
+import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { useNarrationGeneration } from '@/hooks/useNarrationGeneration';
 import { usePodcastGeneration, PodcastType } from '@/hooks/usePodcastGeneration';
 import { TeamChatbotCard } from '@/components/audio/TeamChatbotCard';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 
 type VoiceType = 'narrator' | 'commentator' | 'dynamic';
 
@@ -39,11 +33,9 @@ export default function Audio() {
   const [selectedVoice, setSelectedVoice] = useState<VoiceType>('narrator');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   
-  const { data: matches, isLoading: matchesLoading } = useAllCompletedMatches();
-  const [selectedMatchId, setSelectedMatchId] = useState<string>('');
-  
-  const selectedMatch = matches?.find(m => m.id === selectedMatchId) || matches?.[0];
-  const matchId = selectedMatch?.id || '';
+  // Use centralized match selection hook
+  const { currentMatchId, selectedMatch, isLoading: matchesLoading } = useMatchSelection();
+  const matchId = currentMatchId || '';
   
   const { data: events } = useMatchEvents(matchId);
   const { data: analysis } = useMatchAnalysis(matchId);
@@ -268,13 +260,13 @@ export default function Audio() {
     );
   }
 
-  if (!matches?.length) {
+  if (!selectedMatch) {
     return (
       <AppLayout>
         <div className="flex flex-col items-center justify-center h-64 gap-4">
           <AlertCircle className="h-12 w-12 text-muted-foreground" />
-          <p className="text-muted-foreground">Nenhuma partida analisada encontrada</p>
-          <p className="text-sm text-muted-foreground">Faça upload e analise uma partida primeiro</p>
+          <p className="text-muted-foreground">Nenhuma partida selecionada</p>
+          <p className="text-sm text-muted-foreground">Selecione uma partida no menu principal</p>
         </div>
       </AppLayout>
     );
@@ -299,22 +291,10 @@ export default function Audio() {
           <div>
             <h1 className="font-display text-3xl font-bold">Podcast & Locução</h1>
             <p className="text-muted-foreground">
-              Gere narrações, podcasts e análises em áudio
+              {selectedMatch.home_team?.name} vs {selectedMatch.away_team?.name} • Gere narrações, podcasts e análises em áudio
             </p>
           </div>
           <div className="flex gap-3">
-            <Select value={matchId} onValueChange={setSelectedMatchId}>
-              <SelectTrigger className="w-[280px]">
-                <SelectValue placeholder="Selecione uma partida" />
-              </SelectTrigger>
-              <SelectContent>
-                {matches?.map((match) => (
-                  <SelectItem key={match.id} value={match.id}>
-                    {match.home_team?.name || 'Time Casa'} vs {match.away_team?.name || 'Time Fora'}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Button 
               variant="arena" 
               onClick={handleGenerateNarration}
