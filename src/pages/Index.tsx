@@ -400,21 +400,7 @@ export default function Dashboard() {
                       <BarChart3 className="h-5 w-5 text-primary" />
                       Mapa de Calor 3D
                     </CardTitle>
-                    <div className="flex items-center gap-2">
-                      <Select value={currentMatchId || ''} onValueChange={setSelectedMatch}>
-                        <SelectTrigger className="w-[200px]">
-                          <SelectValue placeholder="Selecione a partida" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {realMatches.map((match) => (
-                            <SelectItem key={match.id} value={match.id}>
-                              {match.home_team?.short_name || 'CAS'} vs {match.away_team?.short_name || 'VIS'}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <Badge variant="arena">Interativo</Badge>
-                    </div>
+                    <Badge variant="arena">Visualização Interativa</Badge>
                   </div>
                 </CardHeader>
                 <CardContent>
