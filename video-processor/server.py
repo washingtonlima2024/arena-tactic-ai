@@ -2121,20 +2121,87 @@ def update_event(event_id: str):
         session.close()
 
 
+def delete_clip_file_from_url(clip_url: str, match_id: str) -> bool:
+    """Deleta arquivo de clip do storage local a partir da URL."""
+    try:
+        if '/api/storage/' in clip_url:
+            # Extrair path: /api/storage/MATCH_ID/clips/HALF/FILENAME
+            parts = clip_url.split('/api/storage/')[-1].split('/')
+            if len(parts) >= 4:  # match_id/clips/half/filename
+                half = parts[2]
+                filename = parts[3]
+                clip_path = get_clip_subfolder_path(match_id, half) / filename
+                if clip_path.exists():
+                    clip_path.unlink()
+                    print(f"[DELETE] ✓ Clip removido: {clip_path}")
+                    return True
+                else:
+                    print(f"[DELETE] ⚠ Clip não encontrado: {clip_path}")
+    except Exception as e:
+        print(f"[DELETE] ⚠ Erro ao remover clip: {e}")
+    return False
+
+
+def delete_thumbnail_file_from_url(thumb_url: str, match_id: str) -> bool:
+    """Deleta arquivo de thumbnail do storage local a partir da URL."""
+    try:
+        if '/api/storage/' in thumb_url:
+            parts = thumb_url.split('/api/storage/')[-1].split('/')
+            if len(parts) >= 3:  # match_id/images/filename
+                filename = parts[-1]  # Último elemento é o filename
+                thumb_path = get_subfolder_path(match_id, 'images') / filename
+                if thumb_path.exists():
+                    thumb_path.unlink()
+                    print(f"[DELETE] ✓ Thumbnail removida: {thumb_path}")
+                    return True
+                else:
+                    print(f"[DELETE] ⚠ Thumbnail não encontrada: {thumb_path}")
+    except Exception as e:
+        print(f"[DELETE] ⚠ Erro ao remover thumbnail: {e}")
+    return False
+
+
 @app.route('/api/events/<event_id>', methods=['DELETE'])
 def delete_event(event_id: str):
-    """Remove um evento."""
+    """Remove um evento com limpeza completa de arquivos associados."""
     session = get_session()
     try:
         event = session.query(MatchEvent).filter_by(id=event_id).first()
         if not event:
             return jsonify({'error': 'Evento não encontrado'}), 404
         
+        match_id = event.match_id
+        deleted_files = []
+        
+        # 1. Deletar arquivo do clip se existir
+        if event.clip_url:
+            clip_deleted = delete_clip_file_from_url(event.clip_url, match_id)
+            if clip_deleted:
+                deleted_files.append('clip')
+        
+        # 2. Deletar thumbnail associada
+        thumbnail = session.query(Thumbnail).filter_by(event_id=event_id).first()
+        if thumbnail:
+            if thumbnail.image_url:
+                thumb_deleted = delete_thumbnail_file_from_url(thumbnail.image_url, match_id)
+                if thumb_deleted:
+                    deleted_files.append('thumbnail')
+            session.delete(thumbnail)
+            print(f"[DELETE] ✓ Registro de thumbnail removido do banco")
+        
+        # 3. Deletar registro do evento
         session.delete(event)
         session.commit()
-        return jsonify({'success': True})
+        
+        print(f"[DELETE] ✓ Evento {event_id} removido com {len(deleted_files)} arquivos")
+        return jsonify({
+            'success': True, 
+            'deleted_files': deleted_files,
+            'message': f'Evento e {len(deleted_files)} arquivos removidos'
+        })
     except Exception as e:
         session.rollback()
+        print(f"[DELETE] ❌ Erro ao remover evento: {e}")
         return jsonify({'error': str(e)}), 400
     finally:
         session.close()

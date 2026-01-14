@@ -23,7 +23,8 @@ import {
   X,
   Link as LinkIcon,
   RefreshCw,
-  Smartphone
+  Smartphone,
+  Trash2
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -255,6 +256,30 @@ export default function Media() {
 
   const goalClips = clips.filter(c => c.type === 'goal');
   const shotClips = clips.filter(c => c.type === 'shot' || c.type === 'shot_on_target');
+
+  // Handler to delete a clip and its associated event/files
+  const handleDeleteClip = async (eventId: string, title: string) => {
+    if (!confirm(`Excluir "${title}"?\n\nIsso removerá:\n• O evento\n• O clip de vídeo\n• A thumbnail/capa`)) {
+      return;
+    }
+    
+    try {
+      await apiClient.deleteEvent(eventId);
+      toast({
+        title: "Clip excluído",
+        description: `"${title}" foi removido com sucesso`
+      });
+      refetchEvents();
+      refetchClipsByHalf();
+      queryClient.invalidateQueries({ queryKey: ['thumbnails', matchId] });
+    } catch (error) {
+      toast({
+        title: "Erro ao excluir",
+        description: String(error),
+        variant: "destructive"
+      });
+    }
+  };
 
   if (matchesLoading) {
     return (
@@ -1079,6 +1104,14 @@ export default function Media() {
                           >
                             <Share2 className="mr-1 h-3 w-3" />
                             Compartilhar
+                          </Button>
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={() => handleDeleteClip(clip.id, clip.title)}
+                          >
+                            <Trash2 className="h-3 w-3" />
                           </Button>
                         </div>
                       </CardContent>
