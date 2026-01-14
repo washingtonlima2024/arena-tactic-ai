@@ -178,7 +178,12 @@ export function ScheduledPostsManager() {
     }
 
     try {
-      const userId = '00000000-0000-0000-0000-000000000001';
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({ title: 'Você precisa estar logado', variant: 'destructive' });
+        return;
+      }
 
       if (editingPost) {
         const { error } = await supabase
@@ -199,7 +204,7 @@ export function ScheduledPostsManager() {
         const { error } = await supabase
           .from('social_scheduled_posts')
           .insert({
-            user_id: userId,
+            user_id: user.id,
             platform: formData.platform,
             content: formData.content,
             media_url: formData.media_url || null,
@@ -222,6 +227,14 @@ export function ScheduledPostsManager() {
   const publishNow = async (post: ScheduledPost) => {
     setPublishing(post.id);
     try {
+      // Get current user
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        toast({ title: 'Você precisa estar logado', variant: 'destructive' });
+        setPublishing(null);
+        return;
+      }
+
       // Update status to publishing
       await supabase
         .from('social_scheduled_posts')
@@ -234,7 +247,7 @@ export function ScheduledPostsManager() {
           platform: post.platform,
           content: post.content,
           mediaUrl: post.media_url,
-          userId: '00000000-0000-0000-0000-000000000001',
+          userId: user.id,
         }
       });
 
