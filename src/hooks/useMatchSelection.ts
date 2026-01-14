@@ -66,16 +66,22 @@ export function useMatchSelection(): UseMatchSelectionResult {
       console.log('[MatchSelection] Match changed from', previousMatchId.current, 'to', currentMatchId);
       
       // Invalidate all match-related queries to force refetch
+      // Use both singular and plural forms to cover all query patterns
       queryClient.invalidateQueries({ queryKey: ['match-events'] });
       queryClient.invalidateQueries({ queryKey: ['match-videos'] });
+      queryClient.invalidateQueries({ queryKey: ['match-video'] }); // singular form used in some pages
       queryClient.invalidateQueries({ queryKey: ['match'] });
       queryClient.invalidateQueries({ queryKey: ['event-thumbnails'] });
+      queryClient.invalidateQueries({ queryKey: ['thumbnails'] }); // alternative key
       queryClient.invalidateQueries({ queryKey: ['analysis-jobs'] });
       queryClient.invalidateQueries({ queryKey: ['analysis-job-source'] });
       queryClient.invalidateQueries({ queryKey: ['clips'] });
+      queryClient.invalidateQueries({ queryKey: ['clips-by-half'] });
       queryClient.invalidateQueries({ queryKey: ['playlists'] });
       queryClient.invalidateQueries({ queryKey: ['generated-audio'] });
       queryClient.invalidateQueries({ queryKey: ['chatbot-conversations'] });
+      queryClient.invalidateQueries({ queryKey: ['video-cover'] });
+      queryClient.invalidateQueries({ queryKey: ['match-analysis'] });
       
       // Dispatch custom event for components that need direct notification
       window.dispatchEvent(new CustomEvent('match-selection-changed', { 
