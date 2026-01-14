@@ -28,7 +28,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import heroBg from '@/assets/hero-bg.jpg';
 import arenaWordmark from '@/assets/arena-play-wordmark.png';
 import { Link } from 'react-router-dom';
-import { useAllCompletedMatches, useMatchEvents } from '@/hooks/useMatchDetails';
+import { useMatchEvents } from '@/hooks/useMatchDetails';
+import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { useEventHeatZones } from '@/hooks/useEventHeatZones';
 import { useGoalDetection } from '@/hooks/useGoalDetection';
 import { useGoalPlayAnalysis } from '@/hooks/useGoalPlayAnalysis';
@@ -37,36 +38,41 @@ import { useQuery } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
 
 export default function Dashboard() {
-  // Fetch real matches from database
-  const { data: realMatches = [], isLoading: matchesLoading } = useAllCompletedMatches();
+  // Use centralized match selection hook
+  const { 
+    currentMatchId, 
+    selectedMatch, 
+    matches: realMatches, 
+    isLoading: matchesLoading,
+    setSelectedMatch 
+  } = useMatchSelection();
   
-  // Get the first match for events display
-  const firstMatchId = realMatches[0]?.id;
-  const { data: matchEvents = [] } = useMatchEvents(firstMatchId);
+  // Get events for the selected match
+  const { data: matchEvents = [] } = useMatchEvents(currentMatchId);
   
   // Video player state
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [playingEventMinute, setPlayingEventMinute] = useState<number>(0);
   const videoRef = useRef<HTMLVideoElement>(null);
   
-  // Fetch video for the first match
+  // Fetch video for the selected match
   const { data: matchVideo } = useQuery({
-    queryKey: ['match-video', firstMatchId],
+    queryKey: ['match-video', currentMatchId],
     queryFn: async () => {
-      if (!firstMatchId) return null;
-      const videos = await apiClient.getVideos(firstMatchId);
+      if (!currentMatchId) return null;
+      const videos = await apiClient.getVideos(currentMatchId);
       return videos?.[0] || null;
     },
-    enabled: !!firstMatchId
+    enabled: !!currentMatchId
   });
   
   // Fetch stats from database
   const { data: stats } = useQuery({
-    queryKey: ['dashboard-stats'],
+    queryKey: ['dashboard-stats', currentMatchId],
     queryFn: async () => {
       const [matches, events, jobs] = await Promise.all([
         apiClient.getMatches(),
-        firstMatchId ? apiClient.getMatchEvents(firstMatchId) : Promise.resolve([]),
+        currentMatchId ? apiClient.getMatchEvents(currentMatchId) : Promise.resolve([]),
         apiClient.getAnalysisJobs()
       ]);
       
@@ -94,8 +100,8 @@ export default function Dashboard() {
   // Generate heat zones and players from real events
   const { heatZones, homePlayers, awayPlayers } = useEventHeatZones(
     matchEvents,
-    realMatches[0]?.home_team?.name,
-    realMatches[0]?.away_team?.name
+    selectedMatch?.home_team?.name,
+    selectedMatch?.away_team?.name
   );
   
   const recentEvents = matchEvents.slice(0, 5);
@@ -129,8 +135,8 @@ export default function Dashboard() {
   } = useGoalDetection({
     framesPerSecond: 5,
     durationSeconds: 6,
-    homeColor: realMatches[0]?.home_team?.primary_color,
-    awayColor: realMatches[0]?.away_team?.primary_color
+    homeColor: selectedMatch?.home_team?.primary_color,
+    awayColor: selectedMatch?.away_team?.primary_color
   });
   
   // Generate animation frames for selected goal
@@ -158,13 +164,13 @@ export default function Dashboard() {
       
       analyzeGoal(
         selectedGoal.description || '',
-        realMatches[0]?.home_team?.name,
-        realMatches[0]?.away_team?.name,
+        selectedMatch?.home_team?.name,
+        selectedMatch?.away_team?.name,
         selectedGoal.minute || undefined,
         contextNarration
       );
     }
-  }, [selectedGoal?.id, matchEvents, realMatches, useYoloDetection]);
+  }, [selectedGoal?.id, matchEvents, selectedMatch, useYoloDetection]);
   
   // Calculate video timestamp for goal
   const getGoalVideoTimestamp = useCallback((goalMinute: number) => {
@@ -394,15 +400,29 @@ export default function Dashboard() {
                       <BarChart3 className="h-5 w-5 text-primary" />
                       Mapa de Calor 3D
                     </CardTitle>
-                    <Badge variant="arena">Visualização Interativa</Badge>
+                    <div className="flex items-center gap-2">
+                      <Select value={currentMatchId || ''} onValueChange={setSelectedMatch}>
+                        <SelectTrigger className="w-[200px]">
+                          <SelectValue placeholder="Selecione a partida" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {realMatches.map((match) => (
+                            <SelectItem key={match.id} value={match.id}>
+                              {match.home_team?.short_name || 'CAS'} vs {match.away_team?.short_name || 'VIS'}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <Badge variant="arena">Interativo</Badge>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent>
                   <Heatmap3D
-                    homeTeam={realMatches[0]?.home_team?.name || 'Time Casa'}
-                    awayTeam={realMatches[0]?.away_team?.name || 'Time Visitante'}
-                    homeColor={realMatches[0]?.home_team?.primary_color || '#10b981'}
-                    awayColor={realMatches[0]?.away_team?.primary_color || '#3b82f6'}
+                    homeTeam={selectedMatch?.home_team?.name || 'Time Casa'}
+                    awayTeam={selectedMatch?.away_team?.name || 'Time Visitante'}
+                    homeColor={selectedMatch?.home_team?.primary_color || '#10b981'}
+                    awayColor={selectedMatch?.away_team?.primary_color || '#3b82f6'}
                     height={700}
                     eventHeatZones={heatZones}
                     homePlayers={homePlayers}
@@ -494,10 +514,10 @@ export default function Dashboard() {
                   
                   <GoalPlayAnimation3D
                     frames={goalAnimationFrames}
-                    homeTeamColor={realMatches[0]?.home_team?.primary_color || '#10b981'}
-                    awayTeamColor={realMatches[0]?.away_team?.primary_color || '#3b82f6'}
-                    homeTeamName={realMatches[0]?.home_team?.name || 'Time Casa'}
-                    awayTeamName={realMatches[0]?.away_team?.name || 'Time Visitante'}
+                    homeTeamColor={selectedMatch?.home_team?.primary_color || '#10b981'}
+                    awayTeamColor={selectedMatch?.away_team?.primary_color || '#3b82f6'}
+                    homeTeamName={selectedMatch?.home_team?.name || 'Time Casa'}
+                    awayTeamName={selectedMatch?.away_team?.name || 'Time Visitante'}
                     goalMinute={selectedGoal?.minute || 0}
                     goalTeam={(selectedGoal?.metadata as any)?.team === 'away' ? 'away' : 'home'}
                     description={selectedGoal?.description || ''}
@@ -540,9 +560,9 @@ export default function Dashboard() {
                 <CardHeader className="pb-3">
                   <div className="flex items-center justify-between">
                     <CardTitle>Últimos Eventos</CardTitle>
-                    {realMatches[0] && (
+                    {selectedMatch && (
                       <Badge variant="arena">
-                        {realMatches[0].home_team?.short_name || 'CAS'} {realMatches[0].home_score}-{realMatches[0].away_score} {realMatches[0].away_team?.short_name || 'VIS'}
+                        {selectedMatch.home_team?.short_name || 'CAS'} {selectedMatch.home_score}-{selectedMatch.away_score} {selectedMatch.away_team?.short_name || 'VIS'}
                       </Badge>
                     )}
                   </div>
@@ -554,7 +574,7 @@ export default function Dashboard() {
                       type: e.event_type as any,
                       minute: e.minute || 0,
                       team: 'home' as const,
-                      matchId: firstMatchId || '',
+                      matchId: currentMatchId || '',
                       teamId: '',
                       description: e.description || '',
                       player: { id: '', name: '', number: 0, position: '' }
@@ -587,8 +607,8 @@ export default function Dashboard() {
                       position_x: e.position_x,
                       position_y: e.position_y
                     }))}
-                    homeTeam={realMatches[0]?.home_team?.short_name}
-                    awayTeam={realMatches[0]?.away_team?.short_name}
+                    homeTeam={selectedMatch?.home_team?.short_name}
+                    awayTeam={selectedMatch?.away_team?.short_name}
                     className="aspect-[3/2]"
                   />
                 </CardContent>
@@ -661,11 +681,11 @@ export default function Dashboard() {
                         {playingEventMinute}'
                       </Badge>
                       <span className="text-sm text-muted-foreground">
-                        {realMatches[0]?.home_team?.name} vs {realMatches[0]?.away_team?.name}
+                        {selectedMatch?.home_team?.name} vs {selectedMatch?.away_team?.name}
                       </span>
                     </div>
                     <Button variant="outline" size="sm" asChild>
-                      <Link to={`/analysis?match=${firstMatchId}`}>
+                      <Link to={`/analysis?match=${currentMatchId}`}>
                         Ver Análise Completa
                       </Link>
                     </Button>
