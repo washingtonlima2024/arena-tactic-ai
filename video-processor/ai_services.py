@@ -583,10 +583,56 @@ ELEVENLABS_VOICES = {
 }
 
 
+def text_to_speech_lovable(text: str, voice: str = 'nova') -> Optional[bytes]:
+    """
+    Convert text to speech using Lovable AI Gateway (proxies OpenAI TTS).
+    
+    Args:
+        text: Text to convert (max 4096 chars)
+        voice: Voice to use (alloy, echo, fable, onyx, nova, shimmer)
+    
+    Returns:
+        Audio data as bytes or None on error
+    """
+    if not LOVABLE_API_KEY:
+        return None
+    
+    try:
+        # Truncate text if too long
+        truncated = text[:4000]
+        
+        print(f"[Lovable TTS] Gerando áudio via Lovable AI Gateway... ({len(truncated)} chars)")
+        
+        response = requests.post(
+            'https://ai.gateway.lovable.dev/v1/audio/speech',
+            headers={
+                'Authorization': f'Bearer {LOVABLE_API_KEY}',
+                'Content-Type': 'application/json'
+            },
+            json={
+                'model': 'tts-1',
+                'input': truncated,
+                'voice': voice if voice in ['alloy', 'echo', 'fable', 'onyx', 'nova', 'shimmer'] else 'nova',
+                'response_format': 'mp3'
+            },
+            timeout=120
+        )
+        
+        if response.ok:
+            print(f"[Lovable TTS] ✓ Áudio gerado: {len(response.content)} bytes")
+            return response.content
+        else:
+            print(f"[Lovable TTS] Erro {response.status_code}: {response.text[:200]}")
+            return None
+    except Exception as e:
+        print(f"[Lovable TTS] Falha: {e}")
+        return None
+
+
 def text_to_speech(text: str, voice: str = 'nova') -> Optional[bytes]:
     """
     Convert text to speech using available TTS provider.
-    Tries OpenAI first, falls back to ElevenLabs if not available.
+    Priority: Lovable AI → OpenAI → ElevenLabs
     
     Args:
         text: Text to convert
@@ -595,7 +641,14 @@ def text_to_speech(text: str, voice: str = 'nova') -> Optional[bytes]:
     Returns:
         Audio data as bytes or None on error
     """
-    # Try OpenAI first if configured
+    # 1. Try Lovable AI Gateway first (uses OpenAI TTS internally)
+    if LOVABLE_API_KEY:
+        result = text_to_speech_lovable(text, voice)
+        if result:
+            return result
+        print("[TTS] Lovable AI falhou, tentando próximo provedor...")
+    
+    # 2. Try OpenAI directly
     if OPENAI_API_KEY and OPENAI_ENABLED:
         try:
             # Truncate text if too long
@@ -624,12 +677,13 @@ def text_to_speech(text: str, voice: str = 'nova') -> Optional[bytes]:
         except Exception as e:
             print(f"[OpenAI TTS] Falha: {e}, tentando ElevenLabs...")
     
-    # Fallback to ElevenLabs
+    # 3. Fallback to ElevenLabs
     if ELEVENLABS_API_KEY and ELEVENLABS_ENABLED:
         voice_id = ELEVENLABS_VOICES.get(voice, ELEVENLABS_VOICES.get('narrator'))
         return text_to_speech_elevenlabs(text, voice_id)
     
-    print("[TTS] Nenhum provedor de TTS disponível (OpenAI ou ElevenLabs)")
+    print("[TTS] ⚠️ Nenhum provedor de TTS disponível (Lovable/OpenAI/ElevenLabs)")
+    print("[TTS] Configure LOVABLE_API_KEY, OPENAI_API_KEY ou ELEVENLABS_API_KEY")
     return None
 
 
