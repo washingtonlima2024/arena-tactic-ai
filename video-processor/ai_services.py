@@ -1023,6 +1023,38 @@ PALAVRAS-CHAVE PARA GOLS (NUNCA IGNORE):
 - "GOL CONTRA", "PRÓPRIO GOL" → É GOL COM isOwnGoal: true!
 
 ═══════════════════════════════════════════════════════════════
+⚠️ ATENÇÃO ESPECIAL: GOLS CONTRA (MUITO IMPORTANTE!)
+═══════════════════════════════════════════════════════════════
+
+COMO IDENTIFICAR GOL CONTRA NA NARRAÇÃO BRASILEIRA:
+- "Gol contra do {{TIME}}" → O {{TIME}} COMETEU O ERRO
+- "Gol contra! O zagueiro do {{TIME}} falhou" → O {{TIME}} ERROU
+- "{{TIME}} fez gol contra" → O {{TIME}} COMETEU O ERRO
+- "Próprio gol de jogador do {{TIME}}" → O {{TIME}} ERROU
+- "Mandou contra", "Jogou contra", "Entrou contra" → GOL CONTRA!
+
+REGRA CRÍTICA PARA GOLS CONTRA:
+→ team = TIME QUE COMETEU O ERRO (não quem se beneficiou!)
+→ isOwnGoal = true (OBRIGATÓRIO!)
+→ O PLACAR VAI PARA O ADVERSÁRIO!
+
+EXEMPLO ESPECÍFICO - Partida: {home_team} vs {away_team}
+
+CASO A - "Gol contra do {home_team}":
+Narração: "[25:30] GOL CONTRA! Zagueiro do {home_team} cortou mal e a bola entrou!"
+→ {{"minute": 25, "second": 30, "event_type": "goal", "team": "home", "isOwnGoal": true, "description": "GOL CONTRA! Zagueiro do {home_team} falha!"}}
+→ QUEM GANHA O PONTO: {away_team} (adversário)
+
+CASO B - "Gol contra do {away_team}":
+Narração: "[38:15] Gol contra! O lateral do {away_team} mandou contra!"
+→ {{"minute": 38, "second": 15, "event_type": "goal", "team": "away", "isOwnGoal": true, "description": "GOL CONTRA! Lateral do {away_team} falha!"}}
+→ QUEM GANHA O PONTO: {home_team} (adversário)
+
+NUNCA CONFUNDA:
+❌ ERRADO: "Gol contra do {home_team}" com team: "away" 
+✅ CORRETO: "Gol contra do {home_team}" com team: "home", isOwnGoal: true
+
+═══════════════════════════════════════════════════════════════
 EXEMPLOS DE EXTRAÇÃO (FEW-SHOT LEARNING):
 ═══════════════════════════════════════════════════════════════
 
@@ -1030,16 +1062,17 @@ EXEMPLOS DE EXTRAÇÃO (FEW-SHOT LEARNING):
 → EXTRAIA O TEMPO EXATO de cada evento em MINUTO e SEGUNDO!
 
 EXEMPLO 1 - GOL NORMAL:
-Transcrição: "[23:45] GOOOOOL do Brasil! Neymar chuta e a bola entra!"
-→ {{"minute": 23, "second": 45, "event_type": "goal", "team": "home", "description": "GOOOOL! Neymar marca!", "isOwnGoal": false, "is_highlight": true}}
+Transcrição: "[23:45] GOOOOOL do {home_team}! Atacante chuta e a bola entra!"
+→ {{"minute": 23, "second": 45, "event_type": "goal", "team": "home", "description": "GOOOOL! {home_team} marca!", "isOwnGoal": false, "is_highlight": true}}
 
-EXEMPLO 2 - GOL COM EMOÇÃO:
-Transcrição: "[35:12] PRA DENTRO! É GOLAÇO! Que pintura!"
-→ {{"minute": 35, "second": 12, "event_type": "goal", "team": "home", "description": "GOLAÇO! Pintura de gol!", "isOwnGoal": false, "is_highlight": true}}
+EXEMPLO 2 - GOL DO VISITANTE:
+Transcrição: "[35:12] PRA DENTRO! Gol do {away_team}! Que pintura!"
+→ {{"minute": 35, "second": 12, "event_type": "goal", "team": "away", "description": "GOLAÇO! {away_team} marca!", "isOwnGoal": false, "is_highlight": true}}
 
-EXEMPLO 3 - GOL CONTRA:
-Transcrição: "[40:30] Que azar! Gol contra! O zagueiro mandou contra!"
-→ {{"minute": 40, "second": 30, "event_type": "goal", "team": "home", "description": "GOL CONTRA! Zagueiro falha!", "isOwnGoal": true, "is_highlight": true}}
+EXEMPLO 3 - GOL CONTRA (ATENÇÃO!):
+Transcrição: "[40:30] Que azar! Gol contra do {home_team}! O zagueiro mandou contra!"
+→ {{"minute": 40, "second": 30, "event_type": "goal", "team": "home", "description": "GOL CONTRA! Zagueiro do {home_team} falha!", "isOwnGoal": true, "is_highlight": true}}
+→ NOTA: O ponto vai para {away_team} porque {home_team} errou!
 
 EXEMPLO 4 - CARTÃO AMARELO:
 Transcrição: "[28:55] Cartão amarelo para o lateral"
@@ -1185,6 +1218,35 @@ RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL.
                     event['description'] = event.get('description', '')[:200]
                     event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'yellow_card', 'red_card', 'penalty'])
                     event['isOwnGoal'] = event.get('isOwnGoal', False)
+                    
+                    # === POST-ANALYSIS VALIDATION: Own Goal Detection ===
+                    if event_type == 'goal':
+                        description = (event.get('description') or '').lower()
+                        
+                        # Detect own goal keywords in description
+                        own_goal_keywords = [
+                            'gol contra', 'próprio gol', 'contra o próprio', 
+                            'mandou contra', 'entrou contra', 'jogou contra',
+                            'own goal', 'autogol', 'contra sua'
+                        ]
+                        has_own_goal_text = any(term in description for term in own_goal_keywords)
+                        
+                        # If description mentions own goal but isOwnGoal is False, auto-fix
+                        if has_own_goal_text and not event.get('isOwnGoal', False):
+                            print(f"[AI] ⚠ AUTO-FIX: Gol contra detectado na descrição mas isOwnGoal=false!")
+                            print(f"[AI]   Descrição: {event.get('description')}")
+                            print(f"[AI]   Corrigindo para isOwnGoal=true")
+                            event['isOwnGoal'] = True
+                            event['_autoFixed'] = True
+                        
+                        # Log goal details for debugging
+                        is_own = event.get('isOwnGoal', False)
+                        team = event.get('team', 'unknown')
+                        minute = event.get('minute', 0)
+                        beneficiary = 'away' if team == 'home' else 'home'
+                        print(f"[AI] ⚽ GOL: Min {minute}' - Time que fez: {team} - OwnGoal: {is_own}")
+                        if is_own:
+                            print(f"[AI] ⚽ → Ponto vai para: {beneficiary} (adversário)")
                     
                     # Skip 'unknown' events if description is empty or too short
                     if event_type == 'unknown' and len(event['description']) < 5:
