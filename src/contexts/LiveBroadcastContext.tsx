@@ -405,7 +405,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       {
         segmentDurationMs: 5 * 60 * 1000,
         overlapDurationMs: 1 * 60 * 1000,
-        maxSegments: 3,
+        maxSegments: 6, // Increased from 3 to 6 (30 min buffer)
       },
       async (segment) => {
         await uploadSegment(segment);
@@ -1387,37 +1387,30 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
             }
             
             if (!clipResult.success) {
-              console.warn(`❌ All ${MAX_RETRIES} attempts failed for event ${event.id}`);
+              console.warn(`❌ All ${MAX_RETRIES} attempts failed for event ${event.id} - marking as pending`);
               
-              await apiClient.deleteEvent(event.id);
-              setApprovedEvents((prev) => prev.filter((e) => e.id !== event.id));
-              
-              if (event.type === "goal") {
-                const desc = event.description.toLowerCase();
-                if (matchInfo.homeTeam && desc.includes(matchInfo.homeTeam.toLowerCase())) {
-                  setCurrentScore((prev) => ({ ...prev, home: Math.max(0, prev.home - 1) }));
-                } else if (matchInfo.awayTeam && desc.includes(matchInfo.awayTeam.toLowerCase())) {
-                  setCurrentScore((prev) => ({ ...prev, away: Math.max(0, prev.away - 1) }));
-                }
-              }
+              // Mark event for later regeneration instead of deleting
+              await apiClient.updateEvent(event.id, { 
+                clip_pending: true 
+              });
               
               toast({
-                title: "Evento removido",
-                description: `Clip não gerado após ${MAX_RETRIES} tentativas`,
-                variant: "destructive"
+                title: "Clip pendente",
+                description: "Clip será gerado após finalizar a partida",
               });
               return;
             }
           } else {
-            console.warn('❌ No video URL available for clip generation - deleting event');
+            console.warn('❌ No video URL available - marking event as pending');
             
-            await apiClient.deleteEvent(event.id);
-            setApprovedEvents((prev) => prev.filter((e) => e.id !== event.id));
+            // Mark event for later regeneration instead of deleting
+            await apiClient.updateEvent(event.id, { 
+              clip_pending: true 
+            });
             
             toast({
-              title: "Evento removido",
-              description: "Sem vídeo disponível para gerar clip",
-              variant: "destructive"
+              title: "Clip pendente",
+              description: "Clip será gerado com o vídeo final",
             });
             return;
           }
@@ -1989,34 +1982,39 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     // Stop recording
     stopRecording();
     
-    // STEP 3: Generate clips - NON-BLOCKING (runs in background)
-    if (videoUrl && approvedEvents.length > 0) {
-      const eventsWithoutClips = approvedEvents.filter(e => !e.clipUrl);
+    // STEP 3: Delegate clip generation to backend
+    // Backend has FFmpeg and can generate precise clips from the final video
+    if (videoUrl && matchId) {
+      const pendingClipsCount = approvedEvents.filter(e => !e.clipUrl).length;
       
-      if (eventsWithoutClips.length > 0) {
+      if (pendingClipsCount > 0) {
         toast({ 
           title: "Partida salva!", 
-          description: `Gerando ${eventsWithoutClips.length} clips em background...` 
+          description: `Gerando ${pendingClipsCount} clips no servidor...` 
         });
         
-        // Non-blocking - fire and forget with error handling
-        Promise.all(
-          eventsWithoutClips.map(event => 
-            generateClipForEvent(event, videoUrl).catch(err => {
-              console.warn('[finishMatch] Clip generation failed:', event.id, err);
-              return { success: false, error: err };
-            })
-          )
-        ).then((results) => {
-          const successCount = results.filter((r: any) => r?.success).length;
-          if (successCount > 0) {
-            toast({ 
-              title: "Clips prontos!", 
-              description: `${successCount} clips gerados com sucesso` 
+        // Delegate to backend - non-blocking
+        apiClient.regenerateClips(matchId)
+          .then((result) => {
+            console.log('[finishMatch] Backend clip generation result:', result);
+            if (result.regenerated > 0) {
+              toast({ 
+                title: "Clips prontos!", 
+                description: `${result.regenerated} clips gerados com sucesso` 
+              });
+            }
+          })
+          .catch(err => {
+            console.error('[finishMatch] Backend clip generation error:', err);
+            toast({
+              title: "Clips pendentes",
+              description: "Clips serão gerados na próxima sincronização",
             });
-          }
-        }).catch(err => {
-          console.error('[finishMatch] Batch clip generation error:', err);
+          });
+      } else {
+        toast({ 
+          title: "Partida salva!", 
+          description: "Todos os clips já foram gerados" 
         });
       }
     }

@@ -1230,6 +1230,37 @@ export const apiClient = {
 
   // ============== Live Match Finalization ==============
   /**
+   * Merge live recording video chunks into a single optimized MP4.
+   * Uses FFmpeg on the backend for proper concatenation with fast seeking.
+   */
+  mergeLiveVideo: async (matchId: string, options?: {
+    chunk_urls?: string[];
+    output_filename?: string;
+    delete_chunks?: boolean;
+  }): Promise<{
+    success: boolean;
+    video_url: string;
+    video_id: string;
+    duration_seconds: number;
+    file_size_mb: number;
+    chunks_merged: number;
+  }> => {
+    await ensureServerAvailable();
+    
+    return apiRequestLongRunning<{
+      success: boolean;
+      video_url: string;
+      video_id: string;
+      duration_seconds: number;
+      file_size_mb: number;
+      chunks_merged: number;
+    }>(`/api/matches/${matchId}/merge-live-video`, {
+      method: 'POST',
+      body: JSON.stringify(options || {})
+    }, 600000); // 10 minutos
+  },
+
+  /**
    * Link events to video and generate clips after live broadcast ends.
    * This function:
    * 1. Updates all events with video_id = null to link to the final video
