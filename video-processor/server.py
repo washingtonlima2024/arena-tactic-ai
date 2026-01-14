@@ -4618,8 +4618,8 @@ def generate_narration():
         audio_bytes = ai_services.text_to_speech(script, voice)
         
         if audio_bytes:
-            # Save to storage
-            result = save_file('generated-audio', audio_bytes, f'narration_{match_id}', 'mp3')
+            # Save to storage - save_file(match_id, subfolder, file_data, filename, extension)
+            result = save_file(match_id, 'generated-audio', audio_bytes, f'narration_{match_id}', 'mp3')
             audio_url = result['url']
             
             # Save to database
@@ -4672,7 +4672,8 @@ def generate_podcast():
         audio_bytes = ai_services.text_to_speech(script, voice)
         
         if audio_bytes:
-            result = save_file('generated-audio', audio_bytes, f'podcast_{podcast_type}_{match_id}', 'mp3')
+            # save_file(match_id, subfolder, file_data, filename, extension)
+            result = save_file(match_id, 'generated-audio', audio_bytes, f'podcast_{podcast_type}', 'mp3')
             audio_url = result['url']
             
             session = get_session()
