@@ -24,13 +24,15 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { supabase } from '@/integrations/supabase/client';
+import { apiClient, normalizeStorageUrl } from '@/lib/apiClient';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
 type MediaSourceType = 'url' | 'upload' | 'clip' | 'playlist';
 
-interface MatchEvent {
+// Extended interface for clips with thumbnails from local server
+interface ClipWithThumbnail {
   id: string;
   event_type: string;
   description: string | null;
@@ -38,6 +40,7 @@ interface MatchEvent {
   clip_url: string | null;
   match_id: string;
   is_highlight?: boolean | null;
+  thumbnail_url?: string | null;
 }
 
 interface Match {
@@ -73,14 +76,14 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   const navigate = useNavigate();
   // Start on clips tab when matchId is provided (internal use)
   const [sourceType, setSourceType] = useState<MediaSourceType>(matchId ? 'clip' : 'url');
-  const [events, setEvents] = useState<MatchEvent[]>([]);
+  const [clips, setClips] = useState<ClipWithThumbnail[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
   const [selectedMatchId, setSelectedMatchId] = useState<string | undefined>(matchId);
-  const [loadingEvents, setLoadingEvents] = useState(false);
+  const [loadingClips, setLoadingClips] = useState(false);
   const [loadingPlaylists, setLoadingPlaylists] = useState(false);
   const [loadingMatches, setLoadingMatches] = useState(false);
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [selectedClipId, setSelectedClipId] = useState<string | null>(null);
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [urlInput, setUrlInput] = useState(value);
   const [uploading, setUploading] = useState(false);
@@ -97,7 +100,7 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
 
   useEffect(() => {
     if (sourceType === 'clip') {
-      fetchEventsWithClips();
+      fetchClipsWithThumbnails();
     } else if (sourceType === 'playlist') {
       fetchPlaylists();
     }
@@ -155,29 +158,65 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
     }
   };
 
-  const fetchEventsWithClips = async () => {
-    setLoadingEvents(true);
+  // Fetch clips from local server (same source as Media page) + thumbnails
+  const fetchClipsWithThumbnails = async () => {
+    const targetMatchId = selectedMatchId || matchId;
+    if (!targetMatchId) {
+      setClips([]);
+      return;
+    }
+    
+    setLoadingClips(true);
     try {
-      // ONLY show clips that are READY (have clip_url)
-      let query = supabase
+      // 1. Fetch events with clip_url from Supabase
+      const { data: events, error } = await supabase
         .from('match_events')
         .select('id, event_type, description, minute, clip_url, match_id, is_highlight')
-        .not('clip_url', 'is', null); // Only clips that are ready
-
-      if (selectedMatchId) {
-        query = query.eq('match_id', selectedMatchId);
-      }
-
-      const { data, error } = await query
-        .order('minute', { ascending: true })
-        .limit(100);
+        .eq('match_id', targetMatchId)
+        .not('clip_url', 'is', null)
+        .in('event_type', ['goal', 'penalty', 'yellow_card', 'red_card', 'save', 'highlight', 'shot_on_target'])
+        .order('minute', { ascending: true });
 
       if (error) throw error;
-      setEvents(data || []);
+
+      // 2. Try to fetch thumbnails from local server storage
+      let thumbnailMap: Record<string, string> = {};
+      try {
+        const imagesResult = await apiClient.listSubfolderFiles(targetMatchId, 'images');
+        if (imagesResult?.files) {
+          // Map event IDs to their thumbnail URLs
+          for (const file of imagesResult.files) {
+            // Thumbnails are named: {event_type}-{minute}m-{timestamp}.jpg or cover-{event_id}.jpg
+            const eventId = events?.find(e => {
+              const filename = file.filename.toLowerCase();
+              // Check if thumbnail matches this event by minute and type
+              return filename.includes(`${e.event_type}-${e.minute}m`) ||
+                     filename.includes(e.id.substring(0, 8));
+            })?.id;
+            
+            if (eventId) {
+              thumbnailMap[eventId] = normalizeStorageUrl(file.url) || file.url;
+            }
+          }
+        }
+      } catch (e) {
+        // Local server not available, continue without thumbnails
+        console.log('Could not fetch thumbnails from local server:', e);
+      }
+
+      // 3. Merge events with thumbnails
+      const clipsWithThumbnails: ClipWithThumbnail[] = (events || []).map(event => ({
+        ...event,
+        clip_url: normalizeStorageUrl(event.clip_url) || event.clip_url,
+        thumbnail_url: thumbnailMap[event.id] || null
+      }));
+
+      setClips(clipsWithThumbnails);
     } catch (error) {
-      console.error('Error fetching events:', error);
+      console.error('Error fetching clips:', error);
+      setClips([]);
     } finally {
-      setLoadingEvents(false);
+      setLoadingClips(false);
     }
   };
 
@@ -258,15 +297,15 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
     }
   };
 
-  const handleSelectClip = (event: MatchEvent) => {
-    setSelectedEventId(event.id);
+  const handleSelectClip = (clip: ClipWithThumbnail) => {
+    setSelectedClipId(clip.id);
     setSelectedPlaylistId(null);
-    if (event.clip_url) {
-      onChange(event.clip_url, 'video');
+    if (clip.clip_url) {
+      onChange(clip.clip_url, 'video');
     } else {
       toast({ 
         title: 'Clip não gerado', 
-        description: 'Este clip ainda não foi processado. Gere na página de Eventos.',
+        description: 'Este clip ainda não foi processado. Gere na página de Mídia.',
         variant: 'destructive' 
       });
     }
@@ -274,7 +313,7 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
 
   const handleSelectPlaylist = (playlist: Playlist) => {
     setSelectedPlaylistId(playlist.id);
-    setSelectedEventId(null);
+    setSelectedClipId(null);
     if (playlist.video_url) {
       onChange(playlist.video_url, 'video');
     } else {
@@ -306,7 +345,7 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
 
   const clearMedia = () => {
     setUrlInput('');
-    setSelectedEventId(null);
+    setSelectedClipId(null);
     setSelectedPlaylistId(null);
     onChange('', 'video');
   };
@@ -327,7 +366,7 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   };
 
   // All clips in the list are ready (we filtered in the query)
-  const readyClipsCount = events.length;
+  const readyClipsCount = clips.length;
 
   // Navigate to media page to generate clips
   const goToMediaPage = () => {
@@ -461,11 +500,11 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
             </Select>
           )}
 
-          {loadingEvents ? (
+          {loadingClips ? (
             <div className="flex items-center justify-center py-8">
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
-          ) : events.length === 0 ? (
+          ) : clips.length === 0 ? (
             <Card className="border-dashed border-muted">
               <CardContent className="flex flex-col items-center justify-center py-6">
                 <Scissors className="h-8 w-8 text-muted-foreground mb-2" />
@@ -493,40 +532,49 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
               </CardContent>
             </Card>
           ) : (
-            <ScrollArea className="h-[200px] border rounded-lg">
+            <ScrollArea className="h-[240px] border rounded-lg">
               <div className="p-2 space-y-1">
-                {events.map((event) => (
+                {clips.map((clip) => (
                   <button
-                    key={event.id}
+                    key={clip.id}
                     type="button"
-                    onClick={() => handleSelectClip(event)}
+                    onClick={() => handleSelectClip(clip)}
                     className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors ${
-                      selectedEventId === event.id 
+                      selectedClipId === clip.id 
                         ? 'bg-primary/10 border border-primary' 
                         : 'hover:bg-muted'
                     }`}
                   >
-                    <div className="h-8 w-8 rounded flex items-center justify-center shrink-0 bg-primary/20">
-                      <Play className="h-4 w-4 text-primary" />
+                    {/* Thumbnail/Cover */}
+                    <div className="h-12 w-16 rounded overflow-hidden shrink-0 bg-muted flex items-center justify-center">
+                      {clip.thumbnail_url ? (
+                        <img 
+                          src={clip.thumbnail_url} 
+                          alt={clip.event_type}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <Play className="h-5 w-5 text-muted-foreground" />
+                      )}
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-sm font-medium truncate">
-                          {getEventTypeLabel(event.event_type)}
+                          {getEventTypeLabel(clip.event_type)}
                         </span>
-                        {event.minute !== null && (
+                        {clip.minute !== null && (
                           <Badge variant="outline" className="text-xs">
-                            {event.minute}'
+                            {clip.minute}'
                           </Badge>
                         )}
                       </div>
-                      {event.description && (
+                      {clip.description && (
                         <p className="text-xs text-muted-foreground truncate">
-                          {event.description}
+                          {clip.description}
                         </p>
                       )}
                     </div>
-                    {selectedEventId === event.id && (
+                    {selectedClipId === clip.id && (
                       <Check className="h-4 w-4 text-primary shrink-0" />
                     )}
                   </button>
