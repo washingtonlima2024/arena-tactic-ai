@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { useSearchParams } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -44,7 +43,8 @@ import {
   XCircle,
   FileText,
 } from "lucide-react";
-import { useAllCompletedMatches, useMatchEvents, useMatchDetails, useMatchAnalysis } from "@/hooks/useMatchDetails";
+import { useMatchEvents, useMatchDetails, useMatchAnalysis } from "@/hooks/useMatchDetails";
+import { useMatchSelection } from "@/hooks/useMatchSelection";
 import { supabase } from "@/integrations/supabase/client";
 import { apiClient } from "@/lib/apiClient";
 
@@ -866,10 +866,9 @@ function EvidenceDialog({
 
 // Main Dashboard Component
 export default function MatchDashboard() {
-  const [searchParams] = useSearchParams();
-  const matchIdParam = searchParams.get('match');
+  // Use centralized match selection hook for auto-sync with header filter
+  const { currentMatchId, matches, isLoading: loadingMatches } = useMatchSelection();
 
-  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(matchIdParam);
   const [period, setPeriod] = useState<PeriodKey>("ALL");
   const [teamFilter, setTeamFilter] = useState<string>("all");
   const [eventTypeFilter, setEventTypeFilter] = useState<string | null>(null);
@@ -878,28 +877,27 @@ export default function MatchDashboard() {
   const [evidenceOpen, setEvidenceOpen] = useState(false);
   const [pickedMinute, setPickedMinute] = useState<number | null>(null);
 
-  // Fetch data
-  const { data: matches, isLoading: loadingMatches } = useAllCompletedMatches();
-  const { data: matchDetails } = useMatchDetails(selectedMatchId);
-  const { data: events = [], isLoading: loadingEvents } = useMatchEvents(selectedMatchId);
-  const { data: analysis } = useMatchAnalysis(selectedMatchId);
+  // Fetch data using currentMatchId from hook (auto-syncs with header)
+  const { data: matchDetails } = useMatchDetails(currentMatchId);
+  const { data: events = [], isLoading: loadingEvents } = useMatchEvents(currentMatchId);
+  const { data: analysis } = useMatchAnalysis(currentMatchId);
 
   // Get video URL for evidence
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   
   useEffect(() => {
-    if (selectedMatchId) {
+    if (currentMatchId) {
       supabase
         .from('videos')
         .select('file_url')
-        .eq('match_id', selectedMatchId)
+        .eq('match_id', currentMatchId)
         .limit(1)
         .maybeSingle()
         .then(({ data }) => {
           setVideoUrl(data?.file_url || null);
         });
     }
-  }, [selectedMatchId]);
+  }, [currentMatchId]);
 
   // Filter events by period
   const filteredEvents = useMemo(() => {
@@ -995,9 +993,7 @@ export default function MatchDashboard() {
     );
   }
 
-  if (!selectedMatchId && matches && matches.length > 0) {
-    setSelectedMatchId(matches[0].id);
-  }
+  // No need to manually set match - useMatchSelection handles it automatically
 
   const homeTeamName = matchDetails?.home_team?.name || 'Time Casa';
   const awayTeamName = matchDetails?.away_team?.name || 'Time Visitante';
@@ -1005,7 +1001,7 @@ export default function MatchDashboard() {
   const awayScore = matchDetails?.away_score || 0;
 
   return (
-    <AppLayout>
+    <AppLayout key={currentMatchId}>
       <div className="container mx-auto p-4 space-y-6">
         {/* Header with Match Selector */}
         <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
@@ -1153,7 +1149,7 @@ export default function MatchDashboard() {
           <div className="lg:col-span-1 space-y-4">
             {/* Goal Validation Card */}
             <GoalValidationCard
-              matchId={selectedMatchId}
+              matchId={currentMatchId}
               events={filteredEvents}
               homeScore={homeScore}
               awayScore={awayScore}
