@@ -16,6 +16,7 @@ import { FIFA_FIELD, metersToSvg } from '@/constants/fieldDimensions';
 import { apiClient } from '@/lib/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { usePlayerDetection } from '@/hooks/usePlayerDetection';
+import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { AppLayout } from '@/components/layout/AppLayout';
 
 interface GoalEvent {
@@ -32,6 +33,9 @@ interface GoalEvent {
 }
 
 const Field = () => {
+  // Use centralized match selection hook for auto-sync with header filter
+  const { currentMatchId, selectedMatch } = useMatchSelection();
+  
   const [showMeasurements, setShowMeasurements] = useState(true);
   const [showGrid, setShowGrid] = useState(false);
   const [theme2D, setTheme2D] = useState<'grass' | 'tactical' | 'minimal'>('grass');
@@ -44,42 +48,34 @@ const Field = () => {
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const { detectFromImage, isDetecting, lastResult } = usePlayerDetection();
 
-  // Fetch goal events from database
+  // Fetch goal events from the selected match
   const { data: goalEvents = [], isLoading } = useQuery({
-    queryKey: ['goal-events'],
+    queryKey: ['goal-events', currentMatchId],
     queryFn: async () => {
+      if (!currentMatchId || !selectedMatch) return [];
+      
       try {
-        // Buscar partidas primeiro
-        const matches = await apiClient.getMatches();
-        const goalEventsResult: GoalEvent[] = [];
+        const events = await apiClient.getMatchEvents(currentMatchId);
+        const goals = events.filter((e: any) => e.event_type === 'goal');
         
-        // Para cada partida, buscar eventos de gol
-        for (const match of matches.slice(0, 5)) {
-          const events = await apiClient.getMatchEvents(match.id);
-          const goals = events.filter((e: any) => e.event_type === 'goal');
-          
-          goals.forEach((e: any) => {
-            goalEventsResult.push({
-              id: e.id,
-              minute: e.minute || 0,
-              second: e.second || 0,
-              description: e.description || 'Gol',
-              team: (e.metadata?.team === 'away' ? 'away' : 'home') as 'home' | 'away',
-              matchId: match.id,
-              homeTeam: match.home_team?.name || 'Time Casa',
-              awayTeam: match.away_team?.name || 'Time Fora',
-              homeColor: match.home_team?.primary_color || '#10b981',
-              awayColor: match.away_team?.primary_color || '#ef4444',
-            });
-          });
-        }
-        
-        return goalEventsResult.slice(0, 10);
+        return goals.map((e: any) => ({
+          id: e.id,
+          minute: e.minute || 0,
+          second: e.second || 0,
+          description: e.description || 'Gol',
+          team: (e.metadata?.team === 'away' ? 'away' : 'home') as 'home' | 'away',
+          matchId: currentMatchId,
+          homeTeam: selectedMatch.home_team?.name || 'Time Casa',
+          awayTeam: selectedMatch.away_team?.name || 'Time Fora',
+          homeColor: selectedMatch.home_team?.primary_color || '#10b981',
+          awayColor: selectedMatch.away_team?.primary_color || '#ef4444',
+        }));
       } catch (error) {
         console.error('Erro ao buscar gols:', error);
         return [];
       }
-    }
+    },
+    enabled: !!currentMatchId
   });
 
   // Generate animation frames for selected goal
@@ -185,7 +181,7 @@ const Field = () => {
   ];
 
   return (
-    <AppLayout>
+    <AppLayout key={currentMatchId}>
       <div className="p-6">
         <div className="max-w-7xl mx-auto space-y-6">
         {/* Header */}
