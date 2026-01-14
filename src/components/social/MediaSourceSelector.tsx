@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Link2,
   Upload,
@@ -10,7 +11,9 @@ import {
   X,
   Check,
   Clock,
-  Loader2
+  Loader2,
+  AlertCircle,
+  ExternalLink
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -42,6 +45,8 @@ interface Match {
   home_team: { name: string } | null;
   away_team: { name: string } | null;
   match_date: string | null;
+  clips_count?: number;
+  events_count?: number;
 }
 
 interface Playlist {
@@ -65,7 +70,9 @@ interface MediaSourceSelectorProps {
 }
 
 export function MediaSourceSelector({ value, mediaType, matchId, onChange }: MediaSourceSelectorProps) {
-  const [sourceType, setSourceType] = useState<MediaSourceType>('url');
+  const navigate = useNavigate();
+  // Start on clips tab when matchId is provided (internal use)
+  const [sourceType, setSourceType] = useState<MediaSourceType>(matchId ? 'clip' : 'url');
   const [events, setEvents] = useState<MatchEvent[]>([]);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
   const [matches, setMatches] = useState<Match[]>([]);
@@ -77,6 +84,9 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   const [selectedPlaylistId, setSelectedPlaylistId] = useState<string | null>(null);
   const [urlInput, setUrlInput] = useState(value);
   const [uploading, setUploading] = useState(false);
+
+  // Determine if we're in "internal mode" (matchId provided = already in system)
+  const isInternalMode = !!matchId;
 
   // Load matches for selection when no matchId is provided
   useEffect(() => {
@@ -100,6 +110,7 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   const fetchMatches = async () => {
     setLoadingMatches(true);
     try {
+      // Fetch matches with clips count
       const { data, error } = await supabase
         .from('matches')
         .select(`
@@ -112,7 +123,31 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
         .limit(20);
 
       if (error) throw error;
-      setMatches((data as unknown as Match[]) || []);
+      
+      // Fetch clips count for each match
+      const matchesWithCounts = await Promise.all(
+        (data || []).map(async (match: any) => {
+          const { count: eventsCount } = await supabase
+            .from('match_events')
+            .select('*', { count: 'exact', head: true })
+            .eq('match_id', match.id)
+            .in('event_type', ['goal', 'penalty', 'yellow_card', 'red_card', 'save', 'highlight', 'shot_on_target']);
+          
+          const { count: clipsCount } = await supabase
+            .from('match_events')
+            .select('*', { count: 'exact', head: true })
+            .eq('match_id', match.id)
+            .not('clip_url', 'is', null);
+          
+          return {
+            ...match,
+            events_count: eventsCount || 0,
+            clips_count: clipsCount || 0
+          };
+        })
+      );
+      
+      setMatches(matchesWithCounts as Match[]);
     } catch (error) {
       console.error('Error fetching matches:', error);
     } finally {
@@ -290,32 +325,65 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
     return `${home} x ${away}${date ? ` (${date})` : ''}`;
   };
 
+  // Count ready clips vs pending
+  const readyClipsCount = events.filter(e => e.clip_url).length;
+  const pendingClipsCount = events.filter(e => !e.clip_url).length;
+
+  // Navigate to media page to generate clips
+  const goToMediaPage = () => {
+    navigate(`/media?match=${selectedMatchId || matchId}`);
+  };
+
+  // Navigate to events page to analyze match
+  const goToEventsPage = () => {
+    navigate(`/events?match=${selectedMatchId || matchId}`);
+  };
+
   return (
     <div className="space-y-3">
       <Label className="flex items-center gap-2">
         <Film className="h-4 w-4 text-primary" />
-        Mídia do Post (opcional)
+        Mídia do Post {!isInternalMode && '(opcional)'}
       </Label>
 
       <Tabs value={sourceType} onValueChange={(v) => setSourceType(v as MediaSourceType)}>
-        <TabsList className="grid grid-cols-4 w-full">
-          <TabsTrigger value="url" className="text-xs gap-1">
-            <Link2 className="h-3 w-3" />
-            Link
-          </TabsTrigger>
-          <TabsTrigger value="upload" className="text-xs gap-1">
-            <Upload className="h-3 w-3" />
-            Upload
-          </TabsTrigger>
-          <TabsTrigger value="clip" className="text-xs gap-1">
-            <Scissors className="h-3 w-3" />
-            Clips
-          </TabsTrigger>
-          <TabsTrigger value="playlist" className="text-xs gap-1">
-            <ListVideo className="h-3 w-3" />
-            Playlist
-          </TabsTrigger>
-        </TabsList>
+        {/* Show simplified tabs when in internal mode (matchId provided) */}
+        {isInternalMode ? (
+          <TabsList className="grid grid-cols-2 w-full">
+            <TabsTrigger value="clip" className="text-xs gap-1">
+              <Scissors className="h-3 w-3" />
+              Clips
+              {events.length > 0 && (
+                <Badge variant="secondary" className="ml-1 text-[10px] px-1">
+                  {readyClipsCount}/{events.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="playlist" className="text-xs gap-1">
+              <ListVideo className="h-3 w-3" />
+              Playlists
+            </TabsTrigger>
+          </TabsList>
+        ) : (
+          <TabsList className="grid grid-cols-4 w-full">
+            <TabsTrigger value="url" className="text-xs gap-1">
+              <Link2 className="h-3 w-3" />
+              Link
+            </TabsTrigger>
+            <TabsTrigger value="upload" className="text-xs gap-1">
+              <Upload className="h-3 w-3" />
+              Upload
+            </TabsTrigger>
+            <TabsTrigger value="clip" className="text-xs gap-1">
+              <Scissors className="h-3 w-3" />
+              Clips
+            </TabsTrigger>
+            <TabsTrigger value="playlist" className="text-xs gap-1">
+              <ListVideo className="h-3 w-3" />
+              Playlist
+            </TabsTrigger>
+          </TabsList>
+        )}
 
         <TabsContent value="url" className="space-y-2 mt-3">
           <Input
@@ -356,7 +424,7 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
         </TabsContent>
 
         <TabsContent value="clip" className="mt-3 space-y-3">
-          {/* Match Selector */}
+          {/* Match Selector - only when no matchId provided */}
           {!matchId && (
             <Select 
               value={selectedMatchId || ''} 
@@ -373,7 +441,19 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
                 ) : (
                   matches.map((match) => (
                     <SelectItem key={match.id} value={match.id}>
-                      {getMatchLabel(match)}
+                      <div className="flex items-center gap-2">
+                        <span>{getMatchLabel(match)}</span>
+                        {match.clips_count !== undefined && match.clips_count > 0 && (
+                          <Badge className="text-[10px] bg-primary/20 text-primary border-0">
+                            {match.clips_count} clips
+                          </Badge>
+                        )}
+                        {match.events_count !== undefined && match.events_count > 0 && match.clips_count === 0 && (
+                          <Badge variant="secondary" className="text-[10px]">
+                            {match.events_count} eventos
+                          </Badge>
+                        )}
+                      </div>
                     </SelectItem>
                   ))
                 )}
@@ -386,75 +466,120 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
           ) : events.length === 0 ? (
-            <Card className="border-dashed">
-              <CardContent className="flex flex-col items-center justify-center py-8">
-                <Scissors className="h-8 w-8 text-muted-foreground mb-2" />
-                <p className="text-sm text-muted-foreground text-center">
-                  {selectedMatchId 
-                    ? 'Nenhum clip disponível para esta partida.'
-                    : 'Selecione uma partida para ver os clips.'}
-                  <br />
-                  Gere clips na página de Eventos.
+            <Card className="border-dashed border-amber-500/30 bg-amber-500/5">
+              <CardContent className="flex flex-col items-center justify-center py-6">
+                <AlertCircle className="h-8 w-8 text-amber-500 mb-2" />
+                <p className="text-sm font-medium text-center mb-1">
+                  {selectedMatchId || matchId
+                    ? 'Esta partida ainda não foi analisada'
+                    : 'Selecione uma partida'}
                 </p>
+                <p className="text-xs text-muted-foreground text-center mb-3">
+                  {selectedMatchId || matchId
+                    ? 'Vá para a página de Eventos para processar os lances'
+                    : 'Escolha uma partida para ver os clips disponíveis'}
+                </p>
+                {(selectedMatchId || matchId) && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={goToEventsPage}
+                    className="gap-2"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    Ir para Eventos
+                  </Button>
+                )}
               </CardContent>
             </Card>
           ) : (
-            <ScrollArea className="h-[200px] border rounded-lg">
-              <div className="p-2 space-y-1">
-                {events.map((event) => (
-                  <button
-                    key={event.id}
-                    type="button"
-                    onClick={() => handleSelectClip(event)}
-                    className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors ${
-                      selectedEventId === event.id 
-                        ? 'bg-primary/10 border border-primary' 
-                        : 'hover:bg-muted'
-                    } ${!event.clip_url ? 'opacity-60' : ''}`}
+            <>
+              {/* Stats bar when there are clips */}
+              {pendingClipsCount > 0 && (
+                <div className="flex items-center justify-between p-2 bg-muted/50 rounded-lg text-xs">
+                  <span className="text-muted-foreground">
+                    <Check className="h-3 w-3 inline mr-1 text-primary" />
+                    {readyClipsCount} prontos
+                    {pendingClipsCount > 0 && (
+                      <span className="ml-2">
+                        <Clock className="h-3 w-3 inline mr-1" />
+                        {pendingClipsCount} pendentes
+                      </span>
+                    )}
+                  </span>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={goToMediaPage}
+                    className="h-6 text-xs gap-1"
                   >
-                    <div className={`h-8 w-8 rounded flex items-center justify-center shrink-0 ${
-                      event.clip_url ? 'bg-primary/20' : 'bg-muted'
-                    }`}>
-                      {event.clip_url ? (
-                        <Play className="h-4 w-4 text-primary" />
-                      ) : (
-                        <Clock className="h-4 w-4 text-muted-foreground" />
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium truncate">
-                          {getEventTypeLabel(event.event_type)}
-                        </span>
-                        {event.minute !== null && (
-                          <Badge variant="outline" className="text-xs">
-                            {event.minute}'
-                          </Badge>
-                        )}
-                        {!event.clip_url && (
-                          <Badge variant="secondary" className="text-xs">
-                            Pendente
-                          </Badge>
+                    <ExternalLink className="h-3 w-3" />
+                    Gerar clips
+                  </Button>
+                </div>
+              )}
+              
+              <ScrollArea className="h-[200px] border rounded-lg">
+                <div className="p-2 space-y-1">
+                  {events.map((event) => (
+                    <button
+                      key={event.id}
+                      type="button"
+                      onClick={() => handleSelectClip(event)}
+                      className={`w-full flex items-center gap-3 p-2 rounded-md text-left transition-colors ${
+                        selectedEventId === event.id 
+                          ? 'bg-primary/10 border border-primary' 
+                          : 'hover:bg-muted'
+                      } ${!event.clip_url ? 'opacity-50 cursor-not-allowed' : ''}`}
+                    >
+                      <div className={`h-8 w-8 rounded flex items-center justify-center shrink-0 ${
+                        event.clip_url ? 'bg-primary/20' : 'bg-muted'
+                      }`}>
+                        {event.clip_url ? (
+                          <Play className="h-4 w-4 text-primary" />
+                        ) : (
+                          <Clock className="h-4 w-4 text-muted-foreground" />
                         )}
                       </div>
-                      {event.description && (
-                        <p className="text-xs text-muted-foreground truncate">
-                          {event.description}
-                        </p>
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium truncate">
+                            {getEventTypeLabel(event.event_type)}
+                          </span>
+                          {event.minute !== null && (
+                            <Badge variant="outline" className="text-xs">
+                              {event.minute}'
+                            </Badge>
+                          )}
+                          {event.clip_url ? (
+                            <Badge className="text-[10px] bg-primary/20 text-primary border-0">
+                              Pronto
+                            </Badge>
+                          ) : (
+                            <Badge variant="secondary" className="text-[10px]">
+                              Pendente
+                            </Badge>
+                          )}
+                        </div>
+                        {event.description && (
+                          <p className="text-xs text-muted-foreground truncate">
+                            {event.description}
+                          </p>
+                        )}
+                      </div>
+                      {selectedEventId === event.id && event.clip_url && (
+                        <Check className="h-4 w-4 text-primary shrink-0" />
                       )}
-                    </div>
-                    {selectedEventId === event.id && event.clip_url && (
-                      <Check className="h-4 w-4 text-primary shrink-0" />
-                    )}
-                  </button>
-                ))}
-              </div>
-            </ScrollArea>
+                    </button>
+                  ))}
+                </div>
+              </ScrollArea>
+            </>
           )}
         </TabsContent>
 
         <TabsContent value="playlist" className="mt-3 space-y-3">
-          {/* Match Selector */}
+          {/* Match Selector - only when no matchId provided */}
           {!matchId && (
             <Select 
               value={selectedMatchId || ''} 
@@ -484,16 +609,30 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
               <Loader2 className="h-6 w-6 animate-spin text-primary" />
             </div>
           ) : playlists.length === 0 ? (
-            <Card className="border-dashed">
-              <CardContent className="flex flex-col items-center justify-center py-8">
+            <Card className="border-dashed border-muted">
+              <CardContent className="flex flex-col items-center justify-center py-6">
                 <ListVideo className="h-8 w-8 text-muted-foreground mb-2" />
-                <p className="text-sm text-muted-foreground text-center">
-                  {selectedMatchId 
-                    ? 'Nenhuma playlist disponível para esta partida.'
-                    : 'Selecione uma partida para ver as playlists.'}
-                  <br />
-                  Crie playlists na página de Mídia.
+                <p className="text-sm font-medium text-center mb-1">
+                  {selectedMatchId || matchId
+                    ? 'Nenhuma playlist criada'
+                    : 'Selecione uma partida'}
                 </p>
+                <p className="text-xs text-muted-foreground text-center mb-3">
+                  {selectedMatchId || matchId
+                    ? 'Crie compilações na página de Mídia'
+                    : 'Escolha uma partida para ver as playlists'}
+                </p>
+                {(selectedMatchId || matchId) && (
+                  <Button 
+                    variant="outline" 
+                    size="sm" 
+                    onClick={goToMediaPage}
+                    className="gap-2"
+                  >
+                    <ExternalLink className="h-3 w-3" />
+                    Ir para Mídia
+                  </Button>
+                )}
               </CardContent>
             </Card>
           ) : (
