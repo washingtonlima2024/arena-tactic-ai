@@ -585,14 +585,14 @@ export function ScheduledPostsManager() {
               <div className="space-y-2">
                 <Label>Campanha (opcional)</Label>
                 <Select 
-                  value={formData.campaign_id} 
-                  onValueChange={(value) => setFormData(prev => ({ ...prev, campaign_id: value }))}
+                  value={formData.campaign_id || 'none'} 
+                  onValueChange={(value) => setFormData(prev => ({ ...prev, campaign_id: value === 'none' ? '' : value }))}
                 >
                   <SelectTrigger>
                     <SelectValue placeholder="Selecionar campanha" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="">Nenhuma</SelectItem>
+                    <SelectItem value="none">Nenhuma</SelectItem>
                     {campaigns.map(campaign => (
                       <SelectItem key={campaign.id} value={campaign.id}>
                         {campaign.name}
