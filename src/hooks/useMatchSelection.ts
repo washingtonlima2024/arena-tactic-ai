@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useAllCompletedMatches, MatchWithDetails } from '@/hooks/useMatchDetails';
 
@@ -29,49 +29,45 @@ export function useMatchSelection(): UseMatchSelectionResult {
   
   const { data: matches = [], isLoading: matchesLoading } = useAllCompletedMatches();
   
-  // Read from sessionStorage as fallback
-  const storedMatchId = typeof window !== 'undefined' 
-    ? sessionStorage.getItem(STORAGE_KEY) 
-    : null;
-  
-  const [selectedMatchId, setSelectedMatchId] = useState<string | null>(
-    matchIdFromUrl || storedMatchId
-  );
-
-  // Sync state when URL changes externally and persist to storage
-  useEffect(() => {
-    if (matchIdFromUrl && matchIdFromUrl !== selectedMatchId) {
-      setSelectedMatchId(matchIdFromUrl);
+  // Determine current match ID with clear priority
+  const currentMatchId = useMemo(() => {
+    // 1. URL has highest priority
+    if (matchIdFromUrl) {
+      // Persist to storage when URL changes
       sessionStorage.setItem(STORAGE_KEY, matchIdFromUrl);
+      return matchIdFromUrl;
     }
-  }, [matchIdFromUrl, selectedMatchId]);
-
-  // Determine current match ID with priority: URL > stored > state > first match
-  const currentMatchId = matchIdFromUrl || storedMatchId || selectedMatchId || matches[0]?.id || null;
+    
+    // 2. Try sessionStorage
+    const storedId = sessionStorage.getItem(STORAGE_KEY);
+    if (storedId && matches.some(m => m.id === storedId)) {
+      return storedId;
+    }
+    
+    // 3. Fallback to first match
+    if (matches.length > 0) {
+      const firstId = matches[0].id;
+      sessionStorage.setItem(STORAGE_KEY, firstId);
+      return firstId;
+    }
+    
+    return null;
+  }, [matchIdFromUrl, matches]);
 
   // Auto-set URL when entering page without match param
-  // IMPORTANT: Use stored/state instead of matches[0]
   useEffect(() => {
-    if (!matchIdFromUrl && matches.length > 0 && currentMatchId) {
-      // Check if stored match still exists in the list
-      const matchExists = matches.some(m => m.id === currentMatchId);
-      if (matchExists) {
-        setSearchParams({ match: currentMatchId }, { replace: true });
-      } else if (matches[0]) {
-        // Fallback to first match only if stored one doesn't exist
-        const fallbackId = matches[0].id;
-        sessionStorage.setItem(STORAGE_KEY, fallbackId);
-        setSearchParams({ match: fallbackId }, { replace: true });
-      }
+    if (!matchIdFromUrl && currentMatchId && matches.length > 0) {
+      setSearchParams({ match: currentMatchId }, { replace: true });
     }
-  }, [matchIdFromUrl, matches.length, currentMatchId, setSearchParams, matches]);
+  }, [matchIdFromUrl, currentMatchId, matches.length, setSearchParams]);
 
   // Find the selected match object
-  const selectedMatch = matches.find(m => m.id === currentMatchId);
+  const selectedMatch = useMemo(() => {
+    return matches.find(m => m.id === currentMatchId);
+  }, [matches, currentMatchId]);
 
-  // Handler to change match selection - save to storage
+  // Handler to change match selection - save to storage and update URL
   const setSelectedMatch = useCallback((matchId: string) => {
-    setSelectedMatchId(matchId);
     sessionStorage.setItem(STORAGE_KEY, matchId);
     setSearchParams({ match: matchId });
   }, [setSearchParams]);

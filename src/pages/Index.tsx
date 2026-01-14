@@ -43,8 +43,7 @@ export default function Dashboard() {
     currentMatchId, 
     selectedMatch, 
     matches: realMatches, 
-    isLoading: matchesLoading,
-    setSelectedMatch 
+    isLoading: matchesLoading
   } = useMatchSelection();
   
   // Get events for the selected match
