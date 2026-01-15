@@ -544,9 +544,23 @@ VIGNETTES_DIR.mkdir(exist_ok=True)
 #     então usamos offset negativo para capturar o momento real.
 EVENT_CLIP_CONFIG = {
     # Eventos de alta importância - contexto longo + compensação de narração
-    # 🆕 AUMENTADO: pre_buffer 25→35s, post_buffer 12→15s, narration_offset -4→-6s
-    'goal': {'pre_buffer': 35, 'post_buffer': 15, 'narration_offset': -6},  # 50s total - jogada completa com margem
-    'penalty': {'pre_buffer': 20, 'post_buffer': 22, 'narration_offset': -4},  # 42s - inclui cobrança
+    # 🆕 FASE 2: Buffers simétricos para centralizar evento no clip
+    # pre_buffer=25, post_buffer=25 = 50s total com gol NO CENTRO
+    # narration_offset=-8 compensa atraso maior da narração
+    'goal': {
+        'pre_buffer': 25,         # 25s antes do evento
+        'post_buffer': 25,        # 25s depois do evento
+        'narration_offset': -8,   # Compensar atraso de narração (aumentado de -6 para -8)
+        'min_duration': 30,       # Duração mínima garantida
+        'centered': True          # Flag: evento deve ficar no centro do clip
+    },
+    'penalty': {
+        'pre_buffer': 22,         # Simétrico
+        'post_buffer': 22,        # Simétrico
+        'narration_offset': -5,   # Aumentado de -4 para -5
+        'min_duration': 30,
+        'centered': True
+    },
     'red_card': {'pre_buffer': 15, 'post_buffer': 10, 'narration_offset': -2},  # 25s
     
     # Eventos de média importância - contexto médio
@@ -577,17 +591,36 @@ EVENT_CLIP_CONFIG = {
 }
 
 
-def get_event_clip_timings(event_type: str) -> tuple:
+def get_event_clip_timings(event_type: str) -> dict:
     """
-    Retorna (pre_buffer, post_buffer, narration_offset) para o tipo de evento.
+    Retorna configuração completa de timing para o tipo de evento.
     
     Args:
         event_type: Tipo do evento (goal, shot, foul, etc.)
     
     Returns:
-        Tuple com (segundos_antes, segundos_depois, offset_narracao)
+        Dict com pre_buffer, post_buffer, narration_offset, min_duration, centered
     """
     config = EVENT_CLIP_CONFIG.get(event_type, EVENT_CLIP_CONFIG['default'])
+    
+    # Compatibilidade: se config for dict antigo, extrair valores
+    if isinstance(config.get('pre_buffer'), (int, float)):
+        return {
+            'pre_buffer': config['pre_buffer'],
+            'post_buffer': config['post_buffer'],
+            'narration_offset': config.get('narration_offset', 0),
+            'min_duration': config.get('min_duration', 10),
+            'centered': config.get('centered', False)
+        }
+    
+    return config
+
+
+def get_event_clip_timings_tuple(event_type: str) -> tuple:
+    """
+    Retorna (pre_buffer, post_buffer, narration_offset) para compatibilidade.
+    """
+    config = get_event_clip_timings(event_type)
     return config['pre_buffer'], config['post_buffer'], config.get('narration_offset', 0)
 
 
@@ -4045,12 +4078,20 @@ def extract_event_clips_auto(
             # Determinar buffers: prioridade para override > categoria > padrão
             # Incluir narration_offset para compensar atraso do narrador
             narration_offset = 0
+            is_centered = False
+            min_duration = 10
+            
             if pre_buffer is not None and post_buffer is not None:
                 actual_pre = pre_buffer
                 actual_post = post_buffer
             elif use_category_timings:
-                actual_pre, actual_post, narration_offset = get_event_clip_timings(event_type)
-                print(f"[CLIP] Using category timing for {event_type}: {actual_pre}s before, {actual_post}s after, offset={narration_offset}s ({actual_pre + actual_post}s total)")
+                timing_config = get_event_clip_timings(event_type)
+                actual_pre = timing_config['pre_buffer']
+                actual_post = timing_config['post_buffer']
+                narration_offset = timing_config.get('narration_offset', 0)
+                is_centered = timing_config.get('centered', False)
+                min_duration = timing_config.get('min_duration', 10)
+                print(f"[CLIP] Using category timing for {event_type}: {actual_pre}s before, {actual_post}s after, offset={narration_offset}s, centered={is_centered}")
             else:
                 actual_pre, actual_post = 15.0, 15.0  # Padrão 30s
             
@@ -4077,11 +4118,65 @@ def extract_event_clips_auto(
                 print(f"[CLIP DEBUG] Calculated from minute/second: video_minute={video_minute}, total_seconds={total_seconds}s")
             
             # ═══════════════════════════════════════════════════════════════
+            # DETECÇÃO DUAL: TEXTO + VISÃO (para gols e penalties)
+            # ═══════════════════════════════════════════════════════════════
+            # Para eventos importantes, usar análise visual para refinar timestamp
+            if event_type in ['goal', 'penalty'] and is_centered:
+                print(f"[CLIP] 🎯 Aplicando detecção DUAL para {event_type}...")
+                try:
+                    dual_result = ai_services.detect_goal_with_dual_analysis(
+                        video_path=video_path,
+                        transcription_timestamp=total_seconds,
+                        home_team=home_team,
+                        away_team=away_team,
+                        vision_window=20  # ±20s window for vision search
+                    )
+                    
+                    print(f"[CLIP] DUAL Result: text={dual_result['text_timestamp']:.1f}s | vision={dual_result['vision_timestamp']}s | final={dual_result['final_timestamp']:.1f}s")
+                    print(f"[CLIP] Method: {dual_result['method_used']} | Confidence: {dual_result['confidence']:.0%}")
+                    
+                    # Use refined timestamp if confidence is acceptable
+                    if dual_result['confidence'] >= 0.5:
+                        old_total = total_seconds
+                        total_seconds = dual_result['final_timestamp']
+                        
+                        # Update event metadata with dual analysis result
+                        event['metadata'] = metadata
+                        event['metadata']['visual_verified'] = dual_result['method_used'] != 'text'
+                        event['metadata']['dual_analysis'] = {
+                            'text_ts': dual_result['text_timestamp'],
+                            'vision_ts': dual_result['vision_timestamp'],
+                            'final_ts': dual_result['final_timestamp'],
+                            'method': dual_result['method_used'],
+                            'confidence': dual_result['confidence']
+                        }
+                        
+                        print(f"[CLIP] ✓ Timestamp refinado: {old_total:.1f}s → {total_seconds:.1f}s (diff: {abs(total_seconds - old_total):.1f}s)")
+                        
+                        # Log for analysis
+                        ai_services.log_clip_analysis(
+                            match_id=match_id,
+                            event_type=event_type,
+                            description=description,
+                            text_ts=dual_result['text_timestamp'],
+                            vision_ts=dual_result['vision_timestamp'] or dual_result['text_timestamp'],
+                            final_ts=dual_result['final_timestamp'],
+                            method=dual_result['method_used'],
+                            confidence=dual_result['confidence']
+                        )
+                    else:
+                        print(f"[CLIP] ⚠ Dual confidence low ({dual_result['confidence']:.0%}), keeping text timestamp")
+                        
+                except Exception as e:
+                    print(f"[CLIP] ⚠ Dual detection error: {e}. Continuing with text timestamp.")
+            
+            # ═══════════════════════════════════════════════════════════════
             # APLICAR OFFSET DE NARRAÇÃO
             # ═══════════════════════════════════════════════════════════════
             # O narrador geralmente descreve o evento 2-5s APÓS ele acontecer.
             # Aplicamos um offset negativo para antecipar e capturar o momento real.
-            if narration_offset != 0:
+            # NOTA: Se dual detection foi usada, offset já foi considerado pela visão
+            if narration_offset != 0 and not metadata.get('visual_verified', False):
                 original_seconds = total_seconds
                 total_seconds = total_seconds + narration_offset
                 print(f"[CLIP DEBUG] Aplicando narration_offset={narration_offset}s: {original_seconds}s → {total_seconds}s")
