@@ -161,6 +161,8 @@ interface Connection {
   account_name: string | null;
   account_id: string | null;
   last_sync_at: string | null;
+  access_token: string | null;
+  refresh_token: string | null;
 }
 
 export default function Social() {
@@ -198,9 +200,26 @@ export default function Social() {
 
   const connectedCount = connections.filter(c => c.is_connected).length;
 
-  const openConnectDialog = (network: SocialNetwork) => {
+  const openConnectDialog = (network: SocialNetwork, isEditing: boolean = false) => {
     setSelectedNetwork(network);
-    setCredentials({});
+    
+    if (isEditing) {
+      // Load existing credentials when editing
+      const existingConnection = getConnection(network.id);
+      if (existingConnection) {
+        setCredentials({
+          access_token: existingConnection.access_token || '',
+          refresh_token: existingConnection.refresh_token || '',
+          account_id: existingConnection.account_id || '',
+          account_name: existingConnection.account_name || '',
+        });
+      } else {
+        setCredentials({});
+      }
+    } else {
+      setCredentials({});
+    }
+    
     setDialogOpen(true);
   };
 
@@ -456,7 +475,7 @@ export default function Social() {
                               variant="outline"
                               size="sm"
                               className="flex-1"
-                              onClick={() => openConnectDialog(network)}
+                              onClick={() => openConnectDialog(network, true)}
                             >
                               Editar
                             </Button>
@@ -523,7 +542,7 @@ export default function Social() {
                     <div className={`p-2 rounded-lg ${selectedNetwork.bgColor}`}>
                       <selectedNetwork.icon className="h-5 w-5 text-white" />
                     </div>
-                    Conectar {selectedNetwork.name}
+                    {getConnection(selectedNetwork.id)?.is_connected ? 'Editar' : 'Conectar'} {selectedNetwork.name}
                   </>
                 )}
               </DialogTitle>
@@ -583,10 +602,10 @@ export default function Social() {
                 {connectingPlatform === selectedNetwork?.id ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Conectando...
+                    Salvando...
                   </>
                 ) : (
-                  'Conectar'
+                  selectedNetwork && getConnection(selectedNetwork.id)?.is_connected ? 'Salvar' : 'Conectar'
                 )}
               </Button>
             </DialogFooter>
