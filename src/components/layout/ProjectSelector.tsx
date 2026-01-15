@@ -10,6 +10,8 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
+import { useMatchEvents } from '@/hooks/useMatchDetails';
+import { calculateScoreFromEvents } from '@/hooks/useDynamicMatchStats';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -17,6 +19,20 @@ export function ProjectSelector() {
   const navigate = useNavigate();
   const location = useLocation();
   const { selectedMatch, matches, isLoading, setSelectedMatch } = useMatchSelection();
+  
+  // Fetch events for selected match to calculate dynamic score
+  const { data: events = [] } = useMatchEvents(selectedMatch?.id || '');
+  
+  // Calculate score dynamically from events
+  const dynamicScore = calculateScoreFromEvents(
+    events,
+    selectedMatch?.home_team?.name || '',
+    selectedMatch?.away_team?.name || ''
+  );
+  
+  // Use dynamic score if events exist, otherwise fallback to database score
+  const homeScore = events.length > 0 ? dynamicScore.home : (selectedMatch?.home_score ?? 0);
+  const awayScore = events.length > 0 ? dynamicScore.away : (selectedMatch?.away_score ?? 0);
 
   // Pages that use match context
   const matchContextPages = ['/events', '/analysis', '/media', '/audio', '/field', '/dashboard'];
@@ -84,11 +100,11 @@ export function ProjectSelector() {
                   </div>
                 )}
                 <span className="text-sm font-semibold">
-                  {selectedMatch.home_score ?? 0}
+                  {homeScore}
                 </span>
                 <span className="text-muted-foreground text-xs">x</span>
                 <span className="text-sm font-semibold">
-                  {selectedMatch.away_score ?? 0}
+                  {awayScore}
                 </span>
                 {awayTeam?.logo_url ? (
                   <img 
