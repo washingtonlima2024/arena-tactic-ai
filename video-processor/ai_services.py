@@ -8,6 +8,7 @@ import json
 import base64
 import requests
 import re
+import subprocess
 from typing import Optional, List, Dict, Any, Tuple
 
 # Carregar variáveis de ambiente do .env
