@@ -4129,7 +4129,7 @@ def extract_event_clips_auto(
                         transcription_timestamp=total_seconds,
                         home_team=home_team,
                         away_team=away_team,
-                        vision_window=20  # ±20s window for vision search
+                        vision_window=30  # Aumentado de 20 para 30s para maior precisão
                     )
                     
                     print(f"[CLIP] DUAL Result: text={dual_result['text_timestamp']:.1f}s | vision={dual_result['vision_timestamp']}s | final={dual_result['final_timestamp']:.1f}s")
@@ -4171,15 +4171,24 @@ def extract_event_clips_auto(
                     print(f"[CLIP] ⚠ Dual detection error: {e}. Continuing with text timestamp.")
             
             # ═══════════════════════════════════════════════════════════════
-            # APLICAR OFFSET DE NARRAÇÃO
+            # APLICAR OFFSET DE NARRAÇÃO (FALLBACK)
             # ═══════════════════════════════════════════════════════════════
-            # O narrador geralmente descreve o evento 2-5s APÓS ele acontecer.
-            # Aplicamos um offset negativo para antecipar e capturar o momento real.
+            # O narrador geralmente descreve o evento 5-10s APÓS ele acontecer.
+            # Aplicamos um offset negativo MAIOR para antecipar e capturar o momento real.
             # NOTA: Se dual detection foi usada, offset já foi considerado pela visão
-            if narration_offset != 0 and not metadata.get('visual_verified', False):
+            FALLBACK_OFFSET_GOAL = -10  # Aumentado de -8 para -10 segundos
+            FALLBACK_OFFSET_DEFAULT = -6  # Fallback para outros eventos
+            
+            if not metadata.get('visual_verified', False):
+                # Visão não confirmou, usar fallback agressivo
+                if event_type in ['goal', 'penalty']:
+                    fallback_offset = FALLBACK_OFFSET_GOAL
+                else:
+                    fallback_offset = narration_offset if narration_offset != 0 else FALLBACK_OFFSET_DEFAULT
+                
                 original_seconds = total_seconds
-                total_seconds = total_seconds + narration_offset
-                print(f"[CLIP DEBUG] Aplicando narration_offset={narration_offset}s: {original_seconds}s → {total_seconds}s")
+                total_seconds = total_seconds + fallback_offset
+                print(f"[CLIP DEBUG] Visual não verificado - aplicando fallback_offset={fallback_offset}s: {original_seconds}s → {total_seconds}s")
             
             # ═══════════════════════════════════════════════════════════════
             # VALIDAÇÃO DE SANIDADE DOS TIMESTAMPS

@@ -505,17 +505,38 @@ LEMBRE-SE:
       });
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // NARRATION DELAY ADJUSTMENT
+    // ═══════════════════════════════════════════════════════════════
+    // O narrador SEMPRE reage APÓS o evento acontecer (atraso de 4-8s)
+    // Aplicamos este offset para antecipar o timestamp real do lance
+    const NARRATION_DELAY_GOAL = 6; // segundos de atraso médio para gols
+    const NARRATION_DELAY_DEFAULT = 4; // segundos para outros eventos
+    
     // Insert events into database
     const eventsToInsert = (analysisResult.events || []).map(event => {
       const eventMinute = Math.max(gameStartMinute, Math.min(gameEndMinute, event.minute));
       const eventSecond = event.second || 0;
       
       // CRÍTICO: videoSecond é relativo ao início do vídeo do período
-      const videoSecond = (eventMinute - gameStartMinute) * 60 + eventSecond;
+      let videoSecond = (eventMinute - gameStartMinute) * 60 + eventSecond;
+      
+      // Aplicar correção de atraso do narrador
+      // O timestamp da transcrição é quando o NARRADOR fala, não quando o lance acontece
+      let narrationDelay = 0;
+      if (event.event_type === 'goal' || event.event_type === 'penalty') {
+        narrationDelay = NARRATION_DELAY_GOAL;
+      } else if (['shot', 'save', 'chance'].includes(event.event_type)) {
+        narrationDelay = NARRATION_DELAY_DEFAULT;
+      }
+      
+      const originalVideoSecond = videoSecond;
+      videoSecond = Math.max(0, videoSecond - narrationDelay);
+      
       const eventMs = videoSecond * 1000;
       
       // Log detalhado para validação
-      console.log(`[EVENT] ${event.event_type} min ${eventMinute}:${eventSecond.toString().padStart(2, '0')} → videoSecond: ${videoSecond}s (gameStart: ${gameStartMinute})`);
+      console.log(`[EVENT] ${event.event_type} min ${eventMinute}:${eventSecond.toString().padStart(2, '0')} → videoSecond: ${videoSecond}s (original: ${originalVideoSecond}s, narrationDelay: -${narrationDelay}s)`);
       
       return {
         match_id: matchId,

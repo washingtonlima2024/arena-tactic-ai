@@ -2910,9 +2910,10 @@ def extract_frames_for_analysis(video_path: str, center_second: float, window_se
 def detect_goal_visual_cues(
     video_path: str, 
     estimated_second: float, 
-    window_seconds: int = 25,
+    window_seconds: int = 30,  # Aumentado de 25 para 30 para maior cobertura
     home_team: str = None,
-    away_team: str = None
+    away_team: str = None,
+    num_frames: int = 12  # Aumentado de 10 para 12 para maior precisão
 ) -> Dict[str, Any]:
     """
     Use Gemini Vision to analyze frames and detect visual goal cues.
@@ -2956,14 +2957,14 @@ def detect_goal_visual_cues(
         result['details'] = 'No Vision API configured (need LOVABLE_API_KEY or GOOGLE_API_KEY)'
         return result
     
-    print(f"[VISION] Analyzing goal at ~{estimated_second:.1f}s (window: ±{window_seconds}s)")
+    print(f"[VISION] Analyzing goal at ~{estimated_second:.1f}s (window: ±{window_seconds}s, frames: {num_frames})")
     
     # Extract frames for analysis
     frames = extract_frames_for_analysis(
         video_path, 
         estimated_second, 
         window_seconds, 
-        num_frames=10  # More frames for better precision
+        num_frames=num_frames
     )
     
     if len(frames) < 3:
@@ -3123,22 +3124,26 @@ def detect_goal_with_dual_analysis(
     transcription_timestamp: float,
     home_team: str = None,
     away_team: str = None,
-    vision_window: int = 20
+    vision_window: int = 30  # Aumentado de 20 para 30 para maior cobertura
 ) -> Dict[str, Any]:
     """
     Detecta gol usando análise DUAL: texto (transcrição) + visão (frames).
     Compara os dois métodos e retorna o mais preciso.
     
     A ideia é que a transcrição dá uma estimativa inicial, mas o narrador
-    sempre descreve o gol DEPOIS que ele acontece. Usamos visão para refinar
-    e encontrar o momento exato.
+    SEMPRE descreve o gol DEPOIS que ele acontece (atraso de 4-10s).
+    Usamos visão para refinar e encontrar o momento exato.
+    
+    ESTRATÉGIA: Janela ASSIMÉTRICA
+    - 70% da janela ANTES do timestamp (onde o gol provavelmente aconteceu)
+    - 30% da janela DEPOIS (para capturar replays/comemoração)
     
     Args:
         video_path: Caminho para o arquivo de vídeo
         transcription_timestamp: Timestamp da transcrição (em segundos no vídeo)
         home_team: Nome do time da casa (opcional, para contexto)
         away_team: Nome do time visitante (opcional, para contexto)
-        vision_window: Janela de busca visual em segundos (±)
+        vision_window: Janela de busca visual total em segundos
     
     Returns:
         Dict com:
@@ -3164,13 +3169,26 @@ def detect_goal_with_dual_analysis(
     
     print(f"[DUAL] Starting dual analysis at text_ts={transcription_timestamp:.1f}s")
     
-    # 1. ANÁLISE VISUAL: Buscar gol em janela ao redor do timestamp
+    # ESTRATÉGIA ASSIMÉTRICA: O gol acontece ANTES do narrador falar
+    # 70% da janela ANTES do timestamp, 30% DEPOIS
+    pre_window = int(vision_window * 0.7)   # Ex: 21s antes
+    post_window = int(vision_window * 0.3)  # Ex: 9s depois
+    
+    # Centro de busca ajustado (deslocado para trás)
+    # Se o narrador falou em T, o gol provavelmente foi em T - pre_window/2
+    adjusted_center = transcription_timestamp - (pre_window / 3)  # Desloca 7s para trás
+    adjusted_center = max(0, adjusted_center)
+    
+    print(f"[DUAL] Janela assimétrica: -{pre_window}s / +{post_window}s (centro ajustado: {adjusted_center:.1f}s)")
+    
+    # 1. ANÁLISE VISUAL: Buscar gol na janela ajustada
     vision_result = detect_goal_visual_cues(
         video_path,
-        estimated_second=transcription_timestamp,
-        window_seconds=vision_window,
+        estimated_second=adjusted_center,  # Centro ajustado para antes
+        window_seconds=max(pre_window, post_window),  # Usar maior janela
         home_team=home_team,
-        away_team=away_team
+        away_team=away_team,
+        num_frames=12  # Mais frames para precisão
     )
     
     if vision_result['visual_confirmed'] and vision_result['confidence'] >= 0.5:
