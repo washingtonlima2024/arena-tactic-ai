@@ -50,6 +50,7 @@ import {
   Copy,
   Twitter
 } from 'lucide-react';
+import { useDynamicMatchStats } from '@/hooks/useDynamicMatchStats';
 import { useMatchAnalysis, useMatchEvents, ExtendedTacticalAnalysis } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
@@ -82,6 +83,13 @@ export default function Analysis() {
   const { data: analysis, isLoading: analysisLoading } = useMatchAnalysis(currentMatchId);
   const { data: events = [], refetch: refetchEvents } = useMatchEvents(currentMatchId);
   const { thumbnails, getThumbnail } = useThumbnailGeneration(currentMatchId || undefined);
+  
+  // Dynamic stats calculated from events
+  const dynamicStats = useDynamicMatchStats(
+    events,
+    selectedMatch?.home_team?.name || '',
+    selectedMatch?.away_team?.name || ''
+  );
   
   // Clip generation
   const { 
@@ -375,8 +383,8 @@ export default function Analysis() {
                   <Badge variant="arena">
                     {selectedMatch.home_team?.short_name || 'Casa'} vs {selectedMatch.away_team?.short_name || 'Visitante'}
                   </Badge>
-                  <Badge variant="outline" className="text-lg font-bold px-3 py-1">
-                    {selectedMatch.home_score ?? 0} x {selectedMatch.away_score ?? 0}
+                  <Badge variant="outline" className="text-lg font-bold px-3 py-1 text-primary">
+                    {dynamicStats.score.home} x {dynamicStats.score.away}
                   </Badge>
                 </>
               )}
