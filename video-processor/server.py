@@ -4524,18 +4524,18 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
                         clip_video_path = local_video_path or video_path
                         
                         if os.path.exists(clip_video_path):
-                        # ✅ Passar segment_start_minute correto para o segundo tempo
-                        segment_start = 45 if half_type == 'second' else 0
-                        clips = extract_event_clips_auto(
-                            match_id=match_id,
-                            video_path=clip_video_path,
-                            events=saved_events,
-                            half_type=half_type,
-                            home_team=home_team,
-                            away_team=away_team,
-                            include_subtitles=include_subtitles,
-                            segment_start_minute=segment_start
-                        )
+                            # ✅ Passar segment_start_minute correto para o segundo tempo
+                            segment_start = 45 if half_type == 'second' else 0
+                            clips = extract_event_clips_auto(
+                                match_id=match_id,
+                                video_path=clip_video_path,
+                                events=saved_events,
+                                half_type=half_type,
+                                home_team=home_team,
+                                away_team=away_team,
+                                include_subtitles=include_subtitles,
+                                segment_start_minute=segment_start
+                            )
                             
                             video_result['clips'] = clips
                             all_clips.extend(clips)
