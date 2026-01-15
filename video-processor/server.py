@@ -4176,8 +4176,8 @@ def extract_event_clips_auto(
             # OFFSET ÚNICO - Aplicado apenas aqui (Edge Function usa 0)
             # O narrador reage 5-10s APÓS o gol, então recuamos no tempo
             # ═══════════════════════════════════════════════════════════════
-            FALLBACK_OFFSET_GOAL = -8  # Gols: recuar 8s antes da narração
-            FALLBACK_OFFSET_DEFAULT = -4  # Outros eventos: recuar 4s
+            FALLBACK_OFFSET_GOAL = -12  # Gols: recuar 12s antes da narração
+            FALLBACK_OFFSET_DEFAULT = -6  # Outros eventos: recuar 6s
             
             if not metadata.get('visual_verified', False):
                 # Visão não confirmou, usar fallback agressivo
