@@ -3041,3 +3041,138 @@ IMPORTANTE: Responda APENAS com o JSON, sem markdown."""
         result['details'] = f'Error: {str(e)}'
     
     return result
+
+
+def detect_goal_with_dual_analysis(
+    video_path: str,
+    transcription_timestamp: float,
+    home_team: str = None,
+    away_team: str = None,
+    vision_window: int = 20
+) -> Dict[str, Any]:
+    """
+    Detecta gol usando análise DUAL: texto (transcrição) + visão (frames).
+    Compara os dois métodos e retorna o mais preciso.
+    
+    A ideia é que a transcrição dá uma estimativa inicial, mas o narrador
+    sempre descreve o gol DEPOIS que ele acontece. Usamos visão para refinar
+    e encontrar o momento exato.
+    
+    Args:
+        video_path: Caminho para o arquivo de vídeo
+        transcription_timestamp: Timestamp da transcrição (em segundos no vídeo)
+        home_team: Nome do time da casa (opcional, para contexto)
+        away_team: Nome do time visitante (opcional, para contexto)
+        vision_window: Janela de busca visual em segundos (±)
+    
+    Returns:
+        Dict com:
+        - text_timestamp: Timestamp original da transcrição
+        - vision_timestamp: Timestamp refinado pela visão (ou None)
+        - final_timestamp: Timestamp final escolhido
+        - method_used: 'text' | 'vision' | 'combined'
+        - confidence: 0.0 a 1.0
+        - details: Descrição do resultado
+    """
+    result = {
+        'text_timestamp': transcription_timestamp,
+        'vision_timestamp': None,
+        'final_timestamp': transcription_timestamp,
+        'method_used': 'text',
+        'confidence': 0.5,  # Confiança base para texto
+        'details': 'Using transcription timestamp only'
+    }
+    
+    if not video_path or not os.path.exists(video_path):
+        result['details'] = f'Video not found: {video_path}'
+        return result
+    
+    print(f"[DUAL] Starting dual analysis at text_ts={transcription_timestamp:.1f}s")
+    
+    # 1. ANÁLISE VISUAL: Buscar gol em janela ao redor do timestamp
+    vision_result = detect_goal_visual_cues(
+        video_path,
+        estimated_second=transcription_timestamp,
+        window_seconds=vision_window,
+        home_team=home_team,
+        away_team=away_team
+    )
+    
+    if vision_result['visual_confirmed'] and vision_result['confidence'] >= 0.5:
+        vision_ts = vision_result['exact_second']
+        result['vision_timestamp'] = vision_ts
+        
+        # 2. COMPARAR os dois timestamps
+        diff = abs(vision_ts - transcription_timestamp)
+        
+        print(f"[DUAL] Text: {transcription_timestamp:.1f}s | Vision: {vision_ts:.1f}s | Diff: {diff:.1f}s")
+        
+        if diff <= 3:
+            # Ambos concordam (diferença ≤ 3s) → alta confiança, usar visão
+            result['final_timestamp'] = vision_ts
+            result['method_used'] = 'combined'
+            result['confidence'] = min(0.95, vision_result['confidence'] + 0.2)
+            result['details'] = f'✓ Texto e Visão concordam (diff: {diff:.1f}s). Usando visão.'
+            print(f"[DUAL] ✓ COMBINED: {result['final_timestamp']:.1f}s (conf: {result['confidence']:.0%})")
+            
+        elif diff <= 10:
+            # Diferença moderada → priorizar visão (narrador atrasou)
+            result['final_timestamp'] = vision_ts
+            result['method_used'] = 'vision'
+            result['confidence'] = vision_result['confidence']
+            result['details'] = f'⚡ Visão corrigiu texto por {diff:.1f}s (narrador atrasado).'
+            print(f"[DUAL] ⚡ VISION: {result['final_timestamp']:.1f}s (corrigiu {diff:.1f}s)")
+            
+        else:
+            # Diferença grande (>10s) → visão pode ter encontrado outro lance
+            # Manter texto mas sinalizar
+            result['final_timestamp'] = transcription_timestamp
+            result['method_used'] = 'text'
+            result['confidence'] = 0.4
+            result['details'] = f'⚠ Divergência grande ({diff:.1f}s). Mantendo texto por segurança.'
+            print(f"[DUAL] ⚠ DIVERGENT: keeping text. Vision at {vision_ts:.1f}s differs by {diff:.1f}s")
+    else:
+        # Visão não confirmou gol
+        result['details'] = f'Visão não confirmou gol (conf: {vision_result["confidence"]:.0%}). Usando texto.'
+        print(f"[DUAL] Vision did not confirm goal, using text timestamp")
+    
+    return result
+
+
+def log_clip_analysis(
+    match_id: str,
+    event_type: str,
+    description: str,
+    text_ts: float,
+    vision_ts: float,
+    final_ts: float,
+    method: str,
+    confidence: float
+):
+    """
+    Log estruturado para análise de precisão de clips.
+    Salva em arquivo JSONL para análise posterior.
+    """
+    from datetime import datetime
+    from pathlib import Path
+    
+    log_entry = {
+        'timestamp': datetime.now().isoformat(),
+        'match_id': match_id,
+        'event_type': event_type,
+        'description': description[:60] if description else '',
+        'text_timestamp': text_ts,
+        'vision_timestamp': vision_ts,
+        'final_timestamp': final_ts,
+        'method_used': method,
+        'confidence': confidence,
+        'diff': abs(vision_ts - text_ts) if vision_ts else 0
+    }
+    
+    try:
+        log_file = Path('logs') / 'clip_analysis.jsonl'
+        log_file.parent.mkdir(exist_ok=True)
+        with open(log_file, 'a') as f:
+            f.write(json.dumps(log_entry) + '\n')
+    except Exception as e:
+        print(f"[LOG] Error writing clip analysis log: {e}")
