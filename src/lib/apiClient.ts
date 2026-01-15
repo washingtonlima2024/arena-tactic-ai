@@ -1130,6 +1130,8 @@ export const apiClient = {
     awayTeam: string;
     autoClip?: boolean;
     autoAnalysis?: boolean;
+    firstHalfTranscription?: string;
+    secondHalfTranscription?: string;
   }) => {
     await ensureServerAvailable();
     

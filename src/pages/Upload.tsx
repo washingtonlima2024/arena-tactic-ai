@@ -1394,6 +1394,36 @@ export default function VideoUpload() {
         console.log('🚀 Iniciando pipeline assíncrono paralelo...');
         setProcessingStage('idle'); // Hide old progress, show async progress
         
+        // Read transcriptions from SRT files if available (to skip Whisper on backend)
+        let firstHalfTranscription = '';
+        let secondHalfTranscription = '';
+        
+        if (firstHalfSrt) {
+          firstHalfTranscription = await readSrtFile(firstHalfSrt);
+          console.log('📝 Transcrição 1º tempo carregada do SRT:', firstHalfTranscription.length, 'chars');
+        }
+        if (secondHalfSrt) {
+          secondHalfTranscription = await readSrtFile(secondHalfSrt);
+          console.log('📝 Transcrição 2º tempo carregada do SRT:', secondHalfTranscription.length, 'chars');
+        }
+        
+        // Also check segment transcriptions (from SRT uploads via VideoSegmentCard)
+        const firstHalfSegments = currentSegments.filter(s => 
+          s.half === 'first' || s.videoType === 'first_half' || s.videoType === 'full'
+        );
+        const secondHalfSegments = currentSegments.filter(s => 
+          s.half === 'second' || s.videoType === 'second_half'
+        );
+        
+        if (!firstHalfTranscription && firstHalfSegments[0]?.transcription) {
+          firstHalfTranscription = firstHalfSegments[0].transcription;
+          console.log('📝 Transcrição 1º tempo carregada do segmento:', firstHalfTranscription.length, 'chars');
+        }
+        if (!secondHalfTranscription && secondHalfSegments[0]?.transcription) {
+          secondHalfTranscription = secondHalfSegments[0].transcription;
+          console.log('📝 Transcrição 2º tempo carregada do segmento:', secondHalfTranscription.length, 'chars');
+        }
+        
         // Build video inputs for async processing
         const videoInputs: VideoInput[] = currentSegments
           .filter(s => s.status === 'complete' || s.status === 'ready')
@@ -1414,6 +1444,8 @@ export default function VideoUpload() {
             awayTeam: awayTeamName,
             autoClip: true,
             autoAnalysis: true,
+            firstHalfTranscription: firstHalfTranscription || undefined,
+            secondHalfTranscription: secondHalfTranscription || undefined,
           });
           
           toast({
