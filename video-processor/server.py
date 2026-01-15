@@ -6380,12 +6380,17 @@ def _process_match_pipeline(job_id: str, data: dict):
     away_team = data.get('awayTeam', 'Time B')
     auto_clip = data.get('autoClip', True)
     
+    # Pre-loaded transcriptions (skip Whisper if provided)
+    first_half_transcription = data.get('firstHalfTranscription', '')
+    second_half_transcription = data.get('secondHalfTranscription', '')
+    
     start_time = time_module.time()
     
     print(f"\n{'='*60}")
     print(f"[ASYNC-PIPELINE] Starting job {job_id}")
     print(f"[ASYNC-PIPELINE] Match: {match_id}")
     print(f"[ASYNC-PIPELINE] Videos: {len(videos)}")
+    print(f"[ASYNC-PIPELINE] Pre-loaded transcriptions: 1st={len(first_half_transcription)} chars, 2nd={len(second_half_transcription)} chars")
     print(f"{'='*60}")
     
     try:
@@ -6488,69 +6493,98 @@ def _process_match_pipeline(job_id: str, data: dict):
             
             _update_async_job(job_id, 'splitting', 20, 'Divisão concluída', 'splitting')
             
-            # ========== PHASE 3: PARALLEL TRANSCRIPTION (60%) ==========
-            _update_async_job(job_id, 'transcribing', 20, 'Transcrevendo...', 'transcribing')
+            # ========== PHASE 3: TRANSCRIPTION (60%) ==========
+            # Check if we have pre-loaded transcriptions from frontend (skip Whisper)
+            has_preloaded_first = bool(first_half_transcription and len(first_half_transcription.strip()) > 100)
+            has_preloaded_second = bool(second_half_transcription and len(second_half_transcription.strip()) > 100)
             
-            transcription_results = {'first': [], 'second': []}
-            completed_parts = 0
+            first_half_text = ''
+            second_half_text = ''
             
-            # Flatten all parts for parallel processing
-            all_parts_flat = []
-            for video_group in all_video_parts:
-                half_type = video_group['halfType']
-                minute_offset = 0 if half_type == 'first' else 45
-                for part_info in video_group['parts']:
-                    all_parts_flat.append({
-                        'partInfo': part_info,
-                        'halfType': half_type,
-                        'minuteOffset': minute_offset
-                    })
-            
-            # Process in parallel (limit to 4 workers to not overload Whisper)
-            with ThreadPoolExecutor(max_workers=4) as executor:
-                transcribe_futures = {}
+            if has_preloaded_first or has_preloaded_second:
+                # Use pre-loaded transcriptions - SKIP WHISPER
+                print(f"[ASYNC-PIPELINE] 📝 Using pre-loaded transcriptions (skipping Whisper)")
+                _update_async_job(job_id, 'transcribing', 50, 'Usando transcrição fornecida...', 'transcribing')
                 
-                for item in all_parts_flat:
-                    future = executor.submit(
-                        _transcribe_part_parallel,
-                        item['partInfo'],
-                        item['halfType'],
-                        match_id,
-                        item['minuteOffset']
-                    )
-                    transcribe_futures[future] = item
+                if has_preloaded_first:
+                    first_half_text = first_half_transcription
+                    print(f"[ASYNC-PIPELINE] ✓ 1st half transcription loaded: {len(first_half_text)} chars")
                 
-                for future in as_completed(transcribe_futures):
-                    item = transcribe_futures[future]
-                    result = future.result()
-                    completed_parts += 1
+                if has_preloaded_second:
+                    second_half_text = second_half_transcription
+                    print(f"[ASYNC-PIPELINE] ✓ 2nd half transcription loaded: {len(second_half_text)} chars")
+                
+                # Mark all parts as done
+                for ps in parts_status:
+                    ps['status'] = 'done'
+                    ps['progress'] = 100
+                
+                _update_async_job(job_id, 'transcribing', 80, 'Transcrição carregada', 
+                                'transcribing', total_parts, total_parts, parts_status)
+            else:
+                # No pre-loaded transcriptions - Run Whisper transcription
+                _update_async_job(job_id, 'transcribing', 20, 'Transcrevendo com Whisper...', 'transcribing')
+                
+                transcription_results = {'first': [], 'second': []}
+                completed_parts = 0
+                
+                # Flatten all parts for parallel processing
+                all_parts_flat = []
+                for video_group in all_video_parts:
+                    half_type = video_group['halfType']
+                    minute_offset = 0 if half_type == 'first' else 45
+                    for part_info in video_group['parts']:
+                        all_parts_flat.append({
+                            'partInfo': part_info,
+                            'halfType': half_type,
+                            'minuteOffset': minute_offset
+                        })
+                
+                # Process in parallel (limit to 4 workers to not overload Whisper)
+                with ThreadPoolExecutor(max_workers=4) as executor:
+                    transcribe_futures = {}
                     
-                    # Update part status
-                    part_key = (item['halfType'], item['partInfo']['part'])
-                    for ps in parts_status:
-                        if ps['halfType'] == item['halfType'] and ps['part'] == item['partInfo']['part']:
-                            ps['status'] = 'done' if result['success'] else 'error'
-                            ps['progress'] = 100
-                            break
+                    for item in all_parts_flat:
+                        future = executor.submit(
+                            _transcribe_part_parallel,
+                            item['partInfo'],
+                            item['halfType'],
+                            match_id,
+                            item['minuteOffset']
+                        )
+                        transcribe_futures[future] = item
                     
-                    # Calculate progress (20% to 80%)
-                    progress = 20 + int((completed_parts / len(all_parts_flat)) * 60)
-                    
-                    if result['success']:
-                        transcription_results[item['halfType']].append(result)
-                        print(f"[ASYNC-PIPELINE] ✓ Transcribed {item['halfType']} part {result['part']}: {len(result['text'])} chars")
-                        _update_async_job(job_id, 'transcribing', progress, 
-                                        f'Parte {completed_parts}/{len(all_parts_flat)} transcrita',
-                                        'transcribing', completed_parts, total_parts, parts_status)
-                    else:
-                        print(f"[ASYNC-PIPELINE] ✗ Failed {item['halfType']} part: {result.get('error')}")
-            
-            # Combine transcriptions
-            first_half_text = '\n\n'.join([r['text'] for r in sorted(transcription_results['first'], key=lambda x: x['part'])])
-            second_half_text = '\n\n'.join([r['text'] for r in sorted(transcription_results['second'], key=lambda x: x['part'])])
+                    for future in as_completed(transcribe_futures):
+                        item = transcribe_futures[future]
+                        result = future.result()
+                        completed_parts += 1
+                        
+                        # Update part status
+                        part_key = (item['halfType'], item['partInfo']['part'])
+                        for ps in parts_status:
+                            if ps['halfType'] == item['halfType'] and ps['part'] == item['partInfo']['part']:
+                                ps['status'] = 'done' if result['success'] else 'error'
+                                ps['progress'] = 100
+                                break
+                        
+                        # Calculate progress (20% to 80%)
+                        progress = 20 + int((completed_parts / len(all_parts_flat)) * 60)
+                        
+                        if result['success']:
+                            transcription_results[item['halfType']].append(result)
+                            print(f"[ASYNC-PIPELINE] ✓ Transcribed {item['halfType']} part {result['part']}: {len(result['text'])} chars")
+                            _update_async_job(job_id, 'transcribing', progress, 
+                                            f'Parte {completed_parts}/{len(all_parts_flat)} transcrita',
+                                            'transcribing', completed_parts, total_parts, parts_status)
+                        else:
+                            print(f"[ASYNC-PIPELINE] ✗ Failed {item['halfType']} part: {result.get('error')}")
+                
+                # Combine transcriptions from Whisper
+                first_half_text = '\n\n'.join([r['text'] for r in sorted(transcription_results['first'], key=lambda x: x['part'])])
+                second_half_text = '\n\n'.join([r['text'] for r in sorted(transcription_results['second'], key=lambda x: x['part'])])
             
             if not first_half_text and not second_half_text:
-                raise Exception("Nenhuma transcrição foi gerada")
+                raise Exception("Nenhuma transcrição foi gerada ou fornecida")
             
             # Save transcription text files
             if first_half_text:

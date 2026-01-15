@@ -38,6 +38,8 @@ interface AsyncProcessingInput {
   awayTeam: string;
   autoClip?: boolean;
   autoAnalysis?: boolean;
+  firstHalfTranscription?: string;
+  secondHalfTranscription?: string;
 }
 
 export function useAsyncProcessing() {
