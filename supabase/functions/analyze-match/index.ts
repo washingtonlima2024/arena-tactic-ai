@@ -508,10 +508,11 @@ LEMBRE-SE:
     // ═══════════════════════════════════════════════════════════════
     // NARRATION DELAY ADJUSTMENT
     // ═══════════════════════════════════════════════════════════════
-    // O narrador SEMPRE reage APÓS o evento acontecer (atraso de 4-8s)
-    // Aplicamos este offset para antecipar o timestamp real do lance
-    const NARRATION_DELAY_GOAL = 10; // segundos de atraso médio para gols (aumentado de 6)
-    const NARRATION_DELAY_DEFAULT = 6; // segundos para outros eventos (aumentado de 4)
+    // Offset de narração - AGORA APLICADO APENAS NO BACKEND PYTHON
+    // Edge Function armazena o timestamp bruto da narração
+    // Python backend aplica o offset quando corta os clips
+    const NARRATION_DELAY_GOAL = 0; // Offset aplicado no Python (-8s)
+    const NARRATION_DELAY_DEFAULT = 0; // Offset aplicado no Python (-4s)
     
     // Insert events into database
     const eventsToInsert = (analysisResult.events || []).map(event => {
