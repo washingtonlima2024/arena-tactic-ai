@@ -3171,7 +3171,9 @@ def analyze_match():
     
     try:
         events = ai_services.analyze_match_events(
-            transcription, home_team, away_team, game_start_minute, game_end_minute
+            transcription, home_team, away_team, game_start_minute, game_end_minute,
+            match_id=match_id,
+            use_dual_verification=True
         )
         
         # Determine match_half based on halfType
@@ -4700,7 +4702,9 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
                 
                 # Analyze transcription
                 events = ai_services.analyze_match_events(
-                    transcription, home_team, away_team, start_minute, end_minute
+                    transcription, home_team, away_team, start_minute, end_minute,
+                    match_id=match_id,
+                    use_dual_verification=True
                 )
                 
                 if not events:
@@ -7118,7 +7122,11 @@ def _process_match_pipeline(job_id: str, data: dict):
                 finally:
                     session.close()
                 
-                events = ai_services.analyze_match_events(first_half_text, home_team, away_team, 0, 45)
+                events = ai_services.analyze_match_events(
+                    first_half_text, home_team, away_team, 0, 45,
+                    match_id=match_id,
+                    use_dual_verification=True
+                )
                 if events:
                     # Save events
                     session = get_session()
@@ -7157,7 +7165,11 @@ def _process_match_pipeline(job_id: str, data: dict):
                 finally:
                     session.close()
                 
-                events = ai_services.analyze_match_events(second_half_text, home_team, away_team, 45, 90)
+                events = ai_services.analyze_match_events(
+                    second_half_text, home_team, away_team, 45, 90,
+                    match_id=match_id,
+                    use_dual_verification=True
+                )
                 if events:
                     session = get_session()
                     try:
