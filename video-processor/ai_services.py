@@ -941,6 +941,74 @@ def _transcribe_with_elevenlabs(audio_path: str, match_id: str = None) -> Dict[s
         return {"error": f"ElevenLabs error: {str(e)}", "success": False}
 
 
+def deduplicate_goal_events(events: List[Dict[str, Any]], min_interval_seconds: int = 30) -> List[Dict[str, Any]]:
+    """
+    Remove eventos de gol duplicados que ocorram em intervalo menor que min_interval_seconds.
+    
+    A IA pode detectar o mesmo gol múltiplas vezes quando o narrador repete expressões
+    como "GOOOL! É GOL!" em sequência ou menciona o mesmo gol em diferentes partes.
+    
+    Args:
+        events: Lista de eventos detectados pela IA
+        min_interval_seconds: Intervalo mínimo entre gols do mesmo time (default: 30s)
+    
+    Returns:
+        Lista de eventos com gols duplicados removidos
+    """
+    if not events:
+        return events
+    
+    # Separar gols dos outros eventos
+    goals = [e for e in events if e.get('event_type') == 'goal']
+    other_events = [e for e in events if e.get('event_type') != 'goal']
+    
+    if len(goals) <= 1:
+        return events  # Nada a deduplicar
+    
+    # Ordenar gols por tempo (minuto + segundo)
+    def get_total_seconds(g):
+        minute = g.get('minute', 0) or 0
+        second = g.get('second', 0) or 0
+        return minute * 60 + second
+    
+    goals_sorted = sorted(goals, key=get_total_seconds)
+    
+    # Filtrar gols duplicados (mesmo time, intervalo < min_interval_seconds)
+    deduplicated_goals = []
+    last_goal_by_team = {}  # {team: last_goal_second}
+    
+    for goal in goals_sorted:
+        team = goal.get('team', 'home')
+        current_seconds = get_total_seconds(goal)
+        
+        # Verificar se já houve um gol recente do mesmo time
+        if team in last_goal_by_team:
+            last_seconds = last_goal_by_team[team]
+            interval = current_seconds - last_seconds
+            
+            if interval < min_interval_seconds:
+                # Gol duplicado detectado - pular
+                print(f"[AI] ⚠️ DEDUP: Removendo gol duplicado do time '{team}' - "
+                      f"intervalo de apenas {interval}s (min: {min_interval_seconds}s)")
+                print(f"[AI]   → Gol removido: {goal.get('minute', 0)}'{goal.get('second', 0)}'' - {goal.get('description', '')[:50]}")
+                continue
+        
+        # Gol válido - manter
+        deduplicated_goals.append(goal)
+        last_goal_by_team[team] = current_seconds
+    
+    if len(deduplicated_goals) < len(goals):
+        removed = len(goals) - len(deduplicated_goals)
+        print(f"[AI] ✓ DEDUP: Removidos {removed} gol(s) duplicado(s). "
+              f"Original: {len(goals)} → Final: {len(deduplicated_goals)}")
+    
+    # Recombinar gols dedupados com outros eventos e ordenar por tempo
+    all_events = deduplicated_goals + other_events
+    all_events_sorted = sorted(all_events, key=get_total_seconds)
+    
+    return all_events_sorted
+
+
 def analyze_match_events(
     transcription: str,
     home_team: str,
@@ -1256,7 +1324,14 @@ RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL.
                     validated_events.append(event)
                 
                 print(f"[AI] Validated {len(validated_events)} events (filtered {len(events) - len(validated_events)} invalid)")
-                return validated_events
+                
+                # ═══════════════════════════════════════════════════════════════
+                # DEDUPLICAÇÃO DE GOLS: Remove gols duplicados do mesmo time
+                # que ocorram em intervalo menor que 30 segundos
+                # ═══════════════════════════════════════════════════════════════
+                deduplicated_events = deduplicate_goal_events(validated_events)
+                
+                return deduplicated_events
             else:
                 last_error = f"No JSON array found in response: {response[:200]}"
                 
