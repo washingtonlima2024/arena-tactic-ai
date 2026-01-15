@@ -6818,6 +6818,20 @@ def _process_match_pipeline(job_id: str, data: dict):
             # Analyze first half
             if first_half_text:
                 print(f"[ASYNC-PIPELINE] Analyzing first half...")
+                
+                # 🆕 Limpar eventos anteriores do primeiro tempo para evitar duplicatas
+                session = get_session()
+                try:
+                    deleted = session.query(MatchEvent).filter_by(
+                        match_id=match_id,
+                        match_half='first_half'
+                    ).delete()
+                    session.commit()
+                    if deleted > 0:
+                        print(f"[ASYNC-PIPELINE] ✓ {deleted} eventos 1º tempo removidos (evitando duplicatas)")
+                finally:
+                    session.close()
+                
                 events = ai_services.analyze_match_events(first_half_text, home_team, away_team, 0, 45)
                 if events:
                     # Save events
@@ -6843,6 +6857,20 @@ def _process_match_pipeline(job_id: str, data: dict):
             # Analyze second half
             if second_half_text:
                 print(f"[ASYNC-PIPELINE] Analyzing second half...")
+                
+                # 🆕 Limpar eventos anteriores do segundo tempo para evitar duplicatas
+                session = get_session()
+                try:
+                    deleted = session.query(MatchEvent).filter_by(
+                        match_id=match_id,
+                        match_half='second_half'
+                    ).delete()
+                    session.commit()
+                    if deleted > 0:
+                        print(f"[ASYNC-PIPELINE] ✓ {deleted} eventos 2º tempo removidos (evitando duplicatas)")
+                finally:
+                    session.close()
+                
                 events = ai_services.analyze_match_events(second_half_text, home_team, away_team, 45, 90)
                 if events:
                     session = get_session()
@@ -6874,6 +6902,23 @@ def _process_match_pipeline(job_id: str, data: dict):
             total_clips = 0
             if auto_clip and total_events > 0:
                 _update_async_job(job_id, 'clipping', 90, 'Gerando clips...', 'clipping')
+                
+                # 🆕 Complementar video_paths com vídeos já salvos no banco
+                session = get_session()
+                try:
+                    existing_videos = session.query(Video).filter_by(match_id=match_id).all()
+                    for video in existing_videos:
+                        half_type = 'first' if video.video_type == 'first_half' else 'second'
+                        if half_type not in video_paths:
+                            # Resolver caminho local do vídeo
+                            video_folder = get_subfolder_path(match_id, 'videos')
+                            if video.file_name:
+                                local_path = video_folder / video.file_name
+                                if local_path.exists():
+                                    video_paths[half_type] = str(local_path)
+                                    print(f"[ASYNC-PIPELINE] ✓ Vídeo existente encontrado: {half_type} -> {video.file_name}")
+                finally:
+                    session.close()
                 
                 # Get all events for clipping
                 session = get_session()
@@ -6916,13 +6961,41 @@ def _process_match_pipeline(job_id: str, data: dict):
                             'complete', total_parts, total_parts, parts_status,
                             events_detected=total_events, clips_generated=total_clips)
             
-            # Update match status
+            # 🆕 Recalcular placar com base em TODOS os eventos após importação
             session = get_session()
             try:
+                all_events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+                home_goals = 0
+                away_goals = 0
+                
+                for event in all_events:
+                    if event.event_type == 'goal':
+                        # Verificar time do gol nos metadados
+                        metadata = event.metadata or {}
+                        team = metadata.get('team', '')
+                        description = (event.description or '').lower()
+                        
+                        # Determinar time pelo metadata ou descrição
+                        if team == 'home' or (home_team and home_team.lower() in description):
+                            home_goals += 1
+                        elif team == 'away' or (away_team and away_team.lower() in description):
+                            away_goals += 1
+                        else:
+                            # Fallback: primeiro time mencionado na descrição
+                            home_goals += 1
+                
                 match = session.query(Match).filter_by(id=match_id).first()
                 if match:
+                    old_score = f"{match.home_score or 0}x{match.away_score or 0}"
+                    match.home_score = home_goals
+                    match.away_score = away_goals
                     match.status = 'completed'
                     session.commit()
+                    new_score = f"{home_goals}x{away_goals}"
+                    if old_score != new_score:
+                        print(f"[ASYNC-PIPELINE] ✓ Placar recalculado: {old_score} -> {new_score}")
+                    else:
+                        print(f"[ASYNC-PIPELINE] ✓ Placar mantido: {new_score}")
             finally:
                 session.close()
             
