@@ -4176,8 +4176,8 @@ def extract_event_clips_auto(
             # O narrador geralmente descreve o evento 5-10s APÓS ele acontecer.
             # Aplicamos um offset negativo MAIOR para antecipar e capturar o momento real.
             # NOTA: Se dual detection foi usada, offset já foi considerado pela visão
-            FALLBACK_OFFSET_GOAL = -10  # Aumentado de -8 para -10 segundos
-            FALLBACK_OFFSET_DEFAULT = -6  # Fallback para outros eventos
+            FALLBACK_OFFSET_GOAL = -14  # Aumentado de -10 para -14 segundos
+            FALLBACK_OFFSET_DEFAULT = -8  # Fallback para outros eventos (aumentado de -6)
             
             if not metadata.get('visual_verified', False):
                 # Visão não confirmou, usar fallback agressivo
