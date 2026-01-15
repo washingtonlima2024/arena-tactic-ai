@@ -312,8 +312,9 @@ export default function VideoUpload() {
             progress: 100,
             status: 'complete' as const,
             isLink: false,
+            // 🆕 Incluir 'full' como primeiro tempo para associação de SRT
             half: video.video_type === 'second_half' ? 'second' as const : 
-                  video.video_type === 'first_half' ? 'first' as const : undefined,
+                  (video.video_type === 'first_half' || video.video_type === 'full') ? 'first' as const : undefined,
           }));
         
         if (newFromDb.length > 0) {
@@ -972,9 +973,16 @@ export default function VideoUpload() {
     // Read and attach to corresponding segments
     const srtContent = await readSrtFile(file);
     
+    // 🆕 Debug: Log para diagnóstico de associação SRT
+    console.log(`[SRT Drop] Half: ${half}, Conteúdo: ${srtContent.length} chars`);
+    console.log(`[SRT Drop] Segmentos disponíveis:`, segments.length);
+    segments.forEach(s => console.log(`  - ${s.name}: half=${s.half}, type=${s.videoType}`));
+    
     setSegments(prev => prev.map(s => {
-      if ((half === 'first' && (s.half === 'first' || s.videoType === 'first_half')) ||
+      // 🆕 Incluir 'full' no filtro do 1º tempo
+      if ((half === 'first' && (s.half === 'first' || s.videoType === 'first_half' || s.videoType === 'full')) ||
           (half === 'second' && (s.half === 'second' || s.videoType === 'second_half'))) {
+        console.log(`[SRT Drop] ✓ Associando SRT ao segmento: ${s.name}`);
         return { ...s, transcription: srtContent };
       }
       return s;
@@ -994,8 +1002,9 @@ export default function VideoUpload() {
     }
     
     // Remove transcription from corresponding segments
+    // 🆕 Incluir 'full' no filtro de remoção do 1º tempo
     setSegments(prev => prev.map(s => {
-      if ((half === 'first' && (s.half === 'first' || s.videoType === 'first_half')) ||
+      if ((half === 'first' && (s.half === 'first' || s.videoType === 'first_half' || s.videoType === 'full')) ||
           (half === 'second' && (s.half === 'second' || s.videoType === 'second_half'))) {
         return { ...s, transcription: undefined };
       }
