@@ -2765,3 +2765,279 @@ def _format_srt_time(seconds: float) -> str:
     secs = int(seconds % 60)
     millis = int((seconds % 1) * 1000)
     return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# VISUAL GOAL DETECTION WITH GEMINI VISION
+# ═══════════════════════════════════════════════════════════════════════════
+
+def extract_frames_for_analysis(video_path: str, center_second: float, window_seconds: int = 20, num_frames: int = 8) -> List[str]:
+    """
+    Extract frames around a timestamp for visual analysis.
+    Returns list of base64-encoded JPEG images.
+    
+    Args:
+        video_path: Path to video file
+        center_second: Center timestamp in seconds
+        window_seconds: Window around center (±seconds)
+        num_frames: Number of frames to extract
+    
+    Returns:
+        List of base64-encoded frame images
+    """
+    import subprocess
+    import tempfile
+    import os
+    
+    frames_base64 = []
+    
+    # Calculate frame timestamps spread across the window
+    start_sec = max(0, center_second - window_seconds)
+    end_sec = center_second + window_seconds
+    step = (end_sec - start_sec) / (num_frames - 1) if num_frames > 1 else 0
+    
+    for i in range(num_frames):
+        timestamp = start_sec + (step * i)
+        
+        with tempfile.NamedTemporaryFile(suffix='.jpg', delete=False) as tmp:
+            tmp_path = tmp.name
+        
+        try:
+            # Extract frame at timestamp
+            cmd = [
+                'ffmpeg', '-y', '-ss', str(timestamp),
+                '-i', video_path,
+                '-vframes', '1',
+                '-q:v', '2',  # High quality
+                '-vf', 'scale=640:-1',  # Resize for API limits
+                tmp_path
+            ]
+            
+            result = subprocess.run(cmd, capture_output=True, timeout=30)
+            
+            if result.returncode == 0 and os.path.exists(tmp_path):
+                with open(tmp_path, 'rb') as f:
+                    img_data = f.read()
+                    if len(img_data) > 1000:  # Valid image
+                        frames_base64.append(base64.b64encode(img_data).decode('utf-8'))
+        except Exception as e:
+            print(f"[FRAMES] Error extracting frame at {timestamp:.1f}s: {e}")
+        finally:
+            try:
+                os.remove(tmp_path)
+            except:
+                pass
+    
+    print(f"[FRAMES] Extracted {len(frames_base64)} frames around {center_second:.1f}s")
+    return frames_base64
+
+
+def detect_goal_visual_cues(
+    video_path: str, 
+    estimated_second: float, 
+    window_seconds: int = 25,
+    home_team: str = None,
+    away_team: str = None
+) -> Dict[str, Any]:
+    """
+    Use Gemini Vision to analyze frames and detect visual goal cues.
+    
+    This function extracts frames around the estimated goal timestamp
+    and uses AI vision to find:
+    - Ball entering the goal
+    - Player celebrations
+    - Replay being shown
+    - Score updates on screen
+    
+    Args:
+        video_path: Path to the video file
+        estimated_second: Estimated timestamp of the goal (from narration)
+        window_seconds: Window around the timestamp to search (±seconds)
+        home_team: Name of home team (for context)
+        away_team: Name of away team (for context)
+    
+    Returns:
+        Dict with:
+        - visual_confirmed: bool - Was a goal visually confirmed?
+        - exact_second: float - Refined timestamp (if confirmed)
+        - confidence: float - Confidence score (0-1)
+        - celebration_second: float - When celebration starts (if detected)
+        - details: str - Description of what was found
+    """
+    result = {
+        'visual_confirmed': False,
+        'exact_second': estimated_second,
+        'confidence': 0.0,
+        'celebration_second': None,
+        'details': 'Visual analysis not performed'
+    }
+    
+    if not os.path.exists(video_path):
+        result['details'] = f'Video file not found: {video_path}'
+        return result
+    
+    # Check if we have any Vision API available
+    if not LOVABLE_API_KEY and not GOOGLE_API_KEY:
+        result['details'] = 'No Vision API configured (need LOVABLE_API_KEY or GOOGLE_API_KEY)'
+        return result
+    
+    print(f"[VISION] Analyzing goal at ~{estimated_second:.1f}s (window: ±{window_seconds}s)")
+    
+    # Extract frames for analysis
+    frames = extract_frames_for_analysis(
+        video_path, 
+        estimated_second, 
+        window_seconds, 
+        num_frames=10  # More frames for better precision
+    )
+    
+    if len(frames) < 3:
+        result['details'] = f'Could not extract enough frames ({len(frames)} < 3)'
+        return result
+    
+    # Build prompt for Gemini Vision
+    team_context = ""
+    if home_team and away_team:
+        team_context = f"Os times jogando são {home_team} (mandante) vs {away_team} (visitante). "
+    
+    system_prompt = f"""Você é um analista especializado em futebol que deve identificar o MOMENTO EXATO de um gol em imagens de vídeo.
+{team_context}
+Analise as imagens em sequência (estão em ordem cronológica) e identifique:
+
+1. BOLA NA REDE: Procure o frame onde a bola está claramente dentro do gol
+2. COMEMORAÇÃO: Jogadores correndo com braços levantados, abraços
+3. REPLAY: Se a imagem mostra um replay (câmera lenta, ângulo diferente)
+4. PLACAR: Se o placar na tela mudou
+
+Retorne um JSON com:
+{{
+  "goal_detected": true/false,
+  "frame_index": número do frame mais próximo do gol (0-{len(frames)-1}),
+  "celebration_frame": número do frame onde começa comemoração (ou null),
+  "confidence": 0.0 a 1.0,
+  "details": "descrição do que você viu",
+  "visual_cues": ["lista de pistas visuais encontradas"]
+}}
+
+IMPORTANTE: Responda APENAS com o JSON, sem markdown."""
+
+    # Build messages with images
+    content_parts = [{"type": "text", "text": system_prompt}]
+    
+    for i, frame_b64 in enumerate(frames):
+        content_parts.append({
+            "type": "image_url",
+            "image_url": {
+                "url": f"data:image/jpeg;base64,{frame_b64}"
+            }
+        })
+    
+    try:
+        # Try Lovable AI Gateway first (supports vision)
+        if LOVABLE_API_KEY:
+            response = requests.post(
+                LOVABLE_API_URL,
+                headers={
+                    'Authorization': f'Bearer {LOVABLE_API_KEY}',
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'model': 'google/gemini-2.5-flash',  # Supports vision
+                    'messages': [
+                        {'role': 'user', 'content': content_parts}
+                    ],
+                    'temperature': 0.1,
+                    'max_tokens': 1000
+                },
+                timeout=60
+            )
+            
+            if response.ok:
+                data = response.json()
+                ai_response = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+                
+                # Parse JSON response
+                try:
+                    # Clean up response if needed
+                    ai_response = ai_response.strip()
+                    if ai_response.startswith('```'):
+                        ai_response = ai_response.split('```')[1]
+                        if ai_response.startswith('json'):
+                            ai_response = ai_response[4:]
+                    
+                    vision_result = json.loads(ai_response)
+                    
+                    # Calculate exact second based on frame index
+                    frame_index = vision_result.get('frame_index', len(frames) // 2)
+                    start_sec = max(0, estimated_second - window_seconds)
+                    step = (2 * window_seconds) / (len(frames) - 1) if len(frames) > 1 else 0
+                    calculated_second = start_sec + (step * frame_index)
+                    
+                    result['visual_confirmed'] = vision_result.get('goal_detected', False)
+                    result['exact_second'] = calculated_second
+                    result['confidence'] = vision_result.get('confidence', 0.0)
+                    result['details'] = vision_result.get('details', 'Analysis complete')
+                    
+                    # Calculate celebration second if provided
+                    celeb_frame = vision_result.get('celebration_frame')
+                    if celeb_frame is not None:
+                        result['celebration_second'] = start_sec + (step * celeb_frame)
+                    
+                    print(f"[VISION] ✓ Goal {'CONFIRMED' if result['visual_confirmed'] else 'NOT FOUND'} at {result['exact_second']:.1f}s (confidence: {result['confidence']:.0%})")
+                    print(f"[VISION] Details: {result['details']}")
+                    
+                    return result
+                    
+                except json.JSONDecodeError as e:
+                    print(f"[VISION] Could not parse AI response: {e}")
+                    result['details'] = f'JSON parse error: {ai_response[:100]}'
+            else:
+                print(f"[VISION] Lovable AI error: {response.status_code}")
+        
+        # Fallback to Google Gemini direct if Lovable failed
+        if GOOGLE_API_KEY and not result['visual_confirmed']:
+            print("[VISION] Trying Google Gemini directly...")
+            # Build Gemini-format request
+            gemini_parts = [{"text": system_prompt}]
+            for frame_b64 in frames:
+                gemini_parts.append({
+                    "inline_data": {
+                        "mime_type": "image/jpeg",
+                        "data": frame_b64
+                    }
+                })
+            
+            gemini_response = requests.post(
+                f"{GOOGLE_API_URL}/models/gemini-2.0-flash:generateContent?key={GOOGLE_API_KEY}",
+                json={
+                    "contents": [{"parts": gemini_parts}],
+                    "generationConfig": {"temperature": 0.1, "maxOutputTokens": 1000}
+                },
+                timeout=60
+            )
+            
+            if gemini_response.ok:
+                gemini_data = gemini_response.json()
+                candidates = gemini_data.get('candidates', [])
+                if candidates:
+                    ai_text = candidates[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+                    try:
+                        vision_result = json.loads(ai_text.strip())
+                        frame_index = vision_result.get('frame_index', len(frames) // 2)
+                        start_sec = max(0, estimated_second - window_seconds)
+                        step = (2 * window_seconds) / (len(frames) - 1) if len(frames) > 1 else 0
+                        
+                        result['visual_confirmed'] = vision_result.get('goal_detected', False)
+                        result['exact_second'] = start_sec + (step * frame_index)
+                        result['confidence'] = vision_result.get('confidence', 0.0)
+                        result['details'] = vision_result.get('details', 'Analysis complete')
+                        
+                        print(f"[VISION] ✓ (Gemini) Goal {'CONFIRMED' if result['visual_confirmed'] else 'NOT FOUND'}")
+                    except:
+                        pass
+    
+    except Exception as e:
+        print(f"[VISION] Error during analysis: {e}")
+        result['details'] = f'Error: {str(e)}'
+    
+    return result
