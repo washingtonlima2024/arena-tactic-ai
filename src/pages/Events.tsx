@@ -40,7 +40,9 @@ import {
   Cog,
   AlertCircle,
   CloudOff,
-  Cloud
+  Cloud,
+  CloudUpload,
+  Server
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -190,6 +192,59 @@ const EventRow = ({
         </Button>
       )}
     </div>
+  );
+};
+
+// Sync to Cloud button component
+interface SyncToCloudButtonProps {
+  matchId: string;
+  eventsCount: number;
+}
+
+const SyncToCloudButton = ({ matchId, eventsCount }: SyncToCloudButtonProps) => {
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [lastSync, setLastSync] = useState<Date | null>(null);
+
+  const handleSync = async () => {
+    if (!matchId || eventsCount === 0) {
+      toast.info('Nenhum evento para sincronizar');
+      return;
+    }
+
+    setIsSyncing(true);
+    try {
+      const result = await apiClient.post(`/api/sync-to-supabase/${matchId}`);
+      
+      if (result.success) {
+        setLastSync(new Date());
+        toast.success(`Sincronizado! ${result.events_synced || 0} eventos enviados para Cloud`);
+      } else {
+        toast.error(result.error || 'Falha na sincronização');
+      }
+    } catch (error: any) {
+      console.error('Sync error:', error);
+      toast.error(error.message || 'Erro ao sincronizar com Cloud');
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={handleSync}
+      disabled={isSyncing || eventsCount === 0}
+      className="gap-2"
+      title={lastSync ? `Último sync: ${lastSync.toLocaleTimeString()}` : 'Sincronizar eventos para Cloud'}
+    >
+      {isSyncing ? (
+        <Loader2 className="h-4 w-4 animate-spin" />
+      ) : (
+        <CloudUpload className="h-4 w-4" />
+      )}
+      <span className="hidden sm:inline">Sync Cloud</span>
+    </Button>
   );
 };
 
@@ -879,10 +934,19 @@ export default function Events() {
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
+          <div className="flex items-center gap-3">
             <h1 className="font-display text-3xl font-bold">Eventos da Partida</h1>
+            {/* Data origin indicator */}
+            {events.length > 0 && (
+              <Badge variant="outline" className="gap-1 text-xs">
+                <Server className="h-3 w-3" />
+                Servidor Local
+              </Badge>
+            )}
           </div>
           <div className="flex items-center gap-2">
+            {/* Sync to Cloud button */}
+            <SyncToCloudButton matchId={currentMatchId} eventsCount={events.length} />
             <Button
               variant="ghost"
               size="icon"
