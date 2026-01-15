@@ -1498,7 +1498,21 @@ def analyze_match_events(
     # ═══════════════════════════════════════════════════════════════
     # SISTEMA DE DUPLA VERIFICAÇÃO (GPT-5 + Gemini)
     # ═══════════════════════════════════════════════════════════════
-    if use_dual_verification and match_id and OPENAI_API_KEY:
+    can_use_dual = use_dual_verification and match_id and OPENAI_API_KEY and OPENAI_ENABLED
+    
+    if not can_use_dual:
+        reasons = []
+        if not use_dual_verification:
+            reasons.append("dual_verification desabilitado")
+        if not match_id:
+            reasons.append("match_id não fornecido")
+        if not OPENAI_API_KEY:
+            reasons.append("OPENAI_API_KEY não configurada")
+        if OPENAI_API_KEY and not OPENAI_ENABLED:
+            reasons.append("OpenAI desabilitado nas configurações")
+        print(f"[AI] ℹ️ Modo legado: {', '.join(reasons) if reasons else 'condições não atendidas'}")
+    
+    if can_use_dual:
         print(f"\n[AI] ═══════════════════════════════════════════════════════════")
         print(f"[AI] 🔄 SISTEMA DE DUPLA VERIFICAÇÃO ATIVADO")
         print(f"[AI]    Fase 1: GPT-5 (detecção)")
