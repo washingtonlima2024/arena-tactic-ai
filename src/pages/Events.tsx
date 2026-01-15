@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -405,6 +405,74 @@ export default function Events() {
     pending: events.filter(e => e.approval_status === 'pending' || !e.approval_status).length,
     approved: events.filter(e => e.approval_status === 'approved').length,
   };
+
+  // Calculate score dynamically from goal events
+  const calculatedScore = useMemo(() => {
+    const homeTeamName = selectedMatch?.home_team?.name || '';
+    const awayTeamName = selectedMatch?.away_team?.name || '';
+    
+    let homeGoals = 0;
+    let awayGoals = 0;
+    
+    events.filter(e => e.event_type === 'goal').forEach(goal => {
+      const metadata = goal.metadata as Record<string, any> | null;
+      const description = (goal.description || '').toLowerCase();
+      
+      // Detect own goal from description or metadata
+      const isOwnGoal = 
+        metadata?.isOwnGoal === true ||
+        description.includes('contra') ||
+        description.includes('own goal') ||
+        description.includes('gol contra');
+      
+      // Determine which team scored
+      let team = metadata?.team || metadata?.scoring_team || '';
+      
+      // Normalize team identification
+      if (team && team !== 'home' && team !== 'away') {
+        if (homeTeamName && (
+          team.toLowerCase().includes(homeTeamName.toLowerCase().slice(0, 5)) ||
+          homeTeamName.toLowerCase().includes(team.toLowerCase().slice(0, 5))
+        )) {
+          team = 'home';
+        } else if (awayTeamName && (
+          team.toLowerCase().includes(awayTeamName.toLowerCase().slice(0, 5)) ||
+          awayTeamName.toLowerCase().includes(team.toLowerCase().slice(0, 5))
+        )) {
+          team = 'away';
+        }
+      }
+      
+      // Apply own goal logic
+      if (isOwnGoal) {
+        // Own goal: opposite team gets the point
+        if (team === 'home' || team === homeTeamName) {
+          awayGoals++;
+        } else if (team === 'away' || team === awayTeamName) {
+          homeGoals++;
+        } else {
+          // Can't determine team, default to home conceding
+          awayGoals++;
+        }
+      } else {
+        // Normal goal
+        if (team === 'home' || team === homeTeamName) {
+          homeGoals++;
+        } else if (team === 'away' || team === awayTeamName) {
+          awayGoals++;
+        } else {
+          // Try to infer from description
+          if (homeTeamName && description.includes(homeTeamName.toLowerCase())) {
+            homeGoals++;
+          } else if (awayTeamName && description.includes(awayTeamName.toLowerCase())) {
+            awayGoals++;
+          }
+        }
+      }
+    });
+    
+    return { home: homeGoals, away: awayGoals };
+  }, [events, selectedMatch]);
 
   // Helper to get event time in ms from metadata
   const getEventTimeMs = (event: any): number => {
@@ -839,15 +907,15 @@ export default function Events() {
                   </p>
                 </div>
 
-                {/* Score Display */}
+                {/* Score Display - Calculated from events */}
                 <div className="flex flex-col items-center gap-2">
                   <div className="flex items-center gap-4">
-                    <span className="text-5xl font-black tabular-nums w-14 text-center">
-                      {selectedMatch.home_score ?? 0}
+                    <span className="text-5xl font-black tabular-nums w-14 text-center text-primary">
+                      {calculatedScore.home}
                     </span>
                     <span className="text-xl font-bold text-muted-foreground">vs</span>
-                    <span className="text-5xl font-black tabular-nums w-14 text-center">
-                      {selectedMatch.away_score ?? 0}
+                    <span className="text-5xl font-black tabular-nums w-14 text-center text-primary">
+                      {calculatedScore.away}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
