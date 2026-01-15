@@ -4171,24 +4171,13 @@ def extract_event_clips_auto(
                     print(f"[CLIP] ⚠ Dual detection error: {e}. Continuing with text timestamp.")
             
             # ═══════════════════════════════════════════════════════════════
-            # APLICAR OFFSET DE NARRAÇÃO (FALLBACK)
+            # OFFSET DESATIVADO - Usando apenas buffer de PRE_SECONDS
             # ═══════════════════════════════════════════════════════════════
-            # OFFSET ÚNICO - Aplicado apenas aqui (Edge Function usa 0)
-            # O narrador reage 5-10s APÓS o gol, então recuamos no tempo
+            # O clip já usa PRE_SECONDS (15s) antes do timestamp da narração
+            # Não aplicar offset adicional para evitar clips "saltando"
+            # O gol aparece naturalmente dentro do buffer de 15s antes
             # ═══════════════════════════════════════════════════════════════
-            FALLBACK_OFFSET_GOAL = -12  # Gols: recuar 12s antes da narração
-            FALLBACK_OFFSET_DEFAULT = -6  # Outros eventos: recuar 6s
-            
-            if not metadata.get('visual_verified', False):
-                # Visão não confirmou, usar fallback agressivo
-                if event_type in ['goal', 'penalty']:
-                    fallback_offset = FALLBACK_OFFSET_GOAL
-                else:
-                    fallback_offset = narration_offset if narration_offset != 0 else FALLBACK_OFFSET_DEFAULT
-                
-                original_seconds = total_seconds
-                total_seconds = total_seconds + fallback_offset
-                print(f"[CLIP DEBUG] Visual não verificado - aplicando fallback_offset={fallback_offset}s: {original_seconds}s → {total_seconds}s")
+            print(f"[CLIP DEBUG] Usando timestamp da narração SEM offset: {total_seconds}s (buffer PRE={actual_pre}s já aplicado no start)")
             
             # ═══════════════════════════════════════════════════════════════
             # VALIDAÇÃO DE SANIDADE DOS TIMESTAMPS
