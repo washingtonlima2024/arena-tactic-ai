@@ -17,13 +17,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Loader2, Save, Target, Trophy, AlertTriangle, Users } from 'lucide-react';
+import { Loader2, Save, Target, Trophy, AlertTriangle, Users, Lock, Unlock } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTeams } from '@/hooks/useTeams';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Badge } from '@/components/ui/badge';
+import { Switch } from '@/components/ui/switch';
+import { syncMatchScoreFromEvents, setMatchScoreLock } from '@/lib/scoreSync';
 
 interface MatchEditDialogProps {
   isOpen: boolean;
@@ -54,6 +57,7 @@ export function MatchEditDialog({
   const [awayScore, setAwayScore] = useState('0');
   const [homeTeamId, setHomeTeamId] = useState<string>('');
   const [awayTeamId, setAwayTeamId] = useState<string>('');
+  const [scoreLocked, setScoreLocked] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
 
   // Fetch event stats for this match
@@ -100,6 +104,21 @@ export function MatchEditDialog({
     enabled: !!match?.id && isOpen
   });
 
+  // Fetch score_locked status
+  const { data: matchLockStatus } = useQuery({
+    queryKey: ['match-lock-status', match?.id],
+    queryFn: async () => {
+      if (!match?.id) return { score_locked: false };
+      const { data } = await supabase
+        .from('matches')
+        .select('score_locked')
+        .eq('id', match.id)
+        .single();
+      return data || { score_locked: false };
+    },
+    enabled: !!match?.id && isOpen
+  });
+
   useEffect(() => {
     if (match) {
       setHomeScore(match.home_score?.toString() || '0');
@@ -109,6 +128,12 @@ export function MatchEditDialog({
     }
   }, [match]);
 
+  useEffect(() => {
+    if (matchLockStatus) {
+      setScoreLocked(matchLockStatus.score_locked || false);
+    }
+  }, [matchLockStatus]);
+
   if (!isAdmin) return null;
 
   const handleSave = async () => {
@@ -116,7 +141,7 @@ export function MatchEditDialog({
     
     setIsSaving(true);
     try {
-      // Update match
+      // Update match with score_locked = true (admin is manually editing)
       const { error } = await supabase
         .from('matches')
         .update({
@@ -124,10 +149,12 @@ export function MatchEditDialog({
           away_score: parseInt(awayScore) || 0,
           home_team_id: homeTeamId || null,
           away_team_id: awayTeamId || null,
+          score_locked: true, // Lock score when manually edited
         })
         .eq('id', match.id);
 
       if (error) throw error;
+      setScoreLocked(true);
 
       // Get new team names
       const newHomeTeam = teams.find(t => t.id === homeTeamId);
@@ -180,39 +207,42 @@ export function MatchEditDialog({
     
     setIsSaving(true);
     try {
-      const { data: goalEvents } = await supabase
-        .from('match_events')
-        .select('metadata')
-        .eq('match_id', match.id)
-        .eq('event_type', 'goal');
+      // Force sync (ignores lock) and unlock the score
+      const result = await syncMatchScoreFromEvents(match.id, true);
       
-      let homeGoals = 0;
-      let awayGoals = 0;
-      
-      goalEvents?.forEach(goal => {
-        const metadata = goal.metadata as Record<string, any> | null;
-        const team = metadata?.team || metadata?.scoring_team;
-        const isOwnGoal = metadata?.isOwnGoal;
+      if (result) {
+        setHomeScore(result.home.toString());
+        setAwayScore(result.away.toString());
+        setScoreLocked(false);
         
-        if (isOwnGoal) {
-          // Own goal: opposite team scores
-          if (team === 'home') awayGoals++;
-          else homeGoals++;
-        } else {
-          if (team === 'home') homeGoals++;
-          else awayGoals++;
-        }
-      });
-      
-      setHomeScore(homeGoals.toString());
-      setAwayScore(awayGoals.toString());
-      
-      toast.success(`Placar sincronizado: ${homeGoals} x ${awayGoals}`);
+        queryClient.invalidateQueries({ queryKey: ['match-lock-status', match.id] });
+        queryClient.invalidateQueries({ queryKey: ['completed-matches'] });
+        queryClient.invalidateQueries({ queryKey: ['matches'] });
+        
+        toast.success(`Placar sincronizado: ${result.home} x ${result.away}`);
+      } else {
+        toast.error('Erro ao sincronizar placar');
+      }
     } catch (error) {
       console.error('Error syncing score:', error);
       toast.error('Erro ao sincronizar placar');
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleToggleScoreLock = async () => {
+    if (!match?.id) return;
+    
+    const newLockState = !scoreLocked;
+    const success = await setMatchScoreLock(match.id, newLockState);
+    
+    if (success) {
+      setScoreLocked(newLockState);
+      queryClient.invalidateQueries({ queryKey: ['match-lock-status', match.id] });
+      toast.success(newLockState ? 'Placar travado' : 'Placar destravado');
+    } else {
+      toast.error('Erro ao alterar trava do placar');
     }
   };
 
@@ -240,6 +270,21 @@ export function MatchEditDialog({
           </TabsList>
           
           <TabsContent value="score" className="space-y-6 pt-4">
+            {/* Score Lock Status */}
+            {scoreLocked && (
+              <div className="flex items-center justify-between rounded-lg border border-yellow-500/30 bg-yellow-500/10 p-3">
+                <div className="flex items-center gap-2">
+                  <Lock className="h-4 w-4 text-yellow-600" />
+                  <span className="text-sm text-yellow-700 dark:text-yellow-400">
+                    Placar editado manualmente (travado)
+                  </span>
+                </div>
+                <Badge variant="outline" className="text-yellow-600 border-yellow-500/50">
+                  Travado
+                </Badge>
+              </div>
+            )}
+
             {/* Scores */}
             <div className="flex items-center justify-center gap-6">
               <div className="space-y-2 text-center">
@@ -273,6 +318,22 @@ export function MatchEditDialog({
               </div>
             </div>
 
+            {/* Lock toggle */}
+            <div className="flex items-center justify-between rounded-lg border bg-muted/30 p-3">
+              <div className="flex items-center gap-2 text-sm">
+                {scoreLocked ? (
+                  <Lock className="h-4 w-4 text-muted-foreground" />
+                ) : (
+                  <Unlock className="h-4 w-4 text-muted-foreground" />
+                )}
+                <span>Travar placar (evitar sincronização automática)</span>
+              </div>
+              <Switch
+                checked={scoreLocked}
+                onCheckedChange={handleToggleScoreLock}
+              />
+            </div>
+
             {/* Sync from events */}
             {eventStats && eventStats.goals > 0 && (
               <div className="rounded-lg border border-primary/20 bg-primary/5 p-3">
@@ -290,6 +351,11 @@ export function MatchEditDialog({
                     Sincronizar
                   </Button>
                 </div>
+                {scoreLocked && (
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Sincronizar irá destravar o placar automaticamente
+                  </p>
+                )}
               </div>
             )}
 

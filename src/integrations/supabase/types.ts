@@ -325,6 +325,7 @@ export type Database = {
           id: string
           match_date: string | null
           organization_id: string | null
+          score_locked: boolean | null
           status: string | null
           updated_at: string
           venue: string | null
@@ -339,6 +340,7 @@ export type Database = {
           id?: string
           match_date?: string | null
           organization_id?: string | null
+          score_locked?: boolean | null
           status?: string | null
           updated_at?: string
           venue?: string | null
@@ -353,6 +355,7 @@ export type Database = {
           id?: string
           match_date?: string | null
           organization_id?: string | null
+          score_locked?: boolean | null
           status?: string | null
           updated_at?: string
           venue?: string | null
