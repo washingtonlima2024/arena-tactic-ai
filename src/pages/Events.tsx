@@ -523,10 +523,16 @@ export default function Events() {
           awayGoals++;
         } else {
           // Try to infer from description
-          if (homeTeamName && description.includes(homeTeamName.toLowerCase())) {
+          const descLower = description.toLowerCase();
+          if (homeTeamName && descLower.includes(homeTeamName.toLowerCase())) {
             homeGoals++;
-          } else if (awayTeamName && description.includes(awayTeamName.toLowerCase())) {
+          } else if (awayTeamName && descLower.includes(awayTeamName.toLowerCase())) {
             awayGoals++;
+          } else {
+            // FALLBACK: Se não conseguir identificar o time, assume gol do time da casa
+            // (narrações geralmente focam no time principal/mandante)
+            console.log(`[CalculatedScore] Goal ${idx + 1}: team unknown, defaulting to home`);
+            homeGoals++;
           }
         }
       }
