@@ -11,6 +11,8 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/apiClient';
 import { useAuth } from '@/hooks/useAuth';
 import { TeamBadge } from '@/components/teams/TeamBadge';
+import { useMatchEvents } from '@/hooks/useMatchDetails';
+import { useDynamicMatchStats } from '@/hooks/useDynamicMatchStats';
 
 interface MatchCardProps {
   match: Match;
@@ -61,6 +63,20 @@ export function MatchCard({ match }: MatchCardProps) {
     },
     enabled: match.status === 'completed' || match.status === 'analyzing' || match.status === 'analyzed',
   });
+
+  // Fetch events for dynamic score calculation
+  const { data: events = [] } = useMatchEvents(match.id);
+  
+  // Calculate dynamic score from events
+  const dynamicStats = useDynamicMatchStats(
+    events,
+    match.homeTeam.name,
+    match.awayTeam.name
+  );
+  
+  // Use dynamic score if events exist, otherwise fallback to match.score
+  const homeScore = events.length > 0 ? dynamicStats.score.home : match.score.home;
+  const awayScore = events.length > 0 ? dynamicStats.score.away : match.score.away;
 
   // Check if match came from live stream
   const { data: isFromLive } = useQuery({
@@ -174,7 +190,7 @@ export function MatchCard({ match }: MatchCardProps) {
                   <div className="flex items-center gap-2">
                     <TeamBadge team={match.homeTeam} size="sm" />
                     <span className="text-sm font-bold text-white">
-                      {match.score.home} - {match.score.away}
+                      {homeScore} - {awayScore}
                     </span>
                     <TeamBadge team={match.awayTeam} size="sm" />
                   </div>
@@ -209,7 +225,7 @@ export function MatchCard({ match }: MatchCardProps) {
                   </div>
                   <div className="flex flex-col items-center">
                     <span className="text-3xl font-bold text-foreground">
-                      {match.score.home} - {match.score.away}
+                      {homeScore} - {awayScore}
                     </span>
                     <Badge 
                       variant={match.status === 'live' ? 'destructive' : 'arena'} 
@@ -254,9 +270,9 @@ export function MatchCard({ match }: MatchCardProps) {
             <div className="flex flex-col items-center">
               {match.status === 'completed' || match.status === 'analyzing' ? (
                 <div className="group relative flex items-center gap-2 text-2xl font-bold">
-                  <span>{match.score.home}</span>
+                  <span>{homeScore}</span>
                   <span className="text-muted-foreground">-</span>
-                  <span>{match.score.away}</span>
+                  <span>{awayScore}</span>
                   {isAdmin && (
                     <Button
                       variant="ghost"
@@ -378,8 +394,8 @@ export function MatchCard({ match }: MatchCardProps) {
         } : null}
         homeTeam={match.homeTeam.name}
         awayTeam={match.awayTeam.name}
-        homeScore={match.score.home}
-        awayScore={match.score.away}
+        homeScore={homeScore}
+        awayScore={awayScore}
         showVignette={false}
         onVignetteComplete={() => setShowVignette(false)}
       />

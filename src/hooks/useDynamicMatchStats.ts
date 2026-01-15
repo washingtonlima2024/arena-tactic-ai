@@ -114,7 +114,10 @@ export function useDynamicMatchStats(
           // Normal goal
           if (teamType === 'home') homeGoals++;
           else if (teamType === 'away') awayGoals++;
-          // Unknown team goals not counted to avoid inflation
+          else {
+            // Fallback: gol sem time identificado assume home (maioria das narrações foca no mandante)
+            homeGoals++;
+          }
         }
       });
       

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -63,6 +63,7 @@ import { getEventTeam, getEventTimeMs as getEventTimeMsHelper, formatEventTime }
 import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
 import { VideoUploadCard } from '@/components/events/VideoUploadCard';
 import { apiClient, normalizeStorageUrl } from '@/lib/apiClient';
+import { useDynamicMatchStats } from '@/hooks/useDynamicMatchStats';
 
 // EventRow component for rendering individual events
 interface EventRowProps {
@@ -461,86 +462,13 @@ export default function Events() {
     approved: events.filter(e => e.approval_status === 'approved').length,
   };
 
-  // Calculate score dynamically from goal events
-  const calculatedScore = useMemo(() => {
-    const homeTeamName = selectedMatch?.home_team?.name || '';
-    const awayTeamName = selectedMatch?.away_team?.name || '';
-    
-    let homeGoals = 0;
-    let awayGoals = 0;
-    
-    const goalEvents = events.filter(e => e.event_type === 'goal');
-    console.log('[CalculatedScore] Goal events:', goalEvents.length, 'Home:', homeTeamName, 'Away:', awayTeamName);
-    
-    goalEvents.forEach((goal, idx) => {
-      const metadata = goal.metadata as Record<string, any> | null;
-      const description = (goal.description || '').toLowerCase();
-      
-      // Detect own goal from description or metadata
-      const isOwnGoal = 
-        metadata?.isOwnGoal === true ||
-        description.includes('contra') ||
-        description.includes('own goal') ||
-        description.includes('gol contra');
-      
-      // Determine which team scored
-      let team = metadata?.team || metadata?.scoring_team || '';
-      const originalTeam = team;
-      
-      // Normalize team identification
-      if (team && team !== 'home' && team !== 'away') {
-        if (homeTeamName && (
-          team.toLowerCase().includes(homeTeamName.toLowerCase().slice(0, 5)) ||
-          homeTeamName.toLowerCase().includes(team.toLowerCase().slice(0, 5))
-        )) {
-          team = 'home';
-        } else if (awayTeamName && (
-          team.toLowerCase().includes(awayTeamName.toLowerCase().slice(0, 5)) ||
-          awayTeamName.toLowerCase().includes(team.toLowerCase().slice(0, 5))
-        )) {
-          team = 'away';
-        }
-      }
-      
-      console.log(`[CalculatedScore] Goal ${idx + 1}:`, { originalTeam, normalizedTeam: team, isOwnGoal, description: goal.description });
-      
-      // Apply own goal logic
-      if (isOwnGoal) {
-        // Own goal: opposite team gets the point
-        if (team === 'home' || team === homeTeamName) {
-          awayGoals++;
-        } else if (team === 'away' || team === awayTeamName) {
-          homeGoals++;
-        } else {
-          // Can't determine team, default to home conceding
-          awayGoals++;
-        }
-      } else {
-        // Normal goal
-        if (team === 'home' || team === homeTeamName) {
-          homeGoals++;
-        } else if (team === 'away' || team === awayTeamName) {
-          awayGoals++;
-        } else {
-          // Try to infer from description
-          const descLower = description.toLowerCase();
-          if (homeTeamName && descLower.includes(homeTeamName.toLowerCase())) {
-            homeGoals++;
-          } else if (awayTeamName && descLower.includes(awayTeamName.toLowerCase())) {
-            awayGoals++;
-          } else {
-            // FALLBACK: Se não conseguir identificar o time, assume gol do time da casa
-            // (narrações geralmente focam no time principal/mandante)
-            console.log(`[CalculatedScore] Goal ${idx + 1}: team unknown, defaulting to home`);
-            homeGoals++;
-          }
-        }
-      }
-    });
-    
-    console.log('[CalculatedScore] Final:', { homeGoals, awayGoals });
-    return { home: homeGoals, away: awayGoals };
-  }, [events, selectedMatch]);
+  // Calculate score dynamically using unified hook
+  const dynamicStats = useDynamicMatchStats(
+    events,
+    selectedMatch?.home_team?.name || '',
+    selectedMatch?.away_team?.name || ''
+  );
+  const calculatedScore = dynamicStats.score;
 
   // Helper to get event time in ms from metadata
   const getEventTimeMs = (event: any): number => {
