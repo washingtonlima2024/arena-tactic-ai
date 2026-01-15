@@ -1,8 +1,19 @@
-import { useRef, useMemo, useEffect, Suspense } from 'react';
+import { useRef, useMemo, Suspense } from 'react';
 import { useLoader, useFrame, useThree } from '@react-three/fiber';
 import { Html } from '@react-three/drei';
 import { OBJLoader } from 'three/examples/jsm/loaders/OBJLoader.js';
 import * as THREE from 'three';
+import React from 'react';
+
+// Interface for uniform colors
+interface UniformColors {
+  shirt: string;
+  shorts: string;
+  socks: string;
+  skin: string;
+  hair: string;
+  boots: string;
+}
 
 interface SoccerPlayerModelProps {
   position: [number, number, number];
@@ -17,6 +28,55 @@ interface SoccerPlayerModelProps {
   isDraggable?: boolean;
   showNumber?: boolean;
   facingDirection?: 'left' | 'right' | 'up' | 'down';
+  uniformColors?: UniformColors;
+}
+
+// Default uniform colors for each team type
+const DEFAULT_UNIFORM_COLORS: Record<string, UniformColors> = {
+  home: {
+    shirt: '#1e40af',
+    shorts: '#1e3a8a',
+    socks: '#ffffff',
+    skin: '#deb887',
+    hair: '#1a1a1a',
+    boots: '#111111',
+  },
+  away: {
+    shirt: '#dc2626',
+    shorts: '#b91c1c',
+    socks: '#ffffff',
+    skin: '#deb887',
+    hair: '#1a1a1a',
+    boots: '#111111',
+  },
+  referee: {
+    shirt: '#fbbf24',
+    shorts: '#1f2937',
+    socks: '#1f2937',
+    skin: '#deb887',
+    hair: '#1a1a1a',
+    boots: '#111111',
+  },
+  linesman: {
+    shirt: '#f97316',
+    shorts: '#1f2937',
+    socks: '#1f2937',
+    skin: '#deb887',
+    hair: '#1a1a1a',
+    boots: '#111111',
+  }
+};
+
+// Function to determine color based on vertex height (Z coordinate in the OBJ)
+function getColorByVertexHeight(z: number, uniformColors: UniformColors): string {
+  // The model has Z varying from ~0 to ~140
+  // These thresholds segment the player model into body parts
+  if (z > 130) return uniformColors.hair;      // Hair (top of head)
+  if (z > 115) return uniformColors.skin;      // Face
+  if (z > 75) return uniformColors.shirt;      // Shirt (torso)
+  if (z > 50) return uniformColors.shorts;     // Shorts
+  if (z > 12) return uniformColors.socks;      // Socks/shins
+  return uniformColors.boots;                   // Boots
 }
 
 // Preload the model for better performance
@@ -38,7 +98,8 @@ function SoccerPlayerModelInner({
   onDrag,
   isDraggable = false,
   showNumber = true,
-  facingDirection = 'right'
+  facingDirection = 'right',
+  uniformColors
 }: SoccerPlayerModelProps) {
   const groupRef = useRef<THREE.Group>(null);
   const modelRef = useRef<THREE.Group>(null);
@@ -51,28 +112,67 @@ function SoccerPlayerModelInner({
   // Load OBJ model
   const obj = useLoader(OBJLoader, '/models/soccer-player.obj');
   
-  // Clone and apply team color
-  const clonedObj = useMemo(() => {
-    const clone = obj.clone();
+  // Get the uniform colors to use
+  const colors = useMemo(() => {
+    if (uniformColors) return uniformColors;
     
-    // Apply team color to all meshes
+    // Use default colors based on team, or create from teamColor
+    const defaults = DEFAULT_UNIFORM_COLORS[team];
+    if (defaults) return defaults;
+    
+    // Fallback: use teamColor for shirt and shorts
+    return {
+      shirt: teamColor,
+      shorts: teamColor,
+      socks: '#ffffff',
+      skin: '#deb887',
+      hair: '#1a1a1a',
+      boots: '#111111',
+    };
+  }, [uniformColors, team, teamColor]);
+  
+  // Clone and apply uniform colors based on vertex height
+  const clonedObj = useMemo(() => {
+    const clone = obj.clone(true);
+    
     clone.traverse((child) => {
       if (child instanceof THREE.Mesh) {
-        // Create new material with team color
+        // Clone the geometry to avoid modifying the original
+        const geometry = child.geometry.clone();
+        child.geometry = geometry;
+        
+        const positions = geometry.attributes.position;
+        const vertexColors = new Float32Array(positions.count * 3);
+        
+        // Apply colors based on vertex height (Z in OBJ corresponds to height)
+        for (let i = 0; i < positions.count; i++) {
+          const z = positions.getZ(i);
+          const partColor = getColorByVertexHeight(z, colors);
+          const color = new THREE.Color(partColor);
+          
+          vertexColors[i * 3] = color.r;
+          vertexColors[i * 3 + 1] = color.g;
+          vertexColors[i * 3 + 2] = color.b;
+        }
+        
+        geometry.setAttribute('color', new THREE.BufferAttribute(vertexColors, 3));
+        
+        // Create material with vertex colors
         child.material = new THREE.MeshStandardMaterial({
-          color: teamColor,
-          roughness: 0.6,
-          metalness: 0.2,
-          emissive: teamColor,
-          emissiveIntensity: hovered || isDragging ? 0.4 : 0.15,
+          vertexColors: true,
+          roughness: 0.5,
+          metalness: 0.1,
+          emissive: new THREE.Color(colors.shirt),
+          emissiveIntensity: hovered || isDragging ? 0.3 : 0.08,
         });
+        
         child.castShadow = true;
         child.receiveShadow = true;
       }
     });
     
     return clone;
-  }, [obj, teamColor, hovered, isDragging]);
+  }, [obj, colors, hovered, isDragging]);
   
   // Animation
   useFrame((state) => {
@@ -131,8 +231,6 @@ function SoccerPlayerModelInner({
     onDrag([clampedX, 0, clampedZ]);
   }, [isDragging, onDrag, camera, raycaster, plane, intersection, gl]);
 
-  const emissiveIntensity = hovered || isDragging ? 0.5 : 0.15;
-
   return (
     <group 
       ref={groupRef} 
@@ -169,7 +267,7 @@ function SoccerPlayerModelInner({
       <pointLight 
         intensity={hovered ? 0.6 : 0.3} 
         distance={2} 
-        color={teamColor}
+        color={colors.shirt}
         position={[0, 0.3, 0]}
       />
       
@@ -199,13 +297,13 @@ function SoccerPlayerModelInner({
             color: '#ffffff',
             fontSize: '11px',
             fontWeight: 'bold',
-            textShadow: `0 0 4px ${teamColor}, 0 0 8px ${teamColor}`,
+            textShadow: `0 0 4px ${colors.shirt}, 0 0 8px ${colors.shirt}`,
             pointerEvents: 'none',
             userSelect: 'none',
             backgroundColor: 'rgba(0,0,0,0.5)',
             padding: '2px 6px',
             borderRadius: '4px',
-            border: `1px solid ${teamColor}`,
+            border: `1px solid ${colors.shirt}`,
           }}
         >
           #{number}
@@ -247,6 +345,14 @@ function PlayerFallback({
   team: 'home' | 'away' | 'referee' | 'linesman';
 }) {
   const groupRef = useRef<THREE.Group>(null);
+  const colors = DEFAULT_UNIFORM_COLORS[team] || {
+    shirt: teamColor,
+    shorts: teamColor,
+    socks: '#ffffff',
+    skin: '#deb887',
+    hair: '#1a1a1a',
+    boots: '#111111',
+  };
   
   useFrame((state) => {
     if (groupRef.current) {
@@ -263,32 +369,56 @@ function PlayerFallback({
         <meshBasicMaterial color="#000000" transparent opacity={0.3} />
       </mesh>
       
-      {/* Simple capsule body */}
+      {/* Boots */}
+      <mesh position={[0, 0.03, 0]}>
+        <boxGeometry args={[0.12, 0.06, 0.08]} />
+        <meshStandardMaterial color={colors.boots} />
+      </mesh>
+      
+      {/* Socks/Legs */}
+      <mesh position={[0, 0.12, 0]}>
+        <capsuleGeometry args={[0.04, 0.12, 8, 16]} />
+        <meshStandardMaterial color={colors.socks} />
+      </mesh>
+      
+      {/* Shorts */}
       <mesh position={[0, 0.25, 0]}>
-        <capsuleGeometry args={[0.08, 0.3, 8, 16]} />
+        <capsuleGeometry args={[0.06, 0.08, 8, 16]} />
+        <meshStandardMaterial color={colors.shorts} />
+      </mesh>
+      
+      {/* Shirt/Body */}
+      <mesh position={[0, 0.4, 0]}>
+        <capsuleGeometry args={[0.07, 0.15, 8, 16]} />
         <meshStandardMaterial 
-          color={teamColor}
-          emissive={teamColor}
-          emissiveIntensity={0.3}
+          color={colors.shirt}
+          emissive={colors.shirt}
+          emissiveIntensity={0.2}
         />
       </mesh>
       
       {/* Head */}
-      <mesh position={[0, 0.55, 0]}>
-        <sphereGeometry args={[0.08, 12, 12]} />
-        <meshStandardMaterial color="#f5d0c5" />
+      <mesh position={[0, 0.58, 0]}>
+        <sphereGeometry args={[0.06, 12, 12]} />
+        <meshStandardMaterial color={colors.skin} />
+      </mesh>
+      
+      {/* Hair */}
+      <mesh position={[0, 0.63, 0]}>
+        <sphereGeometry args={[0.055, 12, 12]} />
+        <meshStandardMaterial color={colors.hair} />
       </mesh>
       
       {/* Number */}
       {number && (
         <Html
-          position={[0, 0.7, 0]}
+          position={[0, 0.75, 0]}
           center
           style={{
             color: '#ffffff',
             fontSize: '10px',
             fontWeight: 'bold',
-            textShadow: `0 0 4px ${teamColor}`,
+            textShadow: `0 0 4px ${colors.shirt}`,
             pointerEvents: 'none',
           }}
         >
@@ -300,8 +430,6 @@ function PlayerFallback({
 }
 
 // Main exported component with Suspense
-import React from 'react';
-
 export function SoccerPlayerModel(props: SoccerPlayerModelProps) {
   return (
     <Suspense fallback={
