@@ -2410,6 +2410,144 @@ def delete_video(video_id: str):
 
 
 # ============================================================================
+# CLIP REGENERATION ENDPOINT
+# ============================================================================
+
+@app.route('/api/matches/<match_id>/regenerate-clips', methods=['POST'])
+def regenerate_clips(match_id: str):
+    """
+    Regenera clips de todos os eventos de uma partida.
+    Útil para corrigir partidas que tiveram problemas com segment_start_minute.
+    """
+    session = get_session()
+    try:
+        # 1. Buscar partida
+        match = session.query(Match).filter_by(id=match_id).first()
+        if not match:
+            return jsonify({'error': 'Partida não encontrada'}), 404
+        
+        # 2. Buscar times
+        home_team = session.query(Team).filter_by(id=match.home_team_id).first()
+        away_team = session.query(Team).filter_by(id=match.away_team_id).first()
+        home_team_name = home_team.name if home_team else 'Time A'
+        away_team_name = away_team.name if away_team else 'Time B'
+        
+        # 3. Buscar eventos
+        events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+        if not events:
+            return jsonify({'error': 'Nenhum evento encontrado', 'clips_generated': 0}), 404
+        
+        # 4. Buscar vídeos
+        videos = session.query(Video).filter_by(match_id=match_id).all()
+        if not videos:
+            return jsonify({'error': 'Nenhum vídeo encontrado', 'clips_generated': 0}), 404
+        
+        # Mapear vídeos por tipo
+        video_paths = {}
+        for video in videos:
+            video_type = video.video_type or 'full'
+            # Resolver caminho local
+            file_url = video.file_url or ''
+            if '/api/storage/' in file_url:
+                parts = file_url.split('/api/storage/')[-1].split('/')
+                if len(parts) >= 2:
+                    local_path = get_file_path(parts[0], parts[1] if len(parts) > 2 else '', parts[-1])
+                    if os.path.exists(local_path):
+                        video_paths[video_type] = local_path
+            elif os.path.exists(file_url):
+                video_paths[video_type] = file_url
+        
+        print(f"[REGENERATE-CLIPS] Partida {match_id}: {len(events)} eventos, {len(video_paths)} vídeos disponíveis")
+        print(f"[REGENERATE-CLIPS] Vídeos: {list(video_paths.keys())}")
+        
+        # 5. Separar eventos por tempo
+        first_half_events = [e.to_dict() for e in events if (e.match_half == 'first_half' or (e.minute or 0) < 45)]
+        second_half_events = [e.to_dict() for e in events if (e.match_half == 'second_half' or (e.minute or 0) >= 45)]
+        
+        total_clips = 0
+        results = {'first_half': 0, 'second_half': 0, 'errors': []}
+        
+        # 6. Processar primeiro tempo
+        first_video = video_paths.get('first_half') or video_paths.get('full')
+        if first_half_events and first_video and os.path.exists(first_video):
+            try:
+                clips = extract_event_clips_auto(
+                    match_id=match_id,
+                    video_path=first_video,
+                    events=first_half_events,
+                    half_type='first',
+                    home_team=home_team_name,
+                    away_team=away_team_name,
+                    segment_start_minute=0
+                )
+                results['first_half'] = len(clips)
+                total_clips += len(clips)
+                print(f"[REGENERATE-CLIPS] ✓ 1º tempo: {len(clips)} clips")
+                
+                # Atualizar eventos com clip URLs
+                for clip in clips:
+                    for event in events:
+                        if event.minute == clip.get('event_minute') and event.event_type == clip.get('event_type'):
+                            event.clip_url = clip.get('url')
+                            event.clip_pending = False
+                            break
+            except Exception as e:
+                results['errors'].append(f"1º tempo: {str(e)}")
+                print(f"[REGENERATE-CLIPS] ⚠ Erro 1º tempo: {e}")
+        
+        # 7. Processar segundo tempo
+        second_video = video_paths.get('second_half') or video_paths.get('full')
+        if second_half_events and second_video and os.path.exists(second_video):
+            try:
+                # ✅ CRUCIAL: passar segment_start_minute=45 para o segundo tempo
+                segment_start = 45 if video_paths.get('second_half') else 0
+                clips = extract_event_clips_auto(
+                    match_id=match_id,
+                    video_path=second_video,
+                    events=second_half_events,
+                    half_type='second',
+                    home_team=home_team_name,
+                    away_team=away_team_name,
+                    segment_start_minute=segment_start
+                )
+                results['second_half'] = len(clips)
+                total_clips += len(clips)
+                print(f"[REGENERATE-CLIPS] ✓ 2º tempo: {len(clips)} clips (segment_start={segment_start})")
+                
+                # Atualizar eventos com clip URLs
+                for clip in clips:
+                    for event in events:
+                        if event.minute == clip.get('event_minute') and event.event_type == clip.get('event_type'):
+                            event.clip_url = clip.get('url')
+                            event.clip_pending = False
+                            break
+            except Exception as e:
+                results['errors'].append(f"2º tempo: {str(e)}")
+                print(f"[REGENERATE-CLIPS] ⚠ Erro 2º tempo: {e}")
+        
+        session.commit()
+        
+        return jsonify({
+            'success': True,
+            'match_id': match_id,
+            'clips_generated': total_clips,
+            'details': results,
+            'events_total': len(events),
+            'first_half_events': len(first_half_events),
+            'second_half_events': len(second_half_events)
+        })
+        
+    except Exception as e:
+        session.rollback()
+        print(f"[REGENERATE-CLIPS] ❌ Erro: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+# ============================================================================
 # ANALYSIS JOBS API
 # ============================================================================
 
@@ -3194,6 +3332,8 @@ def analyze_match():
                             print(f"[ANALYZE-MATCH] Video encontrado: {video_path}")
                             
                             # Extract clips
+                            # ✅ Passar segment_start_minute correto para o segundo tempo
+                            segment_start = 45 if half_type == 'second' else 0
                             clips = extract_event_clips_auto(
                                 match_id=match_id,
                                 video_path=video_path,
@@ -3201,7 +3341,8 @@ def analyze_match():
                                 half_type=half_type,
                                 home_team=home_team,
                                 away_team=away_team,
-                                include_subtitles=include_subtitles
+                                include_subtitles=include_subtitles,
+                                segment_start_minute=segment_start
                             )
                             
                             clips_extracted = clips
@@ -3755,7 +3896,10 @@ def extract_event_clips_auto(
                 total_seconds = 0
             
             if video_duration > 0 and total_seconds > video_duration:
-                print(f"[CLIP] ⚠ ERRO: evento em {total_seconds}s ultrapassa vídeo de {video_duration}s, pulando")
+                print(f"[CLIP] ⚠ SKIP: evento {event_type} min {minute} em {total_seconds}s ultrapassa vídeo de {video_duration:.1f}s")
+                print(f"[CLIP] ⚠ DEBUG: segment_start_minute={segment_start_minute}, video_duration={video_duration:.1f}s, video_minute={video_minute}")
+                if segment_start_minute == 0 and minute >= 45:
+                    print(f"[CLIP] ⚠ DICA: Este parece ser um evento do 2º tempo mas segment_start_minute=0! Corrija o pipeline.")
                 continue
             
             start_seconds = max(0, total_seconds - actual_pre)
@@ -4363,15 +4507,18 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
                         clip_video_path = local_video_path or video_path
                         
                         if os.path.exists(clip_video_path):
-                            clips = extract_event_clips_auto(
-                                match_id=match_id,
-                                video_path=clip_video_path,
-                                events=saved_events,
-                                half_type=half_type,
-                                home_team=home_team,
-                                away_team=away_team,
-                                include_subtitles=include_subtitles
-                            )
+                        # ✅ Passar segment_start_minute correto para o segundo tempo
+                        segment_start = 45 if half_type == 'second' else 0
+                        clips = extract_event_clips_auto(
+                            match_id=match_id,
+                            video_path=clip_video_path,
+                            events=saved_events,
+                            half_type=half_type,
+                            home_team=home_team,
+                            away_team=away_team,
+                            include_subtitles=include_subtitles,
+                            segment_start_minute=segment_start
+                        )
                             
                             video_result['clips'] = clips
                             all_clips.extend(clips)
@@ -6722,13 +6869,16 @@ def _process_match_pipeline(job_id: str, data: dict):
                         half_events = [e for e in events_data if e['match_half'] == f'{half_type}_half']
                         if half_events and os.path.exists(video_path):
                             try:
+                                # ✅ Passar segment_start_minute correto para o segundo tempo
+                                segment_start = 45 if half_type == 'second' else 0
                                 clips = extract_event_clips_auto(
                                     match_id=match_id,
                                     video_path=video_path if not os.path.islink(video_path) else os.readlink(video_path),
                                     events=half_events,
                                     half_type=half_type,
                                     home_team=home_team,
-                                    away_team=away_team
+                                    away_team=away_team,
+                                    segment_start_minute=segment_start
                                 )
                                 total_clips += len(clips)
                                 print(f"[ASYNC-PIPELINE] ✓ Clips {half_type}: {len(clips)}")
