@@ -510,8 +510,8 @@ LEMBRE-SE:
     // ═══════════════════════════════════════════════════════════════
     // O narrador SEMPRE reage APÓS o evento acontecer (atraso de 4-8s)
     // Aplicamos este offset para antecipar o timestamp real do lance
-    const NARRATION_DELAY_GOAL = 6; // segundos de atraso médio para gols
-    const NARRATION_DELAY_DEFAULT = 4; // segundos para outros eventos
+    const NARRATION_DELAY_GOAL = 10; // segundos de atraso médio para gols (aumentado de 6)
+    const NARRATION_DELAY_DEFAULT = 6; // segundos para outros eventos (aumentado de 4)
     
     // Insert events into database
     const eventsToInsert = (analysisResult.events || []).map(event => {
