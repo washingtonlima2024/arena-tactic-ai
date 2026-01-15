@@ -544,20 +544,20 @@ VIGNETTES_DIR.mkdir(exist_ok=True)
 #     então usamos offset negativo para capturar o momento real.
 EVENT_CLIP_CONFIG = {
     # Eventos de alta importância - contexto longo + compensação de narração
-    # 🆕 FASE 2: Buffers simétricos para centralizar evento no clip
-    # pre_buffer=25, post_buffer=25 = 50s total com gol NO CENTRO
+    # 🆕 FASE 2: Buffers simétricos para centralizar evento no clip de 30s
+    # pre_buffer=15, post_buffer=15 = 30s total com gol NO CENTRO
     # narration_offset=-8 compensa atraso maior da narração
     'goal': {
-        'pre_buffer': 25,         # 25s antes do evento
-        'post_buffer': 25,        # 25s depois do evento
-        'narration_offset': -8,   # Compensar atraso de narração (aumentado de -6 para -8)
-        'min_duration': 30,       # Duração mínima garantida
+        'pre_buffer': 15,         # 15s antes do evento = metade do clip
+        'post_buffer': 15,        # 15s depois do evento = metade do clip
+        'narration_offset': -8,   # Compensar atraso de narração
+        'min_duration': 30,       # Duração mínima garantida (30s)
         'centered': True          # Flag: evento deve ficar no centro do clip
     },
     'penalty': {
-        'pre_buffer': 22,         # Simétrico
-        'post_buffer': 22,        # Simétrico
-        'narration_offset': -5,   # Aumentado de -4 para -5
+        'pre_buffer': 15,         # Simétrico - 30s total
+        'post_buffer': 15,        # Simétrico - 30s total
+        'narration_offset': -5,   # Compensar atraso de narração
         'min_duration': 30,
         'centered': True
     },
