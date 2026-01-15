@@ -22,7 +22,8 @@ import { Loader2, Save, Trash2, CheckCircle, XCircle, Clock, Play, Plus } from '
 import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
-
+import { useQueryClient } from '@tanstack/react-query';
+import { syncMatchScoreFromEvents } from '@/lib/scoreSync';
 interface EventEditDialogProps {
   isOpen: boolean;
   onClose: () => void;
@@ -80,6 +81,7 @@ export function EventEditDialog({
   matchId
 }: EventEditDialogProps) {
   const { isAdmin, user } = useAuth();
+  const queryClient = useQueryClient();
   const [eventType, setEventType] = useState('goal');
   const [minute, setMinute] = useState('');
   const [second, setSecond] = useState('');
@@ -146,6 +148,14 @@ export function EventEditDialog({
         });
 
         toast.success('Evento criado! Clip será gerado automaticamente.');
+        
+        // Sync score after creating event
+        const syncResult = await syncMatchScoreFromEvents(targetMatchId);
+        if (syncResult?.updated) {
+          queryClient.invalidateQueries({ queryKey: ['match-details', targetMatchId] });
+          queryClient.invalidateQueries({ queryKey: ['completed-matches'] });
+          queryClient.invalidateQueries({ queryKey: ['matches'] });
+        }
       } else {
         // Update existing event - mark clip as pending for regeneration
         await apiClient.updateEvent(event!.id!, {
@@ -168,6 +178,17 @@ export function EventEditDialog({
         });
 
         toast.success('Evento atualizado! Clip será regenerado automaticamente.');
+        
+        // Sync score after updating event
+        const targetMatchId = matchId || event?.match_id;
+        if (targetMatchId) {
+          const syncResult = await syncMatchScoreFromEvents(targetMatchId);
+          if (syncResult?.updated) {
+            queryClient.invalidateQueries({ queryKey: ['match-details', targetMatchId] });
+            queryClient.invalidateQueries({ queryKey: ['completed-matches'] });
+            queryClient.invalidateQueries({ queryKey: ['matches'] });
+          }
+        }
       }
       
       onSave();
@@ -207,11 +228,24 @@ export function EventEditDialog({
     
     if (!confirm('Tem certeza que deseja excluir este evento?')) return;
     
+    const targetMatchId = matchId || event?.match_id;
+    
     setIsDeleting(true);
     try {
       await apiClient.deleteEvent(event.id);
 
       toast.success('Evento excluído!');
+      
+      // Sync score after deleting event
+      if (targetMatchId) {
+        const syncResult = await syncMatchScoreFromEvents(targetMatchId);
+        if (syncResult?.updated) {
+          queryClient.invalidateQueries({ queryKey: ['match-details', targetMatchId] });
+          queryClient.invalidateQueries({ queryKey: ['completed-matches'] });
+          queryClient.invalidateQueries({ queryKey: ['matches'] });
+        }
+      }
+      
       onSave();
       onClose();
     } catch (error) {
