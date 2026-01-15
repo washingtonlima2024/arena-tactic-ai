@@ -112,15 +112,17 @@ function SoccerPlayerModelInner({
   // Load OBJ model
   const obj = useLoader(OBJLoader, '/models/soccer-player.obj');
   
-  // Get the uniform colors to use
+  // Get the uniform colors to use - PRIORITY: uniformColors > teamColor > defaults
   const colors = useMemo(() => {
+    // If explicit uniformColors was passed, use it
     if (uniformColors) return uniformColors;
     
-    // Use default colors based on team, or create from teamColor
-    const defaults = DEFAULT_UNIFORM_COLORS[team];
-    if (defaults) return defaults;
+    // For referees and linesmen, use default colors
+    if (team === 'referee' || team === 'linesman') {
+      return DEFAULT_UNIFORM_COLORS[team];
+    }
     
-    // Fallback: use teamColor for shirt and shorts
+    // For home/away teams, use teamColor from the database
     return {
       shirt: teamColor,
       shorts: teamColor,
