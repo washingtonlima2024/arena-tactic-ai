@@ -414,7 +414,10 @@ export default function Events() {
     let homeGoals = 0;
     let awayGoals = 0;
     
-    events.filter(e => e.event_type === 'goal').forEach(goal => {
+    const goalEvents = events.filter(e => e.event_type === 'goal');
+    console.log('[CalculatedScore] Goal events:', goalEvents.length, 'Home:', homeTeamName, 'Away:', awayTeamName);
+    
+    goalEvents.forEach((goal, idx) => {
       const metadata = goal.metadata as Record<string, any> | null;
       const description = (goal.description || '').toLowerCase();
       
@@ -427,6 +430,7 @@ export default function Events() {
       
       // Determine which team scored
       let team = metadata?.team || metadata?.scoring_team || '';
+      const originalTeam = team;
       
       // Normalize team identification
       if (team && team !== 'home' && team !== 'away') {
@@ -442,6 +446,8 @@ export default function Events() {
           team = 'away';
         }
       }
+      
+      console.log(`[CalculatedScore] Goal ${idx + 1}:`, { originalTeam, normalizedTeam: team, isOwnGoal, description: goal.description });
       
       // Apply own goal logic
       if (isOwnGoal) {
@@ -471,6 +477,7 @@ export default function Events() {
       }
     });
     
+    console.log('[CalculatedScore] Final:', { homeGoals, awayGoals });
     return { home: homeGoals, away: awayGoals };
   }, [events, selectedMatch]);
 
