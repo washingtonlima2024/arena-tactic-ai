@@ -1818,10 +1818,27 @@ export default function VideoUpload() {
             });
           }
         }
-
         // Analyze second half if has transcription
+        // 🆕 DIAGNÓSTICO: Verificar se 2º tempo tem vídeo mas não tem transcrição
+        if (secondHalfSegments.length > 0 && !secondHalfTranscription) {
+          console.warn('⚠️ [DIAGNÓSTICO] Vídeo do 2º tempo existe mas SEM transcrição!');
+          console.warn('⚠️ [DIAGNÓSTICO] Segmentos 2º tempo:', secondHalfSegments.map(s => ({
+            name: s.name,
+            videoType: s.videoType,
+            half: s.half,
+            hasTranscription: !!s.transcription
+          })));
+          toast({
+            title: "⚠️ 2º Tempo sem transcrição",
+            description: "Arraste o arquivo SRT do 2º tempo para continuar. A análise do 2º tempo foi ignorada.",
+            variant: "destructive",
+          });
+        }
+        
         if (secondHalfTranscription) {
-          console.log('Iniciando análise do 2º Tempo...');
+          console.log('=== [ANÁLISE 2º TEMPO] INICIANDO ===');
+          console.log('[ANÁLISE 2º TEMPO] Transcrição tamanho:', secondHalfTranscription.length, 'chars');
+          console.log('[ANÁLISE 2º TEMPO] Preview:', secondHalfTranscription.substring(0, 200) + '...');
           setProcessingMessage('Analisando 2º tempo...');
           
           try {

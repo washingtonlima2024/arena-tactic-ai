@@ -544,8 +544,9 @@ VIGNETTES_DIR.mkdir(exist_ok=True)
 #     então usamos offset negativo para capturar o momento real.
 EVENT_CLIP_CONFIG = {
     # Eventos de alta importância - contexto longo + compensação de narração
-    'goal': {'pre_buffer': 25, 'post_buffer': 12, 'narration_offset': -4},  # 37s total - jogada completa
-    'penalty': {'pre_buffer': 18, 'post_buffer': 20, 'narration_offset': -3},  # 38s - inclui cobrança
+    # 🆕 AUMENTADO: pre_buffer 25→35s, post_buffer 12→15s, narration_offset -4→-6s
+    'goal': {'pre_buffer': 35, 'post_buffer': 15, 'narration_offset': -6},  # 50s total - jogada completa com margem
+    'penalty': {'pre_buffer': 20, 'post_buffer': 22, 'narration_offset': -4},  # 42s - inclui cobrança
     'red_card': {'pre_buffer': 15, 'post_buffer': 10, 'narration_offset': -2},  # 25s
     
     # Eventos de média importância - contexto médio
@@ -3437,6 +3438,186 @@ def analyze_match():
         })
     except Exception as e:
         print(f"[ANALYZE-MATCH] ERROR: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# VISUAL REFINEMENT ENDPOINT - Refine clip timestamps using Gemini Vision
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/matches/<match_id>/refine-clips', methods=['POST'])
+def refine_event_clips(match_id: str):
+    """
+    Refine event timestamps using visual analysis with Gemini Vision.
+    
+    This endpoint analyzes goal events visually to find the exact moment
+    the goal occurred, rather than relying on narrator timestamps which
+    typically have a 3-6 second delay.
+    
+    Request body (optional):
+    {
+        "event_types": ["goal", "penalty"],  // Types to refine (default: goal only)
+        "window_seconds": 25                  // Search window (default: 25)
+    }
+    
+    Returns:
+    {
+        "success": true,
+        "events_analyzed": 3,
+        "events_refined": 2,
+        "refinements": [
+            {
+                "event_id": "...",
+                "original_second": 125.0,
+                "refined_second": 121.5,
+                "confidence": 0.85,
+                "visual_confirmed": true
+            }
+        ]
+    }
+    """
+    try:
+        data = request.get_json() or {}
+        event_types = data.get('event_types', ['goal'])
+        window_seconds = data.get('window_seconds', 25)
+        
+        session = get_session()
+        
+        # Get events that need refinement
+        events = session.query(MatchEvent).filter(
+            MatchEvent.match_id == match_id,
+            MatchEvent.event_type.in_(event_types)
+        ).all()
+        
+        if not events:
+            return jsonify({
+                'success': True,
+                'events_analyzed': 0,
+                'events_refined': 0,
+                'message': 'No matching events found for visual refinement'
+            })
+        
+        # Get videos for this match
+        videos = session.query(Video).filter_by(match_id=match_id).all()
+        if not videos:
+            return jsonify({
+                'success': False,
+                'error': 'No videos found for this match'
+            }), 400
+        
+        # Get match info for team context
+        match = session.query(Match).filter_by(id=match_id).first()
+        home_team_name = None
+        away_team_name = None
+        if match:
+            if match.home_team_id:
+                home_team = session.query(Team).filter_by(id=match.home_team_id).first()
+                if home_team:
+                    home_team_name = home_team.name
+            if match.away_team_id:
+                away_team = session.query(Team).filter_by(id=match.away_team_id).first()
+                if away_team:
+                    away_team_name = away_team.name
+        
+        refinements = []
+        events_refined = 0
+        
+        for event in events:
+            # Find appropriate video
+            half_type = 'first' if event.match_half == 'first_half' else 'second'
+            target_video = None
+            
+            for v in videos:
+                video_type = v.video_type or 'full'
+                if half_type == 'first' and video_type in ['first_half', 'full']:
+                    target_video = v
+                    break
+                elif half_type == 'second' and video_type in ['second_half', 'full']:
+                    target_video = v
+                    break
+                elif video_type == 'full':
+                    target_video = v
+            
+            if not target_video:
+                print(f"[REFINE] No video found for event {event.id} ({half_type} half)")
+                continue
+            
+            # Resolve video path
+            video_url = target_video.file_url
+            video_path = None
+            
+            if '/api/storage/' in video_url:
+                relative_path = video_url.split('/api/storage/')[-1]
+                parts = relative_path.strip('/').split('/')
+                if len(parts) >= 3:
+                    local_match_id = parts[0]
+                    subfolder = parts[1]
+                    filename = '/'.join(parts[2:])
+                    video_path = get_file_path(local_match_id, subfolder, filename)
+            
+            if not video_path or not os.path.exists(video_path):
+                print(f"[REFINE] Video file not found: {video_url[:60]}...")
+                continue
+            
+            # Get current videoSecond from metadata
+            metadata = event.event_metadata or {}
+            original_second = metadata.get('videoSecond', 0)
+            
+            print(f"[REFINE] Analyzing event {event.id}: {event.event_type} at ~{original_second}s")
+            
+            # Perform visual analysis
+            vision_result = ai_services.detect_goal_visual_cues(
+                video_path=video_path,
+                estimated_second=original_second,
+                window_seconds=window_seconds,
+                home_team=home_team_name,
+                away_team=away_team_name
+            )
+            
+            refinement = {
+                'event_id': event.id,
+                'event_type': event.event_type,
+                'minute': event.minute,
+                'original_second': original_second,
+                'refined_second': vision_result.get('exact_second', original_second),
+                'confidence': vision_result.get('confidence', 0),
+                'visual_confirmed': vision_result.get('visual_confirmed', False),
+                'details': vision_result.get('details', '')
+            }
+            
+            # Update event if visual confirmation was successful
+            if vision_result.get('visual_confirmed') and vision_result.get('confidence', 0) >= 0.5:
+                refined_second = vision_result.get('exact_second', original_second)
+                
+                # Update metadata
+                metadata['videoSecond'] = refined_second
+                metadata['visual_verified'] = True
+                metadata['visual_confidence'] = vision_result.get('confidence')
+                metadata['visual_original_second'] = original_second
+                
+                event.event_metadata = metadata
+                events_refined += 1
+                
+                print(f"[REFINE] ✓ Event {event.id} refined: {original_second:.1f}s → {refined_second:.1f}s")
+            else:
+                print(f"[REFINE] ⚠ Event {event.id} not refined: {vision_result.get('details', 'unknown')}")
+            
+            refinements.append(refinement)
+        
+        session.commit()
+        session.close()
+        
+        return jsonify({
+            'success': True,
+            'events_analyzed': len(events),
+            'events_refined': events_refined,
+            'refinements': refinements
+        })
+        
+    except Exception as e:
+        print(f"[REFINE] Error: {e}")
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
