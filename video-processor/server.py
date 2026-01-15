@@ -6609,14 +6609,38 @@ def _process_match_pipeline(job_id: str, data: dict):
             if not first_half_text and not second_half_text:
                 raise Exception("Nenhuma transcrição foi gerada ou fornecida")
             
-            # Save transcription text files
+            # Helper to detect SRT format
+            def is_srt_format(content: str) -> bool:
+                """Detecta se o conteúdo está em formato SRT."""
+                if not content:
+                    return False
+                # SRT tem padrão: número, timestamp com -->, texto
+                return '-->' in content[:1000] and any(c.isdigit() for c in content[:50])
+            
+            # Save transcription files - BOTH SRT and TXT formats when applicable
             if first_half_text:
+                # Se é formato SRT, salvar na pasta srt com extensão correta
+                if is_srt_format(first_half_text):
+                    srt_path = get_subfolder_path(match_id, 'srt') / 'first_half.srt'
+                    with open(srt_path, 'w', encoding='utf-8') as f:
+                        f.write(first_half_text)
+                    print(f"[ASYNC-PIPELINE] ✓ SRT 1º tempo salvo: {srt_path}")
+                
+                # Também salvar como TXT para análise
                 txt_path = get_subfolder_path(match_id, 'texts') / 'first_half_transcription.txt'
                 with open(txt_path, 'w', encoding='utf-8') as f:
                     f.write(first_half_text)
                 print(f"[ASYNC-PIPELINE] ✓ Transcrição 1º tempo salva: {txt_path}")
             
             if second_half_text:
+                # Se é formato SRT, salvar na pasta srt com extensão correta
+                if is_srt_format(second_half_text):
+                    srt_path = get_subfolder_path(match_id, 'srt') / 'second_half.srt'
+                    with open(srt_path, 'w', encoding='utf-8') as f:
+                        f.write(second_half_text)
+                    print(f"[ASYNC-PIPELINE] ✓ SRT 2º tempo salvo: {srt_path}")
+                
+                # Também salvar como TXT para análise
                 txt_path = get_subfolder_path(match_id, 'texts') / 'second_half_transcription.txt'
                 with open(txt_path, 'w', encoding='utf-8') as f:
                     f.write(second_half_text)
