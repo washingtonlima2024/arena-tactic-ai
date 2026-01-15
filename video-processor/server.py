@@ -4171,13 +4171,25 @@ def extract_event_clips_auto(
                     print(f"[CLIP] ⚠ Dual detection error: {e}. Continuing with text timestamp.")
             
             # ═══════════════════════════════════════════════════════════════
-            # OFFSET DESATIVADO - Usando apenas buffer de PRE_SECONDS
+            # OFFSET DE NARRAÇÃO - Compensa o atraso do narrador
             # ═══════════════════════════════════════════════════════════════
-            # O clip já usa PRE_SECONDS (15s) antes do timestamp da narração
-            # Não aplicar offset adicional para evitar clips "saltando"
-            # O gol aparece naturalmente dentro do buffer de 15s antes
+            # O SRT marca quando o narrador FALA do gol, mas o gol acontece
+            # alguns segundos ANTES. O narration_offset (-8s para gols) ajusta
+            # o ponto central do clip para compensar esse atraso.
+            # 
+            # Exemplo: SRT marca 05:30 (narrador grita GOOOL!)
+            #   - Com offset -8: total_seconds = 330 - 8 = 322 (ponto central)
+            #   - start_seconds = 322 - 15 = 307 (começa 15s antes do gol real)
+            #   - Clip de 307s a 337s (30s) com gol no centro
             # ═══════════════════════════════════════════════════════════════
-            print(f"[CLIP DEBUG] Usando timestamp da narração SEM offset: {total_seconds}s (buffer PRE={actual_pre}s já aplicado no start)")
+            narration_offset = config.get('narration_offset', 0)
+            old_total = total_seconds
+            total_seconds = max(0, total_seconds + narration_offset)
+            
+            if narration_offset != 0:
+                print(f"[CLIP DEBUG] Aplicando narration_offset={narration_offset}s: {old_total:.1f}s → {total_seconds:.1f}s")
+            else:
+                print(f"[CLIP DEBUG] Sem offset aplicado: {total_seconds}s")
             
             # ═══════════════════════════════════════════════════════════════
             # VALIDAÇÃO DE SANIDADE DOS TIMESTAMPS
