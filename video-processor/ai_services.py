@@ -941,6 +941,421 @@ def _transcribe_with_elevenlabs(audio_path: str, match_id: str = None) -> Dict[s
         return {"error": f"ElevenLabs error: {str(e)}", "success": False}
 
 
+def call_openai_gpt5(
+    messages: List[Dict[str, str]],
+    model: str = 'gpt-5',
+    max_tokens: int = 8192
+) -> Optional[str]:
+    """
+    Call OpenAI GPT-5 directly for event detection.
+    Uses max_completion_tokens (GPT-5 requirement).
+    
+    Args:
+        messages: List of message dicts with 'role' and 'content'
+        model: GPT-5 model variant (default: gpt-5)
+        max_tokens: Maximum tokens in response
+    
+    Returns:
+        The AI response text or None on error
+    """
+    if not OPENAI_API_KEY:
+        print("[AI] ⚠ OpenAI API key not configured for GPT-5")
+        return None
+    
+    headers = {
+        'Authorization': f'Bearer {OPENAI_API_KEY}',
+        'Content-Type': 'application/json'
+    }
+    
+    payload = {
+        'model': model,
+        'messages': messages,
+        'max_completion_tokens': max_tokens,  # GPT-5 uses max_completion_tokens instead of max_tokens
+    }
+    
+    try:
+        print(f"[AI] 🧠 Chamando OpenAI {model}...")
+        response = requests.post(
+            f'{OPENAI_API_URL}/chat/completions',
+            headers=headers,
+            json=payload,
+            timeout=180
+        )
+        
+        if not response.ok:
+            print(f"[AI] OpenAI GPT-5 error: {response.status_code} - {response.text[:500]}")
+            return None
+        
+        data = response.json()
+        content = data.get('choices', [{}])[0].get('message', {}).get('content')
+        
+        if content:
+            print(f"[AI] ✓ GPT-5 retornou {len(content)} caracteres")
+        return content
+        
+    except requests.exceptions.Timeout:
+        print(f"[AI] ⚠ GPT-5 timeout após 180s")
+        return None
+    except Exception as e:
+        print(f"[AI] ⚠ GPT-5 error: {e}")
+        return None
+
+
+def detect_events_with_gpt(
+    match_id: str,
+    transcription: str,
+    home_team: str,
+    away_team: str,
+    half: str = 'first',
+    game_start_minute: int = 0,
+    game_end_minute: int = 45
+) -> Dict[str, Any]:
+    """
+    GPT-5 analyzes transcription and generates detected_events.json
+    
+    Phase 1 of the dual verification system:
+    1. GPT-5 reads the full transcription text
+    2. Extracts all match events with confidence scores
+    3. Saves raw results to json/detected_events.json
+    
+    Args:
+        match_id: The match ID
+        transcription: Full transcription text
+        home_team: Home team name
+        away_team: Away team name
+        half: 'first' or 'second'
+        game_start_minute: Start minute (0 for first half, 45 for second)
+        game_end_minute: End minute (45 for first half, 90 for second)
+    
+    Returns:
+        Dict with detected events and metadata
+    """
+    import hashlib
+    from datetime import datetime
+    from storage import get_subfolder_path
+    
+    half_desc = "1º Tempo (0-45 min)" if half == 'first' else "2º Tempo (45-90 min)"
+    
+    system_prompt = f"""Você é um analista de futebol ESPECIALISTA em extrair eventos de narrações esportivas.
+
+⚽⚽⚽ REGRA NÚMERO 1 - NUNCA PERCA UM GOL! ⚽⚽⚽
+
+PALAVRAS-CHAVE PARA GOLS (NUNCA IGNORE):
+- "GOOOL", "GOOOOL", "GOL", "GOLAÇO" → É GOL!
+- "PRA DENTRO", "ENTROU", "MANDOU PRA REDE" → É GOL!
+- "BOLA NO FUNDO DA REDE", "ESTUFOU A REDE" → É GOL!
+- "ABRE O PLACAR", "AMPLIA", "EMPATA", "VIRA O JOGO" → É GOL!
+
+GOLS CONTRA:
+- "Gol contra do {{TIME}}" → team = TIME QUE ERROU, isOwnGoal = true
+
+TIMES DA PARTIDA:
+- HOME (casa): {home_team}
+- AWAY (visitante): {away_team}
+- Período: {half_desc}
+
+Para CADA evento detectado, extraia:
+- event_type: goal, shot, save, foul, yellow_card, red_card, corner, chance, penalty, etc.
+- minute: número do minuto do timestamp [MM:SS]
+- second: número do segundo do timestamp [MM:SS] 
+- team: "home" ou "away"
+- description: descrição curta (max 60 chars)
+- is_highlight: true para eventos importantes
+- isOwnGoal: true apenas para gols contra
+- confidence: 0.0-1.0 (quão certo você está)
+- source_text: trecho EXATO da narração que menciona o evento
+
+FORMATO: Retorne APENAS um array JSON válido, sem explicações."""
+
+    user_prompt = f"""⚽ MISSÃO: ENCONTRAR TODOS OS EVENTOS DA PARTIDA ⚽
+
+PARTIDA: {home_team} vs {away_team}
+PERÍODO: {half_desc} (minutos {game_start_minute}' a {game_end_minute}')
+
+TRANSCRIÇÃO COMPLETA:
+═══════════════════════════════════════════════════════════════
+{transcription}
+═══════════════════════════════════════════════════════════════
+
+CHECKLIST OBRIGATÓRIO:
+□ Quantas vezes aparece "GOL" na transcrição? → Mesmo número de eventos de gol!
+□ Retornar pelo menos 15-30 eventos para um tempo completo
+□ Cada evento TEM que ter minute, second, team, description
+□ source_text = trecho exato da narração
+
+Retorne o array JSON com TODOS os eventos detectados:"""
+
+    print(f"[AI] 🧠 FASE 1: GPT-5 detectando eventos do {half_desc}...")
+    
+    # Try GPT-5 first
+    response = call_openai_gpt5([
+        {'role': 'system', 'content': system_prompt},
+        {'role': 'user', 'content': user_prompt}
+    ], model='gpt-5', max_tokens=8192)
+    
+    generator_model = 'openai/gpt-5'
+    
+    # Fallback to Gemini if GPT-5 fails
+    if not response:
+        print(f"[AI] ⚠ GPT-5 falhou, usando Gemini como fallback...")
+        response = call_ai([
+            {'role': 'system', 'content': system_prompt},
+            {'role': 'user', 'content': user_prompt}
+        ], model='google/gemini-2.5-flash', max_tokens=8192)
+        generator_model = 'google/gemini-2.5-flash'
+    
+    if not response:
+        print(f"[AI] ❌ Nenhuma IA conseguiu processar a transcrição")
+        return {"match_id": match_id, "events": [], "error": "AI processing failed"}
+    
+    # Parse JSON from response
+    events = []
+    try:
+        start = response.find('[')
+        end = response.rfind(']') + 1
+        if start >= 0 and end > start:
+            events = json.loads(response[start:end])
+            print(f"[AI] ✓ Parsed {len(events)} eventos do {generator_model}")
+    except json.JSONDecodeError as e:
+        print(f"[AI] ⚠ JSON parse error: {e}")
+    
+    # Build result with metadata
+    result = {
+        "match_id": match_id,
+        "generated_at": datetime.utcnow().isoformat() + "Z",
+        "generator": generator_model,
+        "transcription_hash": hashlib.md5(transcription.encode()).hexdigest()[:16],
+        "half": half,
+        "game_minutes": f"{game_start_minute}-{game_end_minute}",
+        "home_team": home_team,
+        "away_team": away_team,
+        "total_events": len(events),
+        "events": events
+    }
+    
+    # Count events by type
+    event_counts = {}
+    for e in events:
+        etype = e.get('event_type', 'unknown')
+        event_counts[etype] = event_counts.get(etype, 0) + 1
+    result["event_counts"] = event_counts
+    
+    # Save to json/detected_events.json
+    try:
+        json_path = get_subfolder_path(match_id, 'json')
+        filename = f"detected_events_{half}.json"
+        filepath = json_path / filename
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        
+        print(f"[AI] ✓ {len(events)} eventos salvos em json/{filename}")
+        result["saved_to"] = str(filepath)
+    except Exception as e:
+        print(f"[AI] ⚠ Erro ao salvar JSON: {e}")
+    
+    return result
+
+
+def validate_events_with_gemini(
+    match_id: str,
+    transcription: str,
+    detected_result: Dict[str, Any],
+    home_team: str,
+    away_team: str
+) -> Dict[str, Any]:
+    """
+    Gemini validates each event detected by GPT-5 against the original transcription.
+    
+    Phase 2 of the dual verification system:
+    1. Gemini receives detected events + original transcription
+    2. Validates each event looking for textual evidence
+    3. Saves approved events to validated_events.json
+    4. Saves rejected events to rejected_events.json for audit
+    
+    Args:
+        match_id: The match ID
+        transcription: Original transcription text
+        detected_result: Result from detect_events_with_gpt()
+        home_team: Home team name
+        away_team: Away team name
+    
+    Returns:
+        Dict with validated events and summary
+    """
+    from datetime import datetime
+    from storage import get_subfolder_path
+    
+    events_to_validate = detected_result.get('events', [])
+    half = detected_result.get('half', 'first')
+    
+    if not events_to_validate:
+        print(f"[AI] ⚠ Nenhum evento para validar")
+        return {"match_id": match_id, "events": [], "summary": {"confirmed": 0, "rejected": 0}}
+    
+    # Prepare events for validation (simplified format)
+    events_for_prompt = []
+    for i, event in enumerate(events_to_validate):
+        events_for_prompt.append({
+            "id": i,
+            "type": event.get('event_type'),
+            "minute": event.get('minute'),
+            "second": event.get('second', 0),
+            "team": event.get('team'),
+            "description": (event.get('description') or '')[:80],
+            "source_text": (event.get('source_text') or '')[:100]
+        })
+    
+    validation_prompt = f"""Você é um árbitro de vídeo (VAR) RIGOROSO revisando eventos detectados por outro sistema.
+
+TIMES DA PARTIDA:
+- HOME (casa): {home_team}
+- AWAY (visitante): {away_team}
+
+TRANSCRIÇÃO ORIGINAL:
+═══════════════════════════════════════════════════════════════
+{transcription[:15000]}
+═══════════════════════════════════════════════════════════════
+
+EVENTOS DETECTADOS PELO SISTEMA PRIMÁRIO:
+{json.dumps(events_for_prompt, ensure_ascii=False, indent=2)}
+
+SUA TAREFA:
+Para CADA evento, verifique se existe EVIDÊNCIA CLARA na transcrição:
+
+1. GOLS: Precisa ter "GOL", "GOOOOL", "ENTROU", "PRA DENTRO" etc.
+2. CARTÕES: Precisa ter "AMARELO", "VERMELHO", "CARTÃO"
+3. FALTAS: Precisa ter "FALTA", "FALTOSO"
+4. CHANCES: Precisa ter "QUASE", "PASSOU PERTO", "DEFESA"
+
+RETORNE um JSON array:
+[
+  {{"id": 0, "confirmed": true, "reason": "GOL encontrado: 'GOOOOL do Flamengo'"}},
+  {{"id": 1, "confirmed": false, "reason": "Sem evidência textual para este evento"}}
+]
+
+SEJA RIGOROSO: Na dúvida, REJEITE o evento.
+Retorne APENAS o array JSON, sem explicações."""
+
+    print(f"[AI] 🔍 FASE 2: Gemini validando {len(events_to_validate)} eventos...")
+    
+    response = call_ai([
+        {'role': 'system', 'content': 'Você é um sistema de revisão rigoroso. Confirme apenas eventos com evidência clara no texto.'},
+        {'role': 'user', 'content': validation_prompt}
+    ], model='google/gemini-2.5-flash', max_tokens=4096)
+    
+    if not response:
+        print(f"[AI] ⚠ Validação falhou, mantendo todos os eventos")
+        return {
+            "match_id": match_id, 
+            "events": events_to_validate,
+            "summary": {"confirmed": len(events_to_validate), "rejected": 0, "validation_failed": True}
+        }
+    
+    # Parse validation response
+    validations = []
+    try:
+        start = response.find('[')
+        end = response.rfind(']') + 1
+        if start >= 0 and end > start:
+            validations = json.loads(response[start:end])
+            print(f"[AI] ✓ Recebidas {len(validations)} validações do Gemini")
+    except json.JSONDecodeError as e:
+        print(f"[AI] ⚠ Erro ao parsear validações: {e}")
+        # Return all events if parsing fails
+        return {
+            "match_id": match_id,
+            "events": events_to_validate,
+            "summary": {"confirmed": len(events_to_validate), "rejected": 0, "parse_failed": True}
+        }
+    
+    # Build set of confirmed IDs
+    confirmed_ids = set()
+    validation_reasons = {}
+    for v in validations:
+        vid = v.get('id')
+        if vid is not None:
+            if v.get('confirmed', False):
+                confirmed_ids.add(vid)
+            validation_reasons[vid] = v.get('reason', '')
+    
+    # Separate confirmed and rejected events
+    confirmed_events = []
+    rejected_events = []
+    
+    for i, event in enumerate(events_to_validate):
+        event_copy = event.copy()
+        event_copy['validation_reason'] = validation_reasons.get(i, '')
+        
+        if i in confirmed_ids:
+            event_copy['validated'] = True
+            confirmed_events.append(event_copy)
+        else:
+            event_copy['validated'] = False
+            rejected_events.append(event_copy)
+            print(f"[AI] ❌ Rejeitado: {event.get('event_type')} min {event.get('minute')}' - {validation_reasons.get(i, 'sem razão')[:60]}")
+    
+    # Log confirmed goals
+    for event in confirmed_events:
+        if event.get('event_type') == 'goal':
+            is_own = event.get('isOwnGoal', False)
+            team = event.get('team', 'unknown')
+            minute = event.get('minute', 0)
+            print(f"[AI] ⚽ GOL confirmado: min {minute}' - Time: {team} - OwnGoal: {is_own}")
+    
+    print(f"[AI] ✓ Validação: {len(confirmed_events)} confirmados, {len(rejected_events)} rejeitados")
+    
+    # Build result
+    result = {
+        "match_id": match_id,
+        "validated_at": datetime.utcnow().isoformat() + "Z",
+        "validator": "google/gemini-2.5-flash",
+        "half": half,
+        "home_team": home_team,
+        "away_team": away_team,
+        "events": confirmed_events,
+        "summary": {
+            "total_detected": len(events_to_validate),
+            "confirmed": len(confirmed_events),
+            "rejected": len(rejected_events)
+        }
+    }
+    
+    # Count confirmed events by type
+    confirmed_counts = {}
+    for e in confirmed_events:
+        etype = e.get('event_type', 'unknown')
+        confirmed_counts[etype] = confirmed_counts.get(etype, 0) + 1
+    result["confirmed_counts"] = confirmed_counts
+    
+    # Save validated and rejected to JSON files
+    try:
+        json_path = get_subfolder_path(match_id, 'json')
+        
+        # Save validated events
+        validated_filename = f"validated_events_{half}.json"
+        with open(json_path / validated_filename, 'w', encoding='utf-8') as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+        print(f"[AI] ✓ Eventos validados salvos em json/{validated_filename}")
+        
+        # Save rejected events for audit
+        rejected_result = {
+            "match_id": match_id,
+            "rejected_at": datetime.utcnow().isoformat() + "Z",
+            "half": half,
+            "events": rejected_events
+        }
+        rejected_filename = f"rejected_events_{half}.json"
+        with open(json_path / rejected_filename, 'w', encoding='utf-8') as f:
+            json.dump(rejected_result, f, ensure_ascii=False, indent=2)
+        print(f"[AI] ✓ Eventos rejeitados salvos em json/{rejected_filename}")
+        
+    except Exception as e:
+        print(f"[AI] ⚠ Erro ao salvar JSONs de validação: {e}")
+    
+    return result
+
+
 def deduplicate_goal_events(events: List[Dict[str, Any]], min_interval_seconds: int = 30) -> List[Dict[str, Any]]:
     """
     Remove eventos de gol duplicados que ocorram em intervalo menor que min_interval_seconds.
@@ -1015,10 +1430,17 @@ def analyze_match_events(
     away_team: str,
     game_start_minute: int = 0,
     game_end_minute: int = 45,
-    max_retries: int = 3
+    max_retries: int = 3,
+    match_id: str = None,
+    use_dual_verification: bool = True
 ) -> List[Dict[str, Any]]:
     """
-    Analyze match transcription to extract events using advanced few-shot prompting.
+    Analyze match transcription to extract events using dual AI verification.
+    
+    NEW FLOW (Dual Verification):
+    1. PHASE 1 - Detection (GPT-5): Analyzes transcription, extracts all events
+    2. PHASE 2 - Validation (Gemini): Reviews each event for textual evidence
+    3. PHASE 3 - Deduplication: Removes duplicate goals within 30 seconds
     
     Args:
         transcription: Match transcription text
@@ -1027,6 +1449,8 @@ def analyze_match_events(
         game_start_minute: Start minute of the game segment
         game_end_minute: End minute of the game segment
         max_retries: Maximum retry attempts on failure
+        match_id: Optional match ID for saving intermediate JSON files
+        use_dual_verification: If True, uses GPT-5 + Gemini dual verification
     
     Returns:
         List of detected events with validated scores
@@ -1048,7 +1472,7 @@ def analyze_match_events(
         print(f"[AI] ❌ ERRO: {error_msg}")
         raise ValueError(error_msg)
     
-    # Log dos provedores disponíveis com detalhes das chaves
+    # Log dos provedores disponíveis
     providers = []
     print(f"[AI] DEBUG - Verificando provedores de IA:")
     print(f"  LOVABLE_API_KEY: {'✓ ' + LOVABLE_API_KEY[:10] + '...' if LOVABLE_API_KEY else '✗ não configurada'}")
@@ -1063,13 +1487,111 @@ def analyze_match_events(
     if GOOGLE_API_KEY and GEMINI_ENABLED:
         providers.append("Gemini")
     if OPENAI_API_KEY and OPENAI_ENABLED:
-        providers.append("OpenAI")
+        providers.append("OpenAI/GPT-5")
     if OLLAMA_ENABLED:
         providers.append("Ollama")
     print(f"[AI] Provedores disponíveis: {', '.join(providers) if providers else 'NENHUM!'}")
     
     half_desc = "1º Tempo (0-45 min)" if game_start_minute < 45 else "2º Tempo (45-90 min)"
     match_half = 'first' if game_start_minute < 45 else 'second'
+    
+    # ═══════════════════════════════════════════════════════════════
+    # SISTEMA DE DUPLA VERIFICAÇÃO (GPT-5 + Gemini)
+    # ═══════════════════════════════════════════════════════════════
+    if use_dual_verification and match_id and OPENAI_API_KEY:
+        print(f"\n[AI] ═══════════════════════════════════════════════════════════")
+        print(f"[AI] 🔄 SISTEMA DE DUPLA VERIFICAÇÃO ATIVADO")
+        print(f"[AI]    Fase 1: GPT-5 (detecção)")
+        print(f"[AI]    Fase 2: Gemini (validação)")
+        print(f"[AI]    Fase 3: Deduplicação")
+        print(f"[AI] ═══════════════════════════════════════════════════════════\n")
+        
+        try:
+            # ═══ FASE 1: GPT-5 detecta eventos ═══
+            detected_result = detect_events_with_gpt(
+                match_id=match_id,
+                transcription=transcription,
+                home_team=home_team,
+                away_team=away_team,
+                half=match_half,
+                game_start_minute=game_start_minute,
+                game_end_minute=game_end_minute
+            )
+            
+            if detected_result.get('error'):
+                print(f"[AI] ⚠ Detecção falhou: {detected_result.get('error')}")
+                # Fall through to legacy mode
+            else:
+                # ═══ FASE 2: Gemini valida eventos ═══
+                validated_result = validate_events_with_gemini(
+                    match_id=match_id,
+                    transcription=transcription,
+                    detected_result=detected_result,
+                    home_team=home_team,
+                    away_team=away_team
+                )
+                
+                validated_events = validated_result.get('events', [])
+                
+                # Enrich events with required fields for database insertion
+                VALID_EVENT_TYPES = [
+                    'goal', 'shot', 'save', 'foul', 'yellow_card', 'red_card',
+                    'corner', 'offside', 'substitution', 'chance', 'penalty',
+                    'free_kick', 'throw_in', 'kick_off', 'half_time', 'full_time',
+                    'var', 'injury', 'assist', 'cross', 'tackle', 'interception',
+                    'clearance', 'duel_won', 'duel_lost', 'ball_recovery', 'ball_loss',
+                    'high_press', 'transition', 'buildup', 'shot_on_target', 'unknown'
+                ]
+                
+                enriched_events = []
+                for event in validated_events:
+                    event_type = event.get('event_type', 'unknown')
+                    if event_type not in VALID_EVENT_TYPES:
+                        event_type = 'unknown'
+                    
+                    event['event_type'] = event_type
+                    event['minute'] = max(game_start_minute, min(game_end_minute, event.get('minute', game_start_minute)))
+                    event['team'] = event.get('team', 'home')
+                    event['description'] = (event.get('description') or '')[:200]
+                    event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'yellow_card', 'red_card', 'penalty'])
+                    event['isOwnGoal'] = event.get('isOwnGoal', False)
+                    
+                    # Own goal auto-fix
+                    if event_type == 'goal':
+                        description = (event.get('description') or '').lower()
+                        own_goal_keywords = ['gol contra', 'próprio gol', 'contra o próprio', 'mandou contra', 'own goal', 'autogol']
+                        if any(term in description for term in own_goal_keywords) and not event.get('isOwnGoal'):
+                            event['isOwnGoal'] = True
+                            event['_autoFixed'] = True
+                    
+                    enriched_events.append(event)
+                
+                # ═══ FASE 3: Deduplicação ═══
+                print(f"\n[AI] 🔄 FASE 3: Deduplicação de gols...")
+                final_events = deduplicate_goal_events(enriched_events)
+                
+                # Summary
+                summary = validated_result.get('summary', {})
+                goals_count = len([e for e in final_events if e.get('event_type') == 'goal'])
+                print(f"\n[AI] ═══════════════════════════════════════════════════════════")
+                print(f"[AI] ✓ ANÁLISE COMPLETA (Dupla Verificação)")
+                print(f"[AI]   Detectados: {summary.get('total_detected', 0)} eventos")
+                print(f"[AI]   Confirmados: {summary.get('confirmed', 0)} eventos")
+                print(f"[AI]   Rejeitados: {summary.get('rejected', 0)} eventos")
+                print(f"[AI]   Gols finais: {goals_count}")
+                print(f"[AI]   Resultado: {len(final_events)} eventos finais")
+                print(f"[AI] ═══════════════════════════════════════════════════════════\n")
+                
+                return final_events
+                
+        except Exception as e:
+            print(f"[AI] ⚠ Erro na dupla verificação: {e}")
+            print(f"[AI] Fallback para modo legado...")
+    
+    # ═══════════════════════════════════════════════════════════════
+    # MODO LEGADO (Single AI - Gemini)
+    # ═══════════════════════════════════════════════════════════════
+    print(f"[AI] Usando modo legado (Gemini único)")
     
     # System prompt SYNCHRONIZED with Edge Function (analyze-match/index.ts)
     system_prompt = f"""Você é um NARRADOR VETERANO de futebol brasileiro com 30 anos de experiência.
@@ -1094,81 +1616,9 @@ PALAVRAS-CHAVE PARA GOLS (NUNCA IGNORE):
 ⚠️ ATENÇÃO ESPECIAL: GOLS CONTRA (MUITO IMPORTANTE!)
 ═══════════════════════════════════════════════════════════════
 
-COMO IDENTIFICAR GOL CONTRA NA NARRAÇÃO BRASILEIRA:
-- "Gol contra do {{TIME}}" → O {{TIME}} COMETEU O ERRO
-- "Gol contra! O zagueiro do {{TIME}} falhou" → O {{TIME}} ERROU
-- "{{TIME}} fez gol contra" → O {{TIME}} COMETEU O ERRO
-- "Próprio gol de jogador do {{TIME}}" → O {{TIME}} ERROU
-- "Mandou contra", "Jogou contra", "Entrou contra" → GOL CONTRA!
-
 REGRA CRÍTICA PARA GOLS CONTRA:
 → team = TIME QUE COMETEU O ERRO (não quem se beneficiou!)
 → isOwnGoal = true (OBRIGATÓRIO!)
-→ O PLACAR VAI PARA O ADVERSÁRIO!
-
-EXEMPLO ESPECÍFICO - Partida: {home_team} vs {away_team}
-
-CASO A - "Gol contra do {home_team}":
-Narração: "[25:30] GOL CONTRA! Zagueiro do {home_team} cortou mal e a bola entrou!"
-→ {{"minute": 25, "second": 30, "event_type": "goal", "team": "home", "isOwnGoal": true, "description": "GOL CONTRA! Zagueiro do {home_team} falha!"}}
-→ QUEM GANHA O PONTO: {away_team} (adversário)
-
-CASO B - "Gol contra do {away_team}":
-Narração: "[38:15] Gol contra! O lateral do {away_team} mandou contra!"
-→ {{"minute": 38, "second": 15, "event_type": "goal", "team": "away", "isOwnGoal": true, "description": "GOL CONTRA! Lateral do {away_team} falha!"}}
-→ QUEM GANHA O PONTO: {home_team} (adversário)
-
-NUNCA CONFUNDA:
-❌ ERRADO: "Gol contra do {home_team}" com team: "away" 
-✅ CORRETO: "Gol contra do {home_team}" com team: "home", isOwnGoal: true
-
-═══════════════════════════════════════════════════════════════
-EXEMPLOS DE EXTRAÇÃO (FEW-SHOT LEARNING):
-═══════════════════════════════════════════════════════════════
-
-⏱️ IMPORTANTE: A transcrição tem TIMESTAMPS no formato [MM:SS]!
-→ EXTRAIA O TEMPO EXATO de cada evento em MINUTO e SEGUNDO!
-
-EXEMPLO 1 - GOL NORMAL:
-Transcrição: "[23:45] GOOOOOL do {home_team}! Atacante chuta e a bola entra!"
-→ {{"minute": 23, "second": 45, "event_type": "goal", "team": "home", "description": "GOOOOL! {home_team} marca!", "isOwnGoal": false, "is_highlight": true}}
-
-EXEMPLO 2 - GOL DO VISITANTE:
-Transcrição: "[35:12] PRA DENTRO! Gol do {away_team}! Que pintura!"
-→ {{"minute": 35, "second": 12, "event_type": "goal", "team": "away", "description": "GOLAÇO! {away_team} marca!", "isOwnGoal": false, "is_highlight": true}}
-
-EXEMPLO 3 - GOL CONTRA (ATENÇÃO!):
-Transcrição: "[40:30] Que azar! Gol contra do {home_team}! O zagueiro mandou contra!"
-→ {{"minute": 40, "second": 30, "event_type": "goal", "team": "home", "description": "GOL CONTRA! Zagueiro do {home_team} falha!", "isOwnGoal": true, "is_highlight": true}}
-→ NOTA: O ponto vai para {away_team} porque {home_team} errou!
-
-EXEMPLO 4 - CARTÃO AMARELO:
-Transcrição: "[28:55] Cartão amarelo para o lateral"
-→ {{"minute": 28, "second": 55, "event_type": "yellow_card", "team": "away", "description": "Amarelo para o lateral", "is_highlight": true}}
-
-EXEMPLO 5 - DEFESA DIFÍCIL:
-Transcrição: "[15:08] Que defesa! O goleiro salva!"
-→ {{"minute": 15, "second": 8, "event_type": "save", "team": "away", "description": "Defesa espetacular!", "is_highlight": false}}
-
-EXEMPLO 6 - CHANCE PERDIDA:
-Transcrição: "[32:22] Quase! Passou perto da trave!"
-→ {{"minute": 32, "second": 22, "event_type": "chance", "team": "home", "description": "Bola raspando a trave!", "is_highlight": true}}
-
-═══════════════════════════════════════════════════════════════
-REGRAS CRÍTICAS:
-═══════════════════════════════════════════════════════════════
-
-1. ⚽ GOLS SÃO PRIORIDADE MÁXIMA - Se tem "GOL" na narração, CRIE O EVENTO!
-2. Cada vez que o narrador menciona um gol, CONTE COMO +1 NO PLACAR
-3. GOLS CONTRA: isOwnGoal=true quando marcam em seu próprio gol
-4. TIME CORRETO: Analise contexto para saber quem atacava
-5. ⏱️ TEMPO PRECISO: Extraia MINUTO e SEGUNDO do timestamp [MM:SS]!
-   - minute: número do minuto (0-90)
-   - second: número do segundo (0-59)
-6. DESCRIÇÕES: Máximo 60 caracteres, capture a EMOÇÃO!
-
-TIPOS DE EVENTOS:
-goal, shot, save, foul, yellow_card, red_card, corner, offside, substitution, chance, penalty
 
 TIMES DA PARTIDA:
 - HOME (casa): {home_team}
@@ -1179,60 +1629,17 @@ FORMATO DE SAÍDA: Retorne APENAS um array JSON válido com minute E second, sem
 
     user_prompt = f"""⚽⚽⚽ MISSÃO CRÍTICA: ENCONTRAR TODOS OS GOLS E EVENTOS! ⚽⚽⚽
 
-═══════════════════════════════════════════════════════════════
 PARTIDA: {home_team} (casa) vs {away_team} (visitante)
 PERÍODO: {half_desc} (minutos {game_start_minute}' a {game_end_minute}')
-═══════════════════════════════════════════════════════════════
 
-🎯 QUANTIDADE MÍNIMA DE EVENTOS (OBRIGATÓRIO):
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Para um tempo de 45 minutos, retorne PELO MENOS 15-30 eventos!
-Inclua TODOS os tipos mencionados pelo narrador:
-- GOLS (prioridade máxima!)
-- Cartões amarelos e vermelhos
-- Faltas importantes
-- Escanteios
-- Chances de gol, finalizações
-- Defesas do goleiro
-- Pênaltis (cobrados ou não)
-- Impedimentos
-- Substituições
-- Jogadas de destaque (dribles, passes decisivos)
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-INSTRUÇÕES (SIGA EXATAMENTE):
-
-1️⃣ PRIMEIRO: Leia TODA a transcrição abaixo
-2️⃣ SEGUNDO: PROCURE por TODAS as palavras: GOL, GOOOL, GOLAÇO, ENTROU, PRA DENTRO
-3️⃣ TERCEIRO: Para CADA gol encontrado, crie um evento com event_type: "goal"
-4️⃣ QUARTO: Identifique cartões, faltas, chances, defesas, escanteios, laterais
-5️⃣ QUINTO: Retorne o array JSON com TODOS os eventos (mínimo 15-30)
-
+TRANSCRIÇÃO COMPLETA:
 ═══════════════════════════════════════════════════════════════
-TRANSCRIÇÃO COMPLETA (LEIA COM ATENÇÃO):
-═══════════════════════════════════════════════════════════════
-
 {transcription}
-
 ═══════════════════════════════════════════════════════════════
-⚽ CHECKLIST DE VALIDAÇÃO (ANTES DE RESPONDER):
-═══════════════════════════════════════════════════════════════
-□ Quantas vezes aparece "GOL" na transcrição? → Deve haver o mesmo número de eventos de gol
-□ Retornou pelo menos 15-30 eventos para um tempo completo?
-□ Cada gol tem team: "home" ou "away" correto?
-□ Gols contra têm isOwnGoal: true?
-□ ⏱️ CADA evento tem "minute" E "second" preenchidos do timestamp [MM:SS]?
-□ Incluiu cartões, faltas, chances, defesas?
 
-LEMBRE-SE:
-- Gols de {home_team} → team: "home"
-- Gols de {away_team} → team: "away"
-- Gol contra de {home_team} → team: "home", isOwnGoal: true
-- Gol contra de {away_team} → team: "away", isOwnGoal: true
-- ⏱️ O SEGUNDO é OBRIGATÓRIO para precisão nos clips!
-
-RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL.
-═══════════════════════════════════════════════════════════════"""
+RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL."""
 
     events = []
     last_error = None
@@ -1259,7 +1666,7 @@ RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL.
                 events = json.loads(response[start:end])
                 print(f"[AI] ✓ Parsed {len(events)} events from response")
                 
-                # Valid event types - filter invalid ones like 'description'
+                # Valid event types
                 VALID_EVENT_TYPES = [
                     'goal', 'shot', 'save', 'foul', 'yellow_card', 'red_card',
                     'corner', 'offside', 'substitution', 'chance', 'penalty',
@@ -1272,10 +1679,8 @@ RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL.
                 # Validate and enrich events
                 validated_events = []
                 for event in events:
-                    # Ensure required fields
                     event_type = event.get('event_type', 'unknown')
                     
-                    # Filter invalid event types (like 'description')
                     if event_type not in VALID_EVENT_TYPES:
                         print(f"[AI] ⚠ Invalid event_type '{event_type}' - converting to 'unknown'")
                         event_type = 'unknown'
@@ -1287,48 +1692,24 @@ RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL.
                     event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'yellow_card', 'red_card', 'penalty'])
                     event['isOwnGoal'] = event.get('isOwnGoal', False)
                     
-                    # === POST-ANALYSIS VALIDATION: Own Goal Detection ===
+                    # Own goal auto-fix
                     if event_type == 'goal':
                         description = (event.get('description') or '').lower()
-                        
-                        # Detect own goal keywords in description
-                        own_goal_keywords = [
-                            'gol contra', 'próprio gol', 'contra o próprio', 
-                            'mandou contra', 'entrou contra', 'jogou contra',
-                            'own goal', 'autogol', 'contra sua'
-                        ]
-                        has_own_goal_text = any(term in description for term in own_goal_keywords)
-                        
-                        # If description mentions own goal but isOwnGoal is False, auto-fix
-                        if has_own_goal_text and not event.get('isOwnGoal', False):
-                            print(f"[AI] ⚠ AUTO-FIX: Gol contra detectado na descrição mas isOwnGoal=false!")
-                            print(f"[AI]   Descrição: {event.get('description')}")
-                            print(f"[AI]   Corrigindo para isOwnGoal=true")
+                        own_goal_keywords = ['gol contra', 'próprio gol', 'mandou contra', 'own goal', 'autogol']
+                        if any(term in description for term in own_goal_keywords) and not event.get('isOwnGoal'):
                             event['isOwnGoal'] = True
                             event['_autoFixed'] = True
                         
-                        # Log goal details for debugging
-                        is_own = event.get('isOwnGoal', False)
-                        team = event.get('team', 'unknown')
-                        minute = event.get('minute', 0)
-                        beneficiary = 'away' if team == 'home' else 'home'
-                        print(f"[AI] ⚽ GOL: Min {minute}' - Time que fez: {team} - OwnGoal: {is_own}")
-                        if is_own:
-                            print(f"[AI] ⚽ → Ponto vai para: {beneficiary} (adversário)")
+                        print(f"[AI] ⚽ GOL: Min {event.get('minute')}' - Team: {event.get('team')} - OwnGoal: {event.get('isOwnGoal')}")
                     
-                    # Skip 'unknown' events if description is empty or too short
                     if event_type == 'unknown' and len(event['description']) < 5:
-                        print(f"[AI] ⚠ Skipping empty unknown event at minute {event['minute']}")
                         continue
                     
                     validated_events.append(event)
                 
-                print(f"[AI] Validated {len(validated_events)} events (filtered {len(events) - len(validated_events)} invalid)")
+                print(f"[AI] Validated {len(validated_events)} events")
                 
-                # ═══════════════════════════════════════════════════════════════
-                # DEDUPLICAÇÃO DE GOLS: Remove gols duplicados do mesmo time
-                # que ocorram em intervalo menor que 30 segundos
-                # ═══════════════════════════════════════════════════════════════
+                # Deduplication
                 deduplicated_events = deduplicate_goal_events(validated_events)
                 
                 return deduplicated_events
@@ -1343,7 +1724,7 @@ RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL.
             print(f"[AI] Error: {e}")
         
         if attempt < max_retries - 1:
-            time.sleep(2 * (attempt + 1))  # Exponential backoff
+            time.sleep(2 * (attempt + 1))
     
     error_msg = f"Análise falhou após {max_retries} tentativas. Último erro: {last_error}"
     print(f"[AI] ❌ {error_msg}")
