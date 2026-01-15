@@ -536,53 +536,58 @@ VIGNETTES_DIR.mkdir(exist_ok=True)
 # ═══════════════════════════════════════════════════════════════════
 # CONFIGURAÇÃO DE DURAÇÃO DE CLIPS POR CATEGORIA
 # ═══════════════════════════════════════════════════════════════════
-# Tempos em segundos: pre_buffer (antes do evento) + post_buffer (depois)
+# Tempos em segundos: 
+#   - pre_buffer: segundos antes do timestamp do evento
+#   - post_buffer: segundos depois do timestamp do evento
+#   - narration_offset: compensação para atraso do narrador (negativo = antecipar)
+#     O narrador geralmente descreve o evento 2-5s APÓS ele acontecer,
+#     então usamos offset negativo para capturar o momento real.
 EVENT_CLIP_CONFIG = {
-    # Eventos de alta importância - contexto longo
-    'goal': {'pre_buffer': 20, 'post_buffer': 15},  # 35s total - jogada completa
-    'penalty': {'pre_buffer': 15, 'post_buffer': 20},  # 35s - inclui cobrança
-    'red_card': {'pre_buffer': 15, 'post_buffer': 10},  # 25s
+    # Eventos de alta importância - contexto longo + compensação de narração
+    'goal': {'pre_buffer': 25, 'post_buffer': 12, 'narration_offset': -4},  # 37s total - jogada completa
+    'penalty': {'pre_buffer': 18, 'post_buffer': 20, 'narration_offset': -3},  # 38s - inclui cobrança
+    'red_card': {'pre_buffer': 15, 'post_buffer': 10, 'narration_offset': -2},  # 25s
     
     # Eventos de média importância - contexto médio
-    'shot_on_target': {'pre_buffer': 12, 'post_buffer': 8},  # 20s
-    'shot': {'pre_buffer': 10, 'post_buffer': 8},  # 18s
-    'save': {'pre_buffer': 12, 'post_buffer': 8},  # 20s
-    'yellow_card': {'pre_buffer': 10, 'post_buffer': 8},  # 18s
-    'corner': {'pre_buffer': 8, 'post_buffer': 15},  # 23s - cruzamento + finalização
-    'free_kick': {'pre_buffer': 8, 'post_buffer': 15},  # 23s
+    'shot_on_target': {'pre_buffer': 15, 'post_buffer': 8, 'narration_offset': -3},  # 23s
+    'shot': {'pre_buffer': 12, 'post_buffer': 8, 'narration_offset': -3},  # 20s
+    'save': {'pre_buffer': 15, 'post_buffer': 6, 'narration_offset': -3},  # 21s - defesa já aconteceu
+    'yellow_card': {'pre_buffer': 12, 'post_buffer': 8, 'narration_offset': -2},  # 20s
+    'corner': {'pre_buffer': 8, 'post_buffer': 15, 'narration_offset': -1},  # 23s - cruzamento + finalização
+    'free_kick': {'pre_buffer': 8, 'post_buffer': 15, 'narration_offset': -1},  # 23s
     
     # Eventos de menor duração - contexto curto
-    'foul': {'pre_buffer': 8, 'post_buffer': 5},  # 13s
-    'offside': {'pre_buffer': 8, 'post_buffer': 5},  # 13s
-    'substitution': {'pre_buffer': 5, 'post_buffer': 5},  # 10s
-    'clearance': {'pre_buffer': 6, 'post_buffer': 4},  # 10s
-    'tackle': {'pre_buffer': 6, 'post_buffer': 4},  # 10s
-    'interception': {'pre_buffer': 6, 'post_buffer': 4},  # 10s
-    'pass': {'pre_buffer': 5, 'post_buffer': 5},  # 10s
-    'cross': {'pre_buffer': 6, 'post_buffer': 6},  # 12s
+    'foul': {'pre_buffer': 10, 'post_buffer': 5, 'narration_offset': -2},  # 15s
+    'offside': {'pre_buffer': 10, 'post_buffer': 5, 'narration_offset': -2},  # 15s
+    'substitution': {'pre_buffer': 5, 'post_buffer': 5, 'narration_offset': 0},  # 10s - sem atraso
+    'clearance': {'pre_buffer': 8, 'post_buffer': 4, 'narration_offset': -2},  # 12s
+    'tackle': {'pre_buffer': 8, 'post_buffer': 4, 'narration_offset': -2},  # 12s
+    'interception': {'pre_buffer': 8, 'post_buffer': 4, 'narration_offset': -2},  # 12s
+    'pass': {'pre_buffer': 6, 'post_buffer': 5, 'narration_offset': -1},  # 11s
+    'cross': {'pre_buffer': 8, 'post_buffer': 6, 'narration_offset': -2},  # 14s
     
     # Eventos táticos
-    'high_press': {'pre_buffer': 10, 'post_buffer': 10},  # 20s
-    'transition': {'pre_buffer': 8, 'post_buffer': 12},  # 20s
-    'buildup': {'pre_buffer': 10, 'post_buffer': 10},  # 20s
+    'high_press': {'pre_buffer': 10, 'post_buffer': 10, 'narration_offset': -2},  # 20s
+    'transition': {'pre_buffer': 10, 'post_buffer': 12, 'narration_offset': -2},  # 22s
+    'buildup': {'pre_buffer': 10, 'post_buffer': 10, 'narration_offset': -2},  # 20s
     
     # Padrão para eventos não mapeados
-    'default': {'pre_buffer': 15, 'post_buffer': 15}  # 30s
+    'default': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': -2}  # 30s
 }
 
 
 def get_event_clip_timings(event_type: str) -> tuple:
     """
-    Retorna (pre_buffer, post_buffer) para o tipo de evento.
+    Retorna (pre_buffer, post_buffer, narration_offset) para o tipo de evento.
     
     Args:
         event_type: Tipo do evento (goal, shot, foul, etc.)
     
     Returns:
-        Tuple com (segundos_antes, segundos_depois)
+        Tuple com (segundos_antes, segundos_depois, offset_narracao)
     """
     config = EVENT_CLIP_CONFIG.get(event_type, EVENT_CLIP_CONFIG['default'])
-    return config['pre_buffer'], config['post_buffer']
+    return config['pre_buffer'], config['post_buffer'], config.get('narration_offset', 0)
 
 
 def get_event_clip_config_all():
@@ -3857,12 +3862,14 @@ def extract_event_clips_auto(
             description = event.get('description', '')
             
             # Determinar buffers: prioridade para override > categoria > padrão
+            # Incluir narration_offset para compensar atraso do narrador
+            narration_offset = 0
             if pre_buffer is not None and post_buffer is not None:
                 actual_pre = pre_buffer
                 actual_post = post_buffer
             elif use_category_timings:
-                actual_pre, actual_post = get_event_clip_timings(event_type)
-                print(f"[CLIP] Using category timing for {event_type}: {actual_pre}s before, {actual_post}s after ({actual_pre + actual_post}s total)")
+                actual_pre, actual_post, narration_offset = get_event_clip_timings(event_type)
+                print(f"[CLIP] Using category timing for {event_type}: {actual_pre}s before, {actual_post}s after, offset={narration_offset}s ({actual_pre + actual_post}s total)")
             else:
                 actual_pre, actual_post = 15.0, 15.0  # Padrão 30s
             
@@ -3889,6 +3896,16 @@ def extract_event_clips_auto(
                 print(f"[CLIP DEBUG] Calculated from minute/second: video_minute={video_minute}, total_seconds={total_seconds}s")
             
             # ═══════════════════════════════════════════════════════════════
+            # APLICAR OFFSET DE NARRAÇÃO
+            # ═══════════════════════════════════════════════════════════════
+            # O narrador geralmente descreve o evento 2-5s APÓS ele acontecer.
+            # Aplicamos um offset negativo para antecipar e capturar o momento real.
+            if narration_offset != 0:
+                original_seconds = total_seconds
+                total_seconds = total_seconds + narration_offset
+                print(f"[CLIP DEBUG] Aplicando narration_offset={narration_offset}s: {original_seconds}s → {total_seconds}s")
+            
+            # ═══════════════════════════════════════════════════════════════
             # VALIDAÇÃO DE SANIDADE DOS TIMESTAMPS
             # ═══════════════════════════════════════════════════════════════
             if total_seconds < 0:
@@ -3903,7 +3920,7 @@ def extract_event_clips_auto(
                 continue
             
             start_seconds = max(0, total_seconds - actual_pre)
-            print(f"[CLIP DEBUG] start_seconds (com buffer -{actual_pre}s): {start_seconds}s, duration: {duration}s")
+            print(f"[CLIP DEBUG] start_seconds (com buffer -{actual_pre}s + offset): {start_seconds}s, duration: {duration}s")
             
             # Validate: skip if start time is beyond video duration
             if video_duration > 0 and start_seconds >= video_duration:
