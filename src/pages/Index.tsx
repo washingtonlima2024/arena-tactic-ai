@@ -36,6 +36,7 @@ import { useGoalPlayAnalysis } from '@/hooks/useGoalPlayAnalysis';
 import { apiClient } from '@/lib/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
+import { useDynamicMatchStats, calculateScoreFromEvents } from '@/hooks/useDynamicMatchStats';
 
 export default function Dashboard() {
   // Use centralized match selection hook
@@ -48,6 +49,13 @@ export default function Dashboard() {
   
   // Get events for the selected match
   const { data: matchEvents = [] } = useMatchEvents(currentMatchId);
+  
+  // Dynamic stats calculated from events
+  const dynamicStats = useDynamicMatchStats(
+    matchEvents,
+    selectedMatch?.home_team?.name || '',
+    selectedMatch?.away_team?.name || ''
+  );
   
   // Video player state
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
@@ -565,7 +573,7 @@ export default function Dashboard() {
                     <CardTitle>Últimos Eventos</CardTitle>
                     {selectedMatch && (
                       <Badge variant="arena">
-                        {selectedMatch.home_team?.short_name || 'CAS'} {selectedMatch.home_score}-{selectedMatch.away_score} {selectedMatch.away_team?.short_name || 'VIS'}
+                        {selectedMatch.home_team?.short_name || 'CAS'} {dynamicStats.score.home}-{dynamicStats.score.away} {selectedMatch.away_team?.short_name || 'VIS'}
                       </Badge>
                     )}
                   </div>

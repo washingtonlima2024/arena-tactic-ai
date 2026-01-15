@@ -29,6 +29,7 @@ import {
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { useState, useRef } from 'react';
+import { useDynamicMatchStats } from '@/hooks/useDynamicMatchStats';
 import {
   Select,
   SelectContent,
@@ -103,6 +104,12 @@ export default function Media() {
   
   const { data: events, refetch: refetchEvents } = useMatchEvents(matchId);
   
+  // Dynamic stats calculated from events
+  const dynamicStats = useDynamicMatchStats(
+    events || [],
+    selectedMatch?.home_team?.name || '',
+    selectedMatch?.away_team?.name || ''
+  );
   // Fetch videos for the match using local API
   const { data: matchVideos, refetch: refetchVideos } = useQuery({
     queryKey: ['match-videos', matchId],
@@ -392,11 +399,11 @@ export default function Media() {
                     </div>
                   </div>
                   
-                  {/* Score */}
+                  {/* Score - Dynamic from events */}
                   <div className="flex items-center gap-2">
-                    <span className="text-2xl font-bold">{selectedMatch.home_score || 0}</span>
+                    <span className="text-2xl font-bold text-primary">{dynamicStats.score.home}</span>
                     <span className="text-muted-foreground text-lg">x</span>
-                    <span className="text-2xl font-bold">{selectedMatch.away_score || 0}</span>
+                    <span className="text-2xl font-bold text-primary">{dynamicStats.score.away}</span>
                   </div>
                   
                   {/* Away Team */}

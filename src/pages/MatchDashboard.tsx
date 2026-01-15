@@ -47,6 +47,7 @@ import { useMatchEvents, useMatchDetails, useMatchAnalysis } from "@/hooks/useMa
 import { useMatchSelection } from "@/hooks/useMatchSelection";
 import { supabase } from "@/integrations/supabase/client";
 import { apiClient } from "@/lib/apiClient";
+import { useDynamicMatchStats } from "@/hooks/useDynamicMatchStats";
 
 // Goal Validation Types
 interface GoalValidation {
@@ -997,8 +998,11 @@ export default function MatchDashboard() {
 
   const homeTeamName = matchDetails?.home_team?.name || 'Time Casa';
   const awayTeamName = matchDetails?.away_team?.name || 'Time Visitante';
-  const homeScore = matchDetails?.home_score || 0;
-  const awayScore = matchDetails?.away_score || 0;
+  
+  // Calculate score dynamically from events
+  const dynamicStats = useDynamicMatchStats(events, homeTeamName, awayTeamName);
+  const homeScore = dynamicStats.score.home;
+  const awayScore = dynamicStats.score.away;
 
   return (
     <AppLayout key={currentMatchId}>
