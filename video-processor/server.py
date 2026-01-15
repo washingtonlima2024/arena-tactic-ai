@@ -4173,11 +4173,11 @@ def extract_event_clips_auto(
             # ═══════════════════════════════════════════════════════════════
             # APLICAR OFFSET DE NARRAÇÃO (FALLBACK)
             # ═══════════════════════════════════════════════════════════════
-            # O narrador geralmente descreve o evento 5-10s APÓS ele acontecer.
-            # Aplicamos um offset negativo MAIOR para antecipar e capturar o momento real.
-            # NOTA: Se dual detection foi usada, offset já foi considerado pela visão
-            FALLBACK_OFFSET_GOAL = -14  # Aumentado de -10 para -14 segundos
-            FALLBACK_OFFSET_DEFAULT = -8  # Fallback para outros eventos (aumentado de -6)
+            # OFFSET ÚNICO - Aplicado apenas aqui (Edge Function usa 0)
+            # O narrador reage 5-10s APÓS o gol, então recuamos no tempo
+            # ═══════════════════════════════════════════════════════════════
+            FALLBACK_OFFSET_GOAL = -8  # Gols: recuar 8s antes da narração
+            FALLBACK_OFFSET_DEFAULT = -4  # Outros eventos: recuar 4s
             
             if not metadata.get('visual_verified', False):
                 # Visão não confirmou, usar fallback agressivo
