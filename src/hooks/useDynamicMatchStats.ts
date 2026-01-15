@@ -203,6 +203,9 @@ export function calculateScoreFromEvents(
       teamType = 'home';
     } else if (awayNameLower && description.includes(awayNameLower.slice(0, 4))) {
       teamType = 'away';
+    } else {
+      // Fallback: se não identificou time, assume home (maioria das narrações foca no mandante)
+      teamType = 'home';
     }
     
     if (isOwnGoal) {
@@ -212,6 +215,7 @@ export function calculateScoreFromEvents(
     } else {
       if (teamType === 'home') homeGoals++;
       else if (teamType === 'away') awayGoals++;
+      else homeGoals++; // Default to home
     }
   });
   
