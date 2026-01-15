@@ -984,6 +984,13 @@ export default function MatchDashboard() {
     }
   };
 
+  // Calculate dynamic stats - MUST be before any conditional returns to respect Rules of Hooks
+  const homeTeamName = matchDetails?.home_team?.name || 'Time Casa';
+  const awayTeamName = matchDetails?.away_team?.name || 'Time Visitante';
+  const dynamicStats = useDynamicMatchStats(events, homeTeamName, awayTeamName);
+  const homeScore = dynamicStats.score.home;
+  const awayScore = dynamicStats.score.away;
+
   if (loadingMatches) {
     return (
       <AppLayout>
@@ -993,16 +1000,6 @@ export default function MatchDashboard() {
       </AppLayout>
     );
   }
-
-  // No need to manually set match - useMatchSelection handles it automatically
-
-  const homeTeamName = matchDetails?.home_team?.name || 'Time Casa';
-  const awayTeamName = matchDetails?.away_team?.name || 'Time Visitante';
-  
-  // Calculate score dynamically from events
-  const dynamicStats = useDynamicMatchStats(events, homeTeamName, awayTeamName);
-  const homeScore = dynamicStats.score.home;
-  const awayScore = dynamicStats.score.away;
 
   return (
     <AppLayout key={currentMatchId}>
