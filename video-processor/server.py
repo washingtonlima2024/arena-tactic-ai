@@ -4508,6 +4508,29 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
             print(f"[PIPELINE] Errors: {len(results['errors'])}")
             print(f"{'='*70}\n")
             
+            # AUTO-SYNC: Sincronizar dados para o Supabase Cloud após pipeline
+            try:
+                print(f"[PIPELINE] 🔄 Sincronizando para Cloud...")
+                sync_result = sync_match_to_supabase(match_id)
+                if sync_result.get('success'):
+                    results['cloud_sync'] = {
+                        'success': True,
+                        'events_synced': sync_result.get('events_synced', 0),
+                        'videos_synced': sync_result.get('videos_synced', 0)
+                    }
+                    print(f"[PIPELINE] ✓ Cloud sync: {sync_result.get('events_synced')} eventos sincronizados")
+                else:
+                    results['cloud_sync'] = {
+                        'success': False,
+                        'error': sync_result.get('error', 'Sync failed')
+                    }
+                    results['warnings'].append(f"Cloud sync falhou: {sync_result.get('error')}")
+                    print(f"[PIPELINE] ⚠ Cloud sync falhou: {sync_result.get('error')}")
+            except Exception as sync_error:
+                print(f"[PIPELINE] ⚠ Cloud sync erro: {str(sync_error)}")
+                results['cloud_sync'] = {'success': False, 'error': str(sync_error)}
+                results['warnings'].append(f"Cloud sync erro: {str(sync_error)}")
+            
             return jsonify(results)
             
     except Exception as e:
@@ -6711,6 +6734,17 @@ def _process_match_pipeline(job_id: str, data: dict):
                     session.commit()
             finally:
                 session.close()
+            
+            # AUTO-SYNC: Sincronizar dados para o Supabase Cloud após pipeline assíncrono
+            try:
+                print(f"[ASYNC-PIPELINE] 🔄 Sincronizando para Cloud...")
+                sync_result = sync_match_to_supabase(match_id)
+                if sync_result.get('success'):
+                    print(f"[ASYNC-PIPELINE] ✓ Cloud sync: {sync_result.get('events_synced')} eventos sincronizados")
+                else:
+                    print(f"[ASYNC-PIPELINE] ⚠ Cloud sync falhou: {sync_result.get('error')}")
+            except Exception as sync_error:
+                print(f"[ASYNC-PIPELINE] ⚠ Cloud sync erro: {str(sync_error)}")
             
     except Exception as e:
         print(f"[ASYNC-PIPELINE] ✗ ERROR: {str(e)}")
