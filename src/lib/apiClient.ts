@@ -493,6 +493,15 @@ export const apiClient = {
     message: string;
   }>(`/api/matches/${matchId}/sync-thumbnails`, { method: 'POST' }),
 
+  // Recalculate event timestamps to match video duration
+  recalculateEventTimestamps: (matchId: string) => apiRequest<{
+    success: boolean;
+    updated: number;
+    total_events: number;
+    video_duration_seconds: number;
+    message: string;
+  }>(`/api/matches/${matchId}/recalculate-timestamps`, { method: 'POST' }),
+
   // Diagnose clips - find events with missing/corrupted clips
   diagnoseClips: (matchId: string) => apiRequest<{
     summary: {

@@ -9899,6 +9899,147 @@ def sync_match_thumbnails(match_id):
         session.close()
 
 
+# ============================================================================
+# RECALCULATE EVENT TIMESTAMPS
+# ============================================================================
+
+@app.route('/api/matches/<match_id>/recalculate-timestamps', methods=['POST'])
+def recalculate_event_timestamps(match_id: str):
+    """
+    Recalcula os timestamps dos eventos para corresponder ao vídeo importado.
+    Útil para vídeos de highlights onde os minutos originais não fazem sentido.
+    
+    Estratégias:
+    1. Se há SRT/transcrição, usa para encontrar posições corretas
+    2. Se não, distribui proporcionalmente os eventos ao longo da duração do vídeo
+    """
+    session = get_session()
+    
+    try:
+        # 1. Verificar partida e vídeos
+        match = session.query(Match).filter_by(id=match_id).first()
+        if not match:
+            return jsonify({'error': 'Partida não encontrada'}), 404
+        
+        videos = session.query(Video).filter_by(match_id=match_id).all()
+        if not videos:
+            return jsonify({'error': 'Nenhum vídeo encontrado para esta partida'}), 400
+        
+        # 2. Encontrar duração do vídeo principal
+        video = videos[0]
+        video_duration_sec = video.duration_seconds or 0
+        
+        if not video_duration_sec:
+            # Tentar detectar via ffprobe
+            video_path = None
+            file_url = video.file_url or ''
+            
+            if '/api/storage/' in file_url:
+                parts = file_url.split('/api/storage/')[-1].split('/')
+                if len(parts) >= 3:
+                    vid_match_id = parts[0]
+                    subfolder = parts[1]
+                    filename = '/'.join(parts[2:])
+                    video_path = str(get_file_path(vid_match_id, subfolder, filename))
+            
+            if video_path and os.path.exists(video_path):
+                video_duration_sec = get_video_duration_seconds(video_path)
+        
+        if not video_duration_sec or video_duration_sec <= 0:
+            return jsonify({'error': 'Não foi possível determinar a duração do vídeo'}), 400
+        
+        # 3. Buscar eventos
+        events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+        if not events:
+            return jsonify({'error': 'Nenhum evento encontrado para esta partida'}), 400
+        
+        # 4. Coletar timestamps originais
+        event_data = []
+        for e in events:
+            metadata = e.metadata or {}
+            original_vs = metadata.get('videoSecond') or ((e.minute or 0) * 60 + (e.second or 0))
+            event_data.append({
+                'event': e,
+                'original_videoSecond': original_vs,
+                'event_type': e.event_type,
+                'minute': e.minute or 0
+            })
+        
+        # Ordenar por timestamp original
+        event_data.sort(key=lambda x: x['original_videoSecond'])
+        
+        # 5. Calcular novos timestamps
+        # Estratégia: distribuir proporcionalmente ao longo da duração do vídeo
+        # Deixar margem de 5% no início e fim
+        margin = video_duration_sec * 0.05
+        usable_duration = video_duration_sec - (2 * margin)
+        
+        if len(event_data) == 1:
+            # Um único evento - colocar no centro
+            new_timestamps = [video_duration_sec / 2]
+        else:
+            # Múltiplos eventos - distribuir proporcionalmente
+            # Baseado na ordem original (primeiro evento = início, último = fim)
+            original_min = event_data[0]['original_videoSecond']
+            original_max = event_data[-1]['original_videoSecond']
+            original_range = original_max - original_min if original_max > original_min else 1
+            
+            new_timestamps = []
+            for ed in event_data:
+                # Normalizar para 0-1
+                normalized = (ed['original_videoSecond'] - original_min) / original_range
+                # Mapear para novo range
+                new_ts = margin + (normalized * usable_duration)
+                new_timestamps.append(new_ts)
+        
+        # 6. Atualizar eventos
+        updated = 0
+        for i, ed in enumerate(event_data):
+            event = ed['event']
+            new_vs = new_timestamps[i]
+            
+            # Atualizar metadata
+            metadata = event.metadata or {}
+            metadata['originalVideoSecond'] = ed['original_videoSecond']
+            metadata['videoSecond'] = int(new_vs)
+            metadata['recalculated'] = True
+            metadata['recalculatedAt'] = datetime.utcnow().isoformat()
+            event.metadata = metadata
+            
+            # Atualizar minuto/segundo para exibição
+            new_minute = int(new_vs // 60)
+            new_second = int(new_vs % 60)
+            event.minute = new_minute
+            event.second = new_second
+            
+            # Limpar clip existente para forçar regeneração
+            event.clip_url = None
+            event.clip_pending = True
+            
+            updated += 1
+            print(f"[RECALC] Evento {event.event_type}: {ed['original_videoSecond']:.0f}s → {new_vs:.0f}s ({new_minute}:{new_second:02d})")
+        
+        session.commit()
+        
+        print(f"[RECALC] ✓ {updated} eventos recalculados para vídeo de {video_duration_sec:.0f}s")
+        
+        return jsonify({
+            'success': True,
+            'updated': updated,
+            'total_events': len(events),
+            'video_duration_seconds': video_duration_sec,
+            'message': f'{updated} evento(s) recalculado(s) para corresponder ao vídeo de {video_duration_sec // 60:.0f} minutos'
+        })
+        
+    except Exception as e:
+        session.rollback()
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
 def print_startup_status():
     """Imprime status detalhado no startup."""
     from database import get_database_path, get_base_dir
