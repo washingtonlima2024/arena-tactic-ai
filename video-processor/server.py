@@ -4407,7 +4407,7 @@ def extract_event_clips_auto(
             #   - start_seconds = 322 - 15 = 307 (começa 15s antes do gol real)
             #   - Clip de 307s a 337s (30s) com gol no centro
             # ═══════════════════════════════════════════════════════════════
-            narration_offset = config.get('narration_offset', 0)
+            # narration_offset já foi definido acima (linha ~4305-4316) via timing_config
             old_total = total_seconds
             total_seconds = max(0, total_seconds + narration_offset)
             
