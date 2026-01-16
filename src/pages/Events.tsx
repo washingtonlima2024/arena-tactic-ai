@@ -1078,6 +1078,46 @@ export default function Events() {
               </DropdownMenu>
             )}
 
+            {/* Regenerate Clips Button - Always visible when there are pending clips */}
+            {eventsWithoutClips > 0 && (
+              <Button 
+                variant="secondary" 
+                size="sm"
+                onClick={async () => {
+                  if (!currentMatchId) return;
+                  setIsRegeneratingClips(true);
+                  try {
+                    toast.info('Regenerando clips no servidor local...', { duration: 3000 });
+                    const result = await apiClient.regenerateClips(currentMatchId, {
+                      use_category_timings: true,
+                      force_subtitles: true
+                    });
+                    toast.success(
+                      `${result.regenerated} clips gerados com sucesso!`,
+                      { description: `Todos os clips com 30 segundos de duração` }
+                    );
+                    refetchEvents();
+                    queryClient.invalidateQueries({ queryKey: ['clips', currentMatchId] });
+                    queryClient.invalidateQueries({ queryKey: ['thumbnails', currentMatchId] });
+                  } catch (error: any) {
+                    console.error('Regenerate clips error:', error);
+                    toast.error(`Erro ao regenerar clips: ${error.message || 'Servidor local indisponível'}`);
+                  } finally {
+                    setIsRegeneratingClips(false);
+                  }
+                }}
+                disabled={isRegeneratingClips}
+                className="bg-primary/10 border-primary/30 hover:bg-primary/20"
+              >
+                {isRegeneratingClips ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Film className="mr-2 h-4 w-4" />
+                )}
+                Gerar Clips ({eventsWithoutClips})
+              </Button>
+            )}
+
             {/* Analyze Audio */}
             <TranscriptionAnalysisDialog
               matchId={currentMatchId}
@@ -1147,6 +1187,23 @@ export default function Events() {
                     </div>
                   </div>
                   <Progress value={clipProgress.progress} className="h-2" />
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Server Clip Regeneration Progress */}
+        {isRegeneratingClips && (
+          <Card variant="glass" className="border-primary/30 animate-pulse">
+            <CardContent className="py-4">
+              <div className="flex items-center gap-4">
+                <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                <div className="flex-1">
+                  <p className="text-sm font-medium">Gerando clips no servidor local...</p>
+                  <p className="text-xs text-muted-foreground">
+                    {eventsWithoutClips} eventos sendo processados com clips de 30 segundos
+                  </p>
                 </div>
               </div>
             </CardContent>
