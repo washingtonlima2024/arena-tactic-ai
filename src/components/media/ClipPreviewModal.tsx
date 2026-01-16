@@ -1203,92 +1203,91 @@ export function ClipPreviewModal({
                 size={getDeviceSize()}
                 allowRotation={selectedFormat === '9:16' || selectedFormat === '4:5'}
               >
-                <div className="relative w-full h-full bg-black overflow-hidden">
-                  {activeVideoUrl ? (
-                    <video
-                      ref={videoRef}
-                      src={activeVideoUrl}
-                      poster={clipMode === 'auto' ? posterUrl : undefined}
-                      className={cn(
-                        "absolute inset-0 w-full h-full",
-                        selectedFormat === '9:16' || selectedFormat === '4:5' 
-                          ? "object-cover" 
-                          : "object-contain"
-                      )}
-                      autoPlay={clipMode === 'auto'}
-                      loop={clipMode === 'auto'}
-                      muted={isMuted}
-                      playsInline
-                    />
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
-                      <p className="text-sm">
-                        {clipMode === 'custom' ? 'Vídeo completo não disponível' : 'Clip não disponível'}
-                      </p>
-                    </div>
-                  )}
-                  
-                  {/* Darkening Overlay */}
-                  {overlayOpacity > 0 && (
-                    <div 
-                      className="absolute inset-0 bg-black pointer-events-none z-10"
-                      style={{ opacity: overlayOpacity / 100 }}
-                    />
-                  )}
-                  
-                  {/* Logo Overlay */}
-                  {logoUrl && (
-                    <img
-                      src={logoUrl}
-                      alt="Logo"
-                      className={cn(
-                        "absolute z-20 pointer-events-none max-w-[25%] max-h-[12%] object-contain",
-                        getPositionClasses(logoPosition)
-                      )}
-                      style={{ opacity: logoOpacity / 100 }}
-                    />
-                  )}
-                  
-                  {/* Custom Texts Overlay */}
-                  {customTexts.map(text => (
-                    <div
-                      key={text.id}
-                      className={cn(
-                        "absolute z-20 pointer-events-none px-2 py-1 rounded",
-                        getPositionClasses(text.position)
-                      )}
-                      style={{
-                        color: text.color,
-                        backgroundColor: text.backgroundColor,
-                        opacity: text.opacity / 100,
-                        fontSize: text.fontSize,
-                      }}
-                    >
-                      {text.content}
-                    </div>
-                  ))}
-                  
-                  {/* Subtitles Overlay */}
-                  {showSubtitles && subtitleText && (
-                    <div 
-                      className={cn(
-                        "absolute bottom-6 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 rounded pointer-events-none max-w-[90%]",
-                        getSubtitleStyleClasses(subtitleStyle)
-                      )}
-                    >
-                      <p className="text-center text-sm font-medium">{subtitleText}</p>
-                    </div>
-                  )}
-                  
-                  {/* Format indicator overlay */}
-                  <div className="absolute top-2 left-2 right-2 flex justify-between items-start pointer-events-none z-40">
-                    <Badge 
-                      variant="arena" 
-                      className="text-xs backdrop-blur bg-primary/80"
-                    >
-                      {selectedFormat}
-                    </Badge>
+                {/* Video */}
+                {activeVideoUrl ? (
+                  <video
+                    ref={videoRef}
+                    src={activeVideoUrl}
+                    poster={clipMode === 'auto' ? posterUrl : undefined}
+                    className={cn(
+                      "absolute inset-0 w-full h-full",
+                      selectedFormat === '9:16' || selectedFormat === '4:5' 
+                        ? "object-cover" 
+                        : "object-contain"
+                    )}
+                    autoPlay={clipMode === 'auto'}
+                    loop={clipMode === 'auto'}
+                    muted={isMuted}
+                    playsInline
+                  />
+                ) : (
+                  <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+                    <p className="text-sm">
+                      {clipMode === 'custom' ? 'Vídeo completo não disponível' : 'Clip não disponível'}
+                    </p>
                   </div>
+                )}
+                
+                {/* Darkening Overlay */}
+                {overlayOpacity > 0 && (
+                  <div 
+                    className="absolute inset-0 bg-black pointer-events-none z-10"
+                    style={{ opacity: overlayOpacity / 100 }}
+                  />
+                )}
+                
+                {/* Logo Overlay */}
+                {logoUrl && (
+                  <img
+                    src={logoUrl}
+                    alt="Logo"
+                    className={cn(
+                      "absolute z-20 pointer-events-none max-w-[25%] max-h-[12%] object-contain",
+                      getPositionClasses(logoPosition)
+                    )}
+                    style={{ opacity: logoOpacity / 100 }}
+                  />
+                )}
+                
+                {/* Custom Texts Overlay */}
+                {customTexts.map(text => (
+                  <div
+                    key={text.id}
+                    className={cn(
+                      "absolute z-20 pointer-events-none px-2 py-1 rounded",
+                      getPositionClasses(text.position)
+                    )}
+                    style={{
+                      color: text.color,
+                      backgroundColor: text.backgroundColor,
+                      opacity: text.opacity / 100,
+                      fontSize: text.fontSize,
+                    }}
+                  >
+                    {text.content}
+                  </div>
+                ))}
+                
+                {/* Subtitles Overlay */}
+                {showSubtitles && subtitleText && (
+                  <div 
+                    className={cn(
+                      "absolute bottom-6 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 rounded pointer-events-none max-w-[90%]",
+                      getSubtitleStyleClasses(subtitleStyle)
+                    )}
+                  >
+                    <p className="text-center text-sm font-medium">{subtitleText}</p>
+                  </div>
+                )}
+                
+                {/* Format indicator overlay */}
+                <div className="absolute top-2 left-2 right-2 flex justify-between items-start pointer-events-none z-40">
+                  <Badge 
+                    variant="arena" 
+                    className="text-xs backdrop-blur bg-primary/80"
+                  >
+                    {selectedFormat}
+                  </Badge>
                 </div>
               </DeviceMockup>
             </div>
