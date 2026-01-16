@@ -260,7 +260,10 @@ export function ArenaChatbot() {
     // Send greeting if no messages
     if (messages.length === 0) {
       setTimeout(() => {
-        sendMessage('Olá! Me apresente a Arena Play e como você pode me ajudar.');
+        const greeting = matchContext 
+          ? `Olá! Estou vendo a partida ${matchContext.homeTeam} x ${matchContext.awayTeam}. Me dê um resumo do jogo e como posso criar conteúdo para redes sociais sobre ele.`
+          : 'Olá! Me apresente a Arena Play, suas funcionalidades e como você pode me ajudar com análises e campanhas de redes sociais.';
+        sendMessage(greeting);
       }, 500);
     }
   };
