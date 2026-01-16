@@ -3396,12 +3396,16 @@ def analyze_match():
             texts_base = get_subfolder_path(match_id, 'texts')
             
             srt_candidates = [
+                srt_base / f'{half_type}_transcription.srt',  # first_transcription.srt ✓
                 srt_base / f'{half_type}_half.srt',           # first_half.srt
                 srt_base / f'{match_half_folder}.srt',        # first_half.srt (alt)
                 srt_base / f'{half_type}.srt',                # first.srt
                 srt_base / 'full.srt',                        # full.srt (partida completa)
+                srt_base / 'full_transcription.srt',          # full_transcription.srt
                 srt_base / 'transcription.srt',               # nome genérico
                 srt_base / 'live_transcription.srt',          # transcrição ao vivo
+                srt_base / 'live-transcription.srt',          # formato alternativo live
+                texts_base / f'{half_type}_transcription.srt',# pasta texts
                 texts_base / f'{half_type}_half.srt',         # pasta texts
                 texts_base / 'transcription.srt',
             ]
