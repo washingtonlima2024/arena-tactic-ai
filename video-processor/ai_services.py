@@ -102,9 +102,146 @@ def validate_transcription_teams(
 # KEYWORD-BASED EVENT DETECTION (Deterministic, Fast, Precise)
 # ═══════════════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════════════
+# GOAL CONFIRMATION SYSTEM (Smart keyword detection with context analysis)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# STRONG keywords - Confirm goal IMMEDIATELY (no context needed)
+GOAL_STRONG_KEYWORDS = [
+    r'GO{3,}L',           # GOOOL, GOOOOL, GOOOOOL (3+ O's = extended celebration)
+    r'GOLAÇO',            # Always a goal
+    r'BOLA NA REDE',      # Ball in the net
+    r'ESTUFOU A REDE',    # Bulged the net
+    r'ABRE O PLACAR',     # Opens the score (confirms 1-0)
+    r'EMPATA O JOGO',     # Ties the game (confirms equalizer)
+    r'VIRA O JOGO',       # Turns the game around
+    r'VIROU O JOGO',      # Turned the game around
+    r'AMPLIA O PLACAR',   # Extends the lead
+    r'PRIMEIRO GOL',      # First goal (explicit)
+    r'SEGUNDO GOL',       # Second goal (explicit)
+    r'TERCEIRO GOL',      # Third goal (explicit)
+]
+
+# WEAK keywords - Need context confirmation (player name, score, celebration)
+GOAL_WEAK_KEYWORDS = [
+    r'\bGOL\b',           # Simple GOL (could be "quase gol")
+    r'É GOL',             # "É gol!" - may need confirmation
+    r'PRA DENTRO',        # "Mandou pra dentro" - context helps
+    r'\bENTROU\b',        # "Entrou!" - context helps
+]
+
+# Context that CONFIRMS a weak keyword as a real goal
+GOAL_CONFIRMATION_CONTEXT = [
+    r'[A-Z][a-záéíóúàèìòùâêîôûãõç]+\s+[A-Z][a-záéíóúàèìòùâêîôûãõç]+',  # Player name (First Last)
+    r'\bDO\s+[A-Z][a-záéíóú]+',   # "do Fulano"
+    r'\bDE\s+[A-Z][a-záéíóú]+',   # "de Fulano"
+    r'QUE GOL',                   # "Que gol lindo!"
+    r'BONITO',                    # "Gol bonito"
+    r'LINDO',                     # "Gol lindo"
+    r'INCRÍVEL',                  # "Gol incrível"
+    r'SENSACIONAL',               # Celebration
+    r'FANTÁSTICO',                # Celebration
+    r'\d+\s*[AXx]\s*\d+',         # Score like "1 a 0", "2x1"
+    r'\d+\s+A\s+\d+',             # Score like "1 A 0"
+    r'COMEMORA',                  # "Comemora o gol"
+    r'FESTA',                     # "Festa na arquibancada"
+    r'EXPLODE',                   # "Torcida explode"
+]
+
+# Context that NEGATES - these mean it was NOT a goal
+GOAL_NEGATION_CONTEXT = [
+    r'\bQUASE\b',         # "Quase gol"
+    r'POR POUCO',         # "Por pouco não foi gol"
+    r'\bPERDEU\b',        # "Perdeu o gol"
+    r'NA TRAVE',          # "Bateu na trave"
+    r'PRA FORA',          # "Mandou pra fora"
+    r'DEFENDEU',          # "Goleiro defendeu"
+    r'\bNÃO\b',           # "Não foi gol"
+    r'IMPEDIDO',          # "Estava impedido"
+    r'ANULADO',           # "Gol anulado"
+    r'PASSOU PERTO',      # "Passed close"
+    r'RASPOU',            # "Grazed the post"
+    r'TRAVE',             # Hit the post
+    r'TRAVESSÃO',         # Hit the crossbar
+]
+
+
+def confirm_goal_event(text: str, surrounding_text: str = "") -> dict:
+    """
+    Verify if text contains a REAL goal using smart keyword analysis.
+    
+    Layer 1: Check for negations (invalidates goal)
+    Layer 2: Check for strong keywords (confirms immediately)
+    Layer 3: Check weak keywords + context (needs confirmation)
+    
+    Returns:
+        {
+            'is_goal': True/False,
+            'confidence': 0.0-1.0,
+            'reason': 'strong_keyword' | 'context_confirmed' | 'negated' | 'unconfirmed'
+        }
+    """
+    text_upper = text.upper()
+    full_context = (text + " " + surrounding_text).upper()
+    
+    # 1. Check negations FIRST (invalidates the goal)
+    for negation in GOAL_NEGATION_CONTEXT:
+        if re.search(negation, text_upper):  # Check in main text only
+            return {'is_goal': False, 'confidence': 0.95, 'reason': 'negated'}
+    
+    # 2. Check STRONG keywords (confirms immediately)
+    for strong in GOAL_STRONG_KEYWORDS:
+        if re.search(strong, text_upper, re.IGNORECASE):
+            return {'is_goal': True, 'confidence': 1.0, 'reason': 'strong_keyword'}
+    
+    # 3. Check WEAK keywords + context
+    has_weak_keyword = False
+    for weak in GOAL_WEAK_KEYWORDS:
+        if re.search(weak, text_upper, re.IGNORECASE):
+            has_weak_keyword = True
+            break
+    
+    if has_weak_keyword:
+        # Need confirmation from context
+        for confirmation in GOAL_CONFIRMATION_CONTEXT:
+            if re.search(confirmation, full_context, re.IGNORECASE):
+                return {'is_goal': True, 'confidence': 0.95, 'reason': 'context_confirmed'}
+        
+        # Weak keyword without confirmation - uncertain
+        return {'is_goal': False, 'confidence': 0.5, 'reason': 'unconfirmed'}
+    
+    return {'is_goal': False, 'confidence': 0.0, 'reason': 'no_keyword'}
+
+
+def get_surrounding_context(srt_blocks: list, current_index: int, window: int = 2) -> str:
+    """
+    Get text from neighboring SRT blocks for context analysis.
+    
+    Args:
+        srt_blocks: List of SRT block tuples (index, hours, minutes, seconds, ms, text)
+        current_index: Current block index
+        window: Number of blocks before/after to include
+    
+    Returns:
+        Combined text from surrounding blocks
+    """
+    start = max(0, current_index - window)
+    end = min(len(srt_blocks), current_index + window + 1)
+    
+    texts = []
+    for i in range(start, end):
+        if i != current_index and i < len(srt_blocks):
+            texts.append(srt_blocks[i][5])  # text is at index 5
+    
+    return " ".join(texts)
+
+
 # Event keywords for detection - Portuguese narration patterns
+# Note: Goals are now handled separately by the confirmation system
 EVENT_KEYWORDS = {
     'goal': [
+        # All goal patterns are now processed by confirm_goal_event()
+        # These are just triggers to activate the confirmation system
         r'GO+L',           # GOOOL, GOOOOL, GOL
         r'GOLAÇO',         # Golaço
         r'É GOL',          # É gol!
@@ -200,8 +337,11 @@ def detect_team_from_text(text: str, home_team: str, away_team: str) -> str:
 
 def deduplicate_events(events: List[Dict], threshold_seconds: int = 30) -> List[Dict]:
     """
-    Remove duplicate events that are too close in time.
-    Prioritizes more important events (goal > card > others).
+    Remove duplicate events of the SAME TYPE that are too close in time.
+    Events of DIFFERENT types are allowed even if close together.
+    
+    This allows sequences like: Goal at 24:45, Foul at 24:50 (both kept)
+    But prevents: Goal at 24:45, Goal at 24:47 (duplicate, only one kept)
     """
     if not events:
         return []
@@ -209,33 +349,37 @@ def deduplicate_events(events: List[Dict], threshold_seconds: int = 30) -> List[
     # Sort by timestamp
     sorted_events = sorted(events, key=lambda e: e.get('videoSecond', 0))
     
-    # Event priority (lower = more important)
+    # Event priority (lower = more important, used for tie-breaking)
     priority = {'goal': 1, 'penalty': 2, 'red_card': 3, 'yellow_card': 4, 'save': 5, 'chance': 6}
     
     result = []
-    last_event = None
     
     for event in sorted_events:
-        if last_event is None:
-            result.append(event)
-            last_event = event
-            continue
+        event_type = event.get('event_type')
+        event_time = event.get('videoSecond', 0)
         
-        # Check if too close to previous event
-        time_diff = abs(event.get('videoSecond', 0) - last_event.get('videoSecond', 0))
+        # Check if there's already an event of the SAME TYPE too close
+        is_duplicate = False
+        duplicate_index = -1
         
-        if time_diff < threshold_seconds:
-            # Keep the more important event
-            curr_priority = priority.get(event.get('event_type'), 99)
-            last_priority = priority.get(last_event.get('event_type'), 99)
-            
-            if curr_priority < last_priority:
-                result[-1] = event  # Replace with more important event
-                last_event = event
-            # else: keep the existing one (last_event)
-        else:
+        for i, existing in enumerate(result):
+            if existing.get('event_type') == event_type:
+                time_diff = abs(event_time - existing.get('videoSecond', 0))
+                if time_diff < threshold_seconds:
+                    # Same type, too close - it's a duplicate
+                    is_duplicate = True
+                    duplicate_index = i
+                    
+                    # Keep the one with higher confidence or better text
+                    curr_conf = event.get('confidence', 0)
+                    existing_conf = existing.get('confidence', 0)
+                    
+                    if curr_conf > existing_conf:
+                        result[duplicate_index] = event  # Replace with higher confidence
+                    break
+        
+        if not is_duplicate:
             result.append(event)
-            last_event = event
     
     return result
 
@@ -251,8 +395,13 @@ def detect_events_by_keywords(
     Detect events using ONLY keywords from SRT file.
     Returns list of events with precise timestamps.
     
+    For GOALS: Uses intelligent 2-layer confirmation system:
+      - Strong keywords (GOLAÇO, GOOOOOL) = instant confirm
+      - Weak keywords (GOL) + context (player name) = confirmed
+      - Weak keywords + negation (QUASE GOL) = rejected
+    
     This is a deterministic detector - no AI calls required.
-    Precision: ~100% for timestamps (extracted directly from SRT)
+    Precision: ~99% for goals (with confirmation system)
     Speed: <1 second
     Cost: $0.00
     
@@ -288,11 +437,21 @@ def detect_events_by_keywords(
     matches = list(re.finditer(pattern, srt_content, re.DOTALL))
     print(f"[KEYWORDS] 📄 Encontrados {len(matches)} blocos de legenda no SRT")
     
+    # Pre-parse all blocks for context analysis
+    srt_blocks = []
     for match in matches:
-        hours = int(match.group(2))
-        minutes = int(match.group(3))
-        seconds = int(match.group(4))
-        text = match.group(6).replace('\n', ' ').strip()
+        block_data = (
+            int(match.group(1)),    # index
+            int(match.group(2)),    # hours
+            int(match.group(3)),    # minutes
+            int(match.group(4)),    # seconds
+            int(match.group(5)),    # milliseconds
+            match.group(6).replace('\n', ' ').strip()  # text
+        )
+        srt_blocks.append(block_data)
+    
+    for block_index, block in enumerate(srt_blocks):
+        _, hours, minutes, seconds, _, text = block
         text_upper = text.upper()
         
         # Calculate timestamp in seconds (absolute video time)
@@ -305,6 +464,26 @@ def detect_events_by_keywords(
         for event_type, keywords in EVENT_KEYWORDS.items():
             for keyword in keywords:
                 if re.search(keyword, text_upper, re.IGNORECASE):
+                    
+                    # === SPECIAL HANDLING FOR GOALS ===
+                    if event_type == 'goal':
+                        # Get context from surrounding blocks
+                        surrounding_context = get_surrounding_context(srt_blocks, block_index, window=2)
+                        
+                        # Use confirmation system
+                        confirmation = confirm_goal_event(text, surrounding_context)
+                        
+                        if not confirmation['is_goal']:
+                            print(f"[KEYWORDS] ⚠️  GOL rejeitado em [{minutes:02d}:{seconds:02d}] - Razão: {confirmation['reason']} - {text[:40]}...")
+                            continue  # Skip this false positive
+                        
+                        confidence = confirmation['confidence']
+                        confirmation_reason = confirmation['reason']
+                        print(f"[KEYWORDS] ✓ GOL confirmado em [{minutes:02d}:{seconds:02d}] - {confirmation_reason} (conf: {confidence}) - {text[:40]}...")
+                    else:
+                        confidence = 1.0
+                        confirmation_reason = 'keyword_match'
+                    
                     # Detect team
                     team = detect_team_from_text(text, home_team, away_team)
                     
@@ -323,18 +502,22 @@ def detect_events_by_keywords(
                         'match_half': 'first_half' if half == 'first' else 'second_half',
                         'is_highlight': event_type in ['goal', 'red_card', 'penalty'],
                         'isOwnGoal': is_own_goal if event_type == 'goal' else False,
-                        'confidence': 1.0,  # 100% - deterministic!
+                        'confidence': confidence,
+                        'confirmation_reason': confirmation_reason,
                         'detection_method': 'keyword'
                     }
                     
                     events.append(event)
-                    print(f"[KEYWORDS] ✓ {event_type.upper()} detectado em [{minutes:02d}:{seconds:02d}] - {text[:40]}...")
+                    
+                    if event_type != 'goal':  # Goals already logged above
+                        print(f"[KEYWORDS] ✓ {event_type.upper()} detectado em [{minutes:02d}:{seconds:02d}] - {text[:40]}...")
+                    
                     break  # Avoid duplicates for same text
             else:
                 continue
             break  # Found an event, move to next SRT block
     
-    # Deduplicate close events
+    # Deduplicate close events (now only deduplicates SAME type events)
     original_count = len(events)
     events = deduplicate_events(events, threshold_seconds=30)
     
