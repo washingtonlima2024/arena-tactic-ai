@@ -2620,21 +2620,8 @@ def regenerate_clips(match_id: str):
             if is_highlight_video:
                 print(f"[REGENERATE-CLIPS] ⚡ Highlight detectado ({video_duration_min_check:.0f}min) - processando TODOS como 1ºT")
         
-        if is_highlight_video:
-            # Highlight: todos os eventos vão para first_half
-            first_half_events = [e.to_dict() for e in events]
-            second_half_events = []
-        else:
-            # Partida completa: separar por tempo
-            first_half_events = [e.to_dict() for e in events if (e.match_half == 'first_half' or (e.minute or 0) < 45)]
-            second_half_events = [e.to_dict() for e in events if (e.match_half == 'second_half' or (e.minute or 0) >= 45)]
-        
-        print(f"[REGENERATE-CLIPS] Eventos: {len(first_half_events)} 1ºT, {len(second_half_events)} 2ºT")
-        
-        # Log sample de eventos para debug
-        for i, evt in enumerate(first_half_events[:3]):
-            vs = evt.get('metadata', {}).get('videoSecond', 'N/A')
-            print(f"[REGENERATE-CLIPS]   Evento 1T[{i}]: {evt.get('event_type')} min {evt.get('minute')}' | videoSecond={vs}")
+        # NOTA: A construção de first_half_events foi movida para DEPOIS da correção de timestamps
+        # para garantir que eventos corrigidos sejam usados
         
         total_clips = 0
         results = {'first_half': 0, 'second_half': 0, 'errors': [], 'skipped_events': []}
@@ -2651,9 +2638,10 @@ def regenerate_clips(match_id: str):
             # Coletar videoSecond de todos os eventos
             event_timestamps = []
             for e in events:
-                metadata = e.metadata if hasattr(e, 'metadata') else (e.get('metadata') if isinstance(e, dict) else {})
+                # CORREÇÃO: usar event_metadata (não metadata)
+                metadata = e.event_metadata if hasattr(e, 'event_metadata') and isinstance(e.event_metadata, dict) else {}
                 if metadata:
-                    vs = metadata.get('videoSecond') if isinstance(metadata, dict) else None
+                    vs = metadata.get('videoSecond')
                     if vs is not None and vs > 0:
                         event_timestamps.append(vs)
             
@@ -2721,8 +2709,26 @@ def regenerate_clips(match_id: str):
                         events = session.query(MatchEvent).filter_by(match_id=match_id).all()
                         
                         # Recategorizar eventos após ajuste
-                        first_half_events = [e.to_dict() for e in events]
-                        second_half_events = []
+                        is_highlight_video = True  # Forçar tratamento como highlight após correção
+        
+        # ═══════════════════════════════════════════════════════════════
+        # CONSTRUIR LISTAS DE EVENTOS APÓS POSSÍVEL CORREÇÃO
+        # ═══════════════════════════════════════════════════════════════
+        if is_highlight_video:
+            # Highlight: todos os eventos vão para first_half
+            first_half_events = [e.to_dict() for e in events]
+            second_half_events = []
+        else:
+            # Partida completa: separar por tempo
+            first_half_events = [e.to_dict() for e in events if (e.match_half == 'first_half' or (e.minute or 0) < 45)]
+            second_half_events = [e.to_dict() for e in events if (e.match_half == 'second_half' or (e.minute or 0) >= 45)]
+        
+        print(f"[REGENERATE-CLIPS] Eventos: {len(first_half_events)} 1ºT, {len(second_half_events)} 2ºT")
+        
+        # Log sample de eventos para debug
+        for i, evt in enumerate(first_half_events[:3]):
+            vs = evt.get('metadata', {}).get('videoSecond', 'N/A')
+            print(f"[REGENERATE-CLIPS]   Evento 1T[{i}]: {evt.get('event_type')} min {evt.get('minute')}' | videoSecond={vs}")
         
         # 6. Processar primeiro tempo
         first_video = video_paths.get('first_half') or video_paths.get('full')
