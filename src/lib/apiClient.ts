@@ -537,26 +537,18 @@ export const apiClient = {
       analysisMode: data.analysisMode ?? 'text',  // NOVO
     };
 
-    // Try local server first
+    // MODO 100% LOCAL - Sem fallback para nuvem
     const localServerAvailable = await isLocalServerAvailable();
     
-    if (localServerAvailable) {
-      try {
-        // Usar timeout longo (10 minutos) com retry para análise de IA
-        const result = await apiRequestLongRunningWithRetry<any>('/api/analyze-match', { 
-          method: 'POST', 
-          body: JSON.stringify(body)
-        }, 600000, 2); // 10 minutos, 2 tentativas
-        
-        return result;
-      } catch (error) {
-        console.warn('[API] Local server analysis failed, trying Edge Function fallback...', error);
-      }
+    if (!localServerAvailable) {
+      throw new LocalServerOfflineError();
     }
-    
-    // Fallback to Edge Function if local server fails or is unavailable
-    console.log('[API] Using Edge Function fallback for analysis');
-    return apiClient.analyzeMatchViaEdgeFunction(data);
+
+    // Usar timeout longo (10 minutos) com retry para análise de IA
+    return await apiRequestLongRunningWithRetry<any>('/api/analyze-match', { 
+      method: 'POST', 
+      body: JSON.stringify(body)
+    }, 600000, 2); // 10 minutos, 2 tentativas
   },
   
   // Edge Function fallback for analysis
