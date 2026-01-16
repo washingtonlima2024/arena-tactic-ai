@@ -20,11 +20,11 @@ const aspectRatios = {
   '4:5': 4 / 5,
 };
 
-// Max heights for each size (in vh or px)
-const maxHeights = {
-  sm: 'max-h-[35vh]',
-  md: 'max-h-[45vh]',
-  lg: 'max-h-[55vh]',
+// Height classes based on size
+const heightClasses = {
+  sm: 'h-[200px]',
+  md: 'h-[280px]',
+  lg: 'h-[380px]',
 };
 
 // Device config for styling
@@ -110,7 +110,7 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
   };
   
   return (
-    <div className={cn("flex flex-col items-center gap-3 h-full", className)}>
+    <div className={cn("flex flex-col items-center gap-3", className)}>
       {/* Rotation Button */}
       {canRotate && (
         <Button
@@ -124,11 +124,8 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
         </Button>
       )}
       
-      {/* Main container - flex grow to fill available space */}
-      <div className={cn(
-        "flex items-center justify-center flex-1 min-h-0 w-full",
-        maxHeights[size]
-      )}>
+      {/* Main container */}
+      <div className="flex items-center justify-center">
         {config.device === 'phone' && (
           <div 
             className={cn(
@@ -136,9 +133,9 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
               getBorderRadius(),
               getPadding(),
               getBorderWidth(),
-              maxHeights[size]
+              heightClasses[size]
             )}
-            style={{ aspectRatio: aspectRatio, width: 'auto' }}
+            style={{ aspectRatio: aspectRatio }}
           >
             {/* Phone frame - Dynamic Island style notch */}
             {!isRotated ? (
@@ -172,10 +169,7 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
               "relative w-full h-full bg-black overflow-hidden",
               getScreenRadius()
             )}>
-              {/* Content - takes full screen */}
-              <div className="absolute inset-0 z-10">
-                {children}
-              </div>
+              {children}
             </div>
             
             {/* Home indicator */}
@@ -219,9 +213,9 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
               getBorderRadius(),
               getPadding(),
               getBorderWidth(),
-              maxHeights[size]
+              heightClasses[size]
             )}
-            style={{ aspectRatio: aspectRatio, width: 'auto' }}
+            style={{ aspectRatio: aspectRatio }}
           >
             {/* Camera */}
             <div className={cn(
@@ -234,9 +228,7 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
               "relative w-full h-full bg-black overflow-hidden",
               getScreenRadius()
             )}>
-              <div className="absolute inset-0">
-                {children}
-              </div>
+              {children}
             </div>
             
             {/* Home button - only show on large */}
@@ -247,25 +239,24 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
         )}
         
         {config.device === 'desktop' && (
-          <div className={cn("flex flex-col items-center", maxHeights[size])}>
+          <div className="flex flex-col items-center">
             {/* Monitor */}
             <div 
               className={cn(
-                "relative bg-gray-900 shadow-2xl border-gray-800 flex-1 min-h-0",
+                "relative bg-gray-900 shadow-2xl border-gray-800",
                 getBorderRadius(),
                 getPadding(),
-                getBorderWidth()
+                getBorderWidth(),
+                heightClasses[size]
               )}
-              style={{ aspectRatio: aspectRatio, width: 'auto', height: '85%' }}
+              style={{ aspectRatio: aspectRatio }}
             >
               {/* Screen */}
               <div className={cn(
                 "relative w-full h-full bg-black overflow-hidden",
                 getScreenRadius()
               )}>
-                <div className="absolute inset-0">
-                  {children}
-                </div>
+                {children}
               </div>
               
               {/* Webcam */}
