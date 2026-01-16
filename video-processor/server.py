@@ -4378,6 +4378,18 @@ def extract_event_clips_auto(
             metadata = event.get('metadata', {}) or {}
             stored_video_second = metadata.get('videoSecond')
             
+            # ═══════════════════════════════════════════════════════════════
+            # CUSTOM TRIM - Ajuste manual do usuário via Timeline Editor
+            # ═══════════════════════════════════════════════════════════════
+            custom_trim = metadata.get('customTrim')
+            if custom_trim:
+                custom_start = custom_trim.get('startOffset', -15)
+                custom_end = custom_trim.get('endOffset', 15)
+                actual_pre = abs(custom_start)  # Convert negative offset to positive buffer
+                actual_post = custom_end
+                duration = actual_pre + actual_post
+                print(f"[CLIP] 🎯 Using customTrim for {event_type}: start={custom_start}s, end={custom_end}s, duration={duration}s")
+            
             # Calculate start time in video (with pre-buffer)
             if stored_video_second is not None and stored_video_second >= 0:
                 # Use exact video position from transcription
