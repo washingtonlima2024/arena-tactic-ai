@@ -87,6 +87,8 @@ interface ClipPreviewModalProps {
   eventId?: string;
   eventSecond?: number;
   videoDuration?: number;
+  fullVideoUrl?: string | null;      // URL do vídeo completo para modo personalizado
+  fullVideoDuration?: number;        // Duração do vídeo completo
   initialTrim?: { startOffset: number; endOffset: number };
   onTrimSave?: (eventId: string, trim: { startOffset: number; endOffset: number }) => void;
 }
@@ -150,6 +152,8 @@ export function ClipPreviewModal({
   eventId,
   eventSecond = 0,
   videoDuration = 30,
+  fullVideoUrl,
+  fullVideoDuration,
   initialTrim,
   onTrimSave,
 }: ClipPreviewModalProps) {
@@ -169,6 +173,18 @@ export function ClipPreviewModal({
   // Timeline Editor
   const [showTimelineEditor, setShowTimelineEditor] = useState(false);
   const [currentTrim, setCurrentTrim] = useState(initialTrim);
+  
+  // Absolute timestamps for custom mode (in seconds)
+  const [absoluteStart, setAbsoluteStart] = useState(Math.max(0, eventSecond - 15));
+  const [absoluteEnd, setAbsoluteEnd] = useState(eventSecond + 15);
+  
+  // Determine which video to use based on mode
+  const activeVideoUrl = clipMode === 'custom' && fullVideoUrl 
+    ? fullVideoUrl 
+    : clipUrl;
+  const activeVideoDuration = clipMode === 'custom' && fullVideoDuration 
+    ? fullVideoDuration 
+    : videoDuration;
   
   // Logo Overlay
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -215,8 +231,23 @@ export function ClipPreviewModal({
       setSubtitles([]);
       setShowSubtitles(false);
       setOverlayOpacity(0);
+      // Reset absolute timestamps
+      setAbsoluteStart(Math.max(0, eventSecond - 15));
+      setAbsoluteEnd(Math.min(fullVideoDuration || videoDuration, eventSecond + 15));
     }
-  }, [isOpen, initialTrim, videoDuration]);
+  }, [isOpen, initialTrim, videoDuration, eventSecond, fullVideoDuration]);
+
+  // Handle clip mode change - position video at event time when entering custom mode
+  useEffect(() => {
+    if (clipMode === 'custom' && videoRef.current && fullVideoUrl && eventSecond > 0) {
+      // Position video at the event time when switching to custom mode
+      videoRef.current.currentTime = eventSecond;
+      setCurrentTime(eventSecond);
+      setShowTimelineEditor(true);
+    } else if (clipMode === 'auto') {
+      setShowTimelineEditor(false);
+    }
+  }, [clipMode, eventSecond, fullVideoUrl]);
 
   // Video event listeners
   useEffect(() => {
@@ -519,10 +550,26 @@ export function ClipPreviewModal({
   const handleApplyAndRegenerate = async () => {
     if (!eventId) return;
     
+    // Build trim data based on mode
+    const trimData = clipMode === 'custom' 
+      ? {
+          mode: 'absolute' as const,
+          startSecond: absoluteStart,
+          endSecond: absoluteEnd,
+          duration: absoluteEnd - absoluteStart
+        }
+      : currentTrim 
+        ? {
+            mode: 'relative' as const,
+            startOffset: currentTrim.startOffset,
+            endOffset: currentTrim.endOffset,
+          }
+        : null;
+    
     // Save metadata with mode and overlays config
     const config = {
       clipMode,
-      customTrim: clipMode === 'custom' ? currentTrim : null,
+      customTrim: trimData,
       overlays: {
         logo: logoUrl ? {
           position: logoPosition,
@@ -540,8 +587,14 @@ export function ClipPreviewModal({
     
     console.log('Saving clip config:', config);
     
-    // If custom mode, save the trim
-    if (clipMode === 'custom' && currentTrim && onTrimSave) {
+    // If custom mode with absolute timestamps, save them
+    if (clipMode === 'custom' && trimData && onTrimSave) {
+      // Convert to relative offsets for compatibility
+      onTrimSave(eventId, {
+        startOffset: absoluteStart - eventSecond,
+        endOffset: absoluteEnd - eventSecond
+      });
+    } else if (clipMode === 'auto' && currentTrim && onTrimSave) {
       onTrimSave(eventId, currentTrim);
     }
     
@@ -1055,25 +1108,27 @@ export function ClipPreviewModal({
                 allowRotation={selectedFormat === '9:16' || selectedFormat === '4:5'}
               >
                 <div className="relative w-full h-full bg-black overflow-hidden">
-                  {clipUrl ? (
+                  {activeVideoUrl ? (
                     <video
                       ref={videoRef}
-                      src={clipUrl}
-                      poster={posterUrl}
+                      src={activeVideoUrl}
+                      poster={clipMode === 'auto' ? posterUrl : undefined}
                       className={cn(
                         "absolute inset-0 w-full h-full",
                         selectedFormat === '9:16' || selectedFormat === '4:5' 
                           ? "object-cover" 
                           : "object-contain"
                       )}
-                      autoPlay
-                      loop
+                      autoPlay={clipMode === 'auto'}
+                      loop={clipMode === 'auto'}
                       muted={isMuted}
                       playsInline
                     />
                   ) : (
                     <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
-                      <p className="text-sm">Clip não disponível</p>
+                      <p className="text-sm">
+                        {clipMode === 'custom' ? 'Vídeo completo não disponível' : 'Clip não disponível'}
+                      </p>
                     </div>
                   )}
                   
@@ -1261,11 +1316,23 @@ export function ClipPreviewModal({
                   <VideoTimelineEditor
                     videoRef={videoRef}
                     eventSecond={eventSecond}
-                    videoDuration={videoDuration}
+                    videoDuration={activeVideoDuration}
                     currentVideoTime={currentTime}
+                    mode={clipMode === 'custom' ? 'absolute' : 'relative'}
                     initialTrim={currentTrim}
+                    absoluteStart={absoluteStart}
+                    absoluteEnd={absoluteEnd}
+                    onAbsoluteChange={(start, end) => {
+                      setAbsoluteStart(start);
+                      setAbsoluteEnd(end);
+                    }}
                     onTrimChange={handleTrimChange}
                     onSave={handleTrimSave}
+                    onAbsoluteSave={(start, end) => {
+                      setAbsoluteStart(start);
+                      setAbsoluteEnd(end);
+                      handleApplyAndRegenerate();
+                    }}
                     onSeek={handleTimelineSeek}
                   />
                 </div>
