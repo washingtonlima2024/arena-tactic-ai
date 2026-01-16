@@ -2666,33 +2666,63 @@ def regenerate_clips(match_id: str):
                 print(f"[REGENERATE-CLIPS]   Eventos: {len(event_timestamps)} com videoSecond")
                 print(f"[REGENERATE-CLIPS]   Range de timestamps: {min_event_ts:.1f}s - {max_event_ts:.1f}s")
                 
-                # Se TODOS os eventos estão além da duração do vídeo, retornar erro informativo
-                if min_event_ts > video_duration_sec:
-                    # Calcular em que minutos os eventos estão (para mensagem amigável)
-                    min_event_min = min_event_ts / 60
-                    max_event_min = max_event_ts / 60
+                # Se eventos estão além da duração do vídeo, CORRIGIR AUTOMATICAMENTE
+                if max_event_ts > video_duration_sec:
+                    print(f"[REGENERATE-CLIPS] 🔧 Incompatibilidade detectada: eventos até {max_event_ts:.0f}s, vídeo tem {video_duration_sec:.0f}s")
+                    print(f"[REGENERATE-CLIPS] 🔧 Aplicando correção automática proporcional...")
                     
-                    error_msg = (
-                        f"Incompatibilidade de timestamps: O vídeo tem {video_duration_min:.0f} minutos, "
-                        f"mas os eventos apontam para os minutos {min_event_min:.0f}-{max_event_min:.0f}. "
-                        f"Importe o vídeo completo da partida ou reimporte a transcrição."
-                    )
+                    # Usar 90% da duração do vídeo como range seguro (margem para os clips de 30s)
+                    safe_duration = video_duration_sec * 0.90
                     
-                    print(f"[REGENERATE-CLIPS] ❌ {error_msg}")
+                    adjusted_count = 0
+                    for event in events:
+                        # Obter timestamp atual do evento
+                        old_second = None
+                        metadata = event.event_metadata if hasattr(event, 'event_metadata') else {}
+                        if metadata and isinstance(metadata, dict):
+                            old_second = metadata.get('videoSecond')
+                        
+                        if old_second is None:
+                            old_second = (event.minute or 0) * 60 + (event.second or 0)
+                        
+                        # Só ajustar se estiver fora do range do vídeo
+                        if old_second > video_duration_sec:
+                            # Redistribuir proporcionalmente
+                            new_second = (old_second / max_event_ts) * safe_duration
+                            # Garantir margens de segurança (15s do início e fim)
+                            new_second = max(15, min(new_second, video_duration_sec - 15))
+                            
+                            # Atualizar evento
+                            new_minute = int(new_second / 60)
+                            new_sec = int(new_second % 60)
+                            
+                            print(f"[REGENERATE-CLIPS]   → {event.event_type}: {old_second:.0f}s → {new_second:.0f}s (min {event.minute} → {new_minute})")
+                            
+                            # Atualizar campos do evento
+                            event.minute = new_minute
+                            event.second = new_sec
+                            event.match_half = 'first_half'  # Forçar primeiro tempo para highlights
+                            
+                            # Atualizar videoSecond no metadata
+                            if metadata and isinstance(metadata, dict):
+                                metadata['videoSecond'] = int(new_second)
+                                metadata['originalVideoSecond'] = old_second  # Guardar original
+                                metadata['timestampCorrected'] = True
+                                event.event_metadata = metadata
+                            
+                            session.add(event)
+                            adjusted_count += 1
                     
-                    session.close()
-                    return jsonify({
-                        'success': False,
-                        'error': error_msg,
-                        'error_type': 'timestamp_mismatch',
-                        'regenerated': 0,
-                        'clips_generated': 0,
-                        'failed': len(events),
-                        'total_events': len(events),
-                        'video_duration_minutes': video_duration_min,
-                        'event_range_minutes': [min_event_min, max_event_min],
-                        'message': error_msg
-                    }), 400
+                    if adjusted_count > 0:
+                        session.commit()
+                        print(f"[REGENERATE-CLIPS] ✓ {adjusted_count} eventos ajustados automaticamente")
+                        
+                        # Recarregar eventos com valores atualizados
+                        events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+                        
+                        # Recategorizar eventos após ajuste
+                        first_half_events = [e.to_dict() for e in events]
+                        second_half_events = []
         
         # 6. Processar primeiro tempo
         first_video = video_paths.get('first_half') or video_paths.get('full')
