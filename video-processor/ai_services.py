@@ -2165,14 +2165,14 @@ def analyze_match_events(
     
     if can_use_dual:
         print(f"\n[AI] ═══════════════════════════════════════════════════════════")
-        print(f"[AI] 🔄 SISTEMA DE DUPLA VERIFICAÇÃO ATIVADO")
+        print(f"[AI] 🔄 SISTEMA SINGLE AI (GPT-4o apenas)")
         print(f"[AI]    Fase 1: GPT-4o (detecção)")
-        print(f"[AI]    Fase 2: Gemini (validação)")
+        print(f"[AI]    Fase 2: Filtro por Confidence (sem Gemini)")
         print(f"[AI]    Fase 3: Deduplicação")
         print(f"[AI] ═══════════════════════════════════════════════════════════\n")
         
         try:
-            # ═══ FASE 1: GPT-5 detecta eventos ═══
+            # ═══ FASE 1: GPT-4o detecta eventos ═══
             detected_result = detect_events_with_gpt(
                 match_id=match_id,
                 transcription=transcription,
@@ -2187,16 +2187,85 @@ def analyze_match_events(
                 print(f"[AI] ⚠ Detecção falhou: {detected_result.get('error')}")
                 # Fall through to legacy mode
             else:
-                # ═══ FASE 2: Gemini valida eventos ═══
-                validated_result = validate_events_with_gemini(
-                    match_id=match_id,
-                    transcription=transcription,
-                    detected_result=detected_result,
-                    home_team=home_team,
-                    away_team=away_team
-                )
+                # ═══ FASE 2: Filtro por Confidence (GEMINI REMOVIDO) ═══
+                detected_events = detected_result.get('events', [])
+                half = detected_result.get('half', 'first')
                 
-                validated_events = validated_result.get('events', [])
+                print(f"[AI] 🔍 FASE 2: Filtrando {len(detected_events)} eventos por confidence...")
+                
+                validated_events = []
+                rejected_events = []
+                
+                for event in detected_events:
+                    confidence = event.get('confidence', 0) or 0
+                    event_type = event.get('event_type', '')
+                    source_text = (event.get('source_text') or '').upper()
+                    
+                    # Gols: threshold mais baixo (0.5) - prioridade máxima
+                    # Se menciona "GOL" no source_text, aprovar com confidence >= 0.3
+                    # Outros eventos: threshold padrão (0.7)
+                    is_goal = event_type == 'goal'
+                    has_goal_mention = any(word in source_text for word in ['GOL', 'GOOOL', 'GOLAÇO', 'ENTROU', 'PRA DENTRO'])
+                    
+                    if is_goal and has_goal_mention:
+                        min_confidence = 0.3  # Muito permissivo para gols com menção clara
+                    elif is_goal:
+                        min_confidence = 0.5  # Permissivo para outros gols
+                    else:
+                        min_confidence = 0.7  # Padrão para outros eventos
+                    
+                    if confidence >= min_confidence:
+                        event['validated'] = True
+                        event['validation_reason'] = f'Aprovado por confidence ({confidence:.2f} >= {min_confidence})'
+                        validated_events.append(event)
+                        if is_goal:
+                            print(f"[AI] ⚽ GOL APROVADO: min {event.get('minute')}:{event.get('second', 0):02d} - confidence {confidence:.2f} - {event.get('description', '')[:40]}")
+                    else:
+                        event['validated'] = False
+                        event['validation_reason'] = f'Rejeitado por confidence ({confidence:.2f} < {min_confidence})'
+                        rejected_events.append(event)
+                        print(f"[AI] ❌ Rejeitado: {event_type} min {event.get('minute')}' - confidence {confidence:.2f} < {min_confidence}")
+                
+                print(f"[AI] ✓ Filtro: {len(validated_events)} aprovados, {len(rejected_events)} rejeitados")
+                
+                # Salvar JSONs para debug
+                try:
+                    from datetime import datetime
+                    from storage import get_subfolder_path
+                    json_path = get_subfolder_path(match_id, 'json')
+                    
+                    validated_result = {
+                        "match_id": match_id,
+                        "validated_at": datetime.utcnow().isoformat() + "Z",
+                        "validator": "confidence_filter",
+                        "half": half,
+                        "home_team": home_team,
+                        "away_team": away_team,
+                        "events": validated_events,
+                        "summary": {
+                            "total_detected": len(detected_events),
+                            "confirmed": len(validated_events),
+                            "rejected": len(rejected_events)
+                        }
+                    }
+                    
+                    validated_filename = f"validated_events_{half}.json"
+                    with open(json_path / validated_filename, 'w', encoding='utf-8') as f:
+                        json.dump(validated_result, f, ensure_ascii=False, indent=2)
+                    
+                    rejected_result = {
+                        "match_id": match_id,
+                        "rejected_at": datetime.utcnow().isoformat() + "Z",
+                        "half": half,
+                        "events": rejected_events
+                    }
+                    rejected_filename = f"rejected_events_{half}.json"
+                    with open(json_path / rejected_filename, 'w', encoding='utf-8') as f:
+                        json.dump(rejected_result, f, ensure_ascii=False, indent=2)
+                    
+                    print(f"[AI] ✓ JSONs salvos em json/")
+                except Exception as e:
+                    print(f"[AI] ⚠ Erro ao salvar JSONs: {e}")
                 
                 # Enrich events with required fields for database insertion
                 VALID_EVENT_TYPES = [
@@ -2240,13 +2309,12 @@ def analyze_match_events(
                 # O ajuste fino agora é feito manualmente pelo usuário via Timeline Editor
                 
                 # Summary
-                summary = validated_result.get('summary', {})
                 goals_count = len([e for e in final_events if e.get('event_type') == 'goal'])
                 print(f"\n[AI] ═══════════════════════════════════════════════════════════")
-                print(f"[AI] ✓ ANÁLISE COMPLETA (Dupla Verificação)")
-                print(f"[AI]   Detectados: {summary.get('total_detected', 0)} eventos")
-                print(f"[AI]   Confirmados: {summary.get('confirmed', 0)} eventos")
-                print(f"[AI]   Rejeitados: {summary.get('rejected', 0)} eventos")
+                print(f"[AI] ✓ ANÁLISE COMPLETA (Single AI - GPT-4o)")
+                print(f"[AI]   Detectados: {len(detected_events)} eventos")
+                print(f"[AI]   Aprovados: {len(validated_events)} eventos")
+                print(f"[AI]   Rejeitados: {len(rejected_events)} eventos")
                 print(f"[AI]   Gols finais: {goals_count}")
                 print(f"[AI]   Resultado: {len(final_events)} eventos finais")
                 print(f"[AI] ═══════════════════════════════════════════════════════════\n")
@@ -2254,7 +2322,9 @@ def analyze_match_events(
                 return final_events
                 
         except Exception as e:
-            print(f"[AI] ⚠ Erro na dupla verificação: {e}")
+            print(f"[AI] ⚠ Erro na análise: {e}")
+            import traceback
+            traceback.print_exc()
             print(f"[AI] Fallback para modo legado...")
     
     # ═══════════════════════════════════════════════════════════════
