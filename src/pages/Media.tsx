@@ -749,6 +749,7 @@ export default function Media() {
               clipTitle={clips.find(c => c.id === previewClipId)?.title || ''}
               clipType={clips.find(c => c.id === previewClipId)?.type || ''}
               timestamp={formatTimestamp(clips.find(c => c.id === previewClipId)?.totalSeconds || 0)}
+              matchId={matchId || undefined}
               matchHalf={clips.find(c => c.id === previewClipId)?.matchHalf}
               posterUrl={getThumbnail(previewClipId || '')?.imageUrl}
               eventId={previewClipId || undefined}

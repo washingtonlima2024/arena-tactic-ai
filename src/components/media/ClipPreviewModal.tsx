@@ -57,6 +57,8 @@ import {
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
+import { parseSRT } from '@/lib/transcriptionParser';
+import { apiClient, getApiBase } from '@/lib/apiClient';
 
 type DeviceFormat = '9:16' | '16:9' | '1:1' | '4:5';
 type DeviceType = 'phone' | 'tablet' | 'desktop';
@@ -79,6 +81,7 @@ interface ClipPreviewModalProps {
   clipTitle: string;
   clipType: string;
   timestamp: string;
+  matchId?: string;
   matchHalf?: string;
   posterUrl?: string;
   eventId?: string;
@@ -141,6 +144,7 @@ export function ClipPreviewModal({
   clipTitle,
   clipType,
   timestamp,
+  matchId,
   matchHalf,
   posterUrl,
   eventId,
@@ -177,6 +181,8 @@ export function ClipPreviewModal({
   const [subtitleStyle, setSubtitleStyle] = useState('classico');
   const [subtitleText, setSubtitleText] = useState('');
   const [subtitles, setSubtitles] = useState<Array<{start: number; end: number; text: string}>>([]);
+  const [isLoadingSubtitles, setIsLoadingSubtitles] = useState(false);
+  const [subtitlesLoaded, setSubtitlesLoaded] = useState(false);
   
   // Custom Texts
   const [customTexts, setCustomTexts] = useState<CustomText[]>([]);
@@ -265,17 +271,115 @@ export function ClipPreviewModal({
     setSubtitleText(current?.text || '');
   }, [currentTime, showSubtitles, subtitles]);
 
-  // Load example subtitles when enabled
+  // Load real subtitles from match when enabled
   useEffect(() => {
-    if (showSubtitles && subtitles.length === 0) {
-      // Example subtitles for demo
-      setSubtitles([
-        { start: 0, end: 5, text: 'Lance em desenvolvimento...' },
-        { start: 12, end: 18, text: '⚽ GOOOOL!' },
-        { start: 20, end: 25, text: 'Que jogada sensacional!' },
-      ]);
+    if (!showSubtitles || subtitlesLoaded || !matchId) return;
+    
+    const loadSubtitles = async () => {
+      setIsLoadingSubtitles(true);
+      try {
+        // Get list of files for the match
+        const filesData = await apiClient.listMatchFiles(matchId);
+        
+        // Find SRT files
+        const srtFiles = filesData.files?.srt || [];
+        
+        if (srtFiles.length === 0) {
+          // No SRT found, use example subtitles
+          console.log('[ClipPreview] No SRT files found, using examples');
+          setSubtitles([
+            { start: 0, end: 5, text: 'Legenda não disponível...' },
+          ]);
+          setSubtitlesLoaded(true);
+          return;
+        }
+        
+        // Determine which SRT to use based on matchHalf
+        let targetSrt = srtFiles[0]; // Default to first
+        const halfPrefix = matchHalf === 'first_half' || matchHalf === 'first' ? 'first' : 'second';
+        
+        // Try to find specific half SRT
+        const halfSrt = srtFiles.find((f: any) => 
+          f.name?.toLowerCase().includes(halfPrefix) ||
+          f.name?.toLowerCase().includes(`${halfPrefix}_half`)
+        );
+        
+        if (halfSrt) {
+          targetSrt = halfSrt;
+        } else {
+          // Try full match SRT
+          const fullSrt = srtFiles.find((f: any) => 
+            f.name?.toLowerCase().includes('full') ||
+            f.name?.toLowerCase() === 'transcription.srt'
+          );
+          if (fullSrt) targetSrt = fullSrt;
+        }
+        
+        console.log('[ClipPreview] Loading SRT:', targetSrt.name);
+        
+        // Fetch the SRT content
+        const srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${targetSrt.name}`;
+        const response = await fetch(srtUrl);
+        
+        if (!response.ok) {
+          throw new Error(`Failed to fetch SRT: ${response.status}`);
+        }
+        
+        const srtContent = await response.text();
+        
+        // Parse SRT content
+        const parsed = parseSRT(srtContent);
+        
+        if (parsed.length > 0) {
+          // Convert to simple format and adjust times relative to clip
+          // The clip starts at (eventSecond - 15) in the original video
+          const clipStartInVideo = Math.max(0, eventSecond - 15);
+          
+          const clipSubtitles = parsed
+            .filter(line => {
+              // Filter to only subtitles that overlap with clip time range
+              const clipEnd = clipStartInVideo + videoDuration;
+              return line.end >= clipStartInVideo && line.start <= clipEnd;
+            })
+            .map(line => ({
+              // Adjust times relative to clip start
+              start: Math.max(0, line.start - clipStartInVideo),
+              end: Math.max(0, line.end - clipStartInVideo),
+              text: line.text,
+            }));
+          
+          console.log(`[ClipPreview] Parsed ${clipSubtitles.length} subtitles for clip`);
+          setSubtitles(clipSubtitles);
+          toast.success(`${clipSubtitles.length} legendas carregadas`);
+        } else {
+          console.log('[ClipPreview] No subtitles parsed from SRT');
+          setSubtitles([{ start: 0, end: 5, text: 'Nenhuma legenda encontrada' }]);
+        }
+        
+        setSubtitlesLoaded(true);
+      } catch (error) {
+        console.error('[ClipPreview] Error loading subtitles:', error);
+        toast.error('Erro ao carregar legendas');
+        // Fallback to example
+        setSubtitles([
+          { start: 0, end: 5, text: 'Erro ao carregar legendas' },
+        ]);
+        setSubtitlesLoaded(true);
+      } finally {
+        setIsLoadingSubtitles(false);
+      }
+    };
+    
+    loadSubtitles();
+  }, [showSubtitles, subtitlesLoaded, matchId, matchHalf, eventSecond, videoDuration]);
+
+  // Reset subtitles loaded flag when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      setSubtitlesLoaded(false);
+      setSubtitles([]);
     }
-  }, [showSubtitles, subtitles.length]);
+  }, [isOpen]);
 
   // Format time helper
   const formatTime = (seconds: number) => {
