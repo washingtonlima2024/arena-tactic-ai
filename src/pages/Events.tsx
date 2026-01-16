@@ -616,33 +616,41 @@ export default function Events() {
     // Prepare event with calculated videoSecond for the modal
     let processedEvent = { ...event };
     
-    // Calculate video-relative position if:
-    // 1. We have video duration
-    // 2. AND either there's no videoSecond, or it exceeds video duration
+    // Calculate video-relative position
+    // PRIORIDADE 1: Usar videoSecond do metadata se estiver dentro do range do vídeo
+    // PRIORIDADE 2: Recalcular apenas se videoSecond não existir ou estiver fora do range
     if (videoDuration) {
-      const needsCalculation = !eventVideoSecond || eventVideoSecond > videoDuration;
-      
-      if (needsCalculation) {
-        // Calculate based on game minute offset from video start
+      // Se o backend já corrigiu o videoSecond e está dentro da duração do vídeo, usar direto
+      if (eventVideoSecond !== undefined && eventVideoSecond !== null && eventVideoSecond <= videoDuration) {
+        console.log(`[PLAYER] Usando videoSecond do metadata: ${eventVideoSecond}s (dentro do range de ${videoDuration}s)`);
+        processedEvent = { 
+          ...processedEvent, 
+          metadata: { ...processedEvent.metadata, videoSecond: eventVideoSecond } 
+        };
+      } 
+      // Caso contrário, calcular baseado no minuto do evento
+      else {
+        console.log(`[PLAYER] videoSecond ausente ou fora do range (${eventVideoSecond}s > ${videoDuration}s), recalculando...`);
+        
         if (eventMinute >= videoStartMinute && eventMinute <= actualVideoEndMinute) {
           // Event is within video coverage - calculate offset in seconds
           const offsetSeconds = (eventMinute - videoStartMinute) * 60;
           const calculatedVideoSecond = Math.min(offsetSeconds, videoDuration - 1);
-          console.log(`Calculando offset: minuto ${eventMinute} - start ${videoStartMinute} = ${calculatedVideoSecond}s do vídeo`);
+          console.log(`[PLAYER] Calculando offset: minuto ${eventMinute} - start ${videoStartMinute} = ${calculatedVideoSecond}s do vídeo`);
           processedEvent = { 
             ...processedEvent, 
             metadata: { ...processedEvent.metadata, videoSecond: calculatedVideoSecond } 
           };
         } else if (eventMinute < videoStartMinute) {
           // Event before video coverage - start from beginning
-          console.warn(`Evento (minuto ${eventMinute}) antes da cobertura do vídeo (${videoStartMinute})`);
+          console.warn(`[PLAYER] Evento (minuto ${eventMinute}) antes da cobertura do vídeo (${videoStartMinute})`);
           processedEvent = { 
             ...processedEvent, 
             metadata: { ...processedEvent.metadata, videoSecond: 0 } 
           };
         } else {
           // Event after video coverage - go to end
-          console.warn(`Evento (minuto ${eventMinute}) após da cobertura do vídeo (${actualVideoEndMinute})`);
+          console.warn(`[PLAYER] Evento (minuto ${eventMinute}) após da cobertura do vídeo (${actualVideoEndMinute})`);
           processedEvent = { 
             ...processedEvent, 
             metadata: { ...processedEvent.metadata, videoSecond: Math.max(0, videoDuration - 5) } 
