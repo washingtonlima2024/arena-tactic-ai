@@ -12,65 +12,40 @@ interface DeviceMockupProps {
   allowRotation?: boolean;
 }
 
-// Device frame styles for each format and size
+// Aspect ratio values for each format
+const aspectRatios = {
+  '9:16': 9 / 16,
+  '16:9': 16 / 9,
+  '1:1': 1,
+  '4:5': 4 / 5,
+};
+
+// Max heights for each size (in vh or px)
+const maxHeights = {
+  sm: 'max-h-[35vh]',
+  md: 'max-h-[45vh]',
+  lg: 'max-h-[55vh]',
+};
+
+// Device config for styling
 const deviceConfigs = {
   '9:16': {
     device: 'phone',
-    frameClass: {
-      sm: 'w-[160px] h-[320px]',
-      md: 'w-[220px] h-[460px]',
-      lg: 'w-[280px] h-[580px] md:w-[320px] md:h-[660px]',
-    },
-    rotatedFrameClass: {
-      sm: 'w-[320px] h-[160px]',
-      md: 'w-[460px] h-[220px]',
-      lg: 'w-[580px] h-[280px] md:w-[660px] md:h-[320px]',
-    },
     screenClass: 'rounded-[24px]',
     homeIndicator: true,
   },
   '4:5': {
     device: 'phone',
-    frameClass: {
-      sm: 'w-[200px] h-[260px]',
-      md: 'w-[280px] h-[360px]',
-      lg: 'w-[320px] h-[420px] md:w-[380px] md:h-[500px]',
-    },
-    rotatedFrameClass: {
-      sm: 'w-[260px] h-[200px]',
-      md: 'w-[360px] h-[280px]',
-      lg: 'w-[420px] h-[320px] md:w-[500px] md:h-[380px]',
-    },
     screenClass: 'rounded-[24px]',
     homeIndicator: true,
   },
   '1:1': {
     device: 'tablet',
-    frameClass: {
-      sm: 'w-[260px] h-[280px]',
-      md: 'w-[340px] h-[360px]',
-      lg: 'w-[400px] h-[440px] md:w-[480px] md:h-[520px]',
-    },
-    rotatedFrameClass: {
-      sm: 'w-[280px] h-[260px]',
-      md: 'w-[360px] h-[340px]',
-      lg: 'w-[440px] h-[400px] md:w-[520px] md:h-[480px]',
-    },
     screenClass: 'rounded-[20px]',
     homeIndicator: false,
   },
   '16:9': {
     device: 'desktop',
-    frameClass: {
-      sm: 'w-[360px] h-[230px]',
-      md: 'w-[520px] h-[320px]',
-      lg: 'w-[640px] h-[420px] md:w-[800px] md:h-[500px]',
-    },
-    rotatedFrameClass: {
-      sm: 'w-[230px] h-[360px]',
-      md: 'w-[320px] h-[520px]',
-      lg: 'w-[420px] h-[640px] md:w-[500px] md:h-[800px]',
-    },
     screenClass: 'rounded-t-lg',
     homeIndicator: false,
   },
@@ -79,37 +54,91 @@ const deviceConfigs = {
 export function DeviceMockup({ format, size = 'lg', platform, children, className, allowRotation = false }: DeviceMockupProps) {
   const [isRotated, setIsRotated] = useState(false);
   const config = deviceConfigs[format];
-  const frameClass = isRotated 
-    ? config.rotatedFrameClass[size] 
-    : config.frameClass[size];
   const isSmall = size === 'sm';
   const isMedium = size === 'md';
+  
+  // Calculate aspect ratio (swap if rotated)
+  const baseAspectRatio = aspectRatios[format];
+  const aspectRatio = isRotated ? 1 / baseAspectRatio : baseAspectRatio;
   
   // Only allow rotation for phone formats
   const canRotate = allowRotation && (format === '9:16' || format === '4:5');
   
+  // Get padding based on device and size
+  const getPadding = () => {
+    if (isSmall) return 'p-1';
+    if (isMedium) return 'p-1.5';
+    return 'p-2';
+  };
+
+  const getBorderRadius = () => {
+    if (config.device === 'phone') {
+      if (isSmall) return 'rounded-[24px]';
+      if (isMedium) return 'rounded-[32px]';
+      return 'rounded-[40px]';
+    }
+    if (config.device === 'tablet') {
+      if (isSmall) return 'rounded-[16px]';
+      if (isMedium) return 'rounded-[20px]';
+      return 'rounded-[24px]';
+    }
+    // desktop
+    if (isSmall) return 'rounded-md';
+    if (isMedium) return 'rounded-lg';
+    return 'rounded-lg';
+  };
+
+  const getScreenRadius = () => {
+    if (config.device === 'phone') {
+      if (isSmall) return 'rounded-[18px]';
+      if (isMedium) return 'rounded-[22px]';
+      return 'rounded-[24px]';
+    }
+    if (config.device === 'tablet') {
+      if (isSmall) return 'rounded-md';
+      return 'rounded-lg';
+    }
+    // desktop
+    if (isSmall) return 'rounded-sm';
+    return 'rounded';
+  };
+
+  const getBorderWidth = () => {
+    if (isSmall) return 'border-2';
+    if (isMedium) return 'border-[3px]';
+    return 'border-4';
+  };
+  
   return (
-    <div className={cn("flex flex-col items-center gap-3", className)}>
+    <div className={cn("flex flex-col items-center gap-3 h-full", className)}>
       {/* Rotation Button */}
       {canRotate && (
         <Button
           variant="outline"
           size="sm"
           onClick={() => setIsRotated(!isRotated)}
-          className="gap-2"
+          className="gap-2 flex-shrink-0"
         >
           <RotateCcw className={cn("h-4 w-4 transition-transform", isRotated && "rotate-90")} />
           {isRotated ? 'Retrato' : 'Paisagem'}
         </Button>
       )}
       
-      <div className="flex items-center justify-center">
+      {/* Main container - flex grow to fill available space */}
+      <div className={cn(
+        "flex items-center justify-center flex-1 min-h-0 w-full",
+        maxHeights[size]
+      )}>
         {config.device === 'phone' && (
-          <div className={cn(
-            "relative bg-gray-900 shadow-2xl border-gray-800 transition-all duration-300",
-            isSmall ? "rounded-[24px] p-1 border-2" : isMedium ? "rounded-[32px] p-1.5 border-3" : "rounded-[40px] p-2 border-4",
-            frameClass
-          )}>
+          <div 
+            className={cn(
+              "relative bg-gray-900 shadow-2xl border-gray-800 h-full",
+              getBorderRadius(),
+              getPadding(),
+              getBorderWidth()
+            )}
+            style={{ aspectRatio: aspectRatio }}
+          >
             {/* Phone frame - Dynamic Island style notch */}
             {!isRotated ? (
               <div className={cn(
@@ -140,7 +169,7 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
             {/* Screen */}
             <div className={cn(
               "relative w-full h-full bg-black overflow-hidden",
-              isSmall ? "rounded-[18px]" : isMedium ? "rounded-[22px]" : config.screenClass
+              getScreenRadius()
             )}>
               {/* Content - takes full screen */}
               <div className="absolute inset-0 z-10">
@@ -166,28 +195,32 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
             {/* Side buttons - only show on medium and large */}
             {!isSmall && !isRotated && (
               <>
-                <div className={cn("absolute -left-0.5 bg-gray-700 rounded-l", isSmall ? "top-16 w-0.5 h-4" : isMedium ? "top-20 w-0.5 h-6" : "top-24 w-1 h-8")} />
-                <div className={cn("absolute -left-0.5 bg-gray-700 rounded-l", isSmall ? "top-24 w-0.5 h-6" : isMedium ? "top-28 w-0.5 h-8" : "top-36 w-1 h-12")} />
-                <div className={cn("absolute -right-0.5 bg-gray-700 rounded-r", isSmall ? "top-20 w-0.5 h-8" : isMedium ? "top-24 w-0.5 h-10" : "top-32 w-1 h-16")} />
+                <div className={cn("absolute -left-0.5 bg-gray-700 rounded-l", isMedium ? "top-[15%] w-0.5 h-[5%]" : "top-[15%] w-1 h-[6%]")} />
+                <div className={cn("absolute -left-0.5 bg-gray-700 rounded-l", isMedium ? "top-[22%] w-0.5 h-[8%]" : "top-[23%] w-1 h-[10%]")} />
+                <div className={cn("absolute -right-0.5 bg-gray-700 rounded-r", isMedium ? "top-[18%] w-0.5 h-[10%]" : "top-[20%] w-1 h-[12%]")} />
               </>
             )}
             
             {!isSmall && isRotated && (
               <>
-                <div className={cn("absolute -top-0.5 bg-gray-700 rounded-t", isSmall ? "left-16 h-0.5 w-4" : isMedium ? "left-20 h-0.5 w-6" : "left-24 h-1 w-8")} />
-                <div className={cn("absolute -top-0.5 bg-gray-700 rounded-t", isSmall ? "left-24 h-0.5 w-6" : isMedium ? "left-28 h-0.5 w-8" : "left-36 h-1 w-12")} />
-                <div className={cn("absolute -bottom-0.5 bg-gray-700 rounded-b", isSmall ? "left-20 h-0.5 w-8" : isMedium ? "left-24 h-0.5 w-10" : "left-32 h-1 w-16")} />
+                <div className={cn("absolute -top-0.5 bg-gray-700 rounded-t", isMedium ? "left-[15%] h-0.5 w-[5%]" : "left-[15%] h-1 w-[6%]")} />
+                <div className={cn("absolute -top-0.5 bg-gray-700 rounded-t", isMedium ? "left-[22%] h-0.5 w-[8%]" : "left-[23%] h-1 w-[10%]")} />
+                <div className={cn("absolute -bottom-0.5 bg-gray-700 rounded-b", isMedium ? "left-[18%] h-0.5 w-[10%]" : "left-[20%] h-1 w-[12%]")} />
               </>
             )}
           </div>
         )}
         
         {config.device === 'tablet' && (
-          <div className={cn(
-            "relative bg-gray-900 shadow-2xl border-gray-800",
-            isSmall ? "rounded-[16px] p-1.5 border-2" : isMedium ? "rounded-[20px] p-2 border-3" : "rounded-[24px] p-3 border-4",
-            frameClass
-          )}>
+          <div 
+            className={cn(
+              "relative bg-gray-900 shadow-2xl border-gray-800 h-full",
+              getBorderRadius(),
+              getPadding(),
+              getBorderWidth()
+            )}
+            style={{ aspectRatio: aspectRatio }}
+          >
             {/* Camera */}
             <div className={cn(
               "absolute left-1/2 -translate-x-1/2 rounded-full bg-gray-700 z-30",
@@ -197,7 +230,7 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
             {/* Screen */}
             <div className={cn(
               "relative w-full h-full bg-black overflow-hidden",
-              isSmall ? "rounded-md" : "rounded-lg"
+              getScreenRadius()
             )}>
               <div className="absolute inset-0">
                 {children}
@@ -212,17 +245,21 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
         )}
         
         {config.device === 'desktop' && (
-          <div className="flex flex-col items-center">
+          <div className="flex flex-col items-center h-full">
             {/* Monitor */}
-            <div className={cn(
-              "relative bg-gray-900 shadow-2xl border-gray-800",
-              isSmall ? "rounded-md p-1 border-2" : isMedium ? "rounded-lg p-1.5 border-3" : "rounded-lg p-2 border-4",
-              frameClass
-            )}>
+            <div 
+              className={cn(
+                "relative bg-gray-900 shadow-2xl border-gray-800 flex-1 min-h-0",
+                getBorderRadius(),
+                getPadding(),
+                getBorderWidth()
+              )}
+              style={{ aspectRatio: aspectRatio }}
+            >
               {/* Screen */}
               <div className={cn(
                 "relative w-full h-full bg-black overflow-hidden",
-                isSmall ? "rounded-sm" : "rounded"
+                getScreenRadius()
               )}>
                 <div className="absolute inset-0">
                   {children}
@@ -238,11 +275,11 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
             
             {/* Stand - scaled by size */}
             <div className={cn(
-              "bg-gradient-to-b from-gray-800 to-gray-900",
+              "bg-gradient-to-b from-gray-800 to-gray-900 flex-shrink-0",
               isSmall ? "w-12 h-3" : isMedium ? "w-16 h-4" : "w-24 h-6"
             )} />
             <div className={cn(
-              "bg-gray-800 rounded-lg",
+              "bg-gray-800 rounded-lg flex-shrink-0",
               isSmall ? "w-20 h-1.5" : isMedium ? "w-28 h-2" : "w-40 h-3"
             )} />
           </div>
