@@ -187,7 +187,7 @@ export default function Media() {
 
   // Generate clips from events - Use eventMs from metadata as primary timestamp source
   const clips = events?.map((event) => {
-    const metadata = (event as any).metadata as { eventMs?: number; videoSecond?: number; source?: string } | null;
+    const metadata = (event as any).metadata as { eventMs?: number; videoSecond?: number; source?: string; customTrim?: { startOffset: number; endOffset: number } } | null;
     const eventMs = metadata?.eventMs; // Primary: milliseconds from AI analysis
     const videoSecond = metadata?.videoSecond; // Fallback: seconds from AI analysis
     const matchHalf = event.match_half;
@@ -751,6 +751,35 @@ export default function Media() {
               timestamp={formatTimestamp(clips.find(c => c.id === previewClipId)?.totalSeconds || 0)}
               matchHalf={clips.find(c => c.id === previewClipId)?.matchHalf}
               posterUrl={getThumbnail(previewClipId || '')?.imageUrl}
+              eventId={previewClipId || undefined}
+              eventSecond={clips.find(c => c.id === previewClipId)?.videoSecond || 0}
+              videoDuration={clips.find(c => c.id === previewClipId)?.eventVideo?.duration_seconds || 30}
+              initialTrim={clips.find(c => c.id === previewClipId)?.metadata?.customTrim as { startOffset: number; endOffset: number } | undefined}
+              onTrimSave={async (eventId, trim) => {
+                try {
+                  // Update event metadata with custom trim
+                  const event = events?.find(e => e.id === eventId);
+                  if (event) {
+                    const newMetadata = {
+                      ...((event as any).metadata || {}),
+                      customTrim: trim
+                    };
+                    await apiClient.updateEvent(eventId, { metadata: newMetadata });
+                    toast({
+                      title: "Corte salvo",
+                      description: `Ajuste de ${(trim.endOffset - trim.startOffset).toFixed(1)}s aplicado. Regenere os clips para aplicar.`
+                    });
+                    refetchEvents();
+                  }
+                } catch (error) {
+                  console.error('Error saving trim:', error);
+                  toast({
+                    title: "Erro ao salvar",
+                    description: "Não foi possível salvar o ajuste de corte",
+                    variant: "destructive"
+                  });
+                }
+              }}
             />
 
             {/* Recording in progress warning */}
