@@ -1099,7 +1099,7 @@ export default function Media() {
                               )}
                             </Button>
                           )}
-                          {clip.clipUrl && (
+                          {(clip.clipUrl || clip.canExtract) && (
                             <Button 
                               variant="outline" 
                               size="sm" 
@@ -1107,7 +1107,7 @@ export default function Media() {
                               onClick={() => setPreviewClipId(clip.id)}
                             >
                               <Smartphone className="mr-1 h-3 w-3" />
-                              Preview
+                              {clip.clipUrl ? 'Preview' : 'Editor'}
                             </Button>
                           )}
                           <Button 
