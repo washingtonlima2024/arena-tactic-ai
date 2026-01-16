@@ -88,6 +88,12 @@ export default function Media() {
   const [isSyncingVideos, setIsSyncingVideos] = useState(false);
   const [isSyncingThumbnails, setIsSyncingThumbnails] = useState(false);
   const [previewClipId, setPreviewClipId] = useState<string | null>(null);
+  const [timestampMismatch, setTimestampMismatch] = useState<{
+    detected: boolean;
+    videoDuration?: number;
+    eventRange?: [number, number];
+  }>({ detected: false });
+  const [isRecalculating, setIsRecalculating] = useState(false);
 
   const queryClient = useQueryClient();
   
@@ -345,6 +351,11 @@ export default function Media() {
                   
                   // Verificar erro de incompatibilidade de timestamps
                   if (!result.success && result.error_type === 'timestamp_mismatch') {
+                    setTimestampMismatch({
+                      detected: true,
+                      videoDuration: result.video_duration_minutes,
+                      eventRange: result.event_range_minutes
+                    });
                     toast({ 
                       title: "Incompatibilidade de timestamps", 
                       description: result.error || "Os timestamps dos eventos não correspondem à duração do vídeo",
@@ -354,12 +365,34 @@ export default function Media() {
                     return;
                   }
                   
+                  // Limpar flag de incompatibilidade se sucesso
+                  setTimestampMismatch({ detected: false });
+                  
                   const clipsGerados = result.regenerated || 0;
                   
                   if (clipsGerados === 0 && eventsWithoutClips.length > 0) {
+                    // Verificar se é problema de timestamp
+                    const videoMinutes = matchVideos?.[0]?.duration_seconds 
+                      ? Math.round(matchVideos[0].duration_seconds / 60) 
+                      : null;
+                    
+                    const eventMinutes = clips.map(c => c.minute);
+                    const minEventMin = Math.min(...eventMinutes);
+                    const maxEventMin = Math.max(...eventMinutes);
+                    
+                    if (videoMinutes && minEventMin > videoMinutes) {
+                      setTimestampMismatch({
+                        detected: true,
+                        videoDuration: videoMinutes,
+                        eventRange: [minEventMin, maxEventMin]
+                      });
+                    }
+                    
                     toast({ 
                       title: "Nenhum clip gerado", 
-                      description: "Verifique se o vídeo importado corresponde aos eventos detectados",
+                      description: videoMinutes 
+                        ? `O vídeo tem ${videoMinutes} min mas os eventos apontam para outros momentos.`
+                        : "Verifique se o vídeo importado corresponde aos eventos detectados",
                       variant: "destructive" 
                     });
                   } else {
@@ -399,6 +432,75 @@ export default function Media() {
             </Button>
           </div>
         </div>
+
+        {/* Timestamp Mismatch Alert */}
+        {timestampMismatch.detected && (
+          <Card className="border-destructive bg-destructive/10">
+            <CardContent className="py-4">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <AlertCircle className="h-6 w-6 text-destructive" />
+                  <div>
+                    <p className="font-semibold text-destructive">Incompatibilidade de Timestamps</p>
+                    <p className="text-sm text-muted-foreground">
+                      O vídeo tem {timestampMismatch.videoDuration?.toFixed(0) || '?'} min, 
+                      mas os eventos apontam para os minutos {timestampMismatch.eventRange?.[0]?.toFixed(0) || '?'}-{timestampMismatch.eventRange?.[1]?.toFixed(0) || '?'}.
+                      Isso pode acontecer quando você importa um highlight em vez da partida completa.
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline"
+                    size="sm"
+                    onClick={async () => {
+                      if (!matchId) return;
+                      setIsRecalculating(true);
+                      try {
+                        toast({ title: "Recalculando timestamps...", description: "Ajustando eventos para o vídeo importado" });
+                        const result = await apiClient.recalculateEventTimestamps(matchId);
+                        if (result.success) {
+                          toast({ 
+                            title: `${result.updated} eventos recalculados`, 
+                            description: result.message 
+                          });
+                          setTimestampMismatch({ detected: false });
+                          refetchEvents();
+                          refetchClipsByHalf();
+                        } else {
+                          throw new Error('Falha ao recalcular');
+                        }
+                      } catch (error: any) {
+                        toast({ 
+                          title: "Erro ao recalcular", 
+                          description: error.message || String(error), 
+                          variant: "destructive" 
+                        });
+                      } finally {
+                        setIsRecalculating(false);
+                      }
+                    }}
+                    disabled={isRecalculating}
+                  >
+                    {isRecalculating ? (
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                      <RefreshCw className="mr-2 h-4 w-4" />
+                    )}
+                    Recalcular Timestamps
+                  </Button>
+                  <Button 
+                    variant="ghost" 
+                    size="sm"
+                    onClick={() => setTimestampMismatch({ detected: false })}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
 
         {/* Match Info */}
         {selectedMatch && (
@@ -673,24 +775,55 @@ export default function Media() {
                     variant="arena" 
                     size="sm"
                     onClick={async () => {
+                      // Verificar compatibilidade de timestamps primeiro
+                      const eventsToExtract = clips.filter(c => !c.clipUrl && c.canExtract && c.eventVideo);
+                      
+                      if (eventsToExtract.length === 0) {
+                        toast({ title: "Nenhum clip para extrair", variant: "default" });
+                        return;
+                      }
+                      
+                      // Verificar se há incompatibilidade de timestamps
+                      const videoDuration = eventsToExtract[0]?.eventVideo?.duration_seconds || 0;
+                      const eventSeconds = eventsToExtract.map(c => c.videoSecond);
+                      const minEventSec = Math.min(...eventSeconds);
+                      
+                      if (videoDuration > 0 && minEventSec > videoDuration) {
+                        const videoDurationMin = Math.round(videoDuration / 60);
+                        const minEventMin = Math.round(minEventSec / 60);
+                        const maxEventMin = Math.round(Math.max(...eventSeconds) / 60);
+                        
+                        setTimestampMismatch({
+                          detected: true,
+                          videoDuration: videoDurationMin,
+                          eventRange: [minEventMin, maxEventMin]
+                        });
+                        
+                        toast({ 
+                          title: "Incompatibilidade de timestamps", 
+                          description: `O vídeo tem ${videoDurationMin} min mas os eventos apontam para ${minEventMin}-${maxEventMin} min. Use "Recalcular Timestamps" primeiro.`,
+                          variant: "destructive",
+                          duration: 10000
+                        });
+                        return;
+                      }
+                      
                       // Group events by their corresponding video
-                      const eventsToExtract = clips
-                        .filter(c => !c.clipUrl && c.canExtract && c.eventVideo)
-                        .map(c => ({
-                          id: c.id,
-                          minute: c.minute,
-                          second: c.second,
-                          metadata: { 
-                            eventMs: c.eventMs, 
-                            videoSecond: c.videoRelativeSeconds // Use video-relative timestamp
-                          },
-                          videoUrl: c.eventVideo!.file_url,
-                          videoStartMinute: c.eventVideo!.start_minute ?? 0,
-                          videoDurationSeconds: c.eventVideo!.duration_seconds ?? undefined
-                        }));
+                      const eventsData = eventsToExtract.map(c => ({
+                        id: c.id,
+                        minute: c.minute,
+                        second: c.second,
+                        metadata: { 
+                          eventMs: c.eventMs, 
+                          videoSecond: c.videoRelativeSeconds // Use video-relative timestamp
+                        },
+                        videoUrl: c.eventVideo!.file_url,
+                        videoStartMinute: c.eventVideo!.start_minute ?? 0,
+                        videoDurationSeconds: c.eventVideo!.duration_seconds ?? undefined
+                      }));
                       
                       // Process each unique video separately
-                      const videoGroups = eventsToExtract.reduce((acc, event) => {
+                      const videoGroups = eventsData.reduce((acc, event) => {
                         const key = event.videoUrl;
                         if (!acc[key]) {
                           acc[key] = {
