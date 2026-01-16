@@ -450,28 +450,49 @@ export default function Media() {
                 </div>
                 <div className="flex gap-2">
                   <Button 
-                    variant="outline"
+                    variant="arena"
                     size="sm"
                     onClick={async () => {
                       if (!matchId) return;
                       setIsRecalculating(true);
                       try {
-                        toast({ title: "Recalculando timestamps...", description: "Ajustando eventos para o vídeo importado" });
-                        const result = await apiClient.recalculateEventTimestamps(matchId);
-                        if (result.success) {
-                          toast({ 
-                            title: `${result.updated} eventos recalculados`, 
-                            description: result.message 
-                          });
-                          setTimestampMismatch({ detected: false });
-                          refetchEvents();
-                          refetchClipsByHalf();
-                        } else {
-                          throw new Error('Falha ao recalcular');
+                        // 1. Recalcular timestamps
+                        toast({ title: "Corrigindo timestamps...", description: "Ajustando eventos para o vídeo importado" });
+                        const recalcResult = await apiClient.recalculateEventTimestamps(matchId);
+                        
+                        if (!recalcResult.success) {
+                          throw new Error('Falha ao recalcular timestamps');
                         }
+                        
+                        toast({ 
+                          title: `${recalcResult.updated} eventos ajustados`, 
+                          description: "Gerando clips..." 
+                        });
+                        
+                        // 2. Aguardar propagação
+                        await new Promise(r => setTimeout(r, 500));
+                        
+                        // 3. Gerar clips
+                        const clipsResult = await apiClient.regenerateClips(matchId, {
+                          use_category_timings: true,
+                          force_subtitles: true
+                        });
+                        
+                        const clipsGerados = clipsResult.regenerated || 0;
+                        
+                        toast({ 
+                          title: `${clipsGerados} clips gerados!`, 
+                          description: "Correção concluída com sucesso" 
+                        });
+                        
+                        setTimestampMismatch({ detected: false });
+                        refetchEvents();
+                        refetchClipsByHalf();
+                        queryClient.invalidateQueries({ queryKey: ['thumbnails', matchId] });
+                        
                       } catch (error: any) {
                         toast({ 
-                          title: "Erro ao recalcular", 
+                          title: "Erro ao corrigir", 
                           description: error.message || String(error), 
                           variant: "destructive" 
                         });
@@ -484,9 +505,9 @@ export default function Media() {
                     {isRecalculating ? (
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
-                      <RefreshCw className="mr-2 h-4 w-4" />
+                      <Sparkles className="mr-2 h-4 w-4" />
                     )}
-                    Recalcular Timestamps
+                    Corrigir e Gerar Clips
                   </Button>
                   <Button 
                     variant="ghost" 
