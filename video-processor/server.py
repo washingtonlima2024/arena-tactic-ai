@@ -1933,14 +1933,11 @@ def create_match():
         
         match_dict = match.to_dict(include_teams=True)
         
-        # Immediately sync to Supabase Cloud
-        sync_result = sync_new_match_to_supabase(match_dict)
-        match_dict['supabase_synced'] = sync_result.get('success', False)
-        
-        if sync_result.get('success'):
-            print(f"[CREATE-MATCH] ✓ Match {match.id} created and synced to Supabase")
-        else:
-            print(f"[CREATE-MATCH] ⚠ Match {match.id} created but Supabase sync failed: {sync_result.get('error')}")
+        # Cloud sync disabled - 100% local mode
+        # sync_result = sync_new_match_to_supabase(match_dict)
+        # match_dict['supabase_synced'] = sync_result.get('success', False)
+        match_dict['supabase_synced'] = False
+        print(f"[CREATE-MATCH] ✓ Match {match.id} created (local only, cloud sync disabled)")
         
         return jsonify(match_dict), 201
     except Exception as e:
@@ -3538,13 +3535,14 @@ def analyze_match():
             session_update.close()
         
         # ═══════════════════════════════════════════════════════════════════
-        # SYNC TO SUPABASE CLOUD
+        # CLOUD SYNC DISABLED - 100% LOCAL MODE
         # ═══════════════════════════════════════════════════════════════════
-        sync_result = sync_match_to_supabase(match_id)
-        if sync_result.get('success'):
-            print(f"[ANALYZE-MATCH] ✓ Synced to Supabase: {sync_result.get('events_synced')} events")
-        else:
-            print(f"[ANALYZE-MATCH] ⚠ Supabase sync failed: {sync_result.get('error', 'Unknown error')}")
+        # sync_result = sync_match_to_supabase(match_id)
+        # if sync_result.get('success'):
+        #     print(f"[ANALYZE-MATCH] ✓ Synced to Supabase: {sync_result.get('events_synced')} events")
+        # else:
+        #     print(f"[ANALYZE-MATCH] ⚠ Supabase sync failed: {sync_result.get('error', 'Unknown error')}")
+        print(f"[ANALYZE-MATCH] ℹ Cloud sync disabled - data saved locally only")
         
         return jsonify({
             'success': True, 
@@ -5049,28 +5047,16 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
             print(f"[PIPELINE] Errors: {len(results['errors'])}")
             print(f"{'='*70}\n")
             
+            # CLOUD SYNC DISABLED - 100% LOCAL MODE
             # AUTO-SYNC: Sincronizar dados para o Supabase Cloud após pipeline
-            try:
-                print(f"[PIPELINE] 🔄 Sincronizando para Cloud...")
-                sync_result = sync_match_to_supabase(match_id)
-                if sync_result.get('success'):
-                    results['cloud_sync'] = {
-                        'success': True,
-                        'events_synced': sync_result.get('events_synced', 0),
-                        'videos_synced': sync_result.get('videos_synced', 0)
-                    }
-                    print(f"[PIPELINE] ✓ Cloud sync: {sync_result.get('events_synced')} eventos sincronizados")
-                else:
-                    results['cloud_sync'] = {
-                        'success': False,
-                        'error': sync_result.get('error', 'Sync failed')
-                    }
-                    results['warnings'].append(f"Cloud sync falhou: {sync_result.get('error')}")
-                    print(f"[PIPELINE] ⚠ Cloud sync falhou: {sync_result.get('error')}")
-            except Exception as sync_error:
-                print(f"[PIPELINE] ⚠ Cloud sync erro: {str(sync_error)}")
-                results['cloud_sync'] = {'success': False, 'error': str(sync_error)}
-                results['warnings'].append(f"Cloud sync erro: {str(sync_error)}")
+            # try:
+            #     print(f"[PIPELINE] 🔄 Sincronizando para Cloud...")
+            #     sync_result = sync_match_to_supabase(match_id)
+            #     ...
+            # except Exception as sync_error:
+            #     ...
+            results['cloud_sync'] = {'success': False, 'disabled': True, 'message': 'Cloud sync disabled - local mode'}
+            print(f"[PIPELINE] ℹ Cloud sync disabled - data saved locally only")
             
             return jsonify(results)
             
@@ -7384,16 +7370,15 @@ def _process_match_pipeline(job_id: str, data: dict):
             finally:
                 session.close()
             
+            # CLOUD SYNC DISABLED - 100% LOCAL MODE
             # AUTO-SYNC: Sincronizar dados para o Supabase Cloud após pipeline assíncrono
-            try:
-                print(f"[ASYNC-PIPELINE] 🔄 Sincronizando para Cloud...")
-                sync_result = sync_match_to_supabase(match_id)
-                if sync_result.get('success'):
-                    print(f"[ASYNC-PIPELINE] ✓ Cloud sync: {sync_result.get('events_synced')} eventos sincronizados")
-                else:
-                    print(f"[ASYNC-PIPELINE] ⚠ Cloud sync falhou: {sync_result.get('error')}")
-            except Exception as sync_error:
-                print(f"[ASYNC-PIPELINE] ⚠ Cloud sync erro: {str(sync_error)}")
+            # try:
+            #     print(f"[ASYNC-PIPELINE] 🔄 Sincronizando para Cloud...")
+            #     sync_result = sync_match_to_supabase(match_id)
+            #     ...
+            # except Exception as sync_error:
+            #     ...
+            print(f"[ASYNC-PIPELINE] ℹ Cloud sync disabled - data saved locally only")
             
     except Exception as e:
         print(f"[ASYNC-PIPELINE] ✗ ERROR: {str(e)}")

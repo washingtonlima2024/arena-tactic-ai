@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
-import { apiClient, isLocalServerAvailable } from '@/lib/apiClient';
+import { apiClient } from '@/lib/apiClient';
 import { getEventHalf } from '@/lib/eventHelpers';
-import { supabase } from '@/integrations/supabase/client';
 
 export interface MatchWithDetails {
   id: string;
@@ -79,44 +78,6 @@ export interface AnalysisResult {
   }[];
 }
 
-// Helper function to fetch events with fallback to Supabase Cloud
-async function fetchEventsWithFallback(matchId: string): Promise<any[]> {
-  let events: any[] = [];
-
-  // 1. Try local server first
-  const serverUp = await isLocalServerAvailable();
-  if (serverUp) {
-    try {
-      const localEvents = await apiClient.getMatchEvents(matchId);
-      if (localEvents && localEvents.length > 0) {
-        console.log(`[fetchEvents] ✓ ${localEvents.length} eventos do servidor local`);
-        return localEvents;
-      }
-    } catch (err) {
-      console.warn('[fetchEvents] Erro no servidor local:', err);
-    }
-  }
-
-  // 2. Fallback to Supabase Cloud
-  console.log('[fetchEvents] Tentando fallback para Cloud...');
-  try {
-    const { data: cloudEvents, error } = await supabase
-      .from('match_events')
-      .select('*')
-      .eq('match_id', matchId)
-      .order('minute', { ascending: true });
-    
-    if (!error && cloudEvents && cloudEvents.length > 0) {
-      console.log(`[fetchEvents] ✓ ${cloudEvents.length} eventos do Cloud`);
-      return cloudEvents;
-    }
-  } catch (cloudError) {
-    console.error('[fetchEvents] Erro no Cloud fallback:', cloudError);
-  }
-
-  return events;
-}
-
 // Helper function to calculate scores from goal events
 function calculateScoresFromGoals(
   goalEvents: any[], 
@@ -156,9 +117,9 @@ export function useMatchDetails(matchId: string | null) {
       const dbHomeScore = match.home_score ?? 0;
       const dbAwayScore = match.away_score ?? 0;
       
-      // ALWAYS calculate scores from goal events (with Cloud fallback)
+      // Calculate scores from goal events (local server only)
       try {
-        const events = await fetchEventsWithFallback(matchId);
+        const events = await apiClient.getMatchEvents(matchId);
         const goalEvents = events.filter((e: any) => e.event_type === 'goal');
         
         if (goalEvents.length > 0) {
@@ -189,43 +150,16 @@ export function useMatchEvents(matchId: string | null) {
 
       console.log('[useMatchEvents] Buscando eventos para matchId:', matchId);
 
+      // Local server only - no Cloud fallback
       let events: MatchEvent[] = [];
-
-      // 1. Tentar buscar do servidor local primeiro
-      const serverUp = await isLocalServerAvailable();
-      console.log('[useMatchEvents] Servidor local disponível:', serverUp);
-
-      if (serverUp) {
-        try {
-          const localEvents = await apiClient.getMatchEvents(matchId);
-          console.log('[useMatchEvents] Eventos do servidor local:', localEvents.length);
-          events = localEvents as MatchEvent[];
-        } catch (localError) {
-          console.error('[useMatchEvents] Erro no servidor local:', localError);
-        }
-      }
-
-      // 2. FALLBACK: Se não há eventos locais, buscar do Supabase Cloud
-      if (events.length === 0) {
-        console.log('[useMatchEvents] Sem eventos locais, tentando Cloud fallback...');
-        try {
-          const { data: cloudEvents, error } = await supabase
-            .from('match_events')
-            .select('*')
-            .eq('match_id', matchId)
-            .order('minute', { ascending: true });
-          
-          if (!error && cloudEvents && cloudEvents.length > 0) {
-            console.log('[useMatchEvents] ✓ Eventos do Cloud:', cloudEvents.length);
-            events = cloudEvents as MatchEvent[];
-          } else if (error) {
-            console.error('[useMatchEvents] Erro no Cloud fallback:', error);
-          } else {
-            console.log('[useMatchEvents] Nenhum evento encontrado no Cloud');
-          }
-        } catch (cloudError) {
-          console.error('[useMatchEvents] Erro no Cloud fallback:', cloudError);
-        }
+      
+      try {
+        const localEvents = await apiClient.getMatchEvents(matchId);
+        console.log('[useMatchEvents] Eventos do servidor local:', localEvents.length);
+        events = localEvents as MatchEvent[];
+      } catch (localError) {
+        console.error('[useMatchEvents] Erro no servidor local:', localError);
+        return [];
       }
 
       console.log(`[useMatchEvents] Total: ${events.length} eventos`);
@@ -346,15 +280,14 @@ export function useAllCompletedMatches() {
         ['completed', 'live', 'analyzed', 'analyzing'].includes(m.status)
       );
       
-      // Calculate scores from goals with Cloud fallback
+      // Calculate scores from goals (local only)
       const matchesWithScores = await Promise.all(
         filteredMatches.map(async (match: any) => {
           const dbHomeScore = match.home_score ?? 0;
           const dbAwayScore = match.away_score ?? 0;
           
           try {
-            // Use the helper with Cloud fallback
-            const events = await fetchEventsWithFallback(match.id);
+            const events = await apiClient.getMatchEvents(match.id);
             const goalEvents = events.filter((e: any) => e.event_type === 'goal');
             
             if (goalEvents.length > 0) {

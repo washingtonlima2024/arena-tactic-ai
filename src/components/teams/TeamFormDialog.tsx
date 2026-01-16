@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Upload, Image, Loader2 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 import type { Team, TeamInsert, TeamUpdate } from '@/hooks/useTeams';
 
@@ -68,19 +68,20 @@ export function TeamFormDialog({
     try {
       const fileExt = file.name.split('.').pop();
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${fileExt}`;
-      const filePath = `team-logos/${fileName}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('thumbnails')
-        .upload(filePath, file);
+      // Upload to local server (use 'general' as matchId for team logos)
+      const uploadResult = await apiClient.uploadBlob(
+        'teams',
+        'logos',
+        file,
+        fileName
+      );
 
-      if (uploadError) throw uploadError;
+      if (!uploadResult?.url) {
+        throw new Error('Falha no upload');
+      }
 
-      const { data: { publicUrl } } = supabase.storage
-        .from('thumbnails')
-        .getPublicUrl(filePath);
-
-      setLogoUrl(publicUrl);
+      setLogoUrl(uploadResult.url);
       toast.success('Logo carregada com sucesso!');
     } catch (error) {
       console.error('Error uploading logo:', error);

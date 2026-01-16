@@ -3,13 +3,12 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 import { 
   Upload, 
   Video, 
   Loader2, 
-  CheckCircle, 
   AlertCircle,
   Film,
   LinkIcon
@@ -54,84 +53,47 @@ export function VideoUploadCard({ matchId, onVideoUploaded, eventsCount = 0 }: V
       
       setUploadProgress(20);
 
-      // Upload to Supabase Storage
+      // Upload to local server storage
       const extension = file.name.split('.').pop() || 'mp4';
-      const filePath = `manual-${matchId}-${Date.now()}.${extension}`;
+      const fileName = `manual-${matchId}-${Date.now()}.${extension}`;
 
-      const { error: uploadError } = await supabase.storage
-        .from('match-videos')
-        .upload(filePath, file, {
-          contentType: file.type,
-          upsert: true
-        });
+      setUploadProgress(40);
 
-      if (uploadError) {
-        throw uploadError;
+      // Upload blob to local server
+      const uploadResult = await apiClient.uploadBlob(
+        matchId,
+        'videos',
+        file,
+        fileName
+      );
+
+      if (!uploadResult?.url) {
+        throw new Error('Falha no upload do vídeo');
       }
+
+      const videoUrl = uploadResult.url;
 
       setUploadProgress(70);
 
-      // Get public URL
-      const { data: urlData } = supabase.storage
-        .from('match-videos')
-        .getPublicUrl(filePath);
-
-      const videoUrl = urlData.publicUrl;
-
-      // Create video record in database
-      const { data: videoRecord, error: insertError } = await supabase
-        .from('videos')
-        .insert({
-          match_id: matchId,
-          file_url: videoUrl,
-          file_name: file.name,
-          video_type: 'full',
-          start_minute: 0,
-          end_minute: durationMinutes,
-          duration_seconds: Math.floor(duration),
-          status: 'complete'
-        })
-        .select('id')
-        .single();
-
-      if (insertError) {
-        throw insertError;
-      }
+      // Create video record via local API
+      const videoRecord = await apiClient.post('/api/videos', {
+        match_id: matchId,
+        file_url: videoUrl,
+        file_name: file.name,
+        video_type: 'full',
+        start_minute: 0,
+        end_minute: durationMinutes,
+        duration_seconds: Math.floor(duration),
+        status: 'complete'
+      });
 
       setUploadProgress(85);
 
-      // Link all events to this video
+      // Link all events to this video and update metadata
       if (videoRecord?.id) {
-        await supabase
-          .from('match_events')
-          .update({ video_id: videoRecord.id })
-          .eq('match_id', matchId)
-          .is('video_id', null);
-
-        // Update events metadata with calculated videoSecond
-        const { data: events } = await supabase
-          .from('match_events')
-          .select('id, minute, second, metadata')
-          .eq('match_id', matchId);
-
-        if (events) {
-          for (const event of events) {
-            const eventMinute = event.minute || 0;
-            const eventSecond = event.second || 0;
-            const videoSecond = eventMinute * 60 + eventSecond;
-            
-            await supabase
-              .from('match_events')
-              .update({
-                metadata: {
-                  ...(event.metadata as object || {}),
-                  videoSecond,
-                  eventMs: videoSecond * 1000
-                }
-              })
-              .eq('id', event.id);
-          }
-        }
+        await apiClient.post(`/api/matches/${matchId}/link-video`, {
+          video_id: videoRecord.id
+        }).catch(() => {});
       }
 
       setUploadProgress(100);
