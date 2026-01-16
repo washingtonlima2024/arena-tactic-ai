@@ -86,7 +86,6 @@ export default function Media() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [activeHalfTab, setActiveHalfTab] = useState<string>('all');
   const [isSyncingVideos, setIsSyncingVideos] = useState(false);
-  const [isSyncingThumbnails, setIsSyncingThumbnails] = useState(false);
   const [previewClipId, setPreviewClipId] = useState<string | null>(null);
   const [timestampMismatch, setTimestampMismatch] = useState<{
     detected: boolean;
@@ -626,108 +625,19 @@ export default function Media() {
                 )}
               </div>
               <div className="flex gap-2">
-                {/* Regenerate thumbnails button */}
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={async () => {
-                    if (!matchId) return;
-                    toast({ title: "Regenerando capas...", description: "Aguarde o processamento" });
-                    try {
-                      const result = await apiClient.regenerateThumbnails(matchId);
-                      if (result.generated > 0) {
-                        toast({ 
-                          title: "Capas regeneradas", 
-                          description: `${result.generated} capa(s) gerada(s)${result.errors > 0 ? `, ${result.errors} erro(s)` : ''}` 
-                        });
-                        // Reload thumbnails
-                        queryClient.invalidateQueries({ queryKey: ['thumbnails', matchId] });
-                      } else if (result.errors > 0) {
-                        toast({ 
-                          title: "Falha ao gerar capas", 
-                          description: `${result.errors} erro(s) - verifique se os clips existem`, 
-                          variant: "destructive" 
-                        });
-                      } else {
-                        toast({ 
-                          title: "Nenhum clip para gerar capas", 
-                          description: "Extraia os clips primeiro" 
-                        });
-                      }
-                    } catch (error) {
-                      toast({ 
-                        title: "Erro ao regenerar capas", 
-                        description: String(error), 
-                        variant: "destructive" 
-                      });
-                    }
-                  }}
-                >
-                  <Image className="h-3 w-3 mr-1" />
-                  Regenerar Capas
-                </Button>
-                
-                {/* Sync missing thumbnails button */}
-                <Button 
-                  variant="outline" 
-                  size="sm"
-                  onClick={async () => {
-                    if (!matchId) return;
-                    setIsSyncingThumbnails(true);
-                    try {
-                      // First diagnose to see how many are missing
-                      const diagnosis = await apiClient.diagnoseThumbnails(matchId);
-                      
-                      if (diagnosis.missing_thumbnails === 0) {
-                        toast({ 
-                          title: "Todas as capas OK", 
-                          description: `${diagnosis.total_thumbnails} capa(s) encontrada(s) - cobertura 100%` 
-                        });
-                        return;
-                      }
-                      
-                      toast({ 
-                        title: "Sincronizando capas...", 
-                        description: `${diagnosis.missing_thumbnails} capa(s) faltando` 
-                      });
-                      
-                      // Sync missing thumbnails
-                      const result = await apiClient.syncThumbnails(matchId);
-                      
-                      if (result.generated > 0) {
-                        toast({ 
-                          title: "Capas sincronizadas", 
-                          description: `${result.generated} capa(s) gerada(s)${result.failed > 0 ? `, ${result.failed} erro(s)` : ''}` 
-                        });
-                        queryClient.invalidateQueries({ queryKey: ['thumbnails', matchId] });
-                      } else if (result.failed > 0) {
-                        toast({ 
-                          title: "Falha na sincronização", 
-                          description: `${result.failed} erro(s) - verifique se os clips existem`, 
-                          variant: "destructive" 
-                        });
-                      }
-                    } catch (error) {
-                      toast({ 
-                        title: "Erro ao sincronizar capas", 
-                        description: String(error), 
-                        variant: "destructive" 
-                      });
-                    } finally {
-                      setIsSyncingThumbnails(false);
-                    }
-                  }}
-                  disabled={isSyncingThumbnails}
-                >
-                  {isSyncingThumbnails ? (
-                    <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-                  ) : (
-                    <RefreshCw className="h-3 w-3 mr-1" />
-                  )}
-                  Sincronizar Capas
-                </Button>
+                {/* Link video button - only show if no video */}
+                {!matchVideo && (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => setLinkVideoDialogOpen(true)}
+                  >
+                    <LinkIcon className="h-3 w-3 mr-1" />
+                    Vincular Vídeo
+                  </Button>
+                )}
 
-                {/* Sync videos button */}
+                {/* Sync videos button - useful for importing new videos */}
                 <Button 
                   variant="outline" 
                   size="sm"
@@ -760,114 +670,15 @@ export default function Media() {
                     }
                   }}
                   disabled={isSyncingVideos}
+                  title="Buscar novos vídeos no storage"
                 >
                   {isSyncingVideos ? (
                     <Loader2 className="h-3 w-3 mr-1 animate-spin" />
                   ) : (
                     <RefreshCw className="h-3 w-3 mr-1" />
                   )}
-                  Sincronizar
+                  Atualizar
                 </Button>
-                
-                {/* Extract video clips button - only for clips with canExtract */}
-                {matchVideo && clips.length > 0 && clips.some(c => !c.clipUrl && c.canExtract) && (
-                  <Button 
-                    variant="arena" 
-                    size="sm"
-                    onClick={async () => {
-                      // Verificar compatibilidade de timestamps primeiro
-                      const eventsToExtract = clips.filter(c => !c.clipUrl && c.canExtract && c.eventVideo);
-                      
-                      if (eventsToExtract.length === 0) {
-                        toast({ title: "Nenhum clip para extrair", variant: "default" });
-                        return;
-                      }
-                      
-                      // Verificar se há incompatibilidade de timestamps
-                      const videoDuration = eventsToExtract[0]?.eventVideo?.duration_seconds || 0;
-                      const eventSeconds = eventsToExtract.map(c => c.videoSecond);
-                      const minEventSec = Math.min(...eventSeconds);
-                      
-                      if (videoDuration > 0 && minEventSec > videoDuration) {
-                        const videoDurationMin = Math.round(videoDuration / 60);
-                        const minEventMin = Math.round(minEventSec / 60);
-                        const maxEventMin = Math.round(Math.max(...eventSeconds) / 60);
-                        
-                        setTimestampMismatch({
-                          detected: true,
-                          videoDuration: videoDurationMin,
-                          eventRange: [minEventMin, maxEventMin]
-                        });
-                        
-                        toast({ 
-                          title: "Incompatibilidade de timestamps", 
-                          description: `O vídeo tem ${videoDurationMin} min mas os eventos apontam para ${minEventMin}-${maxEventMin} min. Use "Recalcular Timestamps" primeiro.`,
-                          variant: "destructive",
-                          duration: 10000
-                        });
-                        return;
-                      }
-                      
-                      // Group events by their corresponding video
-                      const eventsData = eventsToExtract.map(c => ({
-                        id: c.id,
-                        minute: c.minute,
-                        second: c.second,
-                        metadata: { 
-                          eventMs: c.eventMs, 
-                          videoSecond: c.videoRelativeSeconds // Use video-relative timestamp
-                        },
-                        videoUrl: c.eventVideo!.file_url,
-                        videoStartMinute: c.eventVideo!.start_minute ?? 0,
-                        videoDurationSeconds: c.eventVideo!.duration_seconds ?? undefined
-                      }));
-                      
-                      // Process each unique video separately
-                      const videoGroups = eventsData.reduce((acc, event) => {
-                        const key = event.videoUrl;
-                        if (!acc[key]) {
-                          acc[key] = {
-                            videoUrl: event.videoUrl,
-                            videoStartMinute: event.videoStartMinute,
-                            videoDurationSeconds: event.videoDurationSeconds,
-                            events: []
-                          };
-                        }
-                        acc[key].events.push({
-                          id: event.id,
-                          minute: event.minute,
-                          second: event.second,
-                          metadata: event.metadata
-                        });
-                        return acc;
-                      }, {} as Record<string, { videoUrl: string; videoStartMinute: number; videoDurationSeconds?: number; events: any[] }>);
-                      
-                      // Process each video group
-                      for (const group of Object.values(videoGroups)) {
-                        console.log(`[Clips] Extraindo ${group.events.length} clips do vídeo: ${group.videoUrl.slice(-30)}`);
-                        await generateAllClips(
-                          group.events, 
-                          group.videoUrl, 
-                          matchId,
-                          {
-                            videoStartMinute: group.videoStartMinute,
-                            videoDurationSeconds: group.videoDurationSeconds
-                          }
-                        );
-                      }
-                      refetchEvents();
-                    }}
-                    disabled={isGeneratingClips}
-                  >
-                    {isGeneratingClips ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    ) : (
-                      <Scissors className="mr-2 h-4 w-4" />
-                    )}
-                    Extrair Clips ({clips.filter(c => !c.clipUrl && c.canExtract).length})
-                  </Button>
-                )}
-
               </div>
             </div>
 

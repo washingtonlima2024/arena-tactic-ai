@@ -222,11 +222,9 @@ export function ClipPreviewModal({
       setSelectedDevice('phone');
       setIsMuted(true);
       setIsPlaying(true);
-      setShowTimelineEditor(false);
       setCurrentTrim(initialTrim);
       setCurrentTime(0);
       setDuration(videoDuration);
-      setClipMode('auto');
       setLogoFile(null);
       setLogoUrl(null);
       setCustomTexts([]);
@@ -237,8 +235,13 @@ export function ClipPreviewModal({
       // Reset absolute timestamps
       setAbsoluteStart(Math.max(0, eventSecond - 15));
       setAbsoluteEnd(Math.min(fullVideoDuration || videoDuration, eventSecond + 15));
+      
+      // Determine initial mode: if no clip but full video exists, start in custom mode
+      const shouldStartCustom = !clipUrl && !!fullVideoUrl;
+      setClipMode(shouldStartCustom ? 'custom' : 'auto');
+      setShowTimelineEditor(shouldStartCustom);
     }
-  }, [isOpen, initialTrim, videoDuration, eventSecond, fullVideoDuration]);
+  }, [isOpen, initialTrim, videoDuration, eventSecond, fullVideoDuration, clipUrl, fullVideoUrl]);
 
   // Handle clip mode change - position video at event time when entering custom mode
   useEffect(() => {
@@ -266,6 +269,12 @@ export function ClipPreviewModal({
     const handlePause = () => setIsPlaying(false);
     const handleLoadedMetadata = () => {
       setDuration(video.duration || videoDuration);
+      
+      // Auto-seek to event time in custom mode when video loads
+      if (clipMode === 'custom' && eventSecond > 0) {
+        video.currentTime = eventSecond;
+        setCurrentTime(eventSecond);
+      }
     };
 
     video.addEventListener('timeupdate', handleTimeUpdate);
@@ -277,6 +286,11 @@ export function ClipPreviewModal({
     // Initialize duration if video already has metadata
     if (video.duration && !isNaN(video.duration)) {
       setDuration(video.duration);
+      // Also seek if custom mode and video already loaded
+      if (clipMode === 'custom' && eventSecond > 0 && video.currentTime < 1) {
+        video.currentTime = eventSecond;
+        setCurrentTime(eventSecond);
+      }
     }
 
     return () => {
@@ -286,7 +300,7 @@ export function ClipPreviewModal({
       video.removeEventListener('pause', handlePause);
       video.removeEventListener('loadedmetadata', handleLoadedMetadata);
     };
-  }, [clipUrl, videoDuration]);
+  }, [clipUrl, videoDuration, clipMode, eventSecond]);
 
   // Update video muted state
   useEffect(() => {
@@ -1153,44 +1167,39 @@ export function ClipPreviewModal({
               </Accordion>
             </ScrollArea>
             
-            {/* Sidebar Footer */}
+            {/* Sidebar Footer - Single action button */}
             <div className="border-t border-border/50 p-3 flex-shrink-0 bg-muted/20 space-y-2">
               <Button 
                 className="w-full gap-2" 
                 variant="arena"
-                onClick={handleApplyAndRegenerate}
-                disabled={isRegenerating}
-              >
-                <RefreshCw className="h-4 w-4" />
-                {clipMode === 'auto' ? 'Salvar Configuração' : 'Salvar Marcações'}
-              </Button>
-              <Button 
-                className="w-full gap-2" 
-                variant="default"
                 onClick={handleRegenerateClip}
                 disabled={isRegenerating || !matchId}
               >
                 {isRegenerating ? (
                   <>
                     <RefreshCw className="h-4 w-4 animate-spin" />
-                    Regenerando...
+                    Gerando...
                   </>
                 ) : (
                   <>
                     <Scissors className="h-4 w-4" />
-                    Regenerar Clip no Servidor
+                    Gerar Clip
                   </>
                 )}
               </Button>
-              <Button 
-                className="w-full gap-2" 
-                variant="outline"
-                onClick={handleDownload}
-                disabled={!clipUrl || isRegenerating}
-              >
-                <Download className="h-4 w-4" />
-                Baixar Clip Atual
-              </Button>
+              
+              {/* Download only appears if clip exists */}
+              {clipUrl && (
+                <Button 
+                  className="w-full gap-2" 
+                  variant="outline"
+                  onClick={handleDownload}
+                  disabled={isRegenerating}
+                >
+                  <Download className="h-4 w-4" />
+                  Baixar
+                </Button>
+              )}
             </div>
           </div>
 
@@ -1293,7 +1302,7 @@ export function ClipPreviewModal({
             </div>
             
             {/* Player Controls Bar */}
-            {clipUrl && (
+            {activeVideoUrl && (
               <div className="border-t border-border/50 bg-muted/30 p-3 flex-shrink-0 space-y-2">
                 {/* Progress Bar */}
                 <Slider
