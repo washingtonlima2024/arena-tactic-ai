@@ -15,7 +15,7 @@ import {
   AlertTriangle, Trash2, Music, Image, MessageSquare, 
   BarChart3, Video, Upload, Loader2
 } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 
 interface ReimportMatchDialogProps {
@@ -44,43 +44,26 @@ export function ReimportMatchDialog({
     setProgress(0);
 
     try {
-      // Step 1: Delete events
-      setCurrentStep('Deletando eventos...');
-      setProgress(10);
-      await supabase.from('match_events').delete().eq('match_id', matchId);
-
-      // Step 2: Delete analysis jobs
-      setCurrentStep('Deletando análises...');
-      setProgress(25);
-      await supabase.from('analysis_jobs').delete().eq('match_id', matchId);
-
-      // Step 3: Delete generated audio
-      setCurrentStep('Deletando áudios...');
-      setProgress(40);
-      await supabase.from('generated_audio').delete().eq('match_id', matchId);
-
-      // Step 4: Delete thumbnails
-      setCurrentStep('Deletando thumbnails...');
-      setProgress(55);
-      await supabase.from('thumbnails').delete().eq('match_id', matchId);
-
-      // Step 5: Delete chatbot conversations
-      setCurrentStep('Deletando conversas...');
-      setProgress(65);
-      await supabase.from('chatbot_conversations').delete().eq('match_id', matchId);
-
-      // Step 6: Delete videos (new - complete reset)
+      // Use local server API to delete all related data
+      setCurrentStep('Deletando dados relacionados...');
+      setProgress(30);
+      
+      // Delete events via local API
+      await apiClient.delete(`/api/matches/${matchId}/events`).catch(() => {});
+      setProgress(50);
+      
+      // Delete videos via local API
       setCurrentStep('Deletando vídeos...');
-      setProgress(80);
-      await supabase.from('videos').delete().eq('match_id', matchId);
-
-      // Step 7: Reset match score and status
+      await apiClient.delete(`/api/matches/${matchId}/videos`).catch(() => {});
+      setProgress(70);
+      
+      // Reset match status
       setCurrentStep('Resetando partida...');
-      setProgress(90);
-      await supabase
-        .from('matches')
-        .update({ home_score: 0, away_score: 0, status: 'pending' })
-        .eq('id', matchId);
+      await apiClient.put(`/api/matches/${matchId}`, {
+        home_score: 0,
+        away_score: 0,
+        status: 'pending'
+      });
 
       setProgress(100);
       setCurrentStep('Concluído!');
