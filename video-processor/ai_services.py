@@ -1657,10 +1657,27 @@ TIMES DA PARTIDA:
 - AWAY (visitante): {away_team}
 - Período: {half_desc}
 
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  🚨🚨🚨 REGRA CRÍTICA SOBRE TIMESTAMPS - LEIA COM ATENÇÃO! 🚨🚨🚨           ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  O formato da transcrição é SRT com timestamps assim:                        ║
+║                                                                              ║
+║  368                                                                         ║
+║  00:24:52,253 --> 00:24:56,308                                               ║
+║  o gol! Gol! É do Brasil!                                                    ║
+║                                                                              ║
+║  ⚠️ USE O TIMESTAMP DO BLOCO [00:24:52], NÃO o minuto mencionado na fala!    ║
+║                                                                              ║
+║  CORRETO: minute=24, second=52 (do timestamp 00:24:52)                       ║
+║  ERRADO:  minute=38 (se o narrador disser "gol aos 38 minutos")              ║
+║                                                                              ║
+║  O timestamp indica o MOMENTO NO VÍDEO onde o evento acontece.               ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
 Para CADA evento detectado, extraia:
 - event_type: goal, shot, save, foul, yellow_card, red_card, corner, chance, penalty, etc.
-- minute: número do minuto do timestamp [MM:SS]
-- second: número do segundo do timestamp [MM:SS] 
+- minute: MINUTO do timestamp SRT [HH:MM:SS] - extraia o valor de MM
+- second: SEGUNDO do timestamp SRT [HH:MM:SS] - extraia o valor de SS
 - team: "home" ou "away"
 - description: descrição curta (max 60 chars)
 - is_highlight: true para eventos importantes
@@ -1675,15 +1692,16 @@ FORMATO: Retorne APENAS um array JSON válido, sem explicações."""
 PARTIDA: {home_team} vs {away_team}
 PERÍODO: {half_desc} (minutos {game_start_minute}' a {game_end_minute}')
 
-TRANSCRIÇÃO COMPLETA:
+TRANSCRIÇÃO COMPLETA (formato SRT com timestamps):
 ═══════════════════════════════════════════════════════════════
 {transcription}
 ═══════════════════════════════════════════════════════════════
 
 CHECKLIST OBRIGATÓRIO:
+□ Para CADA evento, extraia minute e second do TIMESTAMP do bloco SRT (ex: 00:24:52 → minute=24, second=52)
+□ NÃO use o "minuto de jogo" que o narrador menciona - use o timestamp real!
 □ Quantas vezes aparece "GOL" na transcrição? → Mesmo número de eventos de gol!
 □ Retornar pelo menos 15-30 eventos para um tempo completo
-□ Cada evento TEM que ter minute, second, team, description
 □ source_text = trecho exato da narração
 
 Retorne o array JSON com TODOS os eventos detectados:"""
@@ -1719,6 +1737,18 @@ Retorne o array JSON com TODOS os eventos detectados:"""
         if start >= 0 and end > start:
             events = json.loads(response[start:end])
             print(f"[AI] ✓ Parsed {len(events)} eventos do {generator_model}")
+            
+            # Log detalhado de gols detectados
+            goals_detected = [e for e in events if e.get('event_type') == 'goal']
+            if goals_detected:
+                print(f"[AI] ⚽ GPT-4o DETECTOU {len(goals_detected)} GOL(S):")
+                for g in goals_detected:
+                    video_second = (g.get('minute', 0) or 0) * 60 + (g.get('second', 0) or 0)
+                    print(f"[AI]   → min {g.get('minute')}:{g.get('second', 0):02d} = {video_second}s - {(g.get('description') or '')[:50]}")
+                    print(f"[AI]     source: {(g.get('source_text') or '')[:80]}")
+            else:
+                print(f"[AI] ⚠️ ALERTA: Nenhum gol detectado pelo GPT-4o!")
+                
     except json.JSONDecodeError as e:
         print(f"[AI] ⚠ JSON parse error: {e}")
     
@@ -1809,7 +1839,7 @@ def validate_events_with_gemini(
             "source_text": (event.get('source_text') or '')[:100]
         })
     
-    validation_prompt = f"""Você é um árbitro de vídeo (VAR) RIGOROSO revisando eventos detectados por outro sistema.
+    validation_prompt = f"""Você é um árbitro de vídeo (VAR) revisando eventos detectados por outro sistema.
 
 TIMES DA PARTIDA:
 - HOME (casa): {home_team}
@@ -1824,20 +1854,31 @@ EVENTOS DETECTADOS PELO SISTEMA PRIMÁRIO:
 {json.dumps(events_for_prompt, ensure_ascii=False, indent=2)}
 
 SUA TAREFA:
-Para CADA evento, verifique se existe EVIDÊNCIA CLARA na transcrição:
+Para CADA evento, verifique se existe EVIDÊNCIA na transcrição:
 
-1. GOLS: Precisa ter "GOL", "GOOOOL", "ENTROU", "PRA DENTRO" etc.
-2. CARTÕES: Precisa ter "AMARELO", "VERMELHO", "CARTÃO"
-3. FALTAS: Precisa ter "FALTA", "FALTOSO"
-4. CHANCES: Precisa ter "QUASE", "PASSOU PERTO", "DEFESA"
+╔══════════════════════════════════════════════════════════════════════════════╗
+║  🔴 REGRA ESPECIAL PARA GOLS - SEMPRE CONFIRME NA DÚVIDA! 🔴                ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║  GOLS são PRIORITÁRIOS. Se houver QUALQUER menção a:                         ║
+║  - "GOL", "GOOOOL", "GOLAÇO", "ENTROU", "PRA DENTRO", "BOLA NA REDE"         ║
+║  → CONFIRME O GOL IMEDIATAMENTE!                                             ║
+║                                                                              ║
+║  Só rejeite um gol se houver PROVA CLARA de que foi anulado/impedido.       ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+
+Para OUTROS eventos, verifique evidência textual:
+- CARTÕES: "AMARELO", "VERMELHO", "CARTÃO"
+- FALTAS: "FALTA", "FALTOSO"
+- CHANCES: "QUASE", "PASSOU PERTO", "DEFESA"
 
 RETORNE um JSON array:
 [
-  {{"id": 0, "confirmed": true, "reason": "GOL encontrado: 'GOOOOL do Flamengo'"}},
+  {{"id": 0, "confirmed": true, "reason": "GOL encontrado: 'GOOOOL do Brasil'"}},
   {{"id": 1, "confirmed": false, "reason": "Sem evidência textual para este evento"}}
 ]
 
-SEJA RIGOROSO: Na dúvida, REJEITE o evento.
+Para GOLS: Na dúvida, CONFIRME.
+Para outros eventos: Na dúvida, REJEITE.
 Retorne APENAS o array JSON, sem explicações."""
 
     print(f"[AI] 🔍 FASE 2: Gemini validando {len(events_to_validate)} eventos...")
@@ -1890,8 +1931,15 @@ Retorne APENAS o array JSON, sem explicações."""
         event_copy = event.copy()
         event_copy['validation_reason'] = validation_reasons.get(i, '')
         
-        if i in confirmed_ids:
+        is_goal = event.get('event_type') == 'goal'
+        high_confidence = (event.get('confidence') or 0) >= 0.7
+        
+        # REGRA: Gols com confiança >= 0.7 são SEMPRE confirmados (bypass do Gemini)
+        if i in confirmed_ids or (is_goal and high_confidence):
             event_copy['validated'] = True
+            if is_goal and high_confidence and i not in confirmed_ids:
+                event_copy['validation_reason'] = 'AUTO-APROVADO: Gol com alta confiança (bypass VAR)'
+                print(f"[AI] ⚽ GOL AUTO-APROVADO: min {event.get('minute')}:{event.get('second', 0):02d} (confiança: {event.get('confidence', 0):.2f})")
             confirmed_events.append(event_copy)
         else:
             event_copy['validated'] = False
