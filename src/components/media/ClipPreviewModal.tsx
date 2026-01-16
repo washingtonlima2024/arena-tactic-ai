@@ -91,6 +91,7 @@ interface ClipPreviewModalProps {
   fullVideoDuration?: number;        // Duração do vídeo completo
   initialTrim?: { startOffset: number; endOffset: number };
   onTrimSave?: (eventId: string, trim: { startOffset: number; endOffset: number }) => void;
+  onCreateNewEvent?: (newEvent: any) => void;  // Callback when new event is created
 }
 
 const formatConfigs = [
@@ -156,6 +157,7 @@ export function ClipPreviewModal({
   fullVideoDuration,
   initialTrim,
   onTrimSave,
+  onCreateNewEvent,
 }: ClipPreviewModalProps) {
   // Format & Device
   const [selectedFormat, setSelectedFormat] = useState<DeviceFormat>('9:16');
@@ -176,6 +178,7 @@ export function ClipPreviewModal({
   
   // Regeneration state
   const [isRegenerating, setIsRegenerating] = useState(false);
+  const [isCreatingNew, setIsCreatingNew] = useState(false);
   
   // Absolute timestamps for custom mode (in seconds)
   const [absoluteStart, setAbsoluteStart] = useState(Math.max(0, eventSecond - 15));
@@ -710,6 +713,95 @@ export function ClipPreviewModal({
     }
   };
 
+  // Create new event from custom edit
+  const handleSaveAsNewEvent = async () => {
+    if (!matchId || !eventId) {
+      toast.error('ID do evento ou partida não disponível');
+      return;
+    }
+
+    if (clipMode !== 'custom') {
+      toast.error('Use o modo Personalizado para criar novo evento');
+      return;
+    }
+
+    setIsCreatingNew(true);
+    
+    try {
+      // Calculate new timestamp based on custom trim
+      const newVideoSecond = absoluteStart;
+      const newMinute = Math.floor(newVideoSecond / 60);
+      const newSecond = Math.floor(newVideoSecond % 60);
+      
+      // Create new event via API
+      const newEventData = {
+        event_type: clipType || 'highlight',
+        minute: newMinute,
+        second: newSecond,
+        description: `${clipTitle} (Corte editado)`,
+        match_half: matchHalf || 'first_half',
+        is_highlight: true,
+        metadata: {
+          derivedFrom: eventId,
+          manual: true,
+          customTrim: {
+            startSecond: absoluteStart,
+            endSecond: absoluteEnd,
+            duration: absoluteEnd - absoluteStart,
+          },
+          videoSecond: newVideoSecond,
+        }
+      };
+      
+      console.log('[ClipPreview] Creating new event:', newEventData);
+      
+      const newEvent = await apiClient.createEvent(matchId, newEventData);
+      
+      if (newEvent && newEvent.id) {
+        toast.success('Novo evento criado!', {
+          description: `Gerando clip de ${(absoluteEnd - absoluteStart).toFixed(1)}s...`
+        });
+        
+        // Regenerate clip for the new event specifically
+        try {
+          await apiClient.regenerateClips(matchId, {
+            use_category_timings: true,
+            force_subtitles: true
+          });
+          
+          toast.success('Clip gerado para o novo evento!');
+          
+          // Notify parent component
+          if (onCreateNewEvent) {
+            onCreateNewEvent(newEvent);
+          }
+          
+          onClose();
+        } catch (clipError) {
+          console.warn('[ClipPreview] Error generating clip for new event:', clipError);
+          toast.warning('Evento criado, mas houve erro ao gerar clip', {
+            description: 'Você pode regenerar o clip depois'
+          });
+          
+          if (onCreateNewEvent) {
+            onCreateNewEvent(newEvent);
+          }
+          
+          onClose();
+        }
+      } else {
+        toast.error('Erro ao criar evento');
+      }
+    } catch (error) {
+      console.error('[ClipPreview] Error creating new event:', error);
+      toast.error('Erro ao criar novo evento', {
+        description: error instanceof Error ? error.message : 'Verifique a conexão com o servidor'
+      });
+    } finally {
+      setIsCreatingNew(false);
+    }
+  };
+
   // Get device size based on format
   const getDeviceSize = (): 'sm' | 'md' | 'lg' => {
     if (selectedDevice === 'desktop') return 'md';
@@ -1181,13 +1273,13 @@ export function ClipPreviewModal({
               </Accordion>
             </ScrollArea>
             
-            {/* Sidebar Footer - Single action button */}
+            {/* Sidebar Footer - Action buttons */}
             <div className="border-t border-border/50 p-3 flex-shrink-0 bg-muted/20 space-y-2">
               <Button 
                 className="w-full gap-2" 
                 variant="arena"
                 onClick={handleRegenerateClip}
-                disabled={isRegenerating || !matchId}
+                disabled={isRegenerating || isCreatingNew || !matchId}
               >
                 {isRegenerating ? (
                   <>
@@ -1202,13 +1294,35 @@ export function ClipPreviewModal({
                 )}
               </Button>
               
+              {/* Save as New Event - only in custom mode */}
+              {clipMode === 'custom' && (
+                <Button 
+                  className="w-full gap-2" 
+                  variant="secondary"
+                  onClick={handleSaveAsNewEvent}
+                  disabled={isRegenerating || isCreatingNew || !matchId}
+                >
+                  {isCreatingNew ? (
+                    <>
+                      <RefreshCw className="h-4 w-4 animate-spin" />
+                      Criando...
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="h-4 w-4" />
+                      Salvar como Novo Evento
+                    </>
+                  )}
+                </Button>
+              )}
+              
               {/* Download only appears if clip exists */}
               {clipUrl && (
                 <Button 
                   className="w-full gap-2" 
                   variant="outline"
                   onClick={handleDownload}
-                  disabled={isRegenerating}
+                  disabled={isRegenerating || isCreatingNew}
                 >
                   <Download className="h-4 w-4" />
                   Baixar
