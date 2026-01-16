@@ -242,15 +242,18 @@ export function ClipPreviewModal({
 
   // Handle clip mode change - position video at event time when entering custom mode
   useEffect(() => {
-    if (clipMode === 'custom' && videoRef.current && fullVideoUrl && eventSecond > 0) {
-      // Position video at the event time when switching to custom mode
-      videoRef.current.currentTime = eventSecond;
-      setCurrentTime(eventSecond);
+    if (clipMode === 'custom') {
+      // Always show timeline editor in custom mode
       setShowTimelineEditor(true);
+      // Position video at the event time when switching to custom mode
+      if (videoRef.current && activeVideoUrl && eventSecond > 0) {
+        videoRef.current.currentTime = eventSecond;
+        setCurrentTime(eventSecond);
+      }
     } else if (clipMode === 'auto') {
       setShowTimelineEditor(false);
     }
-  }, [clipMode, eventSecond, fullVideoUrl]);
+  }, [clipMode, eventSecond, activeVideoUrl]);
 
   // Video event listeners
   useEffect(() => {
