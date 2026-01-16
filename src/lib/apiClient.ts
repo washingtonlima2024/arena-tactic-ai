@@ -493,6 +493,49 @@ export const apiClient = {
     message: string;
   }>(`/api/matches/${matchId}/sync-thumbnails`, { method: 'POST' }),
 
+  // Diagnose clips - find events with missing/corrupted clips
+  diagnoseClips: (matchId: string) => apiRequest<{
+    summary: {
+      total_events: number;
+      valid_clips: number;
+      missing_clips: number;
+      corrupted_clips: number;
+      duplicates: number;
+      suspicious_timestamps: number;
+      health_score: number;
+    };
+    events_without_clips: Array<{
+      id: string;
+      event_type: string;
+      minute: number;
+      description: string | null;
+    }>;
+    corrupted_clips: Array<{
+      id: string;
+      event_type: string;
+      minute: number;
+      file_size_kb?: number;
+      duration?: number;
+      issue: string;
+    }>;
+    suspicious_timestamps: Array<{
+      id: string;
+      event_type: string;
+      minute: number;
+      videoSecond: number;
+      expected_second: number;
+      difference: number;
+    }>;
+    valid_clips: Array<{
+      id: string;
+      event_type: string;
+      minute: number;
+      file_size_kb: number;
+      duration: number;
+    }>;
+    recommendations: string[];
+  }>(`/api/matches/${matchId}/diagnose-clips`),
+
   // ============== Settings ==============
   getSettings: () => apiRequest<any[]>('/api/settings'),
   upsertSetting: (setting: { setting_key: string; setting_value: string }) => 

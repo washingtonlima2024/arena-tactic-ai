@@ -446,44 +446,71 @@ def call_lovable_ai(
     messages: List[Dict[str, str]],
     model: str = 'google/gemini-2.5-flash',
     temperature: float = 0.7,
-    max_tokens: int = 4096
+    max_tokens: int = 4096,
+    max_retries: int = 3
 ) -> Optional[str]:
     """
     Call Lovable AI Gateway.
+    Implements retry with exponential backoff for rate limits.
     
     Args:
         messages: List of message dicts with 'role' and 'content'
         model: Model to use (default: gemini-2.5-flash)
         temperature: Sampling temperature
         max_tokens: Maximum tokens in response
+        max_retries: Maximum retry attempts for rate limits
     
     Returns:
         The AI response text or None on error
     """
+    import time
+    
     if not LOVABLE_API_KEY:
         raise ValueError("LOVABLE_API_KEY not configured")
     
-    response = requests.post(
-        LOVABLE_API_URL,
-        headers={
-            'Authorization': f'Bearer {LOVABLE_API_KEY}',
-            'Content-Type': 'application/json'
-        },
-        json={
-            'model': model,
-            'messages': messages,
-            'temperature': temperature,
-            'max_tokens': max_tokens
-        },
-        timeout=120
-    )
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                LOVABLE_API_URL,
+                headers={
+                    'Authorization': f'Bearer {LOVABLE_API_KEY}',
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'model': model,
+                    'messages': messages,
+                    'temperature': temperature,
+                    'max_tokens': max_tokens
+                },
+                timeout=120
+            )
+            
+            # Handle rate limit with retry
+            if response.status_code == 429:
+                delay = 2 ** (attempt + 1)  # 2, 4, 8 seconds
+                print(f"[AI] ⚠ Lovable AI rate limit (429), aguardando {delay}s... (tentativa {attempt + 1}/{max_retries})")
+                time.sleep(delay)
+                continue
+            
+            if not response.ok:
+                print(f"Lovable AI error: {response.status_code} - {response.text}")
+                return None
+            
+            data = response.json()
+            content = data.get('choices', [{}])[0].get('message', {}).get('content')
+            if content and attempt > 0:
+                print(f"[AI] ✓ Lovable AI respondeu após {attempt + 1} tentativas")
+            return content
+            
+        except requests.exceptions.Timeout:
+            print(f"[AI] ⚠ Lovable AI timeout após 120s")
+            return None
+        except Exception as e:
+            print(f"[AI] ⚠ Lovable AI error: {e}")
+            return None
     
-    if not response.ok:
-        print(f"Lovable AI error: {response.status_code} - {response.text}")
-        return None
-    
-    data = response.json()
-    return data.get('choices', [{}])[0].get('message', {}).get('content')
+    print(f"[AI] ⚠ Lovable AI falhou após {max_retries} tentativas de rate limit")
+    return None
 
 
 def call_openai(
@@ -945,20 +972,25 @@ def _transcribe_with_elevenlabs(audio_path: str, match_id: str = None) -> Dict[s
 def call_openai_gpt5(
     messages: List[Dict[str, str]],
     model: str = 'gpt-5',
-    max_tokens: int = 8192
+    max_tokens: int = 8192,
+    max_retries: int = 3
 ) -> Optional[str]:
     """
     Call OpenAI GPT-5 directly for event detection.
     Uses max_completion_tokens (GPT-5 requirement).
+    Implements retry with exponential backoff for rate limits.
     
     Args:
         messages: List of message dicts with 'role' and 'content'
         model: GPT-5 model variant (default: gpt-5)
         max_tokens: Maximum tokens in response
+        max_retries: Maximum retry attempts for rate limits
     
     Returns:
         The AI response text or None on error
     """
+    import time
+    
     if not OPENAI_API_KEY:
         print("[AI] ⚠ OpenAI API key not configured for GPT-5")
         return None
@@ -974,32 +1006,43 @@ def call_openai_gpt5(
         'max_completion_tokens': max_tokens,  # GPT-5 uses max_completion_tokens instead of max_tokens
     }
     
-    try:
-        print(f"[AI] 🧠 Chamando OpenAI {model}...")
-        response = requests.post(
-            f'{OPENAI_API_URL}/chat/completions',
-            headers=headers,
-            json=payload,
-            timeout=180
-        )
-        
-        if not response.ok:
-            print(f"[AI] OpenAI GPT-5 error: {response.status_code} - {response.text[:500]}")
+    for attempt in range(max_retries):
+        try:
+            print(f"[AI] 🧠 Chamando OpenAI {model}..." + (f" (tentativa {attempt + 1}/{max_retries})" if attempt > 0 else ""))
+            response = requests.post(
+                f'{OPENAI_API_URL}/chat/completions',
+                headers=headers,
+                json=payload,
+                timeout=180
+            )
+            
+            # Handle rate limit with retry
+            if response.status_code == 429:
+                delay = 2 ** (attempt + 1)  # 2, 4, 8 seconds
+                print(f"[AI] ⚠ Rate limit (429), aguardando {delay}s... (tentativa {attempt + 1}/{max_retries})")
+                time.sleep(delay)
+                continue
+            
+            if not response.ok:
+                print(f"[AI] OpenAI GPT-5 error: {response.status_code} - {response.text[:500]}")
+                return None
+            
+            data = response.json()
+            content = data.get('choices', [{}])[0].get('message', {}).get('content')
+            
+            if content:
+                print(f"[AI] ✓ GPT-5 retornou {len(content)} caracteres" + (f" após {attempt + 1} tentativas" if attempt > 0 else ""))
+            return content
+            
+        except requests.exceptions.Timeout:
+            print(f"[AI] ⚠ GPT-5 timeout após 180s")
             return None
-        
-        data = response.json()
-        content = data.get('choices', [{}])[0].get('message', {}).get('content')
-        
-        if content:
-            print(f"[AI] ✓ GPT-5 retornou {len(content)} caracteres")
-        return content
-        
-    except requests.exceptions.Timeout:
-        print(f"[AI] ⚠ GPT-5 timeout após 180s")
-        return None
-    except Exception as e:
-        print(f"[AI] ⚠ GPT-5 error: {e}")
-        return None
+        except Exception as e:
+            print(f"[AI] ⚠ GPT-5 error: {e}")
+            return None
+    
+    print(f"[AI] ⚠ GPT-5 falhou após {max_retries} tentativas de rate limit")
+    return None
 
 
 def detect_events_with_gpt(

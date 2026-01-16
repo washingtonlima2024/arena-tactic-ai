@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { 
   Select, 
   SelectContent, 
@@ -42,7 +43,8 @@ import {
   CloudOff,
   Cloud,
   CloudUpload,
-  Server
+  Server,
+  Stethoscope
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -280,6 +282,9 @@ export default function Events() {
   const [isRegeneratingClips, setIsRegeneratingClips] = useState(false);
   const [isSyncingMatch, setIsSyncingMatch] = useState(false);
   const [matchSyncStatus, setMatchSyncStatus] = useState<'unknown' | 'synced' | 'local_only' | 'error'>('unknown');
+  const [isDiagnosingClips, setIsDiagnosingClips] = useState(false);
+  const [clipDiagnosis, setClipDiagnosis] = useState<any>(null);
+  const [showDiagnosisDialog, setShowDiagnosisDialog] = useState(false);
   
   const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useMatchEvents(currentMatchId);
 
@@ -346,6 +351,39 @@ export default function Events() {
       toast.error(`Erro de sincronização: ${error.message || 'Erro desconhecido'}`);
     } finally {
       setIsSyncingMatch(false);
+    }
+  };
+
+  // Handle diagnose clips
+  const handleDiagnoseClips = async () => {
+    if (!currentMatchId) return;
+    setIsDiagnosingClips(true);
+    try {
+      const result = await apiClient.diagnoseClips(currentMatchId);
+      setClipDiagnosis(result);
+      setShowDiagnosisDialog(true);
+    } catch (error: any) {
+      toast.error('Erro ao diagnosticar clips: ' + (error.message || 'Erro desconhecido'));
+    } finally {
+      setIsDiagnosingClips(false);
+    }
+  };
+
+  // Handle regenerate clips via server
+  const handleRegenerateClips = async () => {
+    if (!currentMatchId) return;
+    setIsRegeneratingClips(true);
+    try {
+      await apiClient.regenerateClips(currentMatchId);
+      toast.success('Clips regenerados com sucesso!');
+      refetchEvents();
+      queryClient.invalidateQueries({ queryKey: ['clips', currentMatchId] });
+      queryClient.invalidateQueries({ queryKey: ['thumbnails', currentMatchId] });
+    } catch (error: any) {
+      console.error('Regenerate clips error:', error);
+      toast.error(`Erro ao regenerar clips: ${error.message || 'Servidor local indisponível'}`);
+    } finally {
+      setIsRegeneratingClips(false);
     }
   };
 
@@ -1118,6 +1156,23 @@ export default function Events() {
               </Button>
             )}
 
+            {/* Diagnose Clips */}
+            {events.length > 0 && (
+              <Button 
+                variant="outline" 
+                size="sm"
+                onClick={handleDiagnoseClips}
+                disabled={isDiagnosingClips}
+              >
+                {isDiagnosingClips ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Stethoscope className="mr-2 h-4 w-4" />
+                )}
+                Diagnosticar
+              </Button>
+            )}
+
             {/* Analyze Audio */}
             <TranscriptionAnalysisDialog
               matchId={currentMatchId}
@@ -1716,6 +1771,132 @@ export default function Events() {
             }}
           />
         )}
+
+        {/* Clip Diagnosis Dialog */}
+        <Dialog open={showDiagnosisDialog} onOpenChange={setShowDiagnosisDialog}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Stethoscope className="h-5 w-5" />
+                Diagnóstico de Clips
+              </DialogTitle>
+            </DialogHeader>
+            
+            {clipDiagnosis && (
+              <div className="space-y-4">
+                {/* Health Score */}
+                <div className="flex items-center gap-4 p-4 bg-muted rounded-lg">
+                  <div className={`text-4xl font-bold ${
+                    clipDiagnosis.summary.health_score >= 80 ? 'text-green-500' :
+                    clipDiagnosis.summary.health_score >= 50 ? 'text-yellow-500' : 'text-red-500'
+                  }`}>
+                    {clipDiagnosis.summary.health_score}%
+                  </div>
+                  <div className="flex-1">
+                    <Progress value={clipDiagnosis.summary.health_score} />
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Score de Saúde da Partida
+                    </p>
+                  </div>
+                </div>
+                
+                {/* Stats */}
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="p-3 bg-green-500/10 rounded-lg text-center">
+                    <div className="text-2xl font-bold text-green-500">
+                      {clipDiagnosis.summary.valid_clips}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Clips OK</div>
+                  </div>
+                  <div className="p-3 bg-yellow-500/10 rounded-lg text-center">
+                    <div className="text-2xl font-bold text-yellow-500">
+                      {clipDiagnosis.summary.missing_clips}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Faltando</div>
+                  </div>
+                  <div className="p-3 bg-red-500/10 rounded-lg text-center">
+                    <div className="text-2xl font-bold text-red-500">
+                      {clipDiagnosis.summary.corrupted_clips}
+                    </div>
+                    <div className="text-xs text-muted-foreground">Corrompidos</div>
+                  </div>
+                </div>
+                
+                {/* Recommendations */}
+                {clipDiagnosis.recommendations?.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="font-semibold">Recomendações</h4>
+                    {clipDiagnosis.recommendations.map((rec: string, i: number) => (
+                      <div key={i} className="flex items-start gap-2 p-2 bg-muted rounded text-sm">
+                        <AlertTriangle className="h-4 w-4 text-yellow-500 mt-0.5 shrink-0" />
+                        <span>{rec}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                
+                {/* Events without clips */}
+                {clipDiagnosis.events_without_clips?.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="font-semibold text-yellow-500">
+                      Eventos sem Clip ({clipDiagnosis.events_without_clips.length})
+                    </h4>
+                    <div className="max-h-40 overflow-y-auto space-y-1">
+                      {clipDiagnosis.events_without_clips.map((evt: any) => (
+                        <div key={evt.id} className="text-sm p-2 bg-muted rounded flex justify-between">
+                          <span>{evt.minute}' - {evt.event_type}</span>
+                          <span className="text-muted-foreground truncate max-w-[200px]">
+                            {evt.description}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Corrupted clips */}
+                {clipDiagnosis.corrupted_clips?.length > 0 && (
+                  <div className="space-y-2">
+                    <h4 className="font-semibold text-red-500">
+                      Clips Corrompidos ({clipDiagnosis.corrupted_clips.length})
+                    </h4>
+                    <div className="max-h-40 overflow-y-auto space-y-1">
+                      {clipDiagnosis.corrupted_clips.map((evt: any) => (
+                        <div key={evt.id} className="text-sm p-2 bg-muted rounded flex justify-between">
+                          <span>{evt.minute}' - {evt.event_type}</span>
+                          <span className="text-red-400 text-xs">{evt.issue}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                
+                {/* Regenerate button */}
+                {(clipDiagnosis.summary.missing_clips > 0 || clipDiagnosis.summary.corrupted_clips > 0) && (
+                  <Button 
+                    onClick={() => {
+                      setShowDiagnosisDialog(false);
+                      handleRegenerateClips();
+                    }}
+                    className="w-full"
+                    variant="arena"
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Regenerar Clips ({clipDiagnosis.summary.missing_clips + clipDiagnosis.summary.corrupted_clips})
+                  </Button>
+                )}
+
+                {/* All OK message */}
+                {clipDiagnosis.summary.missing_clips === 0 && clipDiagnosis.summary.corrupted_clips === 0 && (
+                  <div className="p-4 bg-green-500/10 rounded-lg text-center">
+                    <CheckCircle className="h-8 w-8 text-green-500 mx-auto mb-2" />
+                    <p className="text-green-500 font-medium">Todos os clips estão OK!</p>
+                  </div>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
       </div>
     </AppLayout>
   );
