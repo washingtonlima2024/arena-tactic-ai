@@ -6,12 +6,18 @@ interface VideoTimelineEditorProps {
   eventSecond: number;       // Segundo do vídeo onde o evento ocorre
   videoDuration: number;     // Duração total do vídeo
   currentVideoTime?: number; // Tempo atual do vídeo para playhead
+  mode?: 'relative' | 'absolute'; // Modo: relative usa offsets, absolute usa timestamps
   initialTrim?: {
     startOffset: number;     // Offset do início (default -15)
     endOffset: number;       // Offset do fim (default +15)
   };
+  // Absolute mode props
+  absoluteStart?: number;    // Tempo absoluto de início (para modo absolute)
+  absoluteEnd?: number;      // Tempo absoluto de fim (para modo absolute)
+  onAbsoluteChange?: (start: number, end: number) => void; // Callback para mudanças absolutas
   onTrimChange?: (trim: { startOffset: number; endOffset: number }) => void;
   onSave?: (trim: { startOffset: number; endOffset: number }) => void;
+  onAbsoluteSave?: (start: number, end: number) => void; // Save para modo absolute
   onSeek?: (time: number) => void; // Callback para seek quando clicar na timeline
 }
 
@@ -26,13 +32,24 @@ export function VideoTimelineEditor({
   eventSecond,
   videoDuration,
   currentVideoTime,
+  mode = 'relative',
   initialTrim,
+  absoluteStart: propAbsoluteStart,
+  absoluteEnd: propAbsoluteEnd,
+  onAbsoluteChange,
   onTrimChange,
   onSave,
+  onAbsoluteSave,
   onSeek
 }: VideoTimelineEditorProps) {
+  // Relative mode state
   const [startOffset, setStartOffset] = useState(initialTrim?.startOffset ?? DEFAULT_START_OFFSET);
   const [endOffset, setEndOffset] = useState(initialTrim?.endOffset ?? DEFAULT_END_OFFSET);
+  
+  // Absolute mode state - store absolute timestamps
+  const [absStart, setAbsStart] = useState(propAbsoluteStart ?? Math.max(0, eventSecond - 15));
+  const [absEnd, setAbsEnd] = useState(propAbsoluteEnd ?? Math.min(videoDuration, eventSecond + 15));
+  
   const [isDraggingStart, setIsDraggingStart] = useState(false);
   const [isDraggingEnd, setIsDraggingEnd] = useState(false);
   const [isDraggingTimeline, setIsDraggingTimeline] = useState(false);
@@ -41,12 +58,28 @@ export function VideoTimelineEditor({
   const timelineRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  const duration = endOffset - startOffset;
+  // Effective offset for absolute mode - calculate MAX_OFFSET dynamically
+  const effectiveMaxOffset = mode === 'absolute' 
+    ? Math.max(60, Math.ceil(videoDuration / 2)) 
+    : MAX_OFFSET;
   
-  // Notify parent of changes
+  const duration = mode === 'absolute' 
+    ? absEnd - absStart 
+    : endOffset - startOffset;
+  
+  // Notify parent of changes (relative mode)
   useEffect(() => {
-    onTrimChange?.({ startOffset, endOffset });
-  }, [startOffset, endOffset, onTrimChange]);
+    if (mode === 'relative') {
+      onTrimChange?.({ startOffset, endOffset });
+    }
+  }, [startOffset, endOffset, onTrimChange, mode]);
+  
+  // Notify parent of absolute changes
+  useEffect(() => {
+    if (mode === 'absolute') {
+      onAbsoluteChange?.(absStart, absEnd);
+    }
+  }, [absStart, absEnd, onAbsoluteChange, mode]);
   
   // Sync video position with timeline dragging
   useEffect(() => {
@@ -57,7 +90,7 @@ export function VideoTimelineEditor({
   }, [timelineOffset, eventSecond, videoDuration, videoRef, isDraggingStart, isDraggingEnd]);
   
   // Calculate timeline width based on offsets
-  const timelineWidth = (MAX_OFFSET * 2 + 10) * PIXELS_PER_SECOND;
+  const timelineWidth = (effectiveMaxOffset * 2 + 10) * PIXELS_PER_SECOND;
   const centerX = timelineWidth / 2;
   
   // Convert offset to pixel position
@@ -69,6 +102,10 @@ export function VideoTimelineEditor({
   const pixelToOffset = useCallback((pixel: number) => {
     return (pixel - centerX) / PIXELS_PER_SECOND;
   }, [centerX]);
+  
+  // Get effective start/end for rendering (works for both modes)
+  const effectiveStartOffset = mode === 'absolute' ? absStart - eventSecond : startOffset;
+  const effectiveEndOffset = mode === 'absolute' ? absEnd - eventSecond : endOffset;
   
   // Handle start handle drag
   const handleStartDrag = useCallback((e: React.MouseEvent) => {
@@ -196,8 +233,13 @@ export function VideoTimelineEditor({
   
   // Reset to default
   const handleReset = () => {
-    setStartOffset(DEFAULT_START_OFFSET);
-    setEndOffset(DEFAULT_END_OFFSET);
+    if (mode === 'absolute') {
+      setAbsStart(Math.max(0, eventSecond - 15));
+      setAbsEnd(Math.min(videoDuration, eventSecond + 15));
+    } else {
+      setStartOffset(DEFAULT_START_OFFSET);
+      setEndOffset(DEFAULT_END_OFFSET);
+    }
     setTimelineOffset(0);
     if (videoRef.current) {
       videoRef.current.currentTime = eventSecond;
@@ -206,12 +248,16 @@ export function VideoTimelineEditor({
   
   // Save handler
   const handleSave = () => {
-    onSave?.({ startOffset, endOffset });
+    if (mode === 'absolute') {
+      onAbsoluteSave?.(absStart, absEnd);
+    } else {
+      onSave?.({ startOffset, endOffset });
+    }
   };
   
   // Generate ruler marks
   const rulerMarks = [];
-  for (let s = -MAX_OFFSET; s <= MAX_OFFSET; s += 1) {
+  for (let s = -effectiveMaxOffset; s <= effectiveMaxOffset; s += mode === 'absolute' ? 5 : 1) {
     const isMajor = s % 5 === 0;
     const isCenter = s === 0;
     rulerMarks.push(
@@ -231,7 +277,9 @@ export function VideoTimelineEditor({
             "text-[10px] mt-0.5",
             isCenter ? "text-primary font-bold" : "text-muted-foreground"
           )}>
-            {s > 0 ? `+${s}` : s}s
+            {mode === 'absolute' 
+              ? `${Math.floor((eventSecond + s) / 60)}:${String(Math.floor((eventSecond + s) % 60)).padStart(2, '0')}`
+              : s > 0 ? `+${s}` : `${s}`}s
           </span>
         )}
       </div>
@@ -239,8 +287,8 @@ export function VideoTimelineEditor({
   }
   
   // Selected region
-  const startPixel = offsetToPixel(startOffset);
-  const endPixel = offsetToPixel(endOffset);
+  const startPixel = offsetToPixel(effectiveStartOffset);
+  const endPixel = offsetToPixel(effectiveEndOffset);
   const regionWidth = endPixel - startPixel;
   
   // Calculate playhead position from currentVideoTime
@@ -251,8 +299,8 @@ export function VideoTimelineEditor({
     ? offsetToPixel(playheadOffset) 
     : undefined;
   const isPlayheadVisible = playheadOffset !== undefined && 
-    playheadOffset >= -MAX_OFFSET && 
-    playheadOffset <= MAX_OFFSET;
+    playheadOffset >= -effectiveMaxOffset && 
+    playheadOffset <= effectiveMaxOffset;
   
   return (
     <div className="space-y-2">

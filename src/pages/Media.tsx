@@ -755,6 +755,8 @@ export default function Media() {
               eventId={previewClipId || undefined}
               eventSecond={clips.find(c => c.id === previewClipId)?.videoSecond || 0}
               videoDuration={clips.find(c => c.id === previewClipId)?.eventVideo?.duration_seconds || 30}
+              fullVideoUrl={normalizeStorageUrl(clips.find(c => c.id === previewClipId)?.eventVideo?.file_url || null)}
+              fullVideoDuration={clips.find(c => c.id === previewClipId)?.eventVideo?.duration_seconds || 0}
               initialTrim={clips.find(c => c.id === previewClipId)?.metadata?.customTrim as { startOffset: number; endOffset: number } | undefined}
               onTrimSave={async (eventId, trim) => {
                 try {
