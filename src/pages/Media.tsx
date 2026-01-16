@@ -325,47 +325,41 @@ export default function Media() {
             <Button 
               variant="arena"
               onClick={async () => {
-                const eventsWithoutClips = clips.filter(c => !c.clipUrl && c.canExtract && c.eventVideo);
+                const eventsWithoutClips = clips.filter(c => !c.clipUrl && c.canExtract);
                 if (eventsWithoutClips.length === 0) {
                   toast({ title: "Todos os clips já foram gerados", variant: "default" });
                   return;
                 }
                 
-                // Agrupar eventos por vídeo para processar cada grupo
-                const eventsByVideo = new Map<string, typeof eventsWithoutClips>();
-                for (const clip of eventsWithoutClips) {
-                  const videoId = clip.eventVideo!.id;
-                  if (!eventsByVideo.has(videoId)) {
-                    eventsByVideo.set(videoId, []);
-                  }
-                  eventsByVideo.get(videoId)!.push(clip);
-                }
-                
-                // Processar cada grupo de eventos por vídeo usando FFmpeg WASM
-                for (const [videoId, videoClips] of eventsByVideo) {
-                  const video = videoClips[0].eventVideo!;
+                // USAR SERVIDOR PYTHON - mais robusto e rápido
+                try {
+                  toast({ 
+                    title: "Gerando clips no servidor...", 
+                    description: `Processando ${eventsWithoutClips.length} eventos` 
+                  });
                   
-                  await generateAllClips(
-                    videoClips.map(c => ({
-                      id: c.id,
-                      minute: c.minute,
-                      second: c.second,
-                      event_type: c.type,
-                      description: c.title,
-                      metadata: { eventMs: c.eventMs, videoSecond: c.videoSecond }
-                    })),
-                    video.file_url,
-                    matchId,
-                    {
-                      videoStartMinute: video.start_minute ?? 0,
-                      videoDurationSeconds: video.duration_seconds ?? undefined,
-                      addSubtitles: true
-                    }
-                  );
+                  const result = await apiClient.regenerateClips(matchId, {
+                    use_category_timings: true,
+                    force_subtitles: true
+                  });
+                  
+                  const clipsGerados = result.regenerated || 0;
+                  toast({ 
+                    title: `${clipsGerados} clips gerados!`, 
+                    description: "Clips com 30 segundos de duração" 
+                  });
+                  
+                  refetchEvents();
+                  refetchClipsByHalf();
+                  queryClient.invalidateQueries({ queryKey: ['thumbnails', matchId] });
+                } catch (error: any) {
+                  console.error('[Media] Regenerate clips error:', error);
+                  toast({ 
+                    title: "Erro ao gerar clips", 
+                    description: error.message || 'Servidor local indisponível',
+                    variant: "destructive" 
+                  });
                 }
-                
-                refetchEvents();
-                refetchClipsByHalf();
               }}
               disabled={isGeneratingClips}
             >
