@@ -174,6 +174,9 @@ export function ClipPreviewModal({
   const [showTimelineEditor, setShowTimelineEditor] = useState(false);
   const [currentTrim, setCurrentTrim] = useState(initialTrim);
   
+  // Regeneration state
+  const [isRegenerating, setIsRegenerating] = useState(false);
+  
   // Absolute timestamps for custom mode (in seconds)
   const [absoluteStart, setAbsoluteStart] = useState(Math.max(0, eventSecond - 15));
   const [absoluteEnd, setAbsoluteEnd] = useState(eventSecond + 15);
@@ -546,9 +549,12 @@ export function ClipPreviewModal({
     setCurrentTime(time);
   }, []);
 
-  // Handle save with mode
+  // Handle save with mode and regenerate on server
   const handleApplyAndRegenerate = async () => {
-    if (!eventId) return;
+    if (!eventId || !matchId) {
+      toast.error('ID do evento ou partida não disponível');
+      return;
+    }
     
     // Build trim data based on mode
     const trimData = clipMode === 'custom' 
@@ -603,6 +609,74 @@ export function ClipPreviewModal({
         ? 'Configuração salva! O clip usará o corte automático de 30s.'
         : 'Configuração salva! O clip usará seus ajustes personalizados.'
     );
+  };
+
+  // Regenerate clip on server with custom trim
+  const handleRegenerateClip = async () => {
+    if (!eventId || !matchId) {
+      toast.error('ID do evento ou partida não disponível');
+      return;
+    }
+
+    setIsRegenerating(true);
+    
+    try {
+      // Build trim data based on mode
+      const trimData = clipMode === 'custom' 
+        ? {
+            mode: 'absolute',
+            startSecond: absoluteStart,
+            endSecond: absoluteEnd,
+            duration: absoluteEnd - absoluteStart
+          }
+        : currentTrim 
+          ? {
+              mode: 'relative',
+              startOffset: currentTrim.startOffset,
+              endOffset: currentTrim.endOffset,
+            }
+          : null;
+      
+      console.log('[ClipPreview] Regenerating clip with trim:', trimData);
+      
+      // First, save the metadata to the event via onTrimSave
+      if (onTrimSave) {
+        if (clipMode === 'custom') {
+          onTrimSave(eventId, {
+            startOffset: absoluteStart - eventSecond,
+            endOffset: absoluteEnd - eventSecond
+          });
+        } else if (currentTrim) {
+          onTrimSave(eventId, currentTrim);
+        }
+      }
+
+      // Call the server to regenerate clips for this match
+      // The server will use the customTrim from event metadata
+      const result = await apiClient.regenerateClips(matchId, {
+        use_category_timings: true,
+        force_subtitles: true
+      });
+      
+      console.log('[ClipPreview] Regeneration result:', result);
+      
+      if (result.regenerated > 0) {
+        toast.success(`Clip regenerado com sucesso!`, {
+          description: `${result.regenerated} clip(s) processado(s). Duração: ${trimData ? `${(trimData.duration || (trimData.endOffset - trimData.startOffset)).toFixed(1)}s` : '30s'}`
+        });
+        // Close modal to refresh the list
+        onClose();
+      } else {
+        toast.warning('Nenhum clip foi gerado. Verifique se o vídeo está disponível.');
+      }
+    } catch (error) {
+      console.error('[ClipPreview] Error regenerating clip:', error);
+      toast.error('Erro ao regenerar clip', {
+        description: error instanceof Error ? error.message : 'Verifique a conexão com o servidor'
+      });
+    } finally {
+      setIsRegenerating(false);
+    }
   };
 
   // Get device size based on format
@@ -1082,15 +1156,34 @@ export function ClipPreviewModal({
                 className="w-full gap-2" 
                 variant="arena"
                 onClick={handleApplyAndRegenerate}
+                disabled={isRegenerating}
               >
                 <RefreshCw className="h-4 w-4" />
-                {clipMode === 'auto' ? 'Aplicar Corte Automático' : 'Aplicar Edição'}
+                {clipMode === 'auto' ? 'Salvar Configuração' : 'Salvar Marcações'}
+              </Button>
+              <Button 
+                className="w-full gap-2" 
+                variant="default"
+                onClick={handleRegenerateClip}
+                disabled={isRegenerating || !matchId}
+              >
+                {isRegenerating ? (
+                  <>
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                    Regenerando...
+                  </>
+                ) : (
+                  <>
+                    <Scissors className="h-4 w-4" />
+                    Regenerar Clip no Servidor
+                  </>
+                )}
               </Button>
               <Button 
                 className="w-full gap-2" 
                 variant="outline"
                 onClick={handleDownload}
-                disabled={!clipUrl}
+                disabled={!clipUrl || isRegenerating}
               >
                 <Download className="h-4 w-4" />
                 Baixar Clip Atual
