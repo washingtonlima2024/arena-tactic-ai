@@ -10002,7 +10002,8 @@ def recalculate_event_timestamps(match_id: str):
         # 4. Coletar timestamps originais
         event_data = []
         for e in events:
-            metadata = e.metadata or {}
+            # IMPORTANTE: Usar event_metadata (não metadata, que é um objeto SQLAlchemy)
+            metadata = e.event_metadata if isinstance(e.event_metadata, dict) else {}
             original_vs = metadata.get('videoSecond') or ((e.minute or 0) * 60 + (e.second or 0))
             event_data.append({
                 'event': e,
@@ -10044,13 +10045,13 @@ def recalculate_event_timestamps(match_id: str):
             event = ed['event']
             new_vs = new_timestamps[i]
             
-            # Atualizar metadata
-            metadata = event.metadata or {}
+            # Atualizar metadata (usar event_metadata, não metadata)
+            metadata = event.event_metadata if isinstance(event.event_metadata, dict) else {}
             metadata['originalVideoSecond'] = ed['original_videoSecond']
             metadata['videoSecond'] = int(new_vs)
             metadata['recalculated'] = True
             metadata['recalculatedAt'] = datetime.utcnow().isoformat()
-            event.metadata = metadata
+            event.event_metadata = metadata
             
             # Atualizar minuto/segundo para exibição
             new_minute = int(new_vs // 60)
