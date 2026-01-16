@@ -132,12 +132,13 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
         {config.device === 'phone' && (
           <div 
             className={cn(
-              "relative bg-gray-900 shadow-2xl border-gray-800 h-full",
+              "relative bg-gray-900 shadow-2xl border-gray-800",
               getBorderRadius(),
               getPadding(),
-              getBorderWidth()
+              getBorderWidth(),
+              maxHeights[size]
             )}
-            style={{ aspectRatio: aspectRatio }}
+            style={{ aspectRatio: aspectRatio, width: 'auto' }}
           >
             {/* Phone frame - Dynamic Island style notch */}
             {!isRotated ? (
@@ -214,12 +215,13 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
         {config.device === 'tablet' && (
           <div 
             className={cn(
-              "relative bg-gray-900 shadow-2xl border-gray-800 h-full",
+              "relative bg-gray-900 shadow-2xl border-gray-800",
               getBorderRadius(),
               getPadding(),
-              getBorderWidth()
+              getBorderWidth(),
+              maxHeights[size]
             )}
-            style={{ aspectRatio: aspectRatio }}
+            style={{ aspectRatio: aspectRatio, width: 'auto' }}
           >
             {/* Camera */}
             <div className={cn(
@@ -245,7 +247,7 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
         )}
         
         {config.device === 'desktop' && (
-          <div className="flex flex-col items-center h-full">
+          <div className={cn("flex flex-col items-center", maxHeights[size])}>
             {/* Monitor */}
             <div 
               className={cn(
@@ -254,7 +256,7 @@ export function DeviceMockup({ format, size = 'lg', platform, children, classNam
                 getPadding(),
                 getBorderWidth()
               )}
-              style={{ aspectRatio: aspectRatio }}
+              style={{ aspectRatio: aspectRatio, width: 'auto', height: '85%' }}
             >
               {/* Screen */}
               <div className={cn(
