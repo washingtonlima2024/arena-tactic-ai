@@ -417,6 +417,12 @@ def detect_events_by_keywords(
     """
     events = []
     
+    # Track last goal time PER TEAM to avoid duplicate detections from narrator repeating
+    # Cooldown period: if we detect a goal for a team, ignore subsequent goal mentions
+    # from that team for GOAL_COOLDOWN_SECONDS
+    GOAL_COOLDOWN_SECONDS = 60
+    last_goal_time = {'home': -120, 'away': -120, 'unknown': -120}
+    
     # Read SRT file
     try:
         with open(srt_path, 'r', encoding='utf-8') as f:
@@ -429,6 +435,7 @@ def detect_events_by_keywords(
     print(f"[KEYWORDS] SRT: {srt_path}")
     print(f"[KEYWORDS] Times: {home_team} vs {away_team}")
     print(f"[KEYWORDS] Tempo: {half} (minuto inicial: {segment_start_minute})")
+    print(f"[KEYWORDS] Cooldown para gols: {GOAL_COOLDOWN_SECONDS}s por time")
     
     # Regex to extract SRT blocks: index, timestamp, text
     # Format: "1\n00:24:45,000 --> 00:24:50,000\nText here\n\n"
@@ -477,15 +484,29 @@ def detect_events_by_keywords(
                             print(f"[KEYWORDS] ⚠️  GOL rejeitado em [{minutes:02d}:{seconds:02d}] - Razão: {confirmation['reason']} - {text[:40]}...")
                             continue  # Skip this false positive
                         
+                        # Detect team BEFORE checking cooldown
+                        team = detect_team_from_text(text, home_team, away_team)
+                        
+                        # Check cooldown - was there a goal from this team recently?
+                        time_since_last = timestamp_seconds - last_goal_time[team]
+                        if time_since_last < GOAL_COOLDOWN_SECONDS:
+                            print(f"[KEYWORDS] ⏳ GOL ignorado (repetição do narrador) - {time_since_last:.0f}s desde último gol do {team} - {text[:40]}...")
+                            continue  # Skip - it's narrator repeating the celebration
+                        
+                        # This is a NEW goal - register it
+                        last_goal_time[team] = timestamp_seconds
+                        
                         confidence = confirmation['confidence']
                         confirmation_reason = confirmation['reason']
-                        print(f"[KEYWORDS] ✓ GOL confirmado em [{minutes:02d}:{seconds:02d}] - {confirmation_reason} (conf: {confidence}) - {text[:40]}...")
+                        print(f"[KEYWORDS] ✓ GOL NOVO em [{minutes:02d}:{seconds:02d}] ({team}) - {confirmation_reason} (conf: {confidence}) - {text[:40]}...")
                     else:
                         confidence = 1.0
                         confirmation_reason = 'keyword_match'
+                        team = None  # Will be detected below for non-goal events
                     
-                    # Detect team
-                    team = detect_team_from_text(text, home_team, away_team)
+                    # Detect team (only if not already done for goals)
+                    if team is None:
+                        team = detect_team_from_text(text, home_team, away_team)
                     
                     # Check for own goal
                     is_own_goal = 'CONTRA' in text_upper or 'PRÓPRIO' in text_upper
