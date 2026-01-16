@@ -311,6 +311,95 @@ EVENT_KEYWORDS = {
 }
 
 
+def refine_event_timestamp_from_srt(
+    event: Dict[str, Any],
+    srt_path: str,
+    window_seconds: int = 30
+) -> Dict[str, Any]:
+    """
+    Refine event timestamp by finding the exact keyword in SRT.
+    
+    Phase 4 of the dual verification system:
+    Searches for event keywords in a ±30s window around the AI-detected timestamp
+    and updates the timestamp to the exact SRT position.
+    
+    Args:
+        event: Event detected by AI with 'minute', 'second', 'event_type'
+        srt_path: Path to SRT file
+        window_seconds: Search window in seconds (default ±30s)
+        
+    Returns:
+        Event with refined 'videoSecond', 'minute', 'second' if keyword found
+    """
+    import re
+    
+    event_type = event.get('event_type', '')
+    keywords = EVENT_KEYWORDS.get(event_type, [])
+    
+    if not keywords or not os.path.exists(srt_path):
+        return event
+    
+    # Calculate AI-detected timestamp in total seconds
+    ai_minute = event.get('minute', 0)
+    ai_second = event.get('second', 0)
+    ai_total_seconds = ai_minute * 60 + ai_second
+    
+    try:
+        with open(srt_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        # Parse SRT blocks: find timestamps and text
+        # Format: HH:MM:SS,mmm --> HH:MM:SS,mmm
+        srt_pattern = r'(\d{2}):(\d{2}):(\d{2}),\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}\s*\n(.*?)(?=\n\n|\Z)'
+        matches = re.findall(srt_pattern, content, re.DOTALL)
+        
+        best_match = None
+        best_distance = float('inf')
+        
+        for hours, minutes, seconds, text in matches:
+            srt_total_seconds = int(hours) * 3600 + int(minutes) * 60 + int(seconds)
+            
+            # Check if within window
+            distance = abs(srt_total_seconds - ai_total_seconds)
+            if distance > window_seconds:
+                continue
+            
+            # Check if any keyword matches
+            text_upper = text.upper()
+            for pattern in keywords:
+                if re.search(pattern, text_upper, re.IGNORECASE):
+                    # Found keyword! Check if closer than previous best
+                    if distance < best_distance:
+                        best_distance = distance
+                        best_match = {
+                            'srt_seconds': srt_total_seconds,
+                            'srt_minute': int(minutes) + int(hours) * 60,
+                            'srt_second': int(seconds),
+                            'keyword': pattern,
+                            'text': text.strip()[:80]
+                        }
+                    break  # Found keyword in this block, move to next
+        
+        # Update event if we found a better timestamp
+        if best_match:
+            original_time = f"{ai_minute}:{ai_second:02d}"
+            new_time = f"{best_match['srt_minute']}:{best_match['srt_second']:02d}"
+            
+            event['minute'] = best_match['srt_minute']
+            event['second'] = best_match['srt_second']
+            event['videoSecond'] = best_match['srt_seconds']
+            event['refined'] = True
+            event['refinement_method'] = 'keyword'
+            event['refinement_delta'] = best_distance
+            
+            print(f"[AI] 🎯 Refinado {event_type}: {original_time} → {new_time} (Δ{best_distance}s, keyword: {best_match['keyword']})")
+        
+    except Exception as e:
+        print(f"[AI] ⚠ Erro ao refinar timestamp: {e}")
+    
+    return event
+
+
 def detect_team_from_text(text: str, home_team: str, away_team: str) -> str:
     """
     Detect which team is mentioned in the text.
@@ -1461,11 +1550,20 @@ def call_openai_gpt5(
         'Content-Type': 'application/json'
     }
     
-    payload = {
-        'model': model,
-        'messages': messages,
-        'max_completion_tokens': max_tokens,  # GPT-5 uses max_completion_tokens instead of max_tokens
-    }
+    # GPT-4o and older models use max_tokens, GPT-5 and O-series use max_completion_tokens
+    if model.startswith('gpt-5') or model.startswith('o3') or model.startswith('o4'):
+        payload = {
+            'model': model,
+            'messages': messages,
+            'max_completion_tokens': max_tokens,
+        }
+    else:
+        payload = {
+            'model': model,
+            'messages': messages,
+            'max_tokens': max_tokens,
+            'temperature': 0.7,
+        }
     
     for attempt in range(max_retries):
         try:
@@ -1590,15 +1688,15 @@ CHECKLIST OBRIGATÓRIO:
 
 Retorne o array JSON com TODOS os eventos detectados:"""
 
-    print(f"[AI] 🧠 FASE 1: GPT-5 detectando eventos do {half_desc}...")
+    print(f"[AI] 🧠 FASE 1: GPT-4o detectando eventos do {half_desc}...")
     
-    # Try GPT-5 first
+    # Try GPT-4o first (stable, cost-effective, good for structured extraction)
     response = call_openai_gpt5([
         {'role': 'system', 'content': system_prompt},
         {'role': 'user', 'content': user_prompt}
-    ], model='gpt-5', max_tokens=8192)
+    ], model='gpt-4o', max_tokens=8192)
     
-    generator_model = 'openai/gpt-5'
+    generator_model = 'openai/gpt-4o'
     
     # Fallback to Gemini if GPT-5 fails
     if not response:
@@ -2020,9 +2118,10 @@ def analyze_match_events(
     if can_use_dual:
         print(f"\n[AI] ═══════════════════════════════════════════════════════════")
         print(f"[AI] 🔄 SISTEMA DE DUPLA VERIFICAÇÃO ATIVADO")
-        print(f"[AI]    Fase 1: GPT-5 (detecção)")
+        print(f"[AI]    Fase 1: GPT-4o (detecção)")
         print(f"[AI]    Fase 2: Gemini (validação)")
         print(f"[AI]    Fase 3: Deduplicação")
+        print(f"[AI]    Fase 4: Refinamento por palavra-chave")
         print(f"[AI] ═══════════════════════════════════════════════════════════\n")
         
         try:
@@ -2087,17 +2186,54 @@ def analyze_match_events(
                 
                 # ═══ FASE 3: Deduplicação ═══
                 print(f"\n[AI] 🔄 FASE 3: Deduplicação de gols...")
-                final_events = deduplicate_goal_events(enriched_events)
+                deduped_events = deduplicate_goal_events(enriched_events)
+                
+                # ═══ FASE 4: Refinamento por Palavra-chave ═══
+                # Busca o timestamp exato no SRT para centralizar o clip
+                final_events = deduped_events
+                srt_candidates = []
+                
+                if match_id:
+                    from storage import get_subfolder_path
+                    srt_folder = get_subfolder_path(match_id, 'srt')
+                    if srt_folder and os.path.exists(srt_folder):
+                        # Look for SRT files matching the half
+                        srt_patterns = [
+                            f'{match_half}_transcription.srt',
+                            f'{match_half}_half.srt',
+                            'transcription.srt',
+                            'full.srt'
+                        ]
+                        for pattern in srt_patterns:
+                            srt_path = os.path.join(srt_folder, pattern)
+                            if os.path.exists(srt_path):
+                                srt_candidates.append(srt_path)
+                                break
+                
+                if srt_candidates:
+                    srt_path = srt_candidates[0]
+                    print(f"\n[AI] 🎯 FASE 4: Refinando timestamps via SRT ({os.path.basename(srt_path)})...")
+                    refined_count = 0
+                    for i, event in enumerate(final_events):
+                        refined = refine_event_timestamp_from_srt(event, srt_path, window_seconds=30)
+                        final_events[i] = refined
+                        if refined.get('refined'):
+                            refined_count += 1
+                    print(f"[AI] ✓ {refined_count}/{len(final_events)} eventos refinados por palavra-chave")
+                else:
+                    print(f"\n[AI] ℹ️ FASE 4: SRT não encontrado, pulando refinamento")
                 
                 # Summary
                 summary = validated_result.get('summary', {})
                 goals_count = len([e for e in final_events if e.get('event_type') == 'goal'])
+                refined_count = len([e for e in final_events if e.get('refined')])
                 print(f"\n[AI] ═══════════════════════════════════════════════════════════")
-                print(f"[AI] ✓ ANÁLISE COMPLETA (Dupla Verificação)")
+                print(f"[AI] ✓ ANÁLISE COMPLETA (Dupla Verificação + Refinamento)")
                 print(f"[AI]   Detectados: {summary.get('total_detected', 0)} eventos")
                 print(f"[AI]   Confirmados: {summary.get('confirmed', 0)} eventos")
                 print(f"[AI]   Rejeitados: {summary.get('rejected', 0)} eventos")
                 print(f"[AI]   Gols finais: {goals_count}")
+                print(f"[AI]   Refinados: {refined_count} eventos")
                 print(f"[AI]   Resultado: {len(final_events)} eventos finais")
                 print(f"[AI] ═══════════════════════════════════════════════════════════\n")
                 
