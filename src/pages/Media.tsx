@@ -343,20 +343,47 @@ export default function Media() {
                     force_subtitles: true
                   });
                   
+                  // Verificar erro de incompatibilidade de timestamps
+                  if (!result.success && result.error_type === 'timestamp_mismatch') {
+                    toast({ 
+                      title: "Incompatibilidade de timestamps", 
+                      description: result.error || "Os timestamps dos eventos não correspondem à duração do vídeo",
+                      variant: "destructive",
+                      duration: 10000
+                    });
+                    return;
+                  }
+                  
                   const clipsGerados = result.regenerated || 0;
-                  toast({ 
-                    title: `${clipsGerados} clips gerados!`, 
-                    description: "Clips com 30 segundos de duração" 
-                  });
+                  
+                  if (clipsGerados === 0 && eventsWithoutClips.length > 0) {
+                    toast({ 
+                      title: "Nenhum clip gerado", 
+                      description: "Verifique se o vídeo importado corresponde aos eventos detectados",
+                      variant: "destructive" 
+                    });
+                  } else {
+                    toast({ 
+                      title: `${clipsGerados} clips gerados!`, 
+                      description: "Clips com 30 segundos de duração" 
+                    });
+                  }
                   
                   refetchEvents();
                   refetchClipsByHalf();
                   queryClient.invalidateQueries({ queryKey: ['thumbnails', matchId] });
                 } catch (error: any) {
                   console.error('[Media] Regenerate clips error:', error);
+                  
+                  // Tentar parsear erro estruturado
+                  let errorMessage = error.message || 'Servidor local indisponível';
+                  if (error.response?.error) {
+                    errorMessage = error.response.error;
+                  }
+                  
                   toast({ 
                     title: "Erro ao gerar clips", 
-                    description: error.message || 'Servidor local indisponível',
+                    description: errorMessage,
                     variant: "destructive" 
                   });
                 }
