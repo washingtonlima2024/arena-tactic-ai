@@ -2610,8 +2610,24 @@ def regenerate_clips(match_id: str):
         print(f"[REGENERATE-CLIPS] ════════════════════════════════════════════")
         
         # 5. Separar eventos por tempo
-        first_half_events = [e.to_dict() for e in events if (e.match_half == 'first_half' or (e.minute or 0) < 45)]
-        second_half_events = [e.to_dict() for e in events if (e.match_half == 'second_half' or (e.minute or 0) >= 45)]
+        # Detectar se é um vídeo de highlight (< 50 minutos) - nesse caso, todos eventos vão para primeiro tempo
+        first_video_check = video_paths.get('first_half') or video_paths.get('full')
+        is_highlight_video = False
+        if first_video_check and os.path.exists(first_video_check):
+            video_duration_check = get_video_duration_seconds(first_video_check)
+            video_duration_min_check = video_duration_check / 60 if video_duration_check > 0 else 0
+            is_highlight_video = video_duration_min_check < 50
+            if is_highlight_video:
+                print(f"[REGENERATE-CLIPS] ⚡ Highlight detectado ({video_duration_min_check:.0f}min) - processando TODOS como 1ºT")
+        
+        if is_highlight_video:
+            # Highlight: todos os eventos vão para first_half
+            first_half_events = [e.to_dict() for e in events]
+            second_half_events = []
+        else:
+            # Partida completa: separar por tempo
+            first_half_events = [e.to_dict() for e in events if (e.match_half == 'first_half' or (e.minute or 0) < 45)]
+            second_half_events = [e.to_dict() for e in events if (e.match_half == 'second_half' or (e.minute or 0) >= 45)]
         
         print(f"[REGENERATE-CLIPS] Eventos: {len(first_half_events)} 1ºT, {len(second_half_events)} 2ºT")
         
@@ -10011,6 +10027,10 @@ def recalculate_event_timestamps(match_id: str):
             new_second = int(new_vs % 60)
             event.minute = new_minute
             event.second = new_second
+            
+            # Para vídeos de highlight, forçar todos eventos como primeiro tempo
+            # já que são redistribuídos para um único arquivo de vídeo
+            event.match_half = 'first_half'
             
             # Limpar clip existente para forçar regeneração
             event.clip_url = None
