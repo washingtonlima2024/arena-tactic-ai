@@ -2533,11 +2533,15 @@ def delete_video(video_id: str):
 @app.route('/api/matches/<match_id>/regenerate-clips', methods=['POST'])
 def regenerate_clips(match_id: str):
     """
-    Regenera clips de todos os eventos de uma partida.
-    Útil para corrigir partidas que tiveram problemas com segment_start_minute.
+    Regenera clips de eventos de uma partida.
+    Pode filtrar por IDs específicos de eventos via parâmetro eventIds.
     """
     session = get_session()
     try:
+        # Parse request data
+        data = request.json or {}
+        event_ids = data.get('eventIds')  # Lista opcional de IDs de eventos específicos
+        
         # 1. Buscar partida
         match = session.query(Match).filter_by(id=match_id).first()
         if not match:
@@ -2549,8 +2553,16 @@ def regenerate_clips(match_id: str):
         home_team_name = home_team.name if home_team else 'Time A'
         away_team_name = away_team.name if away_team else 'Time B'
         
-        # 3. Buscar eventos
-        events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+        # 3. Buscar eventos - filtrar por IDs específicos se fornecido
+        if event_ids and len(event_ids) > 0:
+            events = session.query(MatchEvent).filter(
+                MatchEvent.match_id == match_id,
+                MatchEvent.id.in_(event_ids)
+            ).all()
+            print(f"[REGENERATE-CLIPS] Filtrando por {len(event_ids)} evento(s) específico(s): {event_ids}")
+        else:
+            events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+        
         if not events:
             return jsonify({'error': 'Nenhum evento encontrado', 'clips_generated': 0}), 404
         
@@ -2748,13 +2760,23 @@ def regenerate_clips(match_id: str):
                 total_clips += len(clips)
                 print(f"[REGENERATE-CLIPS] ✓ 1º tempo: {len(clips)} clips")
                 
-                # Atualizar eventos com clip URLs
+                # Atualizar eventos com clip URLs usando IDs para evitar erros de sessão
                 for clip in clips:
-                    for event in events:
-                        if event.minute == clip.get('event_minute') and event.event_type == clip.get('event_type'):
-                            event.clip_url = clip.get('url')
-                            event.clip_pending = False
-                            break
+                    event_id = clip.get('event_id')
+                    if event_id:
+                        # Buscar evento fresco da sessão para evitar "Instance not bound"
+                        event_to_update = session.query(MatchEvent).filter_by(id=event_id).first()
+                        if event_to_update:
+                            event_to_update.clip_url = clip.get('url')
+                            event_to_update.clip_pending = False
+                    else:
+                        # Fallback: buscar por minuto e tipo (compatibilidade)
+                        for event in events:
+                            if event.minute == clip.get('event_minute') and event.event_type == clip.get('event_type'):
+                                merged_event = session.merge(event)
+                                merged_event.clip_url = clip.get('url')
+                                merged_event.clip_pending = False
+                                break
             except Exception as e:
                 results['errors'].append(f"1º tempo: {str(e)}")
                 print(f"[REGENERATE-CLIPS] ⚠ Erro 1º tempo: {e}")
@@ -2778,13 +2800,21 @@ def regenerate_clips(match_id: str):
                 total_clips += len(clips)
                 print(f"[REGENERATE-CLIPS] ✓ 2º tempo: {len(clips)} clips (segment_start={segment_start})")
                 
-                # Atualizar eventos com clip URLs
+                # Atualizar eventos com clip URLs usando IDs para evitar erros de sessão
                 for clip in clips:
-                    for event in events:
-                        if event.minute == clip.get('event_minute') and event.event_type == clip.get('event_type'):
-                            event.clip_url = clip.get('url')
-                            event.clip_pending = False
-                            break
+                    event_id = clip.get('event_id')
+                    if event_id:
+                        event_to_update = session.query(MatchEvent).filter_by(id=event_id).first()
+                        if event_to_update:
+                            event_to_update.clip_url = clip.get('url')
+                            event_to_update.clip_pending = False
+                    else:
+                        for event in events:
+                            if event.minute == clip.get('event_minute') and event.event_type == clip.get('event_type'):
+                                merged_event = session.merge(event)
+                                merged_event.clip_url = clip.get('url')
+                                merged_event.clip_pending = False
+                                break
             except Exception as e:
                 results['errors'].append(f"2º tempo: {str(e)}")
                 print(f"[REGENERATE-CLIPS] ⚠ Erro 2º tempo: {e}")

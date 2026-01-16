@@ -762,11 +762,12 @@ export function ClipPreviewModal({
           description: `Gerando clip de ${(absoluteEnd - absoluteStart).toFixed(1)}s...`
         });
         
-        // Regenerate clip for the new event specifically
+        // Regenerate clip for the new event specifically using eventIds filter
         try {
           await apiClient.regenerateClips(matchId, {
             use_category_timings: true,
-            force_subtitles: true
+            force_subtitles: true,
+            eventIds: [newEvent.id]  // Process only this new event
           });
           
           toast.success('Clip gerado para o novo evento!');

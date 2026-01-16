@@ -827,6 +827,7 @@ export const apiClient = {
     event_types?: string[];
     force_subtitles?: boolean;
     use_category_timings?: boolean;
+    eventIds?: string[];  // IDs específicos de eventos a processar
   }): Promise<{
     success: boolean;
     regenerated: number;
