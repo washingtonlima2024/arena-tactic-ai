@@ -120,16 +120,28 @@ export function VideoTimelineEditor({
       const x = moveEvent.clientX - rect.left + timelineRef.current!.scrollLeft;
       const newOffset = pixelToOffset(x);
       
-      // Clamp: can't go past end handle, minimum duration
-      const maxStart = endOffset - MIN_CLIP_DURATION;
-      const clampedOffset = Math.max(-MAX_OFFSET, Math.min(newOffset, maxStart));
-      
-      setStartOffset(clampedOffset);
-      
-      // Update video preview
-      if (videoRef.current) {
-        const previewTime = Math.max(0, eventSecond + clampedOffset);
-        videoRef.current.currentTime = previewTime;
+      if (mode === 'absolute') {
+        // In absolute mode, convert offset to absolute time
+        const newAbsStart = eventSecond + newOffset;
+        const maxStart = absEnd - MIN_CLIP_DURATION;
+        const clampedStart = Math.max(0, Math.min(newAbsStart, maxStart));
+        setAbsStart(clampedStart);
+        
+        // Update video preview
+        if (videoRef.current) {
+          videoRef.current.currentTime = clampedStart;
+        }
+      } else {
+        // Relative mode
+        const maxStart = endOffset - MIN_CLIP_DURATION;
+        const clampedOffset = Math.max(-MAX_OFFSET, Math.min(newOffset, maxStart));
+        setStartOffset(clampedOffset);
+        
+        // Update video preview
+        if (videoRef.current) {
+          const previewTime = Math.max(0, eventSecond + clampedOffset);
+          videoRef.current.currentTime = previewTime;
+        }
       }
     };
     
@@ -141,7 +153,7 @@ export function VideoTimelineEditor({
     
     document.addEventListener('mousemove', handleMove);
     document.addEventListener('mouseup', handleUp);
-  }, [endOffset, eventSecond, pixelToOffset, videoRef]);
+  }, [mode, endOffset, absEnd, eventSecond, pixelToOffset, videoRef]);
   
   // Handle end handle drag
   const handleEndDrag = useCallback((e: React.MouseEvent) => {
@@ -156,16 +168,28 @@ export function VideoTimelineEditor({
       const x = moveEvent.clientX - rect.left + timelineRef.current!.scrollLeft;
       const newOffset = pixelToOffset(x);
       
-      // Clamp: can't go before start handle, minimum duration
-      const minEnd = startOffset + MIN_CLIP_DURATION;
-      const clampedOffset = Math.min(MAX_OFFSET, Math.max(newOffset, minEnd));
-      
-      setEndOffset(clampedOffset);
-      
-      // Update video preview
-      if (videoRef.current) {
-        const previewTime = Math.max(0, eventSecond + clampedOffset);
-        videoRef.current.currentTime = previewTime;
+      if (mode === 'absolute') {
+        // In absolute mode, convert offset to absolute time
+        const newAbsEnd = eventSecond + newOffset;
+        const minEnd = absStart + MIN_CLIP_DURATION;
+        const clampedEnd = Math.min(videoDuration, Math.max(newAbsEnd, minEnd));
+        setAbsEnd(clampedEnd);
+        
+        // Update video preview
+        if (videoRef.current) {
+          videoRef.current.currentTime = clampedEnd;
+        }
+      } else {
+        // Relative mode
+        const minEnd = startOffset + MIN_CLIP_DURATION;
+        const clampedOffset = Math.min(MAX_OFFSET, Math.max(newOffset, minEnd));
+        setEndOffset(clampedOffset);
+        
+        // Update video preview
+        if (videoRef.current) {
+          const previewTime = Math.max(0, eventSecond + clampedOffset);
+          videoRef.current.currentTime = previewTime;
+        }
       }
     };
     
@@ -177,7 +201,7 @@ export function VideoTimelineEditor({
     
     document.addEventListener('mousemove', handleMove);
     document.addEventListener('mouseup', handleUp);
-  }, [startOffset, eventSecond, pixelToOffset, videoRef]);
+  }, [mode, startOffset, absStart, eventSecond, videoDuration, pixelToOffset, videoRef]);
   
   // Handle click on timeline to seek
   const handleTimelineClick = useCallback((e: React.MouseEvent) => {
@@ -402,15 +426,27 @@ export function VideoTimelineEditor({
         <div className="flex items-center gap-3">
           <span>
             <span className="inline-block w-1.5 h-1.5 rounded-sm bg-blue-500 mr-1" />
-            <strong className="text-foreground">{startOffset.toFixed(1)}s</strong>
+            <strong className="text-foreground">
+              {mode === 'absolute' 
+                ? `${Math.floor(absStart / 60)}:${String(Math.floor(absStart % 60)).padStart(2, '0')}`
+                : `${startOffset.toFixed(1)}s`}
+            </strong>
           </span>
           <span>
             <span className="inline-block w-1.5 h-1.5 rounded-sm bg-primary mr-1" />
-            <strong className="text-foreground">0.0s</strong>
+            <strong className="text-foreground">
+              {mode === 'absolute' 
+                ? `${Math.floor(eventSecond / 60)}:${String(Math.floor(eventSecond % 60)).padStart(2, '0')}`
+                : '0.0s'}
+            </strong>
           </span>
           <span>
             <span className="inline-block w-1.5 h-1.5 rounded-sm bg-orange-500 mr-1" />
-            <strong className="text-foreground">+{endOffset.toFixed(1)}s</strong>
+            <strong className="text-foreground">
+              {mode === 'absolute' 
+                ? `${Math.floor(absEnd / 60)}:${String(Math.floor(absEnd % 60)).padStart(2, '0')}`
+                : `+${endOffset.toFixed(1)}s`}
+            </strong>
           </span>
           <span className="text-muted-foreground">
             ({duration.toFixed(1)}s)
