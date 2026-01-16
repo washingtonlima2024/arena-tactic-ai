@@ -182,12 +182,14 @@ export function ClipPreviewModal({
   const [absoluteEnd, setAbsoluteEnd] = useState(eventSecond + 15);
   
   // Determine which video to use based on mode
-  const activeVideoUrl = clipMode === 'custom' && fullVideoUrl 
-    ? fullVideoUrl 
-    : clipUrl;
-  const activeVideoDuration = clipMode === 'custom' && fullVideoDuration 
-    ? fullVideoDuration 
-    : videoDuration;
+  // Auto: prefer clip, fallback to full video if clip doesn't exist
+  // Custom: always use full video
+  const activeVideoUrl = clipMode === 'custom' 
+    ? (fullVideoUrl || clipUrl)         // Custom: prefer full video
+    : (clipUrl || fullVideoUrl);        // Auto: prefer clip, but use full video if no clip
+  const activeVideoDuration = clipMode === 'custom' 
+    ? (fullVideoDuration || videoDuration)
+    : clipUrl ? videoDuration : (fullVideoDuration || videoDuration);
   
   // Logo Overlay
   const [logoFile, setLogoFile] = useState<File | null>(null);
@@ -232,14 +234,17 @@ export function ClipPreviewModal({
       setSubtitles([]);
       setShowSubtitles(false);
       setOverlayOpacity(0);
-      // Reset absolute timestamps
-      setAbsoluteStart(Math.max(0, eventSecond - 15));
-      setAbsoluteEnd(Math.min(fullVideoDuration || videoDuration, eventSecond + 15));
+      // Reset absolute timestamps with protection for eventSecond exceeding video duration
+      const maxDuration = fullVideoDuration || videoDuration;
+      const effectiveEventSecond = eventSecond > maxDuration 
+        ? Math.min(maxDuration / 2, 30)  // Fallback to safe position
+        : eventSecond;
+      setAbsoluteStart(Math.max(0, effectiveEventSecond - 15));
+      setAbsoluteEnd(Math.min(maxDuration, effectiveEventSecond + 15));
       
-      // Determine initial mode: if no clip but full video exists, start in custom mode
-      const shouldStartCustom = !clipUrl && !!fullVideoUrl;
-      setClipMode(shouldStartCustom ? 'custom' : 'auto');
-      setShowTimelineEditor(shouldStartCustom);
+      // ALWAYS start in Auto mode - never start in Custom mode by default
+      setClipMode('auto');
+      setShowTimelineEditor(false);
     }
   }, [isOpen, initialTrim, videoDuration, eventSecond, fullVideoDuration, clipUrl, fullVideoUrl]);
 
@@ -268,12 +273,21 @@ export function ClipPreviewModal({
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
     const handleLoadedMetadata = () => {
-      setDuration(video.duration || videoDuration);
+      const actualDuration = video.duration || videoDuration;
+      setDuration(actualDuration);
       
-      // Auto-seek to event time in custom mode when video loads
-      if (clipMode === 'custom' && eventSecond > 0) {
-        video.currentTime = eventSecond;
-        setCurrentTime(eventSecond);
+      // Calculate safe eventSecond that respects video duration
+      const effectiveEventSecond = eventSecond > actualDuration 
+        ? Math.min(actualDuration / 2, 30)  // Fallback to safe position
+        : eventSecond;
+      
+      // Auto-seek to event time when:
+      // 1. In custom mode, OR
+      // 2. In auto mode but using fullVideoUrl (no clip exists)
+      const shouldSeek = clipMode === 'custom' || (!clipUrl && fullVideoUrl);
+      if (shouldSeek && effectiveEventSecond > 0) {
+        video.currentTime = effectiveEventSecond;
+        setCurrentTime(effectiveEventSecond);
       }
     };
 
