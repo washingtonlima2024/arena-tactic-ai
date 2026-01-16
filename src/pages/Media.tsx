@@ -745,7 +745,7 @@ export default function Media() {
             <ClipPreviewModal
               isOpen={!!previewClipId}
               onClose={() => setPreviewClipId(null)}
-              clipUrl={clips.find(c => c.id === previewClipId)?.clipUrl || null}
+              clipUrl={normalizeStorageUrl(clips.find(c => c.id === previewClipId)?.clipUrl || null)}
               clipTitle={clips.find(c => c.id === previewClipId)?.title || ''}
               clipType={clips.find(c => c.id === previewClipId)?.type || ''}
               timestamp={formatTimestamp(clips.find(c => c.id === previewClipId)?.totalSeconds || 0)}
