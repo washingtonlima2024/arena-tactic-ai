@@ -219,7 +219,7 @@ export function VideoTimelineEditor({
   const regionWidth = endPixel - startPixel;
   
   return (
-    <div className="space-y-3">
+    <div className="space-y-2">
       {/* Timeline Container */}
       <div 
         ref={containerRef}
@@ -229,7 +229,7 @@ export function VideoTimelineEditor({
         <div 
           ref={timelineRef}
           className={cn(
-            "relative overflow-x-auto py-6 px-4",
+            "relative overflow-x-auto py-4 px-4",
             isDraggingTimeline && "cursor-grabbing",
             !isDraggingTimeline && "cursor-grab"
           )}
@@ -238,7 +238,7 @@ export function VideoTimelineEditor({
         >
           {/* Timeline Track */}
           <div 
-            className="relative h-12"
+            className="relative h-10"
             style={{ width: timelineWidth }}
           >
             {/* Background Track */}
@@ -266,7 +266,7 @@ export function VideoTimelineEditor({
               style={{ left: startPixel - 6 }}
               onMouseDown={handleStartDrag}
             >
-              <div className="w-0.5 h-6 bg-white/70 rounded" />
+              <div className="w-0.5 h-5 bg-white/70 rounded" />
             </div>
             
             {/* End Handle */}
@@ -282,7 +282,7 @@ export function VideoTimelineEditor({
               style={{ left: endPixel - 6 }}
               onMouseDown={handleEndDrag}
             >
-              <div className="w-0.5 h-6 bg-white/70 rounded" />
+              <div className="w-0.5 h-5 bg-white/70 rounded" />
             </div>
             
             {/* Center Playhead (Event Marker) */}
@@ -290,52 +290,50 @@ export function VideoTimelineEditor({
               className="absolute top-0 bottom-0 w-0.5 bg-primary z-20"
               style={{ left: centerX }}
             >
-              <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[5px] border-r-[5px] border-t-[6px] border-transparent border-t-primary" />
+              <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[4px] border-r-[4px] border-t-[5px] border-transparent border-t-primary" />
             </div>
             
             {/* Ruler */}
-            <div className="absolute -top-6 left-0 right-0 h-6">
+            <div className="absolute -top-5 left-0 right-0 h-5">
               {rulerMarks}
             </div>
           </div>
         </div>
       </div>
       
-      {/* Info Bar */}
-      <div className="flex items-center justify-between text-xs text-muted-foreground px-1">
-        <div className="flex items-center gap-4">
+      {/* Info Bar + Actions */}
+      <div className="flex items-center justify-between text-[11px] text-muted-foreground px-1">
+        <div className="flex items-center gap-3">
           <span>
-            <span className="inline-block w-2 h-2 rounded-sm bg-blue-500 mr-1" />
-            Início: <strong className="text-foreground">{startOffset.toFixed(1)}s</strong>
+            <span className="inline-block w-1.5 h-1.5 rounded-sm bg-blue-500 mr-1" />
+            <strong className="text-foreground">{startOffset.toFixed(1)}s</strong>
           </span>
           <span>
-            <span className="inline-block w-2 h-2 rounded-sm bg-primary mr-1" />
-            Evento: <strong className="text-foreground">0.0s</strong>
+            <span className="inline-block w-1.5 h-1.5 rounded-sm bg-primary mr-1" />
+            <strong className="text-foreground">0.0s</strong>
           </span>
           <span>
-            <span className="inline-block w-2 h-2 rounded-sm bg-orange-500 mr-1" />
-            Fim: <strong className="text-foreground">+{endOffset.toFixed(1)}s</strong>
+            <span className="inline-block w-1.5 h-1.5 rounded-sm bg-orange-500 mr-1" />
+            <strong className="text-foreground">+{endOffset.toFixed(1)}s</strong>
+          </span>
+          <span className="text-muted-foreground">
+            ({duration.toFixed(1)}s)
           </span>
         </div>
-        <span>
-          Duração: <strong className="text-foreground">{duration.toFixed(1)}s</strong>
-        </span>
-      </div>
-      
-      {/* Actions */}
-      <div className="flex items-center justify-between">
-        <button
-          onClick={handleReset}
-          className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          ↺ Resetar (30s)
-        </button>
-        <button
-          onClick={handleSave}
-          className="px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors"
-        >
-          💾 Salvar Ajuste
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleReset}
+            className="text-[11px] text-muted-foreground hover:text-foreground transition-colors"
+          >
+            ↺ Resetar
+          </button>
+          <button
+            onClick={handleSave}
+            className="px-2.5 py-1 text-[11px] font-medium bg-primary text-primary-foreground rounded hover:bg-primary/90 transition-colors"
+          >
+            💾 Salvar
+          </button>
+        </div>
       </div>
     </div>
   );
