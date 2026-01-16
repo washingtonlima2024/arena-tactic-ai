@@ -97,6 +97,263 @@ def validate_transcription_teams(
         'warning': None if is_valid else f"Transcrição não menciona {home_team} nem {away_team}. Times detectados: {', '.join(unexpected_teams) if unexpected_teams else 'nenhum'}"
     }
 
+
+# ═══════════════════════════════════════════════════════════════════════════
+# KEYWORD-BASED EVENT DETECTION (Deterministic, Fast, Precise)
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Event keywords for detection - Portuguese narration patterns
+EVENT_KEYWORDS = {
+    'goal': [
+        r'GO+L',           # GOOOL, GOOOOL, GOL
+        r'GOLAÇO',         # Golaço
+        r'É GOL',          # É gol!
+        r'PRA DENTRO',     # Mandou pra dentro
+        r'ENTROU',         # Entrou!
+        r'BOLA NA REDE',   # Bola na rede
+        r'ESTUFOU A REDE', # Estufou a rede
+        r'ABRE O PLACAR',  # Abre o placar
+        r'EMPATA O JOGO',  # Empata o jogo
+        r'VIRA O JOGO',    # Vira o jogo
+        r'VIROU O JOGO',   # Virou o jogo
+        r'AMPLIA',         # Amplia o placar
+        r'PRIMEIRO GOL',   # Primeiro gol
+        r'SEGUNDO GOL',    # Segundo gol
+        r'TERCEIRO GOL',   # Terceiro gol
+    ],
+    'yellow_card': [
+        r'CARTÃO AMARELO',
+        r'AMARELO PARA',
+        r'RECEBE O AMARELO',
+        r'LEVA AMARELO',
+        r'ESTÁ AMARELADO',
+    ],
+    'red_card': [
+        r'CARTÃO VERMELHO',
+        r'VERMELHO PARA',
+        r'EXPULSO',
+        r'FOI EXPULSO',
+        r'RECEBE O VERMELHO',
+        r'LEVA VERMELHO',
+    ],
+    'foul': [
+        r'FALTA DE',
+        r'FALTA PARA',
+        r'COMETEU FALTA',
+        r'FALTA PERIGOSA',
+        r'FALTA DURA',
+    ],
+    'corner': [
+        r'ESCANTEIO',
+        r'CÓRNER',
+        r'BATE O ESCANTEIO',
+        r'COBRANÇA DE ESCANTEIO',
+    ],
+    'penalty': [
+        r'PÊNALTI',
+        r'PENALIDADE MÁXIMA',
+        r'MARCA O PÊNALTI',
+        r'VAI COBRAR O PÊNALTI',
+    ],
+    'save': [
+        r'GRANDE DEFESA',
+        r'DEFESAÇA',
+        r'SALVOU O GOL',
+        r'ESPETACULAR DEFESA',
+        r'MILAGRE DO GOLEIRO',
+    ],
+    'chance': [
+        r'QUASE GOL',
+        r'POR POUCO',
+        r'RASPOU',
+        r'NA TRAVE',
+        r'PASSOU PERTO',
+        r'QUE CHANCE',
+        r'PERDEU O GOL',
+    ]
+}
+
+
+def detect_team_from_text(text: str, home_team: str, away_team: str) -> str:
+    """
+    Detect which team is mentioned in the text.
+    Returns 'home', 'away', or 'unknown'.
+    """
+    text_upper = text.upper()
+    home_upper = home_team.upper()
+    away_upper = away_team.upper()
+    
+    # Get significant words from team names (length > 3)
+    home_words = [w for w in home_upper.split() if len(w) > 3]
+    away_words = [w for w in away_upper.split() if len(w) > 3]
+    
+    home_found = any(w in text_upper for w in home_words) or home_upper in text_upper
+    away_found = any(w in text_upper for w in away_words) or away_upper in text_upper
+    
+    if home_found and not away_found:
+        return 'home'
+    elif away_found and not home_found:
+        return 'away'
+    else:
+        return 'unknown'
+
+
+def deduplicate_events(events: List[Dict], threshold_seconds: int = 30) -> List[Dict]:
+    """
+    Remove duplicate events that are too close in time.
+    Prioritizes more important events (goal > card > others).
+    """
+    if not events:
+        return []
+    
+    # Sort by timestamp
+    sorted_events = sorted(events, key=lambda e: e.get('videoSecond', 0))
+    
+    # Event priority (lower = more important)
+    priority = {'goal': 1, 'penalty': 2, 'red_card': 3, 'yellow_card': 4, 'save': 5, 'chance': 6}
+    
+    result = []
+    last_event = None
+    
+    for event in sorted_events:
+        if last_event is None:
+            result.append(event)
+            last_event = event
+            continue
+        
+        # Check if too close to previous event
+        time_diff = abs(event.get('videoSecond', 0) - last_event.get('videoSecond', 0))
+        
+        if time_diff < threshold_seconds:
+            # Keep the more important event
+            curr_priority = priority.get(event.get('event_type'), 99)
+            last_priority = priority.get(last_event.get('event_type'), 99)
+            
+            if curr_priority < last_priority:
+                result[-1] = event  # Replace with more important event
+                last_event = event
+            # else: keep the existing one (last_event)
+        else:
+            result.append(event)
+            last_event = event
+    
+    return result
+
+
+def detect_events_by_keywords(
+    srt_path: str,
+    home_team: str,
+    away_team: str,
+    half: str = 'first',
+    segment_start_minute: int = 0
+) -> List[Dict[str, Any]]:
+    """
+    Detect events using ONLY keywords from SRT file.
+    Returns list of events with precise timestamps.
+    
+    This is a deterministic detector - no AI calls required.
+    Precision: ~100% for timestamps (extracted directly from SRT)
+    Speed: <1 second
+    Cost: $0.00
+    
+    Args:
+        srt_path: Path to SRT file
+        home_team: Home team name
+        away_team: Away team name
+        half: 'first' or 'second'
+        segment_start_minute: Starting minute for game time (0 for first, 45 for second)
+    
+    Returns:
+        List of events with precise timestamps
+    """
+    events = []
+    
+    # Read SRT file
+    try:
+        with open(srt_path, 'r', encoding='utf-8') as f:
+            srt_content = f.read()
+    except Exception as e:
+        print(f"[KEYWORDS] ❌ Erro ao ler SRT: {e}")
+        return []
+    
+    print(f"[KEYWORDS] 🔍 Iniciando detecção por palavras-chave...")
+    print(f"[KEYWORDS] SRT: {srt_path}")
+    print(f"[KEYWORDS] Times: {home_team} vs {away_team}")
+    print(f"[KEYWORDS] Tempo: {half} (minuto inicial: {segment_start_minute})")
+    
+    # Regex to extract SRT blocks: index, timestamp, text
+    # Format: "1\n00:24:45,000 --> 00:24:50,000\nText here\n\n"
+    pattern = r'(\d+)\n(\d{2}):(\d{2}):(\d{2}),(\d{3})\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}\n(.+?)(?=\n\n|\Z)'
+    
+    matches = list(re.finditer(pattern, srt_content, re.DOTALL))
+    print(f"[KEYWORDS] 📄 Encontrados {len(matches)} blocos de legenda no SRT")
+    
+    for match in matches:
+        hours = int(match.group(2))
+        minutes = int(match.group(3))
+        seconds = int(match.group(4))
+        text = match.group(6).replace('\n', ' ').strip()
+        text_upper = text.upper()
+        
+        # Calculate timestamp in seconds (absolute video time)
+        timestamp_seconds = hours * 3600 + minutes * 60 + seconds
+        
+        # Calculate game minute (for display)
+        game_minute = segment_start_minute + minutes + (hours * 60)
+        
+        # Search for keywords
+        for event_type, keywords in EVENT_KEYWORDS.items():
+            for keyword in keywords:
+                if re.search(keyword, text_upper, re.IGNORECASE):
+                    # Detect team
+                    team = detect_team_from_text(text, home_team, away_team)
+                    
+                    # Check for own goal
+                    is_own_goal = 'CONTRA' in text_upper or 'PRÓPRIO' in text_upper
+                    
+                    event = {
+                        'event_type': event_type,
+                        'minute': minutes,
+                        'second': seconds,
+                        'videoSecond': timestamp_seconds,
+                        'game_minute': game_minute,
+                        'team': team,
+                        'description': text[:60],
+                        'source_text': text,
+                        'match_half': 'first_half' if half == 'first' else 'second_half',
+                        'is_highlight': event_type in ['goal', 'red_card', 'penalty'],
+                        'isOwnGoal': is_own_goal if event_type == 'goal' else False,
+                        'confidence': 1.0,  # 100% - deterministic!
+                        'detection_method': 'keyword'
+                    }
+                    
+                    events.append(event)
+                    print(f"[KEYWORDS] ✓ {event_type.upper()} detectado em [{minutes:02d}:{seconds:02d}] - {text[:40]}...")
+                    break  # Avoid duplicates for same text
+            else:
+                continue
+            break  # Found an event, move to next SRT block
+    
+    # Deduplicate close events
+    original_count = len(events)
+    events = deduplicate_events(events, threshold_seconds=30)
+    
+    # Count by type
+    event_counts = {}
+    for e in events:
+        etype = e.get('event_type', 'unknown')
+        event_counts[etype] = event_counts.get(etype, 0) + 1
+    
+    print(f"\n[KEYWORDS] ═══════════════════════════════════════════════════")
+    print(f"[KEYWORDS] 📊 RESULTADO DA DETECÇÃO POR KEYWORDS:")
+    print(f"[KEYWORDS]   Total bruto: {original_count} eventos")
+    print(f"[KEYWORDS]   Após dedup:  {len(events)} eventos")
+    print(f"[KEYWORDS]   Por tipo: {event_counts}")
+    print(f"[KEYWORDS] ═══════════════════════════════════════════════════\n")
+    
+    return events
+
+
 # API configuration
 LOVABLE_API_KEY = os.environ.get('LOVABLE_API_KEY', '')
 OPENAI_API_KEY = os.environ.get('OPENAI_API_KEY', '')

@@ -3380,13 +3380,82 @@ def analyze_match():
             finally:
                 session_video.close()
         else:
-            # MODO TEXT: Análise tradicional via transcrição
+            # MODO TEXT: Análise via transcrição
             print(f"[ANALYZE-MATCH] 📝 Modo TEXT (transcrição) ativado")
-            events = ai_services.analyze_match_events(
-                transcription, home_team, away_team, game_start_minute, game_end_minute,
-                match_id=match_id,
-                use_dual_verification=(analysis_mode == 'text')  # Dual verification apenas em modo texto
-            )
+            
+            # ═══════════════════════════════════════════════════════════════
+            # PRIORIDADE 1: Detecção por palavras-chave (mais precisa)
+            # ═══════════════════════════════════════════════════════════════
+            events = []
+            keyword_detection_success = False
+            
+            # Tentar localizar arquivo SRT para detecção por keywords
+            match_half_folder = 'first_half' if half_type == 'first' else 'second_half'
+            srt_filename = f'{half_type}_half.srt'
+            srt_path = get_subfolder_path(match_id, 'srt') / srt_filename
+            
+            # Também tentar nome alternativo
+            if not srt_path.exists():
+                srt_path = get_subfolder_path(match_id, 'srt') / f'{match_half_folder}.srt'
+            
+            if srt_path.exists():
+                print(f"[ANALYZE-MATCH] 🔍 Tentando detecção por KEYWORDS (mais precisa)...")
+                print(f"[ANALYZE-MATCH] SRT encontrado: {srt_path}")
+                
+                segment_start = 0 if half_type == 'first' else 45
+                keyword_events = ai_services.detect_events_by_keywords(
+                    str(srt_path),
+                    home_team=home_team,
+                    away_team=away_team,
+                    half=half_type,
+                    segment_start_minute=segment_start
+                )
+                
+                if keyword_events:
+                    # Contar gols detectados por keywords
+                    keyword_goals = [e for e in keyword_events if e.get('event_type') == 'goal']
+                    
+                    print(f"[ANALYZE-MATCH] ✓ KEYWORDS: {len(keyword_events)} eventos detectados")
+                    print(f"[ANALYZE-MATCH] ✓ KEYWORDS: {len(keyword_goals)} gols encontrados")
+                    
+                    # Se encontrou gols por keyword, usar esses resultados
+                    if keyword_goals:
+                        events = keyword_events
+                        keyword_detection_success = True
+                        print(f"[ANALYZE-MATCH] ✓ Usando resultados KEYWORDS (gols detectados)")
+                    else:
+                        # Sem gols, ainda pode usar os eventos mas também tentar IA
+                        events = keyword_events
+                        print(f"[ANALYZE-MATCH] ⚠ KEYWORDS: Nenhum gol, mas {len(keyword_events)} outros eventos")
+                else:
+                    print(f"[ANALYZE-MATCH] ⚠ KEYWORDS: Nenhum evento detectado, usando IA")
+            else:
+                print(f"[ANALYZE-MATCH] ⚠ SRT não encontrado em {srt_path}, usando IA diretamente")
+            
+            # ═══════════════════════════════════════════════════════════════
+            # PRIORIDADE 2: Fallback para IA (se keywords não encontrou gols)
+            # ═══════════════════════════════════════════════════════════════
+            if not keyword_detection_success:
+                print(f"[ANALYZE-MATCH] 🤖 Usando análise de IA como fallback...")
+                ai_events = ai_services.analyze_match_events(
+                    transcription, home_team, away_team, game_start_minute, game_end_minute,
+                    match_id=match_id,
+                    use_dual_verification=(analysis_mode == 'text')
+                )
+                
+                # Se já temos eventos de keyword mas sem gols, mesclar com resultados da IA
+                if events and not keyword_detection_success:
+                    # Adicionar eventos de IA que não estão nos keywords
+                    keyword_times = {e.get('videoSecond', 0) for e in events}
+                    for ai_event in ai_events:
+                        ai_time = ai_event.get('videoSecond', 0) or (ai_event.get('minute', 0) * 60 + ai_event.get('second', 0))
+                        # Se não há evento similar (±30s), adicionar
+                        if not any(abs(ai_time - kt) < 30 for kt in keyword_times):
+                            events.append(ai_event)
+                    print(f"[ANALYZE-MATCH] ✓ Mesclados: {len(events)} eventos totais")
+                else:
+                    events = ai_events
+                    print(f"[ANALYZE-MATCH] ✓ IA: {len(events)} eventos detectados")
         
         # Determine match_half based on halfType
         match_half = 'first_half' if half_type == 'first' else 'second_half'
