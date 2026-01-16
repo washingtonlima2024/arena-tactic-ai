@@ -2559,33 +2559,73 @@ def regenerate_clips(match_id: str):
         if not videos:
             return jsonify({'error': 'Nenhum vídeo encontrado', 'clips_generated': 0}), 404
         
-        # Mapear vídeos por tipo
+        # Mapear vídeos por tipo com logs detalhados
         video_paths = {}
+        print(f"[REGENERATE-CLIPS] ════════════════════════════════════════════")
+        print(f"[REGENERATE-CLIPS] Partida {match_id}")
+        print(f"[REGENERATE-CLIPS] Eventos: {len(events)}")
+        print(f"[REGENERATE-CLIPS] Vídeos no banco: {len(videos)}")
+        
         for video in videos:
             video_type = video.video_type or 'full'
-            # Resolver caminho local
             file_url = video.file_url or ''
+            print(f"[REGENERATE-CLIPS] Video DB: type={video_type}, url={file_url[:80]}...")
+            
+            local_path = None
+            
+            # Tentar resolver caminho a partir da URL
             if '/api/storage/' in file_url:
+                # Formato: .../api/storage/MATCH_ID/videos/FILENAME
                 parts = file_url.split('/api/storage/')[-1].split('/')
-                if len(parts) >= 2:
-                    local_path = get_file_path(parts[0], parts[1] if len(parts) > 2 else '', parts[-1])
-                    if os.path.exists(local_path):
-                        video_paths[video_type] = local_path
-            elif os.path.exists(file_url):
-                video_paths[video_type] = file_url
+                print(f"[REGENERATE-CLIPS]   → Parsed parts: {parts}")
+                if len(parts) >= 3:  # match_id/subfolder/filename
+                    vid_match_id = parts[0]
+                    subfolder = parts[1]
+                    filename = '/'.join(parts[2:])  # Para casos com subpastas em clips/
+                    local_path = str(get_file_path(vid_match_id, subfolder, filename))
+                    print(f"[REGENERATE-CLIPS]   → Resolved path: {local_path}")
+            elif file_url.startswith('/') or os.path.isabs(file_url):
+                local_path = file_url
+                print(f"[REGENERATE-CLIPS]   → Absolute path: {local_path}")
+            
+            # Verificar se o arquivo existe
+            if local_path and os.path.exists(local_path):
+                video_paths[video_type] = local_path
+                print(f"[REGENERATE-CLIPS]   ✓ Arquivo encontrado: {os.path.getsize(local_path) / (1024*1024):.1f}MB")
+            else:
+                print(f"[REGENERATE-CLIPS]   ⚠ Arquivo NÃO encontrado: {local_path}")
         
-        print(f"[REGENERATE-CLIPS] Partida {match_id}: {len(events)} eventos, {len(video_paths)} vídeos disponíveis")
-        print(f"[REGENERATE-CLIPS] Vídeos: {list(video_paths.keys())}")
+        # Fallback: buscar diretamente na pasta de vídeos se nenhum foi encontrado
+        if not video_paths:
+            print(f"[REGENERATE-CLIPS] Nenhum vídeo resolvido, tentando fallback direto...")
+            storage_videos_path = get_match_storage_path(match_id) / 'videos'
+            if storage_videos_path.exists():
+                for f in storage_videos_path.iterdir():
+                    if f.suffix.lower() in {'.mp4', '.mov', '.mkv', '.webm', '.avi'}:
+                        video_paths['full'] = str(f)
+                        print(f"[REGENERATE-CLIPS]   ✓ Fallback: encontrado {f.name} ({f.stat().st_size / (1024*1024):.1f}MB)")
+                        break
+        
+        print(f"[REGENERATE-CLIPS] Vídeos resolvidos: {list(video_paths.keys())}")
+        print(f"[REGENERATE-CLIPS] ════════════════════════════════════════════")
         
         # 5. Separar eventos por tempo
         first_half_events = [e.to_dict() for e in events if (e.match_half == 'first_half' or (e.minute or 0) < 45)]
         second_half_events = [e.to_dict() for e in events if (e.match_half == 'second_half' or (e.minute or 0) >= 45)]
+        
+        print(f"[REGENERATE-CLIPS] Eventos: {len(first_half_events)} 1ºT, {len(second_half_events)} 2ºT")
+        
+        # Log sample de eventos para debug
+        for i, evt in enumerate(first_half_events[:3]):
+            vs = evt.get('metadata', {}).get('videoSecond', 'N/A')
+            print(f"[REGENERATE-CLIPS]   Evento 1T[{i}]: {evt.get('event_type')} min {evt.get('minute')}' | videoSecond={vs}")
         
         total_clips = 0
         results = {'first_half': 0, 'second_half': 0, 'errors': []}
         
         # 6. Processar primeiro tempo
         first_video = video_paths.get('first_half') or video_paths.get('full')
+        print(f"[REGENERATE-CLIPS] 1ºT: video={first_video is not None}, eventos={len(first_half_events)}")
         if first_half_events and first_video and os.path.exists(first_video):
             try:
                 clips = extract_event_clips_auto(
@@ -2644,14 +2684,25 @@ def regenerate_clips(match_id: str):
         
         session.commit()
         
+        print(f"[REGENERATE-CLIPS] ════════════════════════════════════════════")
+        print(f"[REGENERATE-CLIPS] RESULTADO: {total_clips} clips gerados")
+        print(f"[REGENERATE-CLIPS]   1º tempo: {results['first_half']} clips")
+        print(f"[REGENERATE-CLIPS]   2º tempo: {results['second_half']} clips")
+        if results['errors']:
+            print(f"[REGENERATE-CLIPS]   Erros: {results['errors']}")
+        print(f"[REGENERATE-CLIPS] ════════════════════════════════════════════")
+        
         return jsonify({
             'success': True,
             'match_id': match_id,
+            'regenerated': total_clips,  # Para compatibilidade com frontend
             'clips_generated': total_clips,
-            'details': results,
-            'events_total': len(events),
-            'first_half_events': len(first_half_events),
-            'second_half_events': len(second_half_events)
+            'failed': len(results['errors']),
+            'total_events': len(events),
+            'first_half': results['first_half'],
+            'second_half': results['second_half'],
+            'errors': results['errors'],
+            'message': f'{total_clips} clips gerados com sucesso'
         })
         
     except Exception as e:
@@ -2659,7 +2710,7 @@ def regenerate_clips(match_id: str):
         print(f"[REGENERATE-CLIPS] ❌ Erro: {e}")
         import traceback
         traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+        return jsonify({'error': str(e), 'regenerated': 0, 'failed': 1}), 500
     finally:
         session.close()
 
