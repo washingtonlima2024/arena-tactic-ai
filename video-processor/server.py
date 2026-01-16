@@ -542,52 +542,56 @@ VIGNETTES_DIR.mkdir(exist_ok=True)
 #   - narration_offset: compensação para atraso do narrador (negativo = antecipar)
 #     O narrador geralmente descreve o evento 2-5s APÓS ele acontecer,
 #     então usamos offset negativo para capturar o momento real.
+# ═══════════════════════════════════════════════════════════════════════════════
+# EVENT_CLIP_CONFIG - Configuração de Clips de 30 segundos
+# ═══════════════════════════════════════════════════════════════════════════════
+# VISION-ONLY MODE: narration_offset=0 para todos os eventos
+# O timestamp visual detectado pelo Gemini Vision é o momento exato do lance
+# Clips de 30s com evento centralizado: 15s antes + 15s depois
+# ═══════════════════════════════════════════════════════════════════════════════
 EVENT_CLIP_CONFIG = {
-    # Eventos de alta importância - contexto longo + compensação de narração
-    # 🆕 FASE 2: Buffers simétricos para centralizar evento no clip de 30s
-    # pre_buffer=15, post_buffer=15 = 30s total com gol NO CENTRO
-    # narration_offset=-8 compensa atraso maior da narração
+    # Eventos de alta importância - 30s com evento centralizado
     'goal': {
-        'pre_buffer': 15,         # 15s antes do evento = metade do clip
-        'post_buffer': 15,        # 15s depois do evento = metade do clip
-        'narration_offset': -8,   # Compensar atraso de narração
-        'min_duration': 30,       # Duração mínima garantida (30s)
-        'centered': True          # Flag: evento deve ficar no centro do clip
+        'pre_buffer': 15,         # 15s antes do evento
+        'post_buffer': 15,        # 15s depois do evento
+        'narration_offset': 0,    # VISION MODE: sem offset - timestamp visual é preciso
+        'min_duration': 30,       # Duração mínima garantida
+        'centered': True          # Evento no centro do clip
     },
     'penalty': {
-        'pre_buffer': 15,         # Simétrico - 30s total
-        'post_buffer': 15,        # Simétrico - 30s total
-        'narration_offset': -5,   # Compensar atraso de narração
+        'pre_buffer': 15,
+        'post_buffer': 15,
+        'narration_offset': 0,
         'min_duration': 30,
         'centered': True
     },
-    'red_card': {'pre_buffer': 15, 'post_buffer': 10, 'narration_offset': -2},  # 25s
+    'red_card': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30, 'centered': True},
     
-    # Eventos de média importância - contexto médio
-    'shot_on_target': {'pre_buffer': 15, 'post_buffer': 8, 'narration_offset': -3},  # 23s
-    'shot': {'pre_buffer': 12, 'post_buffer': 8, 'narration_offset': -3},  # 20s
-    'save': {'pre_buffer': 15, 'post_buffer': 6, 'narration_offset': -3},  # 21s - defesa já aconteceu
-    'yellow_card': {'pre_buffer': 12, 'post_buffer': 8, 'narration_offset': -2},  # 20s
-    'corner': {'pre_buffer': 8, 'post_buffer': 15, 'narration_offset': -1},  # 23s - cruzamento + finalização
-    'free_kick': {'pre_buffer': 8, 'post_buffer': 15, 'narration_offset': -1},  # 23s
+    # Eventos de média importância - 30s padronizado
+    'shot_on_target': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'shot': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'save': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'yellow_card': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'corner': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'free_kick': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
     
-    # Eventos de menor duração - contexto curto
-    'foul': {'pre_buffer': 10, 'post_buffer': 5, 'narration_offset': -2},  # 15s
-    'offside': {'pre_buffer': 10, 'post_buffer': 5, 'narration_offset': -2},  # 15s
-    'substitution': {'pre_buffer': 5, 'post_buffer': 5, 'narration_offset': 0},  # 10s - sem atraso
-    'clearance': {'pre_buffer': 8, 'post_buffer': 4, 'narration_offset': -2},  # 12s
-    'tackle': {'pre_buffer': 8, 'post_buffer': 4, 'narration_offset': -2},  # 12s
-    'interception': {'pre_buffer': 8, 'post_buffer': 4, 'narration_offset': -2},  # 12s
-    'pass': {'pre_buffer': 6, 'post_buffer': 5, 'narration_offset': -1},  # 11s
-    'cross': {'pre_buffer': 8, 'post_buffer': 6, 'narration_offset': -2},  # 14s
+    # Eventos de menor importância - 30s padronizado
+    'foul': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'offside': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'substitution': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'clearance': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'tackle': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'interception': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'pass': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'cross': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
     
-    # Eventos táticos
-    'high_press': {'pre_buffer': 10, 'post_buffer': 10, 'narration_offset': -2},  # 20s
-    'transition': {'pre_buffer': 10, 'post_buffer': 12, 'narration_offset': -2},  # 22s
-    'buildup': {'pre_buffer': 10, 'post_buffer': 10, 'narration_offset': -2},  # 20s
+    # Eventos táticos - 30s padronizado
+    'high_press': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'transition': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
+    'buildup': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30},
     
-    # Padrão para eventos não mapeados
-    'default': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': -2}  # 30s
+    # Padrão para eventos não mapeados - 30s
+    'default': {'pre_buffer': 15, 'post_buffer': 15, 'narration_offset': 0, 'min_duration': 30}
 }
 
 

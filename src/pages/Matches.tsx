@@ -190,6 +190,7 @@ export default function Matches() {
     useExistingTranscription: { first: boolean; second: boolean };
     manualTranscription: { first: string; second: string; full: string };
     reTranscribe: { first: boolean; second: boolean };
+    analysisMode: 'vision' | 'text';
   }) => {
     if (!matchToReprocess) return;
     
@@ -470,6 +471,7 @@ export default function Matches() {
             gameStartMinute,
             gameEndMinute,
             halfType,
+            analysisMode: options.analysisMode, // Pass vision/text mode
             // Passar dados do match para sync no fallback Edge Function
             matchData: {
               home_team: matchToReprocess.home_team ? {
@@ -478,7 +480,7 @@ export default function Matches() {
                 short_name: matchToReprocess.home_team.short_name,
                 logo_url: matchToReprocess.home_team.logo_url,
                 primary_color: matchToReprocess.home_team.primary_color,
-                secondary_color: matchToReprocess.home_team.secondary_color
+                secondary_color: matchToReprocess.away_team.secondary_color
               } : undefined,
               away_team: matchToReprocess.away_team ? {
                 id: matchToReprocess.away_team.id,
