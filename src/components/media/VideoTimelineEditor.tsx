@@ -42,13 +42,19 @@ export function VideoTimelineEditor({
   onAbsoluteSave,
   onSeek
 }: VideoTimelineEditorProps) {
+  // Calculate effective eventSecond that stays within video bounds
+  // Critical when timestamp exceeds duration (e.g., highlights videos)
+  const effectiveEventSecond = eventSecond > videoDuration 
+    ? Math.min(videoDuration / 2, 30)  // Fallback to center or 30s
+    : Math.max(0, eventSecond);
+  
   // Relative mode state
   const [startOffset, setStartOffset] = useState(initialTrim?.startOffset ?? DEFAULT_START_OFFSET);
   const [endOffset, setEndOffset] = useState(initialTrim?.endOffset ?? DEFAULT_END_OFFSET);
   
-  // Absolute mode state - store absolute timestamps
-  const [absStart, setAbsStart] = useState(propAbsoluteStart ?? Math.max(0, eventSecond - 15));
-  const [absEnd, setAbsEnd] = useState(propAbsoluteEnd ?? Math.min(videoDuration, eventSecond + 15));
+  // Absolute mode state - store absolute timestamps (using effectiveEventSecond)
+  const [absStart, setAbsStart] = useState(propAbsoluteStart ?? Math.max(0, effectiveEventSecond - 15));
+  const [absEnd, setAbsEnd] = useState(propAbsoluteEnd ?? Math.min(videoDuration, effectiveEventSecond + 15));
   
   const [isDraggingStart, setIsDraggingStart] = useState(false);
   const [isDraggingEnd, setIsDraggingEnd] = useState(false);
@@ -84,10 +90,10 @@ export function VideoTimelineEditor({
   // Sync video position with timeline dragging
   useEffect(() => {
     if (videoRef.current && !isDraggingStart && !isDraggingEnd) {
-      const targetTime = Math.max(0, Math.min(videoDuration, eventSecond + timelineOffset));
+      const targetTime = Math.max(0, Math.min(videoDuration, effectiveEventSecond + timelineOffset));
       videoRef.current.currentTime = targetTime;
     }
-  }, [timelineOffset, eventSecond, videoDuration, videoRef, isDraggingStart, isDraggingEnd]);
+  }, [timelineOffset, effectiveEventSecond, videoDuration, videoRef, isDraggingStart, isDraggingEnd]);
   
   // Calculate timeline width based on offsets
   const timelineWidth = (effectiveMaxOffset * 2 + 10) * PIXELS_PER_SECOND;
@@ -104,8 +110,8 @@ export function VideoTimelineEditor({
   }, [centerX]);
   
   // Get effective start/end for rendering (works for both modes)
-  const effectiveStartOffset = mode === 'absolute' ? absStart - eventSecond : startOffset;
-  const effectiveEndOffset = mode === 'absolute' ? absEnd - eventSecond : endOffset;
+  const effectiveStartOffset = mode === 'absolute' ? absStart - effectiveEventSecond : startOffset;
+  const effectiveEndOffset = mode === 'absolute' ? absEnd - effectiveEventSecond : endOffset;
   
   // Handle start handle drag
   const handleStartDrag = useCallback((e: React.MouseEvent) => {
@@ -122,7 +128,7 @@ export function VideoTimelineEditor({
       
       if (mode === 'absolute') {
         // In absolute mode, convert offset to absolute time
-        const newAbsStart = eventSecond + newOffset;
+        const newAbsStart = effectiveEventSecond + newOffset;
         const maxStart = absEnd - MIN_CLIP_DURATION;
         const clampedStart = Math.max(0, Math.min(newAbsStart, maxStart));
         setAbsStart(clampedStart);
@@ -139,7 +145,7 @@ export function VideoTimelineEditor({
         
         // Update video preview
         if (videoRef.current) {
-          const previewTime = Math.max(0, eventSecond + clampedOffset);
+          const previewTime = Math.max(0, effectiveEventSecond + clampedOffset);
           videoRef.current.currentTime = previewTime;
         }
       }
@@ -153,7 +159,7 @@ export function VideoTimelineEditor({
     
     document.addEventListener('mousemove', handleMove);
     document.addEventListener('mouseup', handleUp);
-  }, [mode, endOffset, absEnd, eventSecond, pixelToOffset, videoRef]);
+  }, [mode, endOffset, absEnd, effectiveEventSecond, pixelToOffset, videoRef]);
   
   // Handle end handle drag
   const handleEndDrag = useCallback((e: React.MouseEvent) => {
@@ -170,7 +176,7 @@ export function VideoTimelineEditor({
       
       if (mode === 'absolute') {
         // In absolute mode, convert offset to absolute time
-        const newAbsEnd = eventSecond + newOffset;
+        const newAbsEnd = effectiveEventSecond + newOffset;
         const minEnd = absStart + MIN_CLIP_DURATION;
         const clampedEnd = Math.min(videoDuration, Math.max(newAbsEnd, minEnd));
         setAbsEnd(clampedEnd);
@@ -187,7 +193,7 @@ export function VideoTimelineEditor({
         
         // Update video preview
         if (videoRef.current) {
-          const previewTime = Math.max(0, eventSecond + clampedOffset);
+          const previewTime = Math.max(0, effectiveEventSecond + clampedOffset);
           videoRef.current.currentTime = previewTime;
         }
       }
@@ -201,7 +207,7 @@ export function VideoTimelineEditor({
     
     document.addEventListener('mousemove', handleMove);
     document.addEventListener('mouseup', handleUp);
-  }, [mode, startOffset, absStart, eventSecond, videoDuration, pixelToOffset, videoRef]);
+  }, [mode, startOffset, absStart, effectiveEventSecond, videoDuration, pixelToOffset, videoRef]);
   
   // Handle click on timeline to seek
   const handleTimelineClick = useCallback((e: React.MouseEvent) => {
@@ -215,7 +221,7 @@ export function VideoTimelineEditor({
     const clickedOffset = pixelToOffset(x);
     
     // Move video to clicked position
-    const targetTime = Math.max(0, Math.min(videoDuration, eventSecond + clickedOffset));
+    const targetTime = Math.max(0, Math.min(videoDuration, effectiveEventSecond + clickedOffset));
     
     if (videoRef.current) {
       videoRef.current.currentTime = targetTime;
@@ -258,15 +264,15 @@ export function VideoTimelineEditor({
   // Reset to default
   const handleReset = () => {
     if (mode === 'absolute') {
-      setAbsStart(Math.max(0, eventSecond - 15));
-      setAbsEnd(Math.min(videoDuration, eventSecond + 15));
+      setAbsStart(Math.max(0, effectiveEventSecond - 15));
+      setAbsEnd(Math.min(videoDuration, effectiveEventSecond + 15));
     } else {
       setStartOffset(DEFAULT_START_OFFSET);
       setEndOffset(DEFAULT_END_OFFSET);
     }
     setTimelineOffset(0);
     if (videoRef.current) {
-      videoRef.current.currentTime = eventSecond;
+      videoRef.current.currentTime = effectiveEventSecond;
     }
   };
   
@@ -302,7 +308,7 @@ export function VideoTimelineEditor({
             isCenter ? "text-primary font-bold" : "text-muted-foreground"
           )}>
             {mode === 'absolute' 
-              ? `${Math.floor((eventSecond + s) / 60)}:${String(Math.floor((eventSecond + s) % 60)).padStart(2, '0')}`
+              ? `${Math.floor((effectiveEventSecond + s) / 60)}:${String(Math.floor((effectiveEventSecond + s) % 60)).padStart(2, '0')}`
               : s > 0 ? `+${s}` : `${s}`}s
           </span>
         )}
@@ -317,7 +323,7 @@ export function VideoTimelineEditor({
   
   // Calculate playhead position from currentVideoTime
   const playheadOffset = currentVideoTime !== undefined 
-    ? currentVideoTime - eventSecond 
+    ? currentVideoTime - effectiveEventSecond 
     : undefined;
   const playheadPixel = playheadOffset !== undefined 
     ? offsetToPixel(playheadOffset) 
@@ -436,7 +442,7 @@ export function VideoTimelineEditor({
             <span className="inline-block w-1.5 h-1.5 rounded-sm bg-primary mr-1" />
             <strong className="text-foreground">
               {mode === 'absolute' 
-                ? `${Math.floor(eventSecond / 60)}:${String(Math.floor(eventSecond % 60)).padStart(2, '0')}`
+                ? `${Math.floor(effectiveEventSecond / 60)}:${String(Math.floor(effectiveEventSecond % 60)).padStart(2, '0')}`
                 : '0.0s'}
             </strong>
           </span>
