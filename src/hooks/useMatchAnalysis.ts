@@ -163,19 +163,27 @@ export function useMatchAnalysis() {
     gameStartMinute = 0,
     gameEndMinute = 45,
     halfType,
-    skipValidation = false
+    skipValidation = false,
+    analysisMode = 'text'  // NOVO: 'text' | 'vision' | 'hybrid'
   }: {
     matchId: string;
-    transcription: string;
+    transcription?: string;  // Opcional para modo vision
     homeTeam: string;
     awayTeam: string;
     gameStartMinute?: number;
     gameEndMinute?: number;
     halfType?: 'first' | 'second';
     skipValidation?: boolean;
+    analysisMode?: 'text' | 'vision' | 'hybrid';
   }): Promise<AnalysisResult | null> => {
-    if (!matchId || !transcription) {
-      toast.error('Match ID e transcrição são obrigatórios');
+    if (!matchId) {
+      toast.error('Match ID é obrigatório');
+      return null;
+    }
+    
+    // Transcrição obrigatória apenas para modos text/hybrid
+    if ((analysisMode === 'text' || analysisMode === 'hybrid') && !transcription) {
+      toast.error('Transcrição obrigatória para modo texto');
       return null;
     }
 
@@ -197,11 +205,12 @@ export function useMatchAnalysis() {
 
     try {
       console.log('Starting analysis for match:', matchId);
-      console.log('Transcription length:', transcription.length);
+      console.log('Analysis mode:', analysisMode);
+      console.log('Transcription length:', transcription?.length || 0);
 
       const data = await apiClient.analyzeMatch({
         matchId,
-        transcription,
+        transcription: transcription || '',
         homeTeam,
         awayTeam,
         gameStartMinute,
@@ -209,7 +218,8 @@ export function useMatchAnalysis() {
         halfType: halfType || (gameStartMinute >= 45 ? 'second' : 'first'),
         autoClip: true,
         includeSubtitles: true,
-        skipValidation
+        skipValidation,
+        analysisMode  // NOVO: passar modo de análise
       });
 
       if (!data?.success) {

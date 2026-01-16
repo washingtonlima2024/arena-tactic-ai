@@ -3665,3 +3665,343 @@ def log_clip_analysis(
             f.write(json.dumps(log_entry) + '\n')
     except Exception as e:
         print(f"[LOG] Error writing clip analysis log: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# VISION-ONLY EVENT DETECTION - Análise 100% Visual
+# ═══════════════════════════════════════════════════════════════════════════
+
+def analyze_video_events_vision_only(
+    video_path: str,
+    home_team: str = None,
+    away_team: str = None,
+    scan_interval_seconds: int = 30,
+    frames_per_window: int = 6,
+    target_event_types: List[str] = None
+) -> Dict[str, Any]:
+    """
+    Analisa um vídeo EXCLUSIVAMENTE por visão para detectar eventos de futebol.
+    
+    Processo:
+    1. Divide o vídeo em janelas de N segundos
+    2. Extrai frames de cada janela
+    3. Gemini Vision identifica eventos importantes em cada janela
+    4. Para eventos detectados, faz segunda passada para timestamp preciso
+    5. Retorna eventos com timestamps EXATOS (para clips de 30s centralizados)
+    
+    Args:
+        video_path: Caminho para o arquivo de vídeo
+        home_team: Nome do time mandante (para contexto)
+        away_team: Nome do time visitante (para contexto)
+        scan_interval_seconds: Intervalo entre janelas de análise (default: 30s)
+        frames_per_window: Frames a extrair por janela (default: 6)
+        target_event_types: Tipos de eventos a detectar (default: goal, card, penalty, save)
+    
+    Returns:
+        Dict com:
+        - success: bool
+        - events: List[Dict] com eventos detectados
+        - windows_analyzed: int
+        - total_frames: int
+        - error: str (se falhar)
+    """
+    import subprocess
+    
+    if not target_event_types:
+        target_event_types = ['goal', 'red_card', 'yellow_card', 'penalty', 'save']
+    
+    result = {
+        'success': False,
+        'events': [],
+        'windows_analyzed': 0,
+        'total_frames': 0,
+        'error': None
+    }
+    
+    if not os.path.exists(video_path):
+        result['error'] = f'Vídeo não encontrado: {video_path}'
+        return result
+    
+    # Check API availability
+    if not LOVABLE_API_KEY and not GOOGLE_API_KEY:
+        result['error'] = 'Nenhuma API Vision configurada (LOVABLE_API_KEY ou GOOGLE_API_KEY)'
+        return result
+    
+    # Get video duration
+    try:
+        probe_cmd = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                     '-of', 'default=noprint_wrappers=1:nokey=1', video_path]
+        probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=30)
+        video_duration = float(probe_result.stdout.strip())
+    except Exception as e:
+        result['error'] = f'Não foi possível obter duração do vídeo: {e}'
+        return result
+    
+    print(f"[VISION-ONLY] 🎬 Iniciando análise visual pura")
+    print(f"[VISION-ONLY] Vídeo: {video_path}")
+    print(f"[VISION-ONLY] Duração: {video_duration:.0f}s ({video_duration/60:.1f} min)")
+    print(f"[VISION-ONLY] Intervalo: {scan_interval_seconds}s, Frames/janela: {frames_per_window}")
+    
+    num_windows = int(video_duration / scan_interval_seconds) + 1
+    detected_events = []
+    
+    team_context = ""
+    if home_team and away_team:
+        team_context = f"Partida: {home_team} (casa) vs {away_team} (visitante). "
+    
+    # Prompt para detecção de eventos por visão
+    detection_prompt = f"""Você é um analista de vídeo de futebol especializado em detectar EVENTOS IMPORTANTES visualmente.
+
+{team_context}
+Analise estas imagens consecutivas (em ordem cronológica) e identifique se algum destes eventos está acontecendo:
+
+🔍 EVENTOS A DETECTAR:
+- GOL: Bola entrando na rede, jogadores comemorando, replay de gol
+- CARTÃO AMARELO: Árbitro mostrando cartão amarelo
+- CARTÃO VERMELHO: Árbitro mostrando cartão vermelho  
+- PÊNALTI: Jogador posicionado para cobrar pênalti
+- DEFESA: Goleiro fazendo defesa espetacular
+
+⚠️ IMPORTANTE:
+- Identifique o ÍNDICE DO FRAME onde o evento ACONTECE (0 = primeiro frame)
+- Ignore replays lentos - foque na ação ao vivo
+- Para GOL: o momento que a bola CRUZA a linha do gol
+
+Retorne APENAS JSON (sem markdown):
+{{
+  "events_detected": true/false,
+  "events": [
+    {{
+      "event_type": "goal|yellow_card|red_card|penalty|save",
+      "frame_index": 0-{frames_per_window-1},
+      "confidence": 0.0-1.0,
+      "description": "Breve descrição do evento",
+      "team": "home|away|unknown"
+    }}
+  ]
+}}
+
+Se nenhum evento importante for detectado, retorne:
+{{"events_detected": false, "events": []}}"""
+
+    # Primeira passada: scan por janelas
+    for window_idx in range(num_windows):
+        window_start = window_idx * scan_interval_seconds
+        window_end = min(window_start + scan_interval_seconds, video_duration)
+        
+        if window_end - window_start < 5:  # Janela muito pequena
+            continue
+        
+        window_center = (window_start + window_end) / 2
+        
+        # Extrair frames da janela
+        frames = extract_frames_for_analysis(
+            video_path,
+            center_second=window_center,
+            window_seconds=int((window_end - window_start) / 2),
+            num_frames=frames_per_window
+        )
+        
+        if len(frames) < 2:
+            continue
+        
+        result['total_frames'] += len(frames)
+        result['windows_analyzed'] += 1
+        
+        # Analisar frames com Vision
+        try:
+            content_parts = [{"type": "text", "text": detection_prompt}]
+            
+            for i, frame_b64 in enumerate(frames):
+                content_parts.append({
+                    "type": "image_url",
+                    "image_url": {"url": f"data:image/jpeg;base64,{frame_b64}"}
+                })
+            
+            # Call Gemini Vision
+            if LOVABLE_API_KEY:
+                response = requests.post(
+                    LOVABLE_API_URL,
+                    headers={
+                        'Authorization': f'Bearer {LOVABLE_API_KEY}',
+                        'Content-Type': 'application/json'
+                    },
+                    json={
+                        'model': 'google/gemini-2.5-flash',
+                        'messages': [{'role': 'user', 'content': content_parts}],
+                        'max_tokens': 1024
+                    },
+                    timeout=60
+                )
+                
+                if response.ok:
+                    data = response.json()
+                    response_text = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+                else:
+                    print(f"[VISION-ONLY] ⚠ API error janela {window_idx}: {response.status_code}")
+                    continue
+                    
+            elif GOOGLE_API_KEY:
+                parts = [{"text": detection_prompt}]
+                for frame_b64 in frames:
+                    parts.append({"inline_data": {"mime_type": "image/jpeg", "data": frame_b64}})
+                
+                response = requests.post(
+                    f"{GOOGLE_API_URL}/models/gemini-2.0-flash:generateContent?key={GOOGLE_API_KEY}",
+                    json={
+                        'contents': [{'role': 'user', 'parts': parts}],
+                        'generationConfig': {'maxOutputTokens': 1024}
+                    },
+                    timeout=60
+                )
+                
+                if response.ok:
+                    data = response.json()
+                    candidates = data.get('candidates', [])
+                    if candidates:
+                        parts_resp = candidates[0].get('content', {}).get('parts', [])
+                        response_text = parts_resp[0].get('text', '') if parts_resp else ''
+                    else:
+                        continue
+                else:
+                    print(f"[VISION-ONLY] ⚠ Google API error: {response.status_code}")
+                    continue
+            
+            # Parse response
+            try:
+                json_start = response_text.find('{')
+                json_end = response_text.rfind('}') + 1
+                if json_start >= 0 and json_end > json_start:
+                    parsed = json.loads(response_text[json_start:json_end])
+                    
+                    if parsed.get('events_detected') and parsed.get('events'):
+                        for event in parsed['events']:
+                            if event.get('event_type') not in target_event_types:
+                                continue
+                            if event.get('confidence', 0) < 0.5:
+                                continue
+                            
+                            # Calcular timestamp exato do evento
+                            frame_idx = event.get('frame_index', 0)
+                            frame_interval = (window_end - window_start) / max(1, len(frames) - 1)
+                            event_timestamp = window_start + (frame_idx * frame_interval)
+                            
+                            print(f"[VISION-ONLY] ⚽ EVENTO: {event.get('event_type')} @ {event_timestamp:.1f}s (janela {window_idx})")
+                            
+                            detected_events.append({
+                                'event_type': event.get('event_type'),
+                                'timestamp_seconds': event_timestamp,
+                                'minute': int(event_timestamp / 60),
+                                'second': int(event_timestamp % 60),
+                                'confidence': event.get('confidence', 0.6),
+                                'description': event.get('description', ''),
+                                'team': event.get('team', 'unknown'),
+                                'detection_method': 'vision_only',
+                                'window_index': window_idx
+                            })
+                            
+            except json.JSONDecodeError:
+                print(f"[VISION-ONLY] ⚠ JSON parse error janela {window_idx}")
+                
+        except Exception as e:
+            print(f"[VISION-ONLY] ⚠ Erro analisando janela {window_idx}: {e}")
+        
+        # Progress log
+        if (window_idx + 1) % 5 == 0:
+            print(f"[VISION-ONLY] Progresso: {window_idx + 1}/{num_windows} janelas analisadas")
+    
+    # Segunda passada: refinar timestamps para eventos de alta importância
+    refined_events = []
+    for event in detected_events:
+        if event['event_type'] in ['goal', 'penalty'] and event['confidence'] >= 0.6:
+            print(f"[VISION-ONLY] 🔍 Refinando timestamp de {event['event_type']} @ {event['timestamp_seconds']:.1f}s")
+            
+            # Análise mais detalhada com mais frames
+            refined = detect_goal_visual_cues(
+                video_path,
+                estimated_second=event['timestamp_seconds'],
+                window_seconds=15,  # Janela menor para precisão
+                home_team=home_team,
+                away_team=away_team,
+                num_frames=12
+            )
+            
+            if refined['visual_confirmed'] and refined['confidence'] > event['confidence']:
+                old_ts = event['timestamp_seconds']
+                event['timestamp_seconds'] = refined['exact_second']
+                event['minute'] = int(refined['exact_second'] / 60)
+                event['second'] = int(refined['exact_second'] % 60)
+                event['confidence'] = refined['confidence']
+                event['refined'] = True
+                print(f"[VISION-ONLY] ✓ Timestamp refinado: {old_ts:.1f}s → {refined['exact_second']:.1f}s")
+        
+        refined_events.append(event)
+    
+    # Deduplicar eventos muito próximos
+    deduplicated = []
+    for event in sorted(refined_events, key=lambda e: e['timestamp_seconds']):
+        is_duplicate = False
+        for existing in deduplicated:
+            if existing['event_type'] == event['event_type']:
+                diff = abs(event['timestamp_seconds'] - existing['timestamp_seconds'])
+                if diff < 30:  # Mesmo tipo dentro de 30s = duplicata
+                    is_duplicate = True
+                    # Manter o de maior confiança
+                    if event['confidence'] > existing['confidence']:
+                        deduplicated.remove(existing)
+                        deduplicated.append(event)
+                    break
+        if not is_duplicate:
+            deduplicated.append(event)
+    
+    result['success'] = True
+    result['events'] = deduplicated
+    
+    print(f"[VISION-ONLY] ✅ Análise completa: {len(deduplicated)} eventos detectados em {result['windows_analyzed']} janelas")
+    
+    return result
+
+
+def vision_events_to_match_format(
+    vision_events: List[Dict],
+    match_id: str = None,
+    half_type: str = 'first',
+    segment_start_minute: int = 0
+) -> List[Dict]:
+    """
+    Converte eventos do formato vision_only para o formato esperado pelo match analysis.
+    
+    Args:
+        vision_events: Lista de eventos do analyze_video_events_vision_only
+        match_id: ID da partida
+        half_type: 'first' ou 'second'
+        segment_start_minute: Minuto de início do segmento (0 ou 45)
+    
+    Returns:
+        Lista de eventos no formato do analyze_match_events
+    """
+    formatted = []
+    
+    for event in vision_events:
+        # Ajustar minuto baseado no tempo
+        raw_minute = event.get('minute', 0)
+        adjusted_minute = raw_minute + segment_start_minute
+        
+        formatted.append({
+            'event_type': event.get('event_type', 'unknown'),
+            'minute': adjusted_minute,
+            'second': event.get('second', 0),
+            'description': event.get('description', ''),
+            'team': event.get('team', 'unknown'),
+            'is_highlight': event.get('event_type') in ['goal', 'penalty', 'red_card'],
+            'isOwnGoal': False,
+            'player': None,
+            'metadata': {
+                'detection_method': 'vision_only',
+                'confidence': event.get('confidence', 0),
+                'videoSecond': event.get('timestamp_seconds', 0),
+                'refined': event.get('refined', False)
+            }
+        })
+    
+    return formatted
