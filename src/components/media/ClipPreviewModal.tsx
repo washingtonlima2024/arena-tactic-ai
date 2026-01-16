@@ -1,4 +1,4 @@
-import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Slider } from '@/components/ui/slider';
@@ -6,6 +6,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import * as VisuallyHidden from '@radix-ui/react-visually-hidden';
 import {
   Accordion,
   AccordionContent,
@@ -313,6 +314,10 @@ export function ClipPreviewModal({
         className="w-[95vw] max-w-7xl h-[90vh] p-0 gap-0 bg-background/98 backdrop-blur-xl border-border/50 flex flex-col overflow-hidden"
         hideCloseButton
       >
+        <VisuallyHidden.Root>
+          <DialogTitle>{clipTitle} - Preview</DialogTitle>
+        </VisuallyHidden.Root>
+        
         {/* Header */}
         <div className="flex items-center justify-between px-4 py-3 border-b border-border/50 flex-shrink-0 bg-muted/20">
           <div className="flex items-center gap-3">
