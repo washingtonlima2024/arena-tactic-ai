@@ -5,12 +5,14 @@ interface VideoTimelineEditorProps {
   videoRef: React.RefObject<HTMLVideoElement>;
   eventSecond: number;       // Segundo do vídeo onde o evento ocorre
   videoDuration: number;     // Duração total do vídeo
+  currentVideoTime?: number; // Tempo atual do vídeo para playhead
   initialTrim?: {
     startOffset: number;     // Offset do início (default -15)
     endOffset: number;       // Offset do fim (default +15)
   };
   onTrimChange?: (trim: { startOffset: number; endOffset: number }) => void;
   onSave?: (trim: { startOffset: number; endOffset: number }) => void;
+  onSeek?: (time: number) => void; // Callback para seek quando clicar na timeline
 }
 
 const PIXELS_PER_SECOND = 12;
@@ -23,9 +25,11 @@ export function VideoTimelineEditor({
   videoRef,
   eventSecond,
   videoDuration,
+  currentVideoTime,
   initialTrim,
   onTrimChange,
-  onSave
+  onSave,
+  onSeek
 }: VideoTimelineEditorProps) {
   const [startOffset, setStartOffset] = useState(initialTrim?.startOffset ?? DEFAULT_START_OFFSET);
   const [endOffset, setEndOffset] = useState(initialTrim?.endOffset ?? DEFAULT_END_OFFSET);
@@ -138,6 +142,27 @@ export function VideoTimelineEditor({
     document.addEventListener('mouseup', handleUp);
   }, [startOffset, eventSecond, pixelToOffset, videoRef]);
   
+  // Handle click on timeline to seek
+  const handleTimelineClick = useCallback((e: React.MouseEvent) => {
+    // Don't process if clicked on handles
+    if ((e.target as HTMLElement).dataset.handle) return;
+    
+    const rect = timelineRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    
+    const x = e.clientX - rect.left + timelineRef.current!.scrollLeft;
+    const clickedOffset = pixelToOffset(x);
+    
+    // Move video to clicked position
+    const targetTime = Math.max(0, Math.min(videoDuration, eventSecond + clickedOffset));
+    
+    if (videoRef.current) {
+      videoRef.current.currentTime = targetTime;
+    }
+    
+    onSeek?.(targetTime);
+  }, [eventSecond, videoDuration, pixelToOffset, videoRef, onSeek]);
+  
   // Handle timeline drag (moves both handles together)
   const handleTimelineDrag = useCallback((e: React.MouseEvent) => {
     // Only start timeline drag if not on handles
@@ -218,6 +243,17 @@ export function VideoTimelineEditor({
   const endPixel = offsetToPixel(endOffset);
   const regionWidth = endPixel - startPixel;
   
+  // Calculate playhead position from currentVideoTime
+  const playheadOffset = currentVideoTime !== undefined 
+    ? currentVideoTime - eventSecond 
+    : undefined;
+  const playheadPixel = playheadOffset !== undefined 
+    ? offsetToPixel(playheadOffset) 
+    : undefined;
+  const isPlayheadVisible = playheadOffset !== undefined && 
+    playheadOffset >= -MAX_OFFSET && 
+    playheadOffset <= MAX_OFFSET;
+  
   return (
     <div className="space-y-2">
       {/* Timeline Container */}
@@ -231,9 +267,10 @@ export function VideoTimelineEditor({
           className={cn(
             "relative overflow-x-auto py-4 px-4",
             isDraggingTimeline && "cursor-grabbing",
-            !isDraggingTimeline && "cursor-grab"
+            !isDraggingTimeline && "cursor-pointer"
           )}
           onMouseDown={handleTimelineDrag}
+          onClick={handleTimelineClick}
           style={{ touchAction: 'none' }}
         >
           {/* Timeline Track */}
@@ -285,9 +322,20 @@ export function VideoTimelineEditor({
               <div className="w-0.5 h-5 bg-white/70 rounded" />
             </div>
             
-            {/* Center Playhead (Event Marker) */}
+            {/* Current Playhead (follows video currentTime) */}
+            {isPlayheadVisible && playheadPixel !== undefined && (
+              <div 
+                className="absolute top-0 bottom-0 w-0.5 bg-green-500 z-30 transition-[left] duration-100 ease-linear pointer-events-none"
+                style={{ left: playheadPixel }}
+              >
+                <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-green-500 rounded-full shadow-sm" />
+                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 w-2 h-2 bg-green-500 rounded-full shadow-sm" />
+              </div>
+            )}
+            
+            {/* Center Event Marker */}
             <div 
-              className="absolute top-0 bottom-0 w-0.5 bg-primary z-20"
+              className="absolute top-0 bottom-0 w-0.5 bg-primary z-20 pointer-events-none"
               style={{ left: centerX }}
             >
               <div className="absolute -top-1 left-1/2 -translate-x-1/2 w-0 h-0 border-l-[4px] border-r-[4px] border-t-[5px] border-transparent border-t-primary" />
@@ -319,6 +367,11 @@ export function VideoTimelineEditor({
           <span className="text-muted-foreground">
             ({duration.toFixed(1)}s)
           </span>
+          {isPlayheadVisible && playheadOffset !== undefined && (
+            <span className="text-green-500 font-medium">
+              ▶ {playheadOffset >= 0 ? '+' : ''}{playheadOffset.toFixed(1)}s
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button

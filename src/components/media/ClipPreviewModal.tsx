@@ -6,6 +6,8 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { Input } from '@/components/ui/input';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import * as VisuallyHidden from '@radix-ui/react-visually-hidden';
 import {
   Accordion,
@@ -48,13 +50,27 @@ import {
   Palette,
   Settings2,
   ChevronDown,
-  Layers
+  Layers,
+  Trash2,
+  RefreshCw
 } from 'lucide-react';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 
 type DeviceFormat = '9:16' | '16:9' | '1:1' | '4:5';
 type DeviceType = 'phone' | 'tablet' | 'desktop';
+type ClipMode = 'auto' | 'custom';
+
+interface CustomText {
+  id: string;
+  content: string;
+  position: string;
+  fontSize: number;
+  color: string;
+  backgroundColor: string;
+  opacity: number;
+}
 
 interface ClipPreviewModalProps {
   isOpen: boolean;
@@ -91,6 +107,33 @@ const logoPositions = [
   'bottom-left', 'bottom-center', 'bottom-right'
 ];
 
+// Position helper
+const getPositionClasses = (position: string) => {
+  const positions: Record<string, string> = {
+    'top-left': 'top-3 left-3',
+    'top-center': 'top-3 left-1/2 -translate-x-1/2',
+    'top-right': 'top-3 right-3',
+    'center-left': 'top-1/2 left-3 -translate-y-1/2',
+    'center': 'top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2',
+    'center-right': 'top-1/2 right-3 -translate-y-1/2',
+    'bottom-left': 'bottom-12 left-3',
+    'bottom-center': 'bottom-12 left-1/2 -translate-x-1/2',
+    'bottom-right': 'bottom-12 right-3',
+  };
+  return positions[position] || positions['top-left'];
+};
+
+// Subtitle style helper
+const getSubtitleStyleClasses = (style: string) => {
+  const styles: Record<string, string> = {
+    'classico': 'bg-black/80 text-white',
+    'moderno': 'bg-gradient-to-r from-primary/90 to-primary/70 text-white',
+    'neon': 'bg-transparent border-2 border-green-400 text-green-400 shadow-[0_0_10px_rgba(74,222,128,0.5)]',
+    'minimo': 'bg-transparent text-white drop-shadow-[0_2px_4px_rgba(0,0,0,0.8)]',
+  };
+  return styles[style] || styles['classico'];
+};
+
 export function ClipPreviewModal({
   isOpen,
   onClose,
@@ -114,22 +157,38 @@ export function ClipPreviewModal({
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
-  const [duration, setDuration] = useState(0);
+  const [duration, setDuration] = useState(videoDuration);
+  
+  // Clip Mode
+  const [clipMode, setClipMode] = useState<ClipMode>('auto');
   
   // Timeline Editor
   const [showTimelineEditor, setShowTimelineEditor] = useState(false);
   const [currentTrim, setCurrentTrim] = useState(initialTrim);
   
-  // Styles & Overlays
+  // Logo Overlay
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [logoPosition, setLogoPosition] = useState('top-left');
   const [logoOpacity, setLogoOpacity] = useState(80);
+  
+  // Subtitles
   const [showSubtitles, setShowSubtitles] = useState(false);
   const [subtitleStyle, setSubtitleStyle] = useState('classico');
+  const [subtitleText, setSubtitleText] = useState('');
+  const [subtitles, setSubtitles] = useState<Array<{start: number; end: number; text: string}>>([]);
+  
+  // Custom Texts
+  const [customTexts, setCustomTexts] = useState<CustomText[]>([]);
+  
+  // Overlay opacity
+  const [overlayOpacity, setOverlayOpacity] = useState(0);
   
   // Accordion state
   const [openPanels, setOpenPanels] = useState(['formato', 'dispositivo']);
   
   const videoRef = useRef<HTMLVideoElement>(null);
+  const logoInputRef = useRef<HTMLInputElement>(null);
 
   // Reset state when modal opens
   useEffect(() => {
@@ -141,8 +200,17 @@ export function ClipPreviewModal({
       setShowTimelineEditor(false);
       setCurrentTrim(initialTrim);
       setCurrentTime(0);
+      setDuration(videoDuration);
+      setClipMode('auto');
+      setLogoFile(null);
+      setLogoUrl(null);
+      setCustomTexts([]);
+      setSubtitleText('');
+      setSubtitles([]);
+      setShowSubtitles(false);
+      setOverlayOpacity(0);
     }
-  }, [isOpen, initialTrim]);
+  }, [isOpen, initialTrim, videoDuration]);
 
   // Video event listeners
   useEffect(() => {
@@ -153,13 +221,20 @@ export function ClipPreviewModal({
     const handleDurationChange = () => setDuration(video.duration || videoDuration);
     const handlePlay = () => setIsPlaying(true);
     const handlePause = () => setIsPlaying(false);
-    const handleLoadedMetadata = () => setDuration(video.duration || videoDuration);
+    const handleLoadedMetadata = () => {
+      setDuration(video.duration || videoDuration);
+    };
 
     video.addEventListener('timeupdate', handleTimeUpdate);
     video.addEventListener('durationchange', handleDurationChange);
     video.addEventListener('play', handlePlay);
     video.addEventListener('pause', handlePause);
     video.addEventListener('loadedmetadata', handleLoadedMetadata);
+
+    // Initialize duration if video already has metadata
+    if (video.duration && !isNaN(video.duration)) {
+      setDuration(video.duration);
+    }
 
     return () => {
       video.removeEventListener('timeupdate', handleTimeUpdate);
@@ -177,12 +252,78 @@ export function ClipPreviewModal({
     }
   }, [isMuted]);
 
+  // Sync subtitles with video time
+  useEffect(() => {
+    if (!showSubtitles || subtitles.length === 0) {
+      setSubtitleText('');
+      return;
+    }
+    
+    const current = subtitles.find(
+      sub => currentTime >= sub.start && currentTime <= sub.end
+    );
+    setSubtitleText(current?.text || '');
+  }, [currentTime, showSubtitles, subtitles]);
+
+  // Load example subtitles when enabled
+  useEffect(() => {
+    if (showSubtitles && subtitles.length === 0) {
+      // Example subtitles for demo
+      setSubtitles([
+        { start: 0, end: 5, text: 'Lance em desenvolvimento...' },
+        { start: 12, end: 18, text: '⚽ GOOOOL!' },
+        { start: 20, end: 25, text: 'Que jogada sensacional!' },
+      ]);
+    }
+  }, [showSubtitles, subtitles.length]);
+
   // Format time helper
   const formatTime = (seconds: number) => {
     if (!isFinite(seconds) || isNaN(seconds)) return '0:00';
     const mins = Math.floor(seconds / 60);
     const secs = Math.floor(seconds % 60);
     return `${mins}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  // Logo handlers
+  const handleLogoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      setLogoFile(file);
+      const url = URL.createObjectURL(file);
+      setLogoUrl(url);
+      toast.success('Logo carregado!');
+    }
+  };
+
+  const removeLogo = () => {
+    if (logoUrl) {
+      URL.revokeObjectURL(logoUrl);
+    }
+    setLogoFile(null);
+    setLogoUrl(null);
+  };
+
+  // Custom text handlers
+  const addCustomText = () => {
+    const newText: CustomText = {
+      id: crypto.randomUUID(),
+      content: 'Novo texto',
+      position: 'bottom-center',
+      fontSize: 16,
+      color: '#ffffff',
+      backgroundColor: 'rgba(0,0,0,0.7)',
+      opacity: 100,
+    };
+    setCustomTexts(prev => [...prev, newText]);
+  };
+
+  const updateCustomText = (id: string, updates: Partial<CustomText>) => {
+    setCustomTexts(prev => prev.map(t => t.id === id ? { ...t, ...updates } : t));
+  };
+
+  const removeCustomText = (id: string) => {
+    setCustomTexts(prev => prev.filter(t => t.id !== id));
   };
 
   // Player control handlers
@@ -247,8 +388,10 @@ export function ClipPreviewModal({
       a.click();
       document.body.removeChild(a);
       window.URL.revokeObjectURL(url);
+      toast.success('Download iniciado!');
     } catch (error) {
       console.error('Error downloading clip:', error);
+      toast.error('Erro ao baixar o clip');
     }
   };
 
@@ -259,9 +402,51 @@ export function ClipPreviewModal({
   const handleTrimSave = useCallback((trim: { startOffset: number; endOffset: number }) => {
     if (eventId && onTrimSave) {
       onTrimSave(eventId, trim);
+      toast.success('Ajustes salvos!');
     }
     setShowTimelineEditor(false);
   }, [eventId, onTrimSave]);
+
+  const handleTimelineSeek = useCallback((time: number) => {
+    setCurrentTime(time);
+  }, []);
+
+  // Handle save with mode
+  const handleApplyAndRegenerate = async () => {
+    if (!eventId) return;
+    
+    // Save metadata with mode and overlays config
+    const config = {
+      clipMode,
+      customTrim: clipMode === 'custom' ? currentTrim : null,
+      overlays: {
+        logo: logoUrl ? {
+          position: logoPosition,
+          opacity: logoOpacity,
+        } : null,
+        subtitles: showSubtitles ? {
+          enabled: true,
+          style: subtitleStyle,
+        } : null,
+        texts: customTexts.length > 0 ? customTexts : null,
+        overlay: overlayOpacity > 0 ? { opacity: overlayOpacity } : null,
+      },
+      format: selectedFormat,
+    };
+    
+    console.log('Saving clip config:', config);
+    
+    // If custom mode, save the trim
+    if (clipMode === 'custom' && currentTrim && onTrimSave) {
+      onTrimSave(eventId, currentTrim);
+    }
+    
+    toast.success(
+      clipMode === 'auto' 
+        ? 'Configuração salva! O clip usará o corte automático de 30s.'
+        : 'Configuração salva! O clip usará seus ajustes personalizados.'
+    );
+  };
 
   // Get device size based on format
   const getDeviceSize = (): 'sm' | 'md' | 'lg' => {
@@ -331,9 +516,12 @@ export function ClipPreviewModal({
                     {matchHalf === 'first_half' || matchHalf === 'first' ? '1º Tempo' : '2º Tempo'}
                   </Badge>
                 )}
-                {currentTrim && (
-                  <Badge variant="secondary" className="text-xs">
-                    Ajustado: {(currentTrim.endOffset - currentTrim.startOffset).toFixed(1)}s
+                <Badge variant={clipMode === 'auto' ? 'secondary' : 'default'} className="text-xs">
+                  {clipMode === 'auto' ? '⚡ Auto 30s' : '✂️ Personalizado'}
+                </Badge>
+                {currentTrim && clipMode === 'custom' && (
+                  <Badge variant="outline" className="text-xs">
+                    {(currentTrim.endOffset - currentTrim.startOffset).toFixed(1)}s
                   </Badge>
                 )}
               </div>
@@ -446,10 +634,34 @@ export function ClipPreviewModal({
                       <TabsContent value="overlays" className="space-y-3 mt-3">
                         <div className="space-y-2">
                           <Label className="text-xs font-medium">Logo / Patrocinador</Label>
-                          <div className="border-2 border-dashed border-border/50 rounded-lg p-3 text-center cursor-pointer hover:bg-muted/50 transition-colors">
-                            <Upload className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground" />
-                            <p className="text-[10px] text-muted-foreground">Arraste ou clique</p>
-                          </div>
+                          <input
+                            ref={logoInputRef}
+                            type="file"
+                            accept="image/*"
+                            onChange={handleLogoUpload}
+                            className="hidden"
+                          />
+                          {logoUrl ? (
+                            <div className="relative border border-border/50 rounded-lg p-2 bg-muted/30">
+                              <img src={logoUrl} alt="Logo" className="max-h-16 mx-auto object-contain" />
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="absolute top-1 right-1 h-6 w-6"
+                                onClick={removeLogo}
+                              >
+                                <Trash2 className="h-3 w-3" />
+                              </Button>
+                            </div>
+                          ) : (
+                            <div 
+                              className="border-2 border-dashed border-border/50 rounded-lg p-3 text-center cursor-pointer hover:bg-muted/50 transition-colors"
+                              onClick={() => logoInputRef.current?.click()}
+                            >
+                              <Upload className="h-5 w-5 mx-auto mb-1.5 text-muted-foreground" />
+                              <p className="text-[10px] text-muted-foreground">Arraste ou clique</p>
+                            </div>
+                          )}
                         </div>
                         
                         <div className="space-y-2">
@@ -471,13 +683,27 @@ export function ClipPreviewModal({
                         
                         <div className="space-y-2">
                           <div className="flex justify-between items-center">
-                            <Label className="text-xs font-medium">Opacidade</Label>
+                            <Label className="text-xs font-medium">Opacidade Logo</Label>
                             <Badge variant="outline" className="text-[10px] h-5">{logoOpacity}%</Badge>
                           </div>
                           <Slider 
                             value={[logoOpacity]} 
                             onValueChange={([v]) => setLogoOpacity(v)} 
                             max={100} 
+                            step={5}
+                            className="w-full"
+                          />
+                        </div>
+
+                        <div className="space-y-2">
+                          <div className="flex justify-between items-center">
+                            <Label className="text-xs font-medium">Escurecimento</Label>
+                            <Badge variant="outline" className="text-[10px] h-5">{overlayOpacity}%</Badge>
+                          </div>
+                          <Slider 
+                            value={[overlayOpacity]} 
+                            onValueChange={([v]) => setOverlayOpacity(v)} 
+                            max={70} 
                             step={5}
                             className="w-full"
                           />
@@ -497,8 +723,11 @@ export function ClipPreviewModal({
                         
                         {showSubtitles && (
                           <>
-                            <div className="bg-muted/50 rounded p-2 text-center border border-border/30">
-                              <p className="text-xs italic text-muted-foreground">"Legenda de exemplo..."</p>
+                            <div className={cn(
+                              "rounded p-2 text-center border border-border/30",
+                              getSubtitleStyleClasses(subtitleStyle)
+                            )}>
+                              <p className="text-xs">{subtitleText || '"Legenda de exemplo..."'}</p>
                             </div>
                             
                             <div className="space-y-2">
@@ -523,13 +752,41 @@ export function ClipPreviewModal({
                       
                       {/* Tab: Textos */}
                       <TabsContent value="textos" className="space-y-3 mt-3">
-                        <Button variant="outline" size="sm" className="w-full gap-2 h-8">
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          className="w-full gap-2 h-8"
+                          onClick={addCustomText}
+                        >
                           <Plus className="h-3.5 w-3.5" />
                           Adicionar Texto
                         </Button>
-                        <p className="text-[10px] text-muted-foreground text-center py-3">
-                          Nenhum texto adicionado
-                        </p>
+                        
+                        {customTexts.length === 0 ? (
+                          <p className="text-[10px] text-muted-foreground text-center py-3">
+                            Nenhum texto adicionado
+                          </p>
+                        ) : (
+                          <div className="space-y-2">
+                            {customTexts.map(text => (
+                              <div key={text.id} className="flex items-center gap-2 p-2 bg-muted/30 rounded border border-border/30">
+                                <Input
+                                  value={text.content}
+                                  onChange={(e) => updateCustomText(text.id, { content: e.target.value })}
+                                  className="flex-1 h-7 text-xs"
+                                />
+                                <Button 
+                                  variant="ghost" 
+                                  size="icon" 
+                                  className="h-7 w-7"
+                                  onClick={() => removeCustomText(text.id)}
+                                >
+                                  <Trash2 className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </TabsContent>
                     </Tabs>
                   </AccordionContent>
@@ -545,10 +802,52 @@ export function ClipPreviewModal({
                   </AccordionTrigger>
                   <AccordionContent className="px-3 pb-3">
                     <div className="space-y-3">
+                      {/* Mode Selection */}
+                      <RadioGroup 
+                        value={clipMode} 
+                        onValueChange={(v) => {
+                          setClipMode(v as ClipMode);
+                          if (v === 'custom') {
+                            setShowTimelineEditor(true);
+                          }
+                        }}
+                        className="space-y-2"
+                      >
+                        <div className={cn(
+                          "flex items-center space-x-2 p-2.5 rounded-lg border transition-colors cursor-pointer",
+                          clipMode === 'auto' 
+                            ? "border-primary/50 bg-primary/10" 
+                            : "border-border/30 hover:bg-muted/50"
+                        )}>
+                          <RadioGroupItem value="auto" id="auto" />
+                          <Label htmlFor="auto" className="flex-1 cursor-pointer">
+                            <span className="font-medium text-xs">⚡ Corte Automático</span>
+                            <p className="text-[10px] text-muted-foreground">30s centralizado (-15s / +15s)</p>
+                          </Label>
+                        </div>
+                        <div className={cn(
+                          "flex items-center space-x-2 p-2.5 rounded-lg border transition-colors cursor-pointer",
+                          clipMode === 'custom' 
+                            ? "border-primary/50 bg-primary/10" 
+                            : "border-border/30 hover:bg-muted/50"
+                        )}>
+                          <RadioGroupItem value="custom" id="custom" />
+                          <Label htmlFor="custom" className="flex-1 cursor-pointer">
+                            <span className="font-medium text-xs">✂️ Corte Personalizado</span>
+                            <p className="text-[10px] text-muted-foreground">Ajustar início e fim manualmente</p>
+                          </Label>
+                        </div>
+                      </RadioGroup>
+
+                      {/* Current values display */}
                       <div className="grid grid-cols-3 gap-2 text-center">
                         <div className="p-2 bg-muted/30 rounded-lg border border-border/30">
                           <p className="text-[10px] text-muted-foreground">Início</p>
-                          <p className="text-sm font-mono font-medium">{currentTrim?.startOffset?.toFixed(1) || '-15.0'}s</p>
+                          <p className="text-sm font-mono font-medium">
+                            {clipMode === 'custom' && currentTrim 
+                              ? `${currentTrim.startOffset.toFixed(1)}s`
+                              : '-15.0s'}
+                          </p>
                         </div>
                         <div className="p-2 bg-primary/10 rounded-lg border border-primary/30">
                           <p className="text-[10px] text-primary">Evento</p>
@@ -556,23 +855,29 @@ export function ClipPreviewModal({
                         </div>
                         <div className="p-2 bg-muted/30 rounded-lg border border-border/30">
                           <p className="text-[10px] text-muted-foreground">Fim</p>
-                          <p className="text-sm font-mono font-medium">+{currentTrim?.endOffset?.toFixed(1) || '15.0'}s</p>
+                          <p className="text-sm font-mono font-medium">
+                            {clipMode === 'custom' && currentTrim 
+                              ? `+${currentTrim.endOffset.toFixed(1)}s`
+                              : '+15.0s'}
+                          </p>
                         </div>
                       </div>
                       
-                      <Button
-                        variant={showTimelineEditor ? 'secondary' : 'outline'}
-                        size="sm"
-                        className="w-full gap-2"
-                        onClick={() => setShowTimelineEditor(!showTimelineEditor)}
-                      >
-                        <Settings2 className="h-4 w-4" />
-                        {showTimelineEditor ? 'Fechar Editor' : 'Abrir Timeline Editor'}
-                        <ChevronDown className={cn(
-                          "h-3 w-3 ml-auto transition-transform",
-                          showTimelineEditor && "rotate-180"
-                        )} />
-                      </Button>
+                      {clipMode === 'custom' && (
+                        <Button
+                          variant={showTimelineEditor ? 'secondary' : 'outline'}
+                          size="sm"
+                          className="w-full gap-2"
+                          onClick={() => setShowTimelineEditor(!showTimelineEditor)}
+                        >
+                          <Settings2 className="h-4 w-4" />
+                          {showTimelineEditor ? 'Fechar Editor' : 'Abrir Timeline Editor'}
+                          <ChevronDown className={cn(
+                            "h-3 w-3 ml-auto transition-transform",
+                            showTimelineEditor && "rotate-180"
+                          )} />
+                        </Button>
+                      )}
                     </div>
                   </AccordionContent>
                 </AccordionItem>
@@ -615,15 +920,23 @@ export function ClipPreviewModal({
             </ScrollArea>
             
             {/* Sidebar Footer */}
-            <div className="border-t border-border/50 p-3 flex-shrink-0 bg-muted/20">
+            <div className="border-t border-border/50 p-3 flex-shrink-0 bg-muted/20 space-y-2">
               <Button 
                 className="w-full gap-2" 
                 variant="arena"
+                onClick={handleApplyAndRegenerate}
+              >
+                <RefreshCw className="h-4 w-4" />
+                {clipMode === 'auto' ? 'Aplicar Corte Automático' : 'Aplicar Edição'}
+              </Button>
+              <Button 
+                className="w-full gap-2" 
+                variant="outline"
                 onClick={handleDownload}
                 disabled={!clipUrl}
               >
                 <Download className="h-4 w-4" />
-                Exportar Clip
+                Baixar Clip Atual
               </Button>
             </div>
           </div>
@@ -637,7 +950,7 @@ export function ClipPreviewModal({
                 size={getDeviceSize()}
                 allowRotation={selectedFormat === '9:16' || selectedFormat === '4:5'}
               >
-                <div className="relative w-full h-full bg-black">
+                <div className="relative w-full h-full bg-black overflow-hidden">
                   {clipUrl ? (
                     <video
                       ref={videoRef}
@@ -660,8 +973,60 @@ export function ClipPreviewModal({
                     </div>
                   )}
                   
+                  {/* Darkening Overlay */}
+                  {overlayOpacity > 0 && (
+                    <div 
+                      className="absolute inset-0 bg-black pointer-events-none z-10"
+                      style={{ opacity: overlayOpacity / 100 }}
+                    />
+                  )}
+                  
+                  {/* Logo Overlay */}
+                  {logoUrl && (
+                    <img
+                      src={logoUrl}
+                      alt="Logo"
+                      className={cn(
+                        "absolute z-20 pointer-events-none max-w-[25%] max-h-[12%] object-contain",
+                        getPositionClasses(logoPosition)
+                      )}
+                      style={{ opacity: logoOpacity / 100 }}
+                    />
+                  )}
+                  
+                  {/* Custom Texts Overlay */}
+                  {customTexts.map(text => (
+                    <div
+                      key={text.id}
+                      className={cn(
+                        "absolute z-20 pointer-events-none px-2 py-1 rounded",
+                        getPositionClasses(text.position)
+                      )}
+                      style={{
+                        color: text.color,
+                        backgroundColor: text.backgroundColor,
+                        opacity: text.opacity / 100,
+                        fontSize: text.fontSize,
+                      }}
+                    >
+                      {text.content}
+                    </div>
+                  ))}
+                  
+                  {/* Subtitles Overlay */}
+                  {showSubtitles && subtitleText && (
+                    <div 
+                      className={cn(
+                        "absolute bottom-6 left-1/2 -translate-x-1/2 z-30 px-3 py-1.5 rounded pointer-events-none max-w-[90%]",
+                        getSubtitleStyleClasses(subtitleStyle)
+                      )}
+                    >
+                      <p className="text-center text-sm font-medium">{subtitleText}</p>
+                    </div>
+                  )}
+                  
                   {/* Format indicator overlay */}
-                  <div className="absolute top-2 left-2 right-2 flex justify-between items-start pointer-events-none">
+                  <div className="absolute top-2 left-2 right-2 flex justify-between items-start pointer-events-none z-40">
                     <Badge 
                       variant="arena" 
                       className="text-xs backdrop-blur bg-primary/80"
@@ -680,7 +1045,7 @@ export function ClipPreviewModal({
                 <Slider
                   value={[currentTime]}
                   min={0}
-                  max={duration || 30}
+                  max={duration > 0 ? duration : videoDuration}
                   step={0.1}
                   onValueChange={handleProgressChange}
                   className="w-full"
@@ -786,16 +1151,18 @@ export function ClipPreviewModal({
             )}
             
             {/* Timeline Editor (collapsible) */}
-            <Collapsible open={showTimelineEditor} onOpenChange={setShowTimelineEditor}>
+            <Collapsible open={showTimelineEditor && clipMode === 'custom'} onOpenChange={setShowTimelineEditor}>
               <CollapsibleContent>
                 <div className="border-t border-border/50 p-3 bg-muted/20 max-h-[160px] overflow-y-auto">
                   <VideoTimelineEditor
                     videoRef={videoRef}
                     eventSecond={eventSecond}
                     videoDuration={videoDuration}
+                    currentVideoTime={currentTime}
                     initialTrim={currentTrim}
                     onTrimChange={handleTrimChange}
                     onSave={handleTrimSave}
+                    onSeek={handleTimelineSeek}
                   />
                 </div>
               </CollapsibleContent>
