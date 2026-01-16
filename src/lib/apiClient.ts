@@ -823,14 +823,19 @@ export const apiClient = {
     regenerated: number;
     failed: number;
     total_events: number;
-    timings_used: Record<string, { pre: number; post: number; total: number }>;
+    timings_used?: Record<string, { pre: number; post: number; total: number }>;
     message: string;
+    error?: string;
+    error_type?: string;
+    video_duration_minutes?: number;
+    event_range_minutes?: [number, number];
   }> => {
     await ensureServerAvailable();
-    return apiRequestLongRunning(`/api/matches/${matchId}/regenerate-clips`, {
+    const result = await apiRequestLongRunning<any>(`/api/matches/${matchId}/regenerate-clips`, {
       method: 'POST',
       body: JSON.stringify(options || { use_category_timings: true, force_subtitles: true })
     }, 600000); // 10 minutes timeout
+    return result;
   },
 
   getClipConfig: () => 

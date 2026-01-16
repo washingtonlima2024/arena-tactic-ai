@@ -2621,7 +2621,62 @@ def regenerate_clips(match_id: str):
             print(f"[REGENERATE-CLIPS]   Evento 1T[{i}]: {evt.get('event_type')} min {evt.get('minute')}' | videoSecond={vs}")
         
         total_clips = 0
-        results = {'first_half': 0, 'second_half': 0, 'errors': []}
+        results = {'first_half': 0, 'second_half': 0, 'errors': [], 'skipped_events': []}
+        
+        # ═══════════════════════════════════════════════════════════════
+        # VERIFICAÇÃO DE COMPATIBILIDADE DE TIMESTAMPS
+        # ═══════════════════════════════════════════════════════════════
+        # Detectar quando os eventos têm timestamps além da duração do vídeo
+        first_video = video_paths.get('first_half') or video_paths.get('full')
+        if first_video and os.path.exists(first_video):
+            video_duration_sec = get_video_duration_seconds(first_video)
+            video_duration_min = video_duration_sec / 60 if video_duration_sec > 0 else 0
+            
+            # Coletar videoSecond de todos os eventos
+            event_timestamps = []
+            for e in events:
+                metadata = e.metadata if hasattr(e, 'metadata') else (e.get('metadata') if isinstance(e, dict) else {})
+                if metadata:
+                    vs = metadata.get('videoSecond') if isinstance(metadata, dict) else None
+                    if vs is not None and vs > 0:
+                        event_timestamps.append(vs)
+            
+            if event_timestamps and video_duration_sec > 0:
+                min_event_ts = min(event_timestamps)
+                max_event_ts = max(event_timestamps)
+                
+                print(f"[REGENERATE-CLIPS] Verificação de compatibilidade:")
+                print(f"[REGENERATE-CLIPS]   Vídeo: {video_duration_sec:.1f}s ({video_duration_min:.1f} min)")
+                print(f"[REGENERATE-CLIPS]   Eventos: {len(event_timestamps)} com videoSecond")
+                print(f"[REGENERATE-CLIPS]   Range de timestamps: {min_event_ts:.1f}s - {max_event_ts:.1f}s")
+                
+                # Se TODOS os eventos estão além da duração do vídeo, retornar erro informativo
+                if min_event_ts > video_duration_sec:
+                    # Calcular em que minutos os eventos estão (para mensagem amigável)
+                    min_event_min = min_event_ts / 60
+                    max_event_min = max_event_ts / 60
+                    
+                    error_msg = (
+                        f"Incompatibilidade de timestamps: O vídeo tem {video_duration_min:.0f} minutos, "
+                        f"mas os eventos apontam para os minutos {min_event_min:.0f}-{max_event_min:.0f}. "
+                        f"Importe o vídeo completo da partida ou reimporte a transcrição."
+                    )
+                    
+                    print(f"[REGENERATE-CLIPS] ❌ {error_msg}")
+                    
+                    session.close()
+                    return jsonify({
+                        'success': False,
+                        'error': error_msg,
+                        'error_type': 'timestamp_mismatch',
+                        'regenerated': 0,
+                        'clips_generated': 0,
+                        'failed': len(events),
+                        'total_events': len(events),
+                        'video_duration_minutes': video_duration_min,
+                        'event_range_minutes': [min_event_min, max_event_min],
+                        'message': error_msg
+                    }), 400
         
         # 6. Processar primeiro tempo
         first_video = video_paths.get('first_half') or video_paths.get('full')
