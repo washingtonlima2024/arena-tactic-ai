@@ -14,6 +14,7 @@ import { Switch } from '@/components/ui/switch';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { 
   Loader2, 
   FileText, 
@@ -21,7 +22,9 @@ import {
   CheckCircle, 
   Upload, 
   AlertTriangle,
-  RefreshCw 
+  RefreshCw,
+  Eye,
+  Type
 } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
@@ -45,6 +48,7 @@ interface ReprocessOptionsDialogProps {
     useExistingTranscription: { first: boolean; second: boolean };
     manualTranscription: { first: string; second: string; full: string };
     reTranscribe: { first: boolean; second: boolean };
+    analysisMode: 'vision' | 'text';
   }) => Promise<void>;
   isReprocessing: boolean;
   progress: { stage: string; progress: number };
@@ -66,6 +70,7 @@ export function ReprocessOptionsDialog({
   const [manualText, setManualText] = useState({ first: '', second: '', full: '' });
   const [selectedTab, setSelectedTab] = useState('existing');
   const [activeHalf, setActiveHalf] = useState<'first' | 'second' | 'full'>('full');
+  const [analysisMode, setAnalysisMode] = useState<'vision' | 'text'>('vision');
 
   // CRITICAL: Reset ALL state when dialog opens or match changes to prevent data contamination
   useEffect(() => {
@@ -82,6 +87,7 @@ export function ReprocessOptionsDialog({
       setActiveHalf('full');
       setExistingTranscriptions(null);
       setIsLoading(true);
+      setAnalysisMode('vision'); // Default to vision mode
       
       // Then load existing transcriptions for the NEW match
       if (match?.id) {
@@ -171,6 +177,7 @@ export function ReprocessOptionsDialog({
       useExistingTranscription: useExisting,
       manualTranscription: manualText,
       reTranscribe,
+      analysisMode,
     });
   };
 
@@ -206,7 +213,47 @@ export function ReprocessOptionsDialog({
             <Loader2 className="h-8 w-8 animate-spin text-primary" />
           </div>
         ) : (
-          <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-4">
+          <div className="space-y-6">
+            {/* Analysis Mode Selection */}
+            <div className="p-4 rounded-lg border border-primary/30 bg-primary/5">
+              <div className="flex items-center gap-2 mb-3">
+                <Eye className="h-5 w-5 text-primary" />
+                <span className="font-medium">Modo de Análise</span>
+              </div>
+              <RadioGroup 
+                value={analysisMode} 
+                onValueChange={(v) => setAnalysisMode(v as 'vision' | 'text')}
+                className="space-y-3"
+              >
+                <div className="flex items-start space-x-3 p-3 rounded-lg border border-primary/20 bg-background hover:border-primary/40 transition-colors">
+                  <RadioGroupItem value="vision" id="vision" className="mt-0.5" />
+                  <div className="flex-1">
+                    <Label htmlFor="vision" className="font-medium flex items-center gap-2 cursor-pointer">
+                      <Eye className="h-4 w-4 text-primary" />
+                      Análise Visual (Gemini Vision)
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Detecta eventos diretamente nos frames do vídeo. Timestamps precisos sem depender da narração.
+                    </p>
+                  </div>
+                  <Badge variant="default" className="bg-primary/20 text-primary text-xs">Recomendado</Badge>
+                </div>
+                <div className="flex items-start space-x-3 p-3 rounded-lg border border-border bg-background hover:border-primary/40 transition-colors">
+                  <RadioGroupItem value="text" id="text" className="mt-0.5" />
+                  <div className="flex-1">
+                    <Label htmlFor="text" className="font-medium flex items-center gap-2 cursor-pointer">
+                      <Type className="h-4 w-4" />
+                      Análise de Transcrição
+                    </Label>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Detecta eventos a partir do texto transcrito da narração. Mais rápido, mas depende da qualidade da transcrição.
+                    </p>
+                  </div>
+                </div>
+              </RadioGroup>
+            </div>
+
+            <Tabs value={selectedTab} onValueChange={setSelectedTab} className="space-y-4">
             <TabsList className="grid w-full grid-cols-3">
               <TabsTrigger value="existing" className="gap-2">
                 <FileText className="h-4 w-4" />
@@ -425,6 +472,7 @@ export function ReprocessOptionsDialog({
               </div>
             </TabsContent>
           </Tabs>
+          </div>
         )}
 
         <DialogFooter>

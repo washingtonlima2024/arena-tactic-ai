@@ -8,43 +8,39 @@ import { supabase } from '@/integrations/supabase/client';
 import { getFFmpeg } from '@/lib/ffmpegSingleton';
 import { apiClient } from '@/lib/apiClient';
 
-// Timing constants in milliseconds - SYNC WITH BACKEND EVENT_CLIP_CONFIG
-// Default fallback values (category-specific timings below)
-export const CLIP_BUFFER_BEFORE_MS = 15000; // 15 seconds before event (default)
-export const CLIP_BUFFER_AFTER_MS = 15000;  // 15 seconds after event (default)
+// ═══════════════════════════════════════════════════════════════════════════════
+// CLIP TIMING CONSTANTS - Synchronized with video-processor/server.py EVENT_CLIP_CONFIG
+// ═══════════════════════════════════════════════════════════════════════════════
+// VISION-ONLY MODE: All clips are 30 seconds (15s before + 15s after)
+// Event is centered in the clip with no narration offset compensation needed
+// ═══════════════════════════════════════════════════════════════════════════════
+export const CLIP_BUFFER_BEFORE_MS = 15000; // 15 seconds before event
+export const CLIP_BUFFER_AFTER_MS = 15000;  // 15 seconds after event
 
-// Category-specific clip timings (in milliseconds) - SYNC WITH video-processor/server.py
+// Standardized 30-second clips for all event types - SYNC WITH video-processor/server.py
 export const EVENT_CLIP_TIMINGS: Record<string, { before: number; after: number }> = {
-  // Alta importância - contexto longo
-  goal: { before: 20000, after: 15000 },        // 35s total
-  penalty: { before: 15000, after: 20000 },     // 35s
-  red_card: { before: 15000, after: 10000 },    // 25s
-  
-  // Média importância
-  shot_on_target: { before: 12000, after: 8000 },  // 20s
-  shot: { before: 10000, after: 8000 },            // 18s
-  save: { before: 12000, after: 8000 },            // 20s
-  yellow_card: { before: 10000, after: 8000 },     // 18s
-  corner: { before: 8000, after: 15000 },          // 23s
-  free_kick: { before: 8000, after: 15000 },       // 23s
-  
-  // Eventos curtos
-  foul: { before: 8000, after: 5000 },             // 13s
-  offside: { before: 8000, after: 5000 },          // 13s
-  substitution: { before: 5000, after: 5000 },     // 10s
-  clearance: { before: 6000, after: 4000 },        // 10s
-  tackle: { before: 6000, after: 4000 },           // 10s
-  interception: { before: 6000, after: 4000 },     // 10s
-  pass: { before: 5000, after: 5000 },             // 10s
-  cross: { before: 6000, after: 6000 },            // 12s
-  
-  // Eventos táticos
-  high_press: { before: 10000, after: 10000 },     // 20s
-  transition: { before: 8000, after: 12000 },      // 20s
-  buildup: { before: 10000, after: 10000 },        // 20s
-  
-  // Padrão
-  default: { before: 15000, after: 15000 }         // 30s
+  // All events now use 30s clips with event centered
+  goal: { before: 15000, after: 15000 },
+  penalty: { before: 15000, after: 15000 },
+  red_card: { before: 15000, after: 15000 },
+  shot_on_target: { before: 15000, after: 15000 },
+  shot: { before: 15000, after: 15000 },
+  save: { before: 15000, after: 15000 },
+  yellow_card: { before: 15000, after: 15000 },
+  corner: { before: 15000, after: 15000 },
+  free_kick: { before: 15000, after: 15000 },
+  foul: { before: 15000, after: 15000 },
+  offside: { before: 15000, after: 15000 },
+  substitution: { before: 15000, after: 15000 },
+  clearance: { before: 15000, after: 15000 },
+  tackle: { before: 15000, after: 15000 },
+  interception: { before: 15000, after: 15000 },
+  pass: { before: 15000, after: 15000 },
+  cross: { before: 15000, after: 15000 },
+  high_press: { before: 15000, after: 15000 },
+  transition: { before: 15000, after: 15000 },
+  buildup: { before: 15000, after: 15000 },
+  default: { before: 15000, after: 15000 }
 };
 
 // Helper function to get timing for event type
