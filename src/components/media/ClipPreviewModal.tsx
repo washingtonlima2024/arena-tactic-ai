@@ -2,6 +2,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { DeviceMockup } from './DeviceMockup';
+import { VideoTimelineEditor } from './VideoTimelineEditor';
 import { 
   X, 
   Smartphone, 
@@ -12,9 +13,12 @@ import {
   RectangleHorizontal,
   Download,
   Volume2,
-  VolumeX
+  VolumeX,
+  Scissors,
+  ChevronDown,
+  ChevronUp
 } from 'lucide-react';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 
 type DeviceFormat = '9:16' | '16:9' | '1:1' | '4:5';
@@ -29,6 +33,11 @@ interface ClipPreviewModalProps {
   timestamp: string;
   matchHalf?: string;
   posterUrl?: string;
+  eventId?: string;
+  eventSecond?: number;
+  videoDuration?: number;
+  initialTrim?: { startOffset: number; endOffset: number };
+  onTrimSave?: (eventId: string, trim: { startOffset: number; endOffset: number }) => void;
 }
 
 const formatConfigs = [
@@ -53,10 +62,17 @@ export function ClipPreviewModal({
   timestamp,
   matchHalf,
   posterUrl,
+  eventId,
+  eventSecond = 0,
+  videoDuration = 30,
+  initialTrim,
+  onTrimSave,
 }: ClipPreviewModalProps) {
   const [selectedFormat, setSelectedFormat] = useState<DeviceFormat>('9:16');
   const [selectedDevice, setSelectedDevice] = useState<DeviceType>('phone');
   const [isMuted, setIsMuted] = useState(true);
+  const [showTimelineEditor, setShowTimelineEditor] = useState(false);
+  const [currentTrim, setCurrentTrim] = useState(initialTrim);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // Reset state when modal opens
@@ -65,8 +81,10 @@ export function ClipPreviewModal({
       setSelectedFormat('9:16');
       setSelectedDevice('phone');
       setIsMuted(true);
+      setShowTimelineEditor(false);
+      setCurrentTrim(initialTrim);
     }
-  }, [isOpen]);
+  }, [isOpen, initialTrim]);
 
   // Update video muted state
   useEffect(() => {
@@ -94,21 +112,21 @@ export function ClipPreviewModal({
     }
   };
 
+  const handleTrimChange = useCallback((trim: { startOffset: number; endOffset: number }) => {
+    setCurrentTrim(trim);
+  }, []);
+
+  const handleTrimSave = useCallback((trim: { startOffset: number; endOffset: number }) => {
+    if (eventId && onTrimSave) {
+      onTrimSave(eventId, trim);
+    }
+    setShowTimelineEditor(false);
+  }, [eventId, onTrimSave]);
+
   // Get device size based on format
   const getDeviceSize = (): 'sm' | 'md' | 'lg' => {
     if (selectedDevice === 'desktop') return 'md';
     return 'lg';
-  };
-
-  // Get aspect ratio style for video container
-  const getAspectRatioStyle = () => {
-    switch (selectedFormat) {
-      case '9:16': return { aspectRatio: '9/16' };
-      case '16:9': return { aspectRatio: '16/9' };
-      case '1:1': return { aspectRatio: '1/1' };
-      case '4:5': return { aspectRatio: '4/5' };
-      default: return { aspectRatio: '9/16' };
-    }
   };
 
   const currentFormatConfig = formatConfigs.find(f => f.id === selectedFormat);
@@ -131,6 +149,11 @@ export function ClipPreviewModal({
                   {matchHalf && (
                     <Badge variant="outline">
                       {matchHalf === 'first_half' || matchHalf === 'first' ? '1º Tempo' : '2º Tempo'}
+                    </Badge>
+                  )}
+                  {currentTrim && (
+                    <Badge variant="secondary" className="text-xs">
+                      Ajustado: {(currentTrim.endOffset - currentTrim.startOffset).toFixed(1)}s
                     </Badge>
                   )}
                 </div>
@@ -202,6 +225,23 @@ export function ClipPreviewModal({
                   {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
                   {isMuted ? 'Ativar Som' : 'Silenciar'}
                 </Button>
+                
+                {/* Timeline Editor Toggle */}
+                <Button
+                  variant={showTimelineEditor ? 'secondary' : 'outline'}
+                  size="sm"
+                  className="w-full justify-start gap-2"
+                  onClick={() => setShowTimelineEditor(!showTimelineEditor)}
+                >
+                  <Scissors className="h-4 w-4" />
+                  Ajustar Corte
+                  {showTimelineEditor ? (
+                    <ChevronUp className="h-3 w-3 ml-auto" />
+                  ) : (
+                    <ChevronDown className="h-3 w-3 ml-auto" />
+                  )}
+                </Button>
+                
                 <Button
                   variant="arena"
                   size="sm"
@@ -216,46 +256,63 @@ export function ClipPreviewModal({
             </div>
 
             {/* Preview Area */}
-            <div className="flex-1 flex items-center justify-center p-4 lg:p-8 overflow-auto bg-gradient-to-br from-muted/20 to-muted/5">
-              <DeviceMockup 
-                format={selectedFormat} 
-                size={getDeviceSize()}
-                allowRotation={selectedFormat === '9:16' || selectedFormat === '4:5'}
-              >
-                <div className="relative w-full h-full bg-black">
-                  {clipUrl ? (
-                    <video
-                      ref={videoRef}
-                      src={clipUrl}
-                      poster={posterUrl}
-                      className={cn(
-                        "absolute inset-0 w-full h-full",
-                        selectedFormat === '9:16' || selectedFormat === '4:5' 
-                          ? "object-cover" 
-                          : "object-contain"
-                      )}
-                      autoPlay
-                      loop
-                      muted={isMuted}
-                      playsInline
-                    />
-                  ) : (
-                    <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
-                      <p className="text-sm">Clip não disponível</p>
+            <div className="flex-1 flex flex-col overflow-hidden">
+              {/* Video Preview */}
+              <div className="flex-1 flex items-center justify-center p-4 lg:p-8 overflow-auto bg-gradient-to-br from-muted/20 to-muted/5">
+                <DeviceMockup 
+                  format={selectedFormat} 
+                  size={getDeviceSize()}
+                  allowRotation={selectedFormat === '9:16' || selectedFormat === '4:5'}
+                >
+                  <div className="relative w-full h-full bg-black">
+                    {clipUrl ? (
+                      <video
+                        ref={videoRef}
+                        src={clipUrl}
+                        poster={posterUrl}
+                        className={cn(
+                          "absolute inset-0 w-full h-full",
+                          selectedFormat === '9:16' || selectedFormat === '4:5' 
+                            ? "object-cover" 
+                            : "object-contain"
+                        )}
+                        autoPlay
+                        loop
+                        muted={isMuted}
+                        playsInline
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center text-muted-foreground">
+                        <p className="text-sm">Clip não disponível</p>
+                      </div>
+                    )}
+                    
+                    {/* Format indicator overlay */}
+                    <div className="absolute top-2 left-2 right-2 flex justify-between items-start pointer-events-none">
+                      <Badge 
+                        variant="arena" 
+                        className="text-xs backdrop-blur bg-primary/80"
+                      >
+                        {selectedFormat}
+                      </Badge>
                     </div>
-                  )}
-                  
-                  {/* Format indicator overlay */}
-                  <div className="absolute top-2 left-2 right-2 flex justify-between items-start pointer-events-none">
-                    <Badge 
-                      variant="arena" 
-                      className="text-xs backdrop-blur bg-primary/80"
-                    >
-                      {selectedFormat}
-                    </Badge>
                   </div>
+                </DeviceMockup>
+              </div>
+              
+              {/* Timeline Editor (collapsible) */}
+              {showTimelineEditor && (
+                <div className="border-t border-border/50 p-4 bg-muted/30">
+                  <VideoTimelineEditor
+                    videoRef={videoRef}
+                    eventSecond={eventSecond}
+                    videoDuration={videoDuration}
+                    initialTrim={currentTrim}
+                    onTrimChange={handleTrimChange}
+                    onSave={handleTrimSave}
+                  />
                 </div>
-              </DeviceMockup>
+              )}
             </div>
           </div>
         </div>

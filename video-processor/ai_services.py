@@ -2121,7 +2121,6 @@ def analyze_match_events(
         print(f"[AI]    Fase 1: GPT-4o (detecção)")
         print(f"[AI]    Fase 2: Gemini (validação)")
         print(f"[AI]    Fase 3: Deduplicação")
-        print(f"[AI]    Fase 4: Refinamento por palavra-chave")
         print(f"[AI] ═══════════════════════════════════════════════════════════\n")
         
         try:
@@ -2186,54 +2185,21 @@ def analyze_match_events(
                 
                 # ═══ FASE 3: Deduplicação ═══
                 print(f"\n[AI] 🔄 FASE 3: Deduplicação de gols...")
-                deduped_events = deduplicate_goal_events(enriched_events)
+                final_events = deduplicate_goal_events(enriched_events)
                 
-                # ═══ FASE 4: Refinamento por Palavra-chave ═══
-                # Busca o timestamp exato no SRT para centralizar o clip
-                final_events = deduped_events
-                srt_candidates = []
-                
-                if match_id:
-                    from storage import get_subfolder_path
-                    srt_folder = get_subfolder_path(match_id, 'srt')
-                    if srt_folder and os.path.exists(srt_folder):
-                        # Look for SRT files matching the half
-                        srt_patterns = [
-                            f'{match_half}_transcription.srt',
-                            f'{match_half}_half.srt',
-                            'transcription.srt',
-                            'full.srt'
-                        ]
-                        for pattern in srt_patterns:
-                            srt_path = os.path.join(srt_folder, pattern)
-                            if os.path.exists(srt_path):
-                                srt_candidates.append(srt_path)
-                                break
-                
-                if srt_candidates:
-                    srt_path = srt_candidates[0]
-                    print(f"\n[AI] 🎯 FASE 4: Refinando timestamps via SRT ({os.path.basename(srt_path)})...")
-                    refined_count = 0
-                    for i, event in enumerate(final_events):
-                        refined = refine_event_timestamp_from_srt(event, srt_path, window_seconds=30)
-                        final_events[i] = refined
-                        if refined.get('refined'):
-                            refined_count += 1
-                    print(f"[AI] ✓ {refined_count}/{len(final_events)} eventos refinados por palavra-chave")
-                else:
-                    print(f"\n[AI] ℹ️ FASE 4: SRT não encontrado, pulando refinamento")
+                # ═══ FASE 4 REMOVIDA ═══
+                # O refinamento por keyword foi removido
+                # O ajuste fino agora é feito manualmente pelo usuário via Timeline Editor
                 
                 # Summary
                 summary = validated_result.get('summary', {})
                 goals_count = len([e for e in final_events if e.get('event_type') == 'goal'])
-                refined_count = len([e for e in final_events if e.get('refined')])
                 print(f"\n[AI] ═══════════════════════════════════════════════════════════")
-                print(f"[AI] ✓ ANÁLISE COMPLETA (Dupla Verificação + Refinamento)")
+                print(f"[AI] ✓ ANÁLISE COMPLETA (Dupla Verificação)")
                 print(f"[AI]   Detectados: {summary.get('total_detected', 0)} eventos")
                 print(f"[AI]   Confirmados: {summary.get('confirmed', 0)} eventos")
                 print(f"[AI]   Rejeitados: {summary.get('rejected', 0)} eventos")
                 print(f"[AI]   Gols finais: {goals_count}")
-                print(f"[AI]   Refinados: {refined_count} eventos")
                 print(f"[AI]   Resultado: {len(final_events)} eventos finais")
                 print(f"[AI] ═══════════════════════════════════════════════════════════\n")
                 
