@@ -3150,7 +3150,7 @@ def ai_status():
 
 @app.route('/api/analyze-match', methods=['POST'])
 def analyze_match():
-    """Analisa uma partida a partir de transcrição e extrai clips automaticamente."""
+    """Analisa uma partida a partir de transcrição e/ou análise visual e extrai clips automaticamente."""
     data = request.json
     match_id = data.get('matchId')
     transcription = data.get('transcription')
@@ -3163,12 +3163,16 @@ def analyze_match():
     include_subtitles = data.get('includeSubtitles', True)
     skip_validation = data.get('skipValidation', False)  # Allow bypassing validation
     
+    # NOVO: Modo de análise - 'text' (transcrição), 'vision' (visual), 'hybrid' (ambos)
+    analysis_mode = data.get('analysisMode', 'text')  # default: 'text' para backward compatibility
+    
     print(f"\n{'='*60}")
     print(f"[ANALYZE-MATCH] Nova requisição de análise")
     print(f"[ANALYZE-MATCH] Match ID: {match_id}")
     print(f"[ANALYZE-MATCH] Half Type: {half_type}")
     print(f"[ANALYZE-MATCH] Game Minutes: {game_start_minute} - {game_end_minute}")
     print(f"[ANALYZE-MATCH] Auto Clip: {auto_clip}")
+    print(f"[ANALYZE-MATCH] Analysis Mode: {analysis_mode}")  # NOVO
     print(f"[ANALYZE-MATCH] Transcription length: {len(transcription) if transcription else 0} chars")
     print(f"{'='*60}")
     
@@ -3178,15 +3182,17 @@ def analyze_match():
     if not match_id:
         return jsonify({'error': 'Match ID é obrigatório', 'validation': 'match_id_missing'}), 400
     
-    if not transcription:
-        return jsonify({'error': 'Transcrição é obrigatória', 'validation': 'transcription_missing'}), 400
-    
-    if len(transcription) < 100:
-        return jsonify({
-            'error': 'Transcrição muito curta para análise', 
-            'validation': 'transcription_too_short',
-            'length': len(transcription)
-        }), 400
+    # Validação de transcrição - obrigatória apenas para modo 'text'
+    if analysis_mode == 'text' or analysis_mode == 'hybrid':
+        if not transcription:
+            return jsonify({'error': 'Transcrição é obrigatória para modo text/hybrid', 'validation': 'transcription_missing'}), 400
+        
+        if len(transcription) < 100:
+            return jsonify({
+                'error': 'Transcrição muito curta para análise', 
+                'validation': 'transcription_too_short',
+                'length': len(transcription)
+            }), 400
     
     # Check if match exists in local database
     session_check = get_session()
@@ -3244,11 +3250,88 @@ def analyze_match():
             # Log warning but continue - user may have confirmed
     
     try:
-        events = ai_services.analyze_match_events(
-            transcription, home_team, away_team, game_start_minute, game_end_minute,
-            match_id=match_id,
-            use_dual_verification=True
-        )
+        # ═══════════════════════════════════════════════════════════════
+        # ANÁLISE DE EVENTOS - Modo baseado em analysis_mode
+        # ═══════════════════════════════════════════════════════════════
+        events = []
+        
+        if analysis_mode == 'vision':
+            # MODO VISION-ONLY: Análise 100% visual
+            print(f"[ANALYZE-MATCH] 🎬 Modo VISION-ONLY ativado")
+            
+            # Buscar vídeo da partida para análise visual
+            session_video = get_session()
+            try:
+                videos = session_video.query(Video).filter_by(match_id=match_id).all()
+                video_path = None
+                
+                if videos:
+                    # Encontrar vídeo apropriado para este tempo
+                    for v in videos:
+                        video_type = v.video_type or 'full'
+                        if half_type == 'first' and video_type in ['first_half', 'full']:
+                            video_url = v.file_url
+                            break
+                        elif half_type == 'second' and video_type in ['second_half', 'full']:
+                            video_url = v.file_url
+                            break
+                        elif video_type == 'full':
+                            video_url = v.file_url
+                    
+                    # Resolver caminho do vídeo
+                    if video_url and '/api/storage/' in video_url:
+                        relative_path = video_url.split('/api/storage/')[-1]
+                        parts = relative_path.strip('/').split('/')
+                        if len(parts) >= 3:
+                            local_match_id = parts[0]
+                            subfolder = parts[1]
+                            filename = '/'.join(parts[2:])
+                            video_path = get_file_path(local_match_id, subfolder, filename)
+                
+                if video_path and os.path.exists(video_path):
+                    print(f"[ANALYZE-MATCH] 🎥 Vídeo encontrado: {video_path}")
+                    
+                    # Executar análise visual
+                    vision_result = ai_services.analyze_video_events_vision_only(
+                        video_path=video_path,
+                        home_team=home_team,
+                        away_team=away_team,
+                        scan_interval_seconds=30,
+                        frames_per_window=6
+                    )
+                    
+                    if vision_result['success']:
+                        # Converter eventos visuais para formato padrão
+                        segment_start = 0 if half_type == 'first' else 45
+                        events = ai_services.vision_events_to_match_format(
+                            vision_result['events'],
+                            match_id=match_id,
+                            half_type=half_type,
+                            segment_start_minute=segment_start
+                        )
+                        print(f"[ANALYZE-MATCH] ✓ {len(events)} eventos detectados visualmente")
+                    else:
+                        print(f"[ANALYZE-MATCH] ⚠ Análise visual falhou: {vision_result.get('error')}")
+                        return jsonify({
+                            'error': f"Análise visual falhou: {vision_result.get('error')}",
+                            'validation': 'vision_failed'
+                        }), 400
+                else:
+                    print(f"[ANALYZE-MATCH] ⚠ Nenhum vídeo encontrado para análise visual")
+                    return jsonify({
+                        'error': 'Nenhum vídeo encontrado para análise visual. Faça upload do vídeo primeiro.',
+                        'validation': 'video_missing'
+                    }), 400
+            finally:
+                session_video.close()
+        else:
+            # MODO TEXT: Análise tradicional via transcrição
+            print(f"[ANALYZE-MATCH] 📝 Modo TEXT (transcrição) ativado")
+            events = ai_services.analyze_match_events(
+                transcription, home_team, away_team, game_start_minute, game_end_minute,
+                match_id=match_id,
+                use_dual_verification=(analysis_mode == 'text')  # Dual verification apenas em modo texto
+            )
         
         # Determine match_half based on halfType
         match_half = 'first_half' if half_type == 'first' else 'second_half'

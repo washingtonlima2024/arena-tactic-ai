@@ -510,6 +510,7 @@ export const apiClient = {
     autoClip?: boolean;
     includeSubtitles?: boolean;
     skipValidation?: boolean;
+    analysisMode?: 'text' | 'vision' | 'hybrid';  // NOVO: modo de análise
     // Match data for sync when using Edge Function fallback
     matchData?: {
       home_team?: { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string; secondary_color?: string };
@@ -533,6 +534,7 @@ export const apiClient = {
       autoClip: data.autoClip ?? true,
       includeSubtitles: data.includeSubtitles ?? true,
       skipValidation: data.skipValidation ?? false,
+      analysisMode: data.analysisMode ?? 'text',  // NOVO
     };
 
     // Try local server first
