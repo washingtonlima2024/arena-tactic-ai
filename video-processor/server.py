@@ -1399,6 +1399,83 @@ def upload_to_match(match_id: str, subfolder: str):
         return jsonify({'error': str(e)}), 400
 
 
+def _sync_videos_for_match(match_id: str) -> dict:
+    """
+    Função auxiliar para sincronizar vídeos físicos com o banco de dados.
+    Usada internamente antes da extração de clips para garantir que vídeos estejam registrados.
+    
+    Returns:
+        dict: {'synced': int, 'videos': list}
+    """
+    storage_path = get_match_storage_path(match_id) / 'videos'
+    
+    if not storage_path.exists():
+        return {'synced': 0, 'videos': []}
+    
+    session = get_session()
+    synced = []
+    
+    try:
+        # Listar vídeos existentes no banco
+        existing = session.query(Video).filter_by(match_id=match_id).all()
+        existing_files = {v.file_name for v in existing if v.file_name}
+        
+        # Verificar arquivos no disco
+        video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v'}
+        
+        for file_path in storage_path.iterdir():
+            if file_path.is_file() and file_path.suffix.lower() in video_extensions:
+                filename = file_path.name
+                
+                if filename not in existing_files:
+                    # Detectar tipo de vídeo pelo nome
+                    video_type = 'full'
+                    lower_name = filename.lower()
+                    if '1' in lower_name or 'first' in lower_name or 'primeiro' in lower_name:
+                        video_type = 'first_half'
+                    elif '2' in lower_name or 'second' in lower_name or 'segundo' in lower_name:
+                        video_type = 'second_half'
+                    
+                    # Detectar duração via ffprobe
+                    duration_seconds = None
+                    try:
+                        probe = subprocess.run([
+                            'ffprobe', '-v', 'quiet', '-print_format', 'json',
+                            '-show_format', str(file_path)
+                        ], capture_output=True, text=True, timeout=30)
+                        if probe.returncode == 0:
+                            probe_data = json_module.loads(probe.stdout)
+                            duration_seconds = int(float(probe_data.get('format', {}).get('duration', 0)))
+                    except Exception:
+                        pass
+                    
+                    # Criar registro
+                    file_url = f"http://localhost:5000/api/storage/{match_id}/videos/{filename}"
+                    video = Video(
+                        match_id=match_id,
+                        file_url=file_url,
+                        file_name=filename,
+                        video_type=video_type,
+                        duration_seconds=duration_seconds,
+                        status='ready',
+                        start_minute=0 if video_type in ['first_half', 'full'] else 45,
+                        end_minute=45 if video_type == 'first_half' else 90
+                    )
+                    session.add(video)
+                    synced.append(video.to_dict())
+                    print(f"[_sync_videos] Vídeo registrado automaticamente: {filename} ({video_type})")
+        
+        session.commit()
+        return {'synced': len(synced), 'videos': synced}
+        
+    except Exception as e:
+        session.rollback()
+        print(f"[_sync_videos] Erro: {e}")
+        return {'synced': 0, 'videos': [], 'error': str(e)}
+    finally:
+        session.close()
+
+
 @app.route('/api/videos/sync/<match_id>', methods=['POST'])
 def sync_videos_from_storage(match_id: str):
     """
@@ -3327,6 +3404,16 @@ def analyze_match():
         clips_extracted = []
         if auto_clip and saved_events and match_id:
             print(f"[ANALYZE-MATCH] Iniciando extração automática de clips...")
+            
+            # ========== AUTO-SYNC: Sincronizar vídeos físicos com o banco ==========
+            # Isso garante que vídeos uploadados/transcritos mas não registrados sejam detectados
+            try:
+                sync_result = _sync_videos_for_match(match_id)
+                if sync_result['synced'] > 0:
+                    print(f"[ANALYZE-MATCH] ✓ {sync_result['synced']} vídeo(s) sincronizado(s) automaticamente")
+            except Exception as sync_err:
+                print(f"[ANALYZE-MATCH] ⚠ Erro ao auto-sincronizar vídeos: {sync_err}")
+            # ========================================================================
             
             # Fetch videos for this match
             session = get_session()
