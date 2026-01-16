@@ -3390,15 +3390,36 @@ def analyze_match():
             keyword_detection_success = False
             
             # Tentar localizar arquivo SRT para detecção por keywords
+            # Tentativas de nomes: first_half.srt, full.srt, transcription.srt, etc
             match_half_folder = 'first_half' if half_type == 'first' else 'second_half'
-            srt_filename = f'{half_type}_half.srt'
-            srt_path = get_subfolder_path(match_id, 'srt') / srt_filename
+            srt_base = get_subfolder_path(match_id, 'srt')
+            texts_base = get_subfolder_path(match_id, 'texts')
             
-            # Também tentar nome alternativo
-            if not srt_path.exists():
-                srt_path = get_subfolder_path(match_id, 'srt') / f'{match_half_folder}.srt'
+            srt_candidates = [
+                srt_base / f'{half_type}_half.srt',           # first_half.srt
+                srt_base / f'{match_half_folder}.srt',        # first_half.srt (alt)
+                srt_base / f'{half_type}.srt',                # first.srt
+                srt_base / 'full.srt',                        # full.srt (partida completa)
+                srt_base / 'transcription.srt',               # nome genérico
+                srt_base / 'live_transcription.srt',          # transcrição ao vivo
+                texts_base / f'{half_type}_half.srt',         # pasta texts
+                texts_base / 'transcription.srt',
+            ]
             
-            if srt_path.exists():
+            srt_path = None
+            for candidate in srt_candidates:
+                if candidate.exists():
+                    srt_path = candidate
+                    print(f"[ANALYZE-MATCH] ✓ SRT encontrado: {candidate.name}")
+                    break
+            
+            if not srt_path:
+                # Listar todos os arquivos SRT disponíveis para debug
+                available_srts = list(srt_base.glob('*.srt')) if srt_base.exists() else []
+                print(f"[ANALYZE-MATCH] ⚠ Nenhum SRT encontrado para {half_type}")
+                print(f"[ANALYZE-MATCH] ⚠ Arquivos SRT disponíveis: {[f.name for f in available_srts]}")
+            
+            if srt_path and srt_path.exists():
                 print(f"[ANALYZE-MATCH] 🔍 Tentando detecção por KEYWORDS (mais precisa)...")
                 print(f"[ANALYZE-MATCH] SRT encontrado: {srt_path}")
                 
@@ -3761,7 +3782,7 @@ def analyze_match():
             'clipsExtracted': len(clips_extracted),
             'clips': clips_extracted,
             'matchStatus': 'analyzed',
-            'supabaseSync': sync_result.get('success', False)
+            'supabaseSync': False  # Cloud sync disabled - 100% local mode
         })
     except Exception as e:
         print(f"[ANALYZE-MATCH] ERROR: {str(e)}")
