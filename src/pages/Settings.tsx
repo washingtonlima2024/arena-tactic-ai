@@ -38,10 +38,13 @@ import {
   Trash2,
   HardDrive,
   RefreshCw,
-  Wifi
+  Wifi,
+  ChevronDown,
+  Link2
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getApiMode, setApiMode, type ApiMode, isLocalEnvironment, getApiBase } from '@/lib/apiMode';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { getApiMode, setApiMode, type ApiMode, isLocalEnvironment, getApiBase, getActiveConnectionMethod } from '@/lib/apiMode';
 
 export default function Settings() {
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
@@ -1092,7 +1095,7 @@ export default function Settings() {
               </CardContent>
             </Card>
 
-            {/* Servidor Python - URL Configuration */}
+            {/* Servidor Python - Configuração Unificada */}
             <Card variant="glow">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -1100,318 +1103,306 @@ export default function Settings() {
                   Servidor Python
                 </CardTitle>
                 <CardDescription>
-                  URL do servidor de processamento de vídeo
+                  Configure o acesso ao servidor de processamento de vídeo
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Indicador de ambiente */}
-                <div className="flex items-center gap-2 text-sm">
+                {/* Indicador de ambiente e método ativo */}
+                <div className="flex flex-wrap items-center gap-2 text-sm">
                   {isLocalEnvironment() ? (
-                    <>
-                      <Badge variant="outline" className="text-green-500 border-green-500">
-                        Ambiente Local
-                      </Badge>
-                      <span className="text-muted-foreground">
-                        Usando IP padrão: 10.0.0.20:5000
-                      </span>
-                    </>
+                    <Badge variant="outline" className="text-green-500 border-green-500">
+                      Ambiente Local
+                    </Badge>
                   ) : (
-                    <>
-                      <Badge variant="outline" className="text-orange-500 border-orange-500">
-                        Ambiente de Produção
-                      </Badge>
-                      <span className="text-muted-foreground">
-                        Requer URL pública configurada
-                      </span>
-                    </>
+                    <Badge variant="outline" className="text-orange-500 border-orange-500">
+                      Ambiente de Produção
+                    </Badge>
                   )}
+                  
+                  {(() => {
+                    const active = getActiveConnectionMethod();
+                    const colors: Record<string, string> = {
+                      subdomain: 'text-emerald-500 border-emerald-500 bg-emerald-500/10',
+                      cloudflare: 'text-orange-500 border-orange-500 bg-orange-500/10',
+                      ngrok: 'text-blue-500 border-blue-500 bg-blue-500/10',
+                      local: 'text-muted-foreground border-muted'
+                    };
+                    return (
+                      <Badge variant="outline" className={colors[active.method]}>
+                        <Link2 className="h-3 w-3 mr-1" />
+                        Usando: {active.label}
+                      </Badge>
+                    );
+                  })()}
                 </div>
-                
-                {/* Campo de URL */}
-                <div className="space-y-2">
-                  <Label>URL Pública do Servidor</Label>
-                  <div className="flex gap-2">
-                    <Input 
-                      value={serverUrl}
-                      onChange={(e) => setServerUrl(e.target.value)}
-                      placeholder="https://api.arenaplay.kakttus.com"
-                      className="flex-1"
-                    />
-                    <Button 
-                      variant="outline" 
-                      onClick={testServerConnection}
-                      disabled={testingServerConnection}
-                    >
-                      {testingServerConnection ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Wifi className="h-4 w-4 mr-2" />
-                      )}
-                      {testingServerConnection ? '' : 'Testar'}
+
+                {/* Subdomínio Dedicado */}
+                <Collapsible defaultOpen={!!serverUrl}>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" className="w-full justify-between p-3 h-auto border rounded-lg hover:bg-muted/50">
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-4 w-4 text-emerald-500" />
+                        <span className="font-medium">Subdomínio Dedicado</span>
+                        <Badge variant="outline" className="text-xs text-emerald-500 border-emerald-500">
+                          Recomendado
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {serverUrl && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
+                        <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform" />
+                      </div>
                     </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Configure a URL pública para acessar o servidor remotamente (ex: Cloudflare Tunnel, VPN, ou servidor público).
-                    Deixe vazio para usar o IP local padrão (10.0.0.20:5000).
-                  </p>
-                </div>
-
-                {/* Status indicator */}
-                <div className={`rounded-lg border p-3 ${serverUrl ? 'border-orange-500/30 bg-orange-500/5' : 'border-muted bg-muted/30'}`}>
-                  <div className="flex items-center gap-2">
-                    {serverUrl ? (
-                      <>
-                        <CheckCircle2 className="h-4 w-4 text-orange-500" />
-                        <span className="text-sm text-orange-500">URL customizada configurada</span>
-                      </>
-                    ) : (
-                      <>
-                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm text-muted-foreground">Usando IP local padrão</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card variant="glow">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Database className="h-5 w-5" />
-                  Modo de Operação
-                </CardTitle>
-                <CardDescription>
-                  Escolha entre servidor local ou nuvem
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    {apiMode === 'local' ? (
-                      <Server className="h-5 w-5 text-primary" />
-                    ) : (
-                      <Cloud className="h-5 w-5 text-primary" />
-                    )}
-                  <div>
-                      <p className="font-medium">Servidor Local (Python)</p>
-                      <p className="text-sm text-muted-foreground">
-                        Modo 100% Local - Usando servidor Python em localhost:5000
-                      </p>
-                    </div>
-                  </div>
-                  <Badge variant="default" className="bg-primary">
-                    Local Ativo
-                  </Badge>
-                </div>
-                
-                <Separator />
-
-                <div className={`rounded-lg border p-4 ${apiMode === 'local' ? 'border-primary/30 bg-primary/5' : 'border-muted bg-muted/30'}`}>
-                  <div className="flex items-center gap-3 mb-2">
-                    <Server className={`h-5 w-5 ${apiMode === 'local' ? 'text-primary' : 'text-muted-foreground'}`} />
-                    <p className={`font-medium ${apiMode === 'local' ? 'text-primary' : 'text-muted-foreground'}`}>
-                      Modo Local {apiMode === 'local' && '(Ativo)'}
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-3 pl-2 space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      URL permanente via DNS próprio. Ideal para produção.
                     </p>
+                    <div className="flex gap-2">
+                      <Input 
+                        value={serverUrl}
+                        onChange={(e) => setServerUrl(e.target.value)}
+                        placeholder="https://api.arenaplay.kakttus.com"
+                        className="flex-1"
+                      />
+                      <Button 
+                        variant="outline" 
+                        onClick={testServerConnection}
+                        disabled={testingServerConnection}
+                      >
+                        {testingServerConnection ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <>
+                            <Wifi className="h-4 w-4 mr-2" />
+                            Testar
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                    {serverUrl && (
+                      <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+                          <span className="text-sm text-emerald-500">Configurado - Prioridade máxima</span>
+                        </div>
+                      </div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+
+                {/* Túnel Cloudflare */}
+                <Collapsible defaultOpen={!!cloudflareUrl && !serverUrl}>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" className="w-full justify-between p-3 h-auto border rounded-lg hover:bg-muted/50">
+                      <div className="flex items-center gap-2">
+                        <Cloud className="h-4 w-4 text-orange-500" />
+                        <span className="font-medium">Túnel Cloudflare</span>
+                        <Badge variant="outline" className="text-xs text-muted-foreground">
+                          Temporário
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {cloudflareUrl && <CheckCircle2 className="h-4 w-4 text-orange-500" />}
+                        <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform" />
+                      </div>
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-3 pl-2 space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      URL temporária via <code className="bg-muted px-1 rounded">cloudflared tunnel</code>. Muda a cada reinício.
+                    </p>
+                    <div className="flex gap-2">
+                      <Input 
+                        value={cloudflareUrl}
+                        onChange={(e) => setCloudflareUrl(e.target.value)}
+                        placeholder="https://xxxxx.trycloudflare.com"
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          setDetectingCloudflare(true);
+                          try {
+                            const baseUrl = 'http://localhost:5000';
+                            const response = await fetch(`${baseUrl}/api/detect-cloudflare`, {
+                              signal: AbortSignal.timeout(5000)
+                            });
+                            
+                            if (response.ok) {
+                              const data = await response.json();
+                              if (data.success && data.url) {
+                                setCloudflareUrl(data.url);
+                                toast.success(`Cloudflare detectado: ${data.url}`);
+                              } else if (data.running) {
+                                toast.info(data.hint || 'Copie a URL do terminal do cloudflared');
+                              } else {
+                                toast.error(data.error || 'Nenhum túnel Cloudflare ativo');
+                              }
+                            } else {
+                              toast.error('Servidor local não respondeu');
+                            }
+                          } catch {
+                            toast.error('Servidor Python offline');
+                          } finally {
+                            setDetectingCloudflare(false);
+                          }
+                        }}
+                        disabled={detectingCloudflare}
+                      >
+                        {detectingCloudflare ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          'Detectar'
+                        )}
+                      </Button>
+                      {cloudflareUrl && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            setCloudflareUrl('');
+                            localStorage.removeItem('cloudflare_tunnel_url');
+                            toast.success('URL do Cloudflare removida');
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4 text-muted-foreground" />
+                        </Button>
+                      )}
+                    </div>
+                    {cloudflareUrl && !serverUrl && (
+                      <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-2">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4 text-orange-500" />
+                          <span className="text-sm text-orange-500">Ativo como fallback</span>
+                        </div>
+                      </div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+
+                {/* Túnel Ngrok */}
+                <Collapsible defaultOpen={!!ngrokUrl && !serverUrl && !cloudflareUrl}>
+                  <CollapsibleTrigger asChild>
+                    <Button variant="ghost" className="w-full justify-between p-3 h-auto border rounded-lg hover:bg-muted/50">
+                      <div className="flex items-center gap-2">
+                        <Globe className="h-4 w-4 text-blue-500" />
+                        <span className="font-medium">Túnel Ngrok</span>
+                        <Badge variant="outline" className="text-xs text-muted-foreground">
+                          Temporário
+                        </Badge>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {ngrokUrl && <CheckCircle2 className="h-4 w-4 text-blue-500" />}
+                        <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform" />
+                      </div>
+                    </Button>
+                  </CollapsibleTrigger>
+                  <CollapsibleContent className="pt-3 pl-2 space-y-3">
+                    <p className="text-xs text-muted-foreground">
+                      URL temporária via ngrok. Requer conta gratuita em <a href="https://ngrok.com" target="_blank" className="text-primary hover:underline">ngrok.com</a>.
+                    </p>
+                    <div className="flex gap-2">
+                      <Input 
+                        value={ngrokUrl}
+                        onChange={(e) => setNgrokUrl(e.target.value)}
+                        placeholder="https://xxxxx.ngrok-free.app"
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={async () => {
+                          setDetectingNgrok(true);
+                          try {
+                            const baseUrl = 'http://localhost:5000';
+                            const response = await fetch(`${baseUrl}/api/detect-ngrok`, {
+                              signal: AbortSignal.timeout(5000)
+                            });
+                            
+                            if (response.ok) {
+                              const data = await response.json();
+                              if (data.success && data.url) {
+                                setNgrokUrl(data.url);
+                                toast.success(`Ngrok detectado: ${data.url}`);
+                              } else {
+                                toast.error(data.error || 'Nenhum túnel ngrok ativo');
+                              }
+                            } else {
+                              toast.error('Servidor local não respondeu');
+                            }
+                          } catch {
+                            toast.error('Servidor Python offline');
+                          } finally {
+                            setDetectingNgrok(false);
+                          }
+                        }}
+                        disabled={detectingNgrok}
+                      >
+                        {detectingNgrok ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          'Detectar'
+                        )}
+                      </Button>
+                      {ngrokUrl && (
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => {
+                            setNgrokUrl('');
+                            localStorage.removeItem('ngrok_fallback_url');
+                            toast.success('URL do ngrok removida');
+                          }}
+                        >
+                          <Trash2 className="h-4 w-4 text-muted-foreground" />
+                        </Button>
+                      )}
+                    </div>
+                    {ngrokUrl && !serverUrl && !cloudflareUrl && (
+                      <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-2">
+                        <div className="flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4 text-blue-500" />
+                          <span className="text-sm text-blue-500">Ativo como fallback</span>
+                        </div>
+                      </div>
+                    )}
+                  </CollapsibleContent>
+                </Collapsible>
+
+                {/* Prioridade de resolução */}
+                <div className="rounded-lg border border-muted bg-muted/30 p-3">
+                  <p className="text-xs font-medium text-muted-foreground mb-2">Ordem de prioridade:</p>
+                  <div className="flex flex-wrap gap-2 text-xs">
+                    <Badge variant="outline" className={serverUrl ? 'text-emerald-500 border-emerald-500' : ''}>
+                      1. Subdomínio
+                    </Badge>
+                    <span className="text-muted-foreground">→</span>
+                    <Badge variant="outline" className={!serverUrl && cloudflareUrl ? 'text-orange-500 border-orange-500' : ''}>
+                      2. Cloudflare
+                    </Badge>
+                    <span className="text-muted-foreground">→</span>
+                    <Badge variant="outline" className={!serverUrl && !cloudflareUrl && ngrokUrl ? 'text-blue-500 border-blue-500' : ''}>
+                      3. Ngrok
+                    </Badge>
+                    <span className="text-muted-foreground">→</span>
+                    <Badge variant="outline" className={!serverUrl && !cloudflareUrl && !ngrokUrl && isLocalEnvironment() ? 'text-green-500 border-green-500' : ''}>
+                      4. IP Local
+                    </Badge>
                   </div>
-                  <p className="text-sm text-muted-foreground">
-                    Banco SQLite local, armazenamento em ./storage, processamento via Python/FFmpeg.
-                    Requer servidor Python rodando.
-                  </p>
                 </div>
 
-                <div className="rounded-lg border p-4 border-green-500/30 bg-green-500/5">
-                  <div className="flex items-center gap-3 mb-2">
-                    <CheckCircle2 className="h-5 w-5 text-green-500" />
-                    <p className="font-medium text-green-600">Modo 100% Local Ativo</p>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    Todos os dados são armazenados localmente. Nenhuma dependência de serviços externos.
-                  </p>
-                </div>
-                
-                <Separator />
-                
-                {/* Ngrok URL Configuration */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
+                {/* Modo 100% Local Info */}
+                {isLocalEnvironment() && !serverUrl && !cloudflareUrl && !ngrokUrl && (
+                  <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3">
                     <div className="flex items-center gap-2">
-                      <Globe className="h-4 w-4 text-primary" />
-                      <Label className="font-medium">URL do Ngrok (Acesso Remoto)</Label>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={async () => {
-                        setDetectingNgrok(true);
-                        try {
-                          // Try to detect ngrok via local server
-                          const baseUrl = 'http://localhost:5000';
-                          const response = await fetch(`${baseUrl}/api/detect-ngrok`, {
-                            signal: AbortSignal.timeout(5000)
-                          });
-                          
-                          if (response.ok) {
-                            const data = await response.json();
-                            if (data.success && data.url) {
-                              setNgrokUrl(data.url);
-                              toast.success(`Ngrok detectado: ${data.url}`);
-                            } else {
-                              toast.error(data.error || 'Nenhum túnel ngrok ativo');
-                            }
-                          } else {
-                            toast.error('Servidor local não respondeu');
-                          }
-                        } catch (error) {
-                          // Fallback: try to detect directly from browser (won't work due to CORS, but worth trying)
-                          toast.error('Servidor Python offline. Inicie o servidor para detectar ngrok.');
-                        } finally {
-                          setDetectingNgrok(false);
-                        }
-                      }}
-                      disabled={detectingNgrok}
-                    >
-                      {detectingNgrok ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <Wifi className="h-4 w-4 mr-2" />
-                      )}
-                      Auto-detectar
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Configure a URL do túnel ngrok para acessar o servidor local remotamente (ex: preview do Lovable)
-                  </p>
-                  <div className="flex gap-2">
-                    <Input 
-                      value={ngrokUrl}
-                      onChange={(e) => setNgrokUrl(e.target.value)}
-                      placeholder="https://xxxxxx.ngrok-free.app"
-                      className="flex-1"
-                    />
-                    {ngrokUrl && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          setNgrokUrl('');
-                          localStorage.removeItem('ngrok_fallback_url');
-                          toast.success('URL do ngrok removida');
-                        }}
-                        title="Limpar URL"
-                      >
-                        <Trash2 className="h-4 w-4 text-muted-foreground" />
-                      </Button>
-                    )}
-                  </div>
-                  <div className={`rounded-lg border p-3 ${ngrokUrl ? 'border-blue-500/30 bg-blue-500/5' : 'border-muted bg-muted/30'}`}>
-                    <div className="flex items-center gap-2">
-                      {ngrokUrl ? (
-                        <>
-                          <CheckCircle2 className="h-4 w-4 text-blue-500" />
-                          <span className="text-sm text-blue-500">Túnel ngrok configurado</span>
-                        </>
-                      ) : (
-                        <>
-                          <AlertCircle className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm text-muted-foreground">Sem túnel ngrok</span>
-                        </>
-                      )}
+                      <Server className="h-4 w-4 text-green-500" />
+                      <span className="text-sm text-green-600">
+                        Usando IP local padrão: <code className="bg-muted px-1 rounded">10.0.0.20:5000</code>
+                      </span>
                     </div>
                   </div>
-                </div>
-                
-                <Separator />
-                
-                {/* Cloudflare Tunnel URL Configuration */}
-                <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Cloud className="h-4 w-4 text-orange-500" />
-                      <Label className="font-medium">URL do Túnel Cloudflare (Acesso Remoto)</Label>
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={async () => {
-                        setDetectingCloudflare(true);
-                        try {
-                          // Try to detect cloudflare via local server
-                          const baseUrl = 'http://localhost:5000';
-                          const response = await fetch(`${baseUrl}/api/detect-cloudflare`, {
-                            signal: AbortSignal.timeout(5000)
-                          });
-                          
-                          if (response.ok) {
-                            const data = await response.json();
-                            if (data.success && data.url) {
-                              setCloudflareUrl(data.url);
-                              toast.success(`Cloudflare detectado: ${data.url}`);
-                            } else if (data.running) {
-                              toast.info(data.hint || 'Copie a URL do terminal do cloudflared');
-                            } else {
-                              toast.error(data.error || 'Nenhum túnel Cloudflare ativo');
-                            }
-                          } else {
-                            toast.error('Servidor local não respondeu');
-                          }
-                        } catch (error) {
-                          toast.error('Servidor Python offline. Inicie o servidor para detectar cloudflare.');
-                        } finally {
-                          setDetectingCloudflare(false);
-                        }
-                      }}
-                      disabled={detectingCloudflare}
-                    >
-                      {detectingCloudflare ? (
-                        <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                      ) : (
-                        <Wifi className="h-4 w-4 mr-2" />
-                      )}
-                      Auto-detectar
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Configure a URL do túnel Cloudflare para acessar o servidor local remotamente. Usado como fallback quando ngrok não está disponível.
-                  </p>
-                  <div className="flex gap-2">
-                    <Input 
-                      value={cloudflareUrl}
-                      onChange={(e) => setCloudflareUrl(e.target.value)}
-                      placeholder="https://xxxxxx.trycloudflare.com"
-                      className="flex-1"
-                    />
-                    {cloudflareUrl && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => {
-                          setCloudflareUrl('');
-                          localStorage.removeItem('cloudflare_tunnel_url');
-                          toast.success('URL do Cloudflare removida');
-                        }}
-                        title="Limpar URL"
-                      >
-                        <Trash2 className="h-4 w-4 text-muted-foreground" />
-                      </Button>
-                    )}
-                  </div>
-                  <div className={`rounded-lg border p-3 ${cloudflareUrl ? 'border-orange-500/30 bg-orange-500/5' : 'border-muted bg-muted/30'}`}>
-                    <div className="flex items-center gap-2">
-                      {cloudflareUrl ? (
-                        <>
-                          <CheckCircle2 className="h-4 w-4 text-orange-500" />
-                          <span className="text-sm text-orange-500">Túnel Cloudflare configurado - fallback ativo</span>
-                        </>
-                      ) : (
-                        <>
-                          <AlertCircle className="h-4 w-4 text-muted-foreground" />
-                          <span className="text-sm text-muted-foreground">Sem túnel Cloudflare configurado</span>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
+                )}
               </CardContent>
             </Card>
 
