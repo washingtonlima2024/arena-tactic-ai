@@ -41,7 +41,7 @@ import {
   Wifi
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getApiMode, setApiMode, type ApiMode } from '@/lib/apiMode';
+import { getApiMode, setApiMode, type ApiMode, isLocalEnvironment, getApiBase } from '@/lib/apiMode';
 
 export default function Settings() {
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
@@ -92,6 +92,10 @@ export default function Settings() {
   // Cloudflare Tunnel URL setting
   const [cloudflareUrl, setCloudflareUrl] = useState('');
   const [detectingCloudflare, setDetectingCloudflare] = useState(false);
+  
+  // Servidor Python URL (para acesso remoto/produção)
+  const [serverUrl, setServerUrl] = useState('');
+  const [testingServerConnection, setTestingServerConnection] = useState(false);
   // Lovable API Key (para geração de thumbnails)
   const [lovableApiKey, setLovableApiKey] = useState('');
   const [showLovableKey, setShowLovableKey] = useState(false);
@@ -166,6 +170,10 @@ export default function Settings() {
       
       // Lovable API Key
       setLovableApiKey(apiSettings.find(s => s.setting_key === 'LOVABLE_API_KEY')?.setting_value || '');
+      
+      // Servidor Python URL - carregar de localStorage
+      const storedServerUrl = localStorage.getItem('arenaApiUrl') || '';
+      setServerUrl(storedServerUrl);
     }
   }, [apiSettings]);
 
@@ -228,6 +236,19 @@ export default function Settings() {
       } else {
         localStorage.removeItem('cloudflare_tunnel_url');
       }
+      
+      // Salvar URL do servidor Python no localStorage
+      const trimmedServerUrl = serverUrl.trim();
+      if (trimmedServerUrl) {
+        localStorage.setItem('arenaApiUrl', trimmedServerUrl);
+        setServerUrl(trimmedServerUrl);
+      } else {
+        localStorage.removeItem('arenaApiUrl');
+      }
+      
+      // Emitir evento para atualizar indicador de status
+      window.dispatchEvent(new CustomEvent('arena-reconnect'));
+      
       toast.success('Todas as configurações foram salvas!');
     } catch (error) {
       toast.error('Erro ao salvar configurações');
@@ -336,6 +357,35 @@ export default function Settings() {
   };
 
   const totalTempSize = tempFolders.reduce((sum, f) => sum + (f.size_bytes || 0), 0);
+
+  // Testar conexão com servidor Python
+  const testServerConnection = async () => {
+    setTestingServerConnection(true);
+    try {
+      const urlToTest = serverUrl.trim() || getApiBase();
+      if (!urlToTest) {
+        toast.error('Nenhuma URL configurada');
+        setTestingServerConnection(false);
+        return;
+      }
+      
+      const response = await fetch(`${urlToTest}/health?light=true`, {
+        signal: AbortSignal.timeout(5000),
+        headers: { 'ngrok-skip-browser-warning': 'true' }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        toast.success(`Servidor conectado! Versão: ${data.version || 'N/A'}`);
+      } else {
+        toast.error('Servidor respondeu com erro');
+      }
+    } catch (error) {
+      toast.error('Não foi possível conectar ao servidor');
+    } finally {
+      setTestingServerConnection(false);
+    }
+  };
 
   return (
     <AppLayout>
@@ -1038,6 +1088,89 @@ export default function Settings() {
                       </div>
                     </div>
                   ))}
+                </div>
+              </CardContent>
+            </Card>
+
+            {/* Servidor Python - URL Configuration */}
+            <Card variant="glow">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <Server className="h-5 w-5 text-orange-500" />
+                  Servidor Python
+                </CardTitle>
+                <CardDescription>
+                  URL do servidor de processamento de vídeo
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                {/* Indicador de ambiente */}
+                <div className="flex items-center gap-2 text-sm">
+                  {isLocalEnvironment() ? (
+                    <>
+                      <Badge variant="outline" className="text-green-500 border-green-500">
+                        Ambiente Local
+                      </Badge>
+                      <span className="text-muted-foreground">
+                        Usando IP padrão: 10.0.0.20:5000
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <Badge variant="outline" className="text-orange-500 border-orange-500">
+                        Ambiente de Produção
+                      </Badge>
+                      <span className="text-muted-foreground">
+                        Requer URL pública configurada
+                      </span>
+                    </>
+                  )}
+                </div>
+                
+                {/* Campo de URL */}
+                <div className="space-y-2">
+                  <Label>URL Pública do Servidor</Label>
+                  <div className="flex gap-2">
+                    <Input 
+                      value={serverUrl}
+                      onChange={(e) => setServerUrl(e.target.value)}
+                      placeholder="https://api.arenaplay.kakttus.com"
+                      className="flex-1"
+                    />
+                    <Button 
+                      variant="outline" 
+                      onClick={testServerConnection}
+                      disabled={testingServerConnection}
+                    >
+                      {testingServerConnection ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        <Wifi className="h-4 w-4 mr-2" />
+                      )}
+                      {testingServerConnection ? '' : 'Testar'}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Configure a URL pública para acessar o servidor remotamente (ex: Cloudflare Tunnel, VPN, ou servidor público).
+                    Deixe vazio para usar o IP local padrão (10.0.0.20:5000).
+                  </p>
+                </div>
+
+                {/* Status indicator */}
+                <div className={`rounded-lg border p-3 ${serverUrl ? 'border-orange-500/30 bg-orange-500/5' : 'border-muted bg-muted/30'}`}>
+                  <div className="flex items-center gap-2">
+                    {serverUrl ? (
+                      <>
+                        <CheckCircle2 className="h-4 w-4 text-orange-500" />
+                        <span className="text-sm text-orange-500">URL customizada configurada</span>
+                      </>
+                    ) : (
+                      <>
+                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">Usando IP local padrão</span>
+                      </>
+                    )}
+                  </div>
                 </div>
               </CardContent>
             </Card>
