@@ -1,15 +1,13 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Server, Settings, AlertTriangle, Link2, Copy, RefreshCw, Wifi, WifiOff } from 'lucide-react';
+import { Server, RefreshCw, WifiOff } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { checkLocalServerAvailable, hasServerUrlConfigured, getApiBase, clearTunnelCache, checkAndRecoverConnection } from '@/lib/apiMode';
+import { checkLocalServerAvailable, getApiBase } from '@/lib/apiMode';
 import { resetServerAvailability } from '@/lib/apiClient';
-import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Tooltip,
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 
@@ -17,7 +15,7 @@ interface ServerStatusIndicatorProps {
   collapsed?: boolean;
 }
 
-type ConnectionStatus = 'checking' | 'online' | 'offline' | 'not-configured' | 'outdated';
+type ConnectionStatus = 'checking' | 'online' | 'offline' | 'outdated';
 
 interface ServerHealth {
   version?: string;
@@ -30,23 +28,11 @@ interface ServerHealth {
 export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps) {
   const [status, setStatus] = useState<ConnectionStatus>('checking');
   const [serverHealth, setServerHealth] = useState<ServerHealth | null>(null);
-  const [showQuickConfig, setShowQuickConfig] = useState(false);
-  const [tunnelUrl, setTunnelUrl] = useState('');
   const [isReconnecting, setIsReconnecting] = useState(false);
-  const navigate = useNavigate();
-  const location = useLocation();
 
   const checkStatus = useCallback(async () => {
-    // Primeiro verifica se há URL configurada
-    if (!hasServerUrlConfigured()) {
-      setStatus('not-configured');
-      return;
-    }
-    
     try {
-      const response = await fetch(`${getApiBase()}/health`, {
-        headers: { 'ngrok-skip-browser-warning': 'true' }
-      });
+      const response = await fetch(`${getApiBase()}/health`);
       
       if (response.ok) {
         const data = await response.json();
@@ -100,22 +86,8 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
       }
     }
     
-    // Todas as tentativas falharam - verificar se é túnel expirado
-    const apiUrl = getApiBase();
-    const isUsingTunnel = apiUrl?.includes('trycloudflare.com') || apiUrl?.includes('ngrok');
-    
-    if (isUsingTunnel) {
-      // Limpar cache do túnel expirado e mostrar config
-      clearTunnelCache();
-      resetServerAvailability();
-      setStatus('not-configured');
-      setShowQuickConfig(true);
-      toast.error('Túnel expirado! Configure a nova URL do servidor.');
-    } else {
-      setStatus('offline');
-      toast.error('Servidor não disponível. Verifique se o Python está rodando.');
-    }
-    
+    setStatus('offline');
+    toast.error('Servidor não disponível. Verifique se o Python está rodando em 10.0.0.20:5000');
     setIsReconnecting(false);
   }, [checkStatus]);
 
@@ -131,47 +103,13 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
       toast.success('Servidor reconectado automaticamente!');
     };
     
-    // Listen for tunnel expired event
-    const handleTunnelExpired = () => {
-      console.log('[ServerStatus] Túnel expirado detectado');
-      setStatus('not-configured');
-      setShowQuickConfig(true);
-      toast.warning('Túnel expirado! Configure a nova URL.');
-    };
-    
     window.addEventListener('server-reconnected', handleServerReconnected);
-    window.addEventListener('tunnel-expired', handleTunnelExpired);
 
     return () => {
       clearInterval(interval);
       window.removeEventListener('server-reconnected', handleServerReconnected);
-      window.removeEventListener('tunnel-expired', handleTunnelExpired);
     };
   }, [checkStatus]);
-
-  const handleQuickConnect = () => {
-    const url = tunnelUrl.trim();
-    if (!url) {
-      toast.error('Cole a URL do túnel Cloudflare');
-      return;
-    }
-    
-    // Salvar no localStorage
-    localStorage.setItem('cloudflare_tunnel_url', url);
-    toast.success('Túnel configurado! Reconectando...');
-    setShowQuickConfig(false);
-    setTunnelUrl('');
-    
-    // Forçar recheck
-    window.location.reload();
-  };
-
-  const copyUrlExample = () => {
-    const baseUrl = window.location.origin + window.location.pathname;
-    const example = `${baseUrl}?tunnel=https://SEU-TUNEL.trycloudflare.com`;
-    navigator.clipboard.writeText(example);
-    toast.success('Exemplo copiado! Cole no terminal e substitua a URL.');
-  };
 
   const getStatusConfig = () => {
     switch (status) {
@@ -193,7 +131,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           label: serverHealth?.version ? `v${serverHealth.version}` : 'Online',
           tooltip: serverHealth?.version 
             ? `Servidor Python v${serverHealth.version} (${serverHealth.build_date})` 
-            : 'Servidor Python online',
+            : 'Servidor Python online em 10.0.0.20:5000',
           icon: Server,
           iconColor: 'text-primary',
           animate: false,
@@ -204,7 +142,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           color: 'bg-red-500',
           textColor: 'text-red-500',
           label: 'Offline',
-          tooltip: 'Servidor Python offline - clique para reconectar',
+          tooltip: 'Servidor Python offline em 10.0.0.20:5000 - clique para reconectar',
           icon: WifiOff,
           iconColor: 'text-red-500',
           animate: true,
@@ -221,74 +159,16 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           animate: true,
           clickable: true
         };
-      case 'not-configured':
-        return {
-          color: 'bg-orange-500',
-          textColor: 'text-orange-500',
-          label: 'Configurar',
-          tooltip: 'Túnel não configurado. Clique para configurar.',
-          icon: AlertTriangle,
-          iconColor: 'text-orange-500',
-          animate: true,
-          clickable: true
-        };
     }
   };
-
-  // Quick config panel for not-configured state
-  if (showQuickConfig && !collapsed) {
-    return (
-      <div className="flex flex-col gap-2 rounded-lg px-3 py-3 bg-orange-500/10 border border-orange-500/30">
-        <div className="flex items-center gap-2 text-xs font-medium text-orange-500">
-          <Link2 className="h-4 w-4" />
-          Configurar Túnel
-        </div>
-        <Input
-          value={tunnelUrl}
-          onChange={(e) => setTunnelUrl(e.target.value)}
-          placeholder="https://xxx.trycloudflare.com"
-          className="h-8 text-xs"
-        />
-        <div className="flex gap-1">
-          <Button size="sm" className="h-7 text-xs flex-1" onClick={handleQuickConnect}>
-            Conectar
-          </Button>
-          <Button 
-            size="sm" 
-            variant="ghost" 
-            className="h-7 text-xs px-2"
-            onClick={() => setShowQuickConfig(false)}
-          >
-            ✕
-          </Button>
-        </div>
-        <button 
-          onClick={copyUrlExample}
-          className="flex items-center gap-1 text-[10px] text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <Copy className="h-3 w-3" />
-          Copiar exemplo de URL com ?tunnel=
-        </button>
-      </div>
-    );
-  }
 
   const config = getStatusConfig();
   const Icon = config.icon;
 
   const handleClick = () => {
     if (status === 'offline') {
-      // Reconectar ao servidor
       handleReconnect();
-    } else if (status === 'not-configured') {
-      // Se collapsed, ir para settings. Se expandido, mostrar quick config
-      if (collapsed) {
-        navigate('/settings');
-      } else {
-        setShowQuickConfig(true);
-      }
     } else if (status === 'outdated') {
-      // Mostrar toast com instruções para reiniciar
       const missingFns = serverHealth?.critical_functions 
         ? Object.entries(serverHealth.critical_functions)
             .filter(([_, loaded]) => !loaded)
@@ -348,9 +228,6 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           <RefreshCw className="h-3 w-3 mr-1" />
           Reconectar
         </Button>
-      )}
-      {!collapsed && status === 'not-configured' && (
-        <Settings className="h-3 w-3 text-orange-500 ml-auto" />
       )}
     </div>
   );
