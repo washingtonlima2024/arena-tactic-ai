@@ -1,14 +1,25 @@
 /**
  * Arena Play - Detecção Automática de Ambiente
  * 
- * - Localhost/desenvolvimento: usa IP fixo 10.0.0.20:5000
- * - Produção (domínio externo): requer URL pública configurada
+ * Prioridade de resolução de URL:
+ * 1. Subdomínio dedicado (arenaApiUrl) - ex: https://api.arenaplay.kakttus.com
+ * 2. Túnel Cloudflare (cloudflare_tunnel_url) - temporário
+ * 3. Túnel Ngrok (ngrok_fallback_url) - temporário
+ * 4. IP local (10.0.0.20:5000) - apenas em ambiente local
  */
 
 // Servidor padrão para rede local
 const LOCAL_SERVER_URL = 'http://10.0.0.20:5000';
 
 export type ApiMode = 'local';
+
+export type ConnectionMethod = 'subdomain' | 'cloudflare' | 'ngrok' | 'local';
+
+export interface ActiveConnection {
+  method: ConnectionMethod;
+  url: string;
+  label: string;
+}
 
 /**
  * Detecta se está rodando em ambiente local (localhost/rede interna)
@@ -46,43 +57,72 @@ export const isLocalMode = (): boolean => {
 };
 
 /**
+ * Retorna informações sobre o método de conexão ativo
+ */
+export const getActiveConnectionMethod = (): ActiveConnection => {
+  const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
+  const cloudflareUrl = localStorage.getItem('cloudflare_tunnel_url')?.trim();
+  const ngrokUrl = localStorage.getItem('ngrok_fallback_url')?.trim();
+  
+  if (arenaApiUrl) {
+    return { method: 'subdomain', url: arenaApiUrl, label: 'Subdomínio Dedicado' };
+  }
+  if (cloudflareUrl) {
+    return { method: 'cloudflare', url: cloudflareUrl, label: 'Túnel Cloudflare' };
+  }
+  if (ngrokUrl) {
+    return { method: 'ngrok', url: ngrokUrl, label: 'Túnel Ngrok' };
+  }
+  return { method: 'local', url: LOCAL_SERVER_URL, label: 'IP Local' };
+};
+
+/**
  * Verifica se há uma URL de servidor configurada.
  * Em produção, requer URL customizada.
  */
 export const hasServerUrlConfigured = (): boolean => {
-  const stored = localStorage.getItem('arenaApiUrl')?.trim();
+  const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
+  const cloudflareUrl = localStorage.getItem('cloudflare_tunnel_url')?.trim();
+  const ngrokUrl = localStorage.getItem('ngrok_fallback_url')?.trim();
   
   if (isLocalEnvironment()) {
     return true; // Em ambiente local, sempre tem o IP fixo
   }
   
-  // Em produção, precisa de URL pública configurada
-  return !!stored;
+  // Em produção, precisa de pelo menos uma URL pública configurada
+  return !!(arenaApiUrl || cloudflareUrl || ngrokUrl);
 };
 
 /**
  * Verifica se está em produção sem URL configurada
  */
 export const needsProductionApiUrl = (): boolean => {
-  return isProductionEnvironment() && !localStorage.getItem('arenaApiUrl')?.trim();
+  return isProductionEnvironment() && !hasServerUrlConfigured();
 };
 
 /**
  * Retorna a URL base da API.
- * - Prioridade 1: URL customizada (arenaApiUrl)
- * - Prioridade 2: IP fixo local (apenas se em ambiente local)
+ * Prioridade: Subdomínio → Cloudflare → Ngrok → IP Local
  */
 export const getApiBase = (): string => {
-  // 1. URL customizada (maior prioridade)
-  const stored = localStorage.getItem('arenaApiUrl')?.trim();
-  if (stored) return stored;
+  // 1. Subdomínio dedicado (maior prioridade)
+  const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
+  if (arenaApiUrl) return arenaApiUrl;
   
-  // 2. Em ambiente local, usar IP fixo
+  // 2. Túnel Cloudflare
+  const cloudflareUrl = localStorage.getItem('cloudflare_tunnel_url')?.trim();
+  if (cloudflareUrl) return cloudflareUrl;
+  
+  // 3. Túnel Ngrok
+  const ngrokUrl = localStorage.getItem('ngrok_fallback_url')?.trim();
+  if (ngrokUrl) return ngrokUrl;
+  
+  // 4. Em ambiente local, usar IP fixo
   if (isLocalEnvironment()) {
     return LOCAL_SERVER_URL;
   }
   
-  // 3. Em produção sem URL configurada - retornar vazio
+  // 5. Em produção sem URL configurada - retornar vazio
   // O ServerStatusIndicator vai alertar o usuário
   return '';
 };
@@ -90,9 +130,11 @@ export const getApiBase = (): string => {
 export const checkLocalServerAvailable = async (): Promise<boolean> => {
   try {
     const apiUrl = getApiBase();
+    if (!apiUrl) return false;
     
     const response = await fetch(`${apiUrl}/health?light=true`, {
-      signal: AbortSignal.timeout(5000)
+      signal: AbortSignal.timeout(5000),
+      headers: { 'ngrok-skip-browser-warning': 'true' }
     });
     return response.ok;
   } catch {
