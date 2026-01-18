@@ -44,7 +44,7 @@ import {
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { getApiMode, setApiMode, type ApiMode, isLocalEnvironment, getApiBase, getActiveConnectionMethod } from '@/lib/apiMode';
+import { getApiMode, setApiMode, type ApiMode, isLocalEnvironment, getApiBase, getActiveConnectionMethod, PRODUCTION_API_URL, isArenaPlayProduction } from '@/lib/apiMode';
 
 export default function Settings() {
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
@@ -174,9 +174,14 @@ export default function Settings() {
       // Lovable API Key
       setLovableApiKey(apiSettings.find(s => s.setting_key === 'LOVABLE_API_KEY')?.setting_value || '');
       
-      // Servidor Python URL - carregar de localStorage
+      // Servidor Python URL - carregar de localStorage ou usar URL padrão em produção
       const storedServerUrl = localStorage.getItem('arenaApiUrl') || '';
-      setServerUrl(storedServerUrl);
+      if (storedServerUrl) {
+        setServerUrl(storedServerUrl);
+      } else if (isArenaPlayProduction()) {
+        // Em produção no domínio correto, pré-popular com URL padrão
+        setServerUrl(PRODUCTION_API_URL);
+      }
     }
   }, [apiSettings]);
 
@@ -1155,7 +1160,10 @@ export default function Settings() {
                   </CollapsibleTrigger>
                   <CollapsibleContent className="pt-3 pl-2 space-y-3">
                     <p className="text-xs text-muted-foreground">
-                      URL permanente via DNS próprio. Ideal para produção.
+                      URL permanente via DNS próprio. Ideal para produção. 
+                      {isArenaPlayProduction() && !serverUrl && (
+                        <span className="text-emerald-500 ml-1">Recomendado: {PRODUCTION_API_URL}</span>
+                      )}
                     </p>
                     <div className="flex gap-2">
                       <Input 

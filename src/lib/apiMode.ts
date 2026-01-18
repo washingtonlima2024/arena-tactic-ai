@@ -11,6 +11,9 @@
 // Servidor padrão para rede local
 const LOCAL_SERVER_URL = 'http://10.0.0.20:5000';
 
+// URL de produção padrão (subdomínio dedicado)
+export const PRODUCTION_API_URL = 'https://api.arenaplay.kakttus.com';
+
 export type ApiMode = 'local';
 
 export type ConnectionMethod = 'subdomain' | 'cloudflare' | 'ngrok' | 'local';
@@ -20,6 +23,39 @@ export interface ActiveConnection {
   url: string;
   label: string;
 }
+
+/**
+ * Retorna a URL padrão de produção
+ */
+export const getDefaultProductionUrl = (): string => PRODUCTION_API_URL;
+
+/**
+ * Verifica se está rodando no domínio de produção do Arena Play
+ */
+export const isArenaPlayProduction = (): boolean => {
+  const hostname = window.location.hostname;
+  return hostname.includes('arenaplay') || hostname.includes('kakttus');
+};
+
+/**
+ * Auto-configura a URL de produção se estiver no domínio correto e sem configuração
+ * Retorna true se auto-configurou, false caso contrário
+ */
+export const autoConfigureProductionUrl = (): boolean => {
+  const existingUrl = localStorage.getItem('arenaApiUrl')?.trim();
+  
+  // Se já tem URL configurada, não fazer nada
+  if (existingUrl) return false;
+  
+  // Se está no domínio de produção, auto-configurar
+  if (isArenaPlayProduction()) {
+    localStorage.setItem('arenaApiUrl', PRODUCTION_API_URL);
+    console.log('[ApiMode] Auto-configurada URL de produção:', PRODUCTION_API_URL);
+    return true;
+  }
+  
+  return false;
+};
 
 /**
  * Detecta se está rodando em ambiente local (localhost/rede interna)
@@ -102,9 +138,12 @@ export const needsProductionApiUrl = (): boolean => {
 
 /**
  * Retorna a URL base da API.
- * Prioridade: Subdomínio → Cloudflare → Ngrok → IP Local
+ * Prioridade: Subdomínio → Cloudflare → Ngrok → IP Local (ou URL padrão em produção)
  */
 export const getApiBase = (): string => {
+  // Tentar auto-configurar em primeiro acesso em produção
+  autoConfigureProductionUrl();
+  
   // 1. Subdomínio dedicado (maior prioridade)
   const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
   if (arenaApiUrl) return arenaApiUrl;
@@ -122,7 +161,12 @@ export const getApiBase = (): string => {
     return LOCAL_SERVER_URL;
   }
   
-  // 5. Em produção sem URL configurada - retornar vazio
+  // 5. Em produção no domínio correto sem configuração, usar URL padrão
+  if (isArenaPlayProduction()) {
+    return PRODUCTION_API_URL;
+  }
+  
+  // 6. Em produção genérica sem URL configurada - retornar vazio
   // O ServerStatusIndicator vai alertar o usuário
   return '';
 };
