@@ -2172,10 +2172,13 @@ def get_match_events(match_id: str):
 
 @app.route('/api/matches/<match_id>/events', methods=['POST'])
 def create_match_event(match_id: str):
-    """Cria um evento de partida."""
+    """Cria um evento de partida e gera clip/thumbnail automaticamente."""
     data = request.json
     session = get_session()
     try:
+        # Usar event_metadata (não metadata) para compatibilidade
+        event_metadata = data.get('event_metadata') or data.get('metadata', {})
+        
         event = MatchEvent(
             match_id=match_id,
             event_type=data['event_type'],
@@ -2188,16 +2191,126 @@ def create_match_event(match_id: str):
             position_x=data.get('position_x'),
             position_y=data.get('position_y'),
             is_highlight=data.get('is_highlight', False),
-            metadata=data.get('metadata', {})
+            event_metadata=event_metadata
         )
         session.add(event)
         session.commit()
-        return jsonify(event.to_dict()), 201
+        
+        event_id = event.id
+        event_dict = event.to_dict()
+        session.close()
+        
+        # ═══════════════════════════════════════════════════════════════
+        # AUTO-GENERATE CLIP E THUMBNAIL
+        # ═══════════════════════════════════════════════════════════════
+        auto_clip = data.get('auto_clip', True)  # Default: gerar automaticamente
+        clip_result = {'generated': False, 'clip_url': None, 'thumbnail_url': None}
+        
+        if auto_clip:
+            try:
+                print(f"[CREATE-EVENT] Iniciando geração automática de clip para evento {event_id}...")
+                
+                # Chamar internamente o regenerate_clips apenas para este evento
+                with app.test_request_context(
+                    f'/api/matches/{match_id}/regenerate-clips',
+                    method='POST',
+                    json={'eventIds': [event_id]}
+                ):
+                    # Executar regeneração apenas deste evento
+                    regen_session = get_session()
+                    try:
+                        # Buscar vídeos da partida
+                        videos = regen_session.query(Video).filter_by(match_id=match_id).all()
+                        if videos:
+                            # Mapear vídeos por tipo
+                            video_paths = {}
+                            for video in videos:
+                                video_type = video.video_type or 'full'
+                                file_url = video.file_url or ''
+                                
+                                local_path = None
+                                if '/api/storage/' in file_url:
+                                    parts = file_url.split('/api/storage/')[-1].split('/')
+                                    if len(parts) >= 3:
+                                        vid_match_id = parts[0]
+                                        subfolder = parts[1]
+                                        filename = '/'.join(parts[2:])
+                                        local_path = str(get_file_path(vid_match_id, subfolder, filename))
+                                elif file_url.startswith('/') or os.path.isabs(file_url):
+                                    local_path = file_url
+                                
+                                if local_path and os.path.exists(local_path):
+                                    video_paths[video_type] = local_path
+                            
+                            # Fallback: buscar na pasta
+                            if not video_paths:
+                                storage_videos_path = get_match_storage_path(match_id) / 'videos'
+                                if storage_videos_path.exists():
+                                    for f in storage_videos_path.iterdir():
+                                        if f.suffix.lower() in {'.mp4', '.mov', '.mkv', '.webm', '.avi'}:
+                                            video_paths['full'] = str(f)
+                                            break
+                            
+                            if video_paths:
+                                # Buscar evento atualizado
+                                fresh_event = regen_session.query(MatchEvent).filter_by(id=event_id).first()
+                                if fresh_event:
+                                    # Buscar times
+                                    match_obj = regen_session.query(Match).filter_by(id=match_id).first()
+                                    home_team = regen_session.query(Team).filter_by(id=match_obj.home_team_id).first() if match_obj else None
+                                    away_team = regen_session.query(Team).filter_by(id=match_obj.away_team_id).first() if match_obj else None
+                                    home_team_name = home_team.name if home_team else 'Time A'
+                                    away_team_name = away_team.name if away_team else 'Time B'
+                                    
+                                    # Escolher vídeo apropriado
+                                    event_half = fresh_event.match_half or 'first_half'
+                                    video_path = video_paths.get(event_half) or video_paths.get('full') or list(video_paths.values())[0]
+                                    
+                                    # Extrair clip
+                                    clip_url, thumb_url = extract_event_clips_auto(
+                                        [fresh_event],
+                                        video_path,
+                                        match_id,
+                                        home_team_name,
+                                        away_team_name
+                                    )
+                                    
+                                    # Atualizar evento com URLs
+                                    fresh_event = regen_session.merge(fresh_event)
+                                    if clip_url:
+                                        fresh_event.clip_url = clip_url[0] if isinstance(clip_url, list) and clip_url else clip_url
+                                        clip_result['clip_url'] = fresh_event.clip_url
+                                        clip_result['generated'] = True
+                                        print(f"[CREATE-EVENT] ✓ Clip gerado: {fresh_event.clip_url}")
+                                    
+                                    regen_session.commit()
+                                    event_dict = fresh_event.to_dict()
+                            else:
+                                print(f"[CREATE-EVENT] ⚠ Nenhum vídeo encontrado para gerar clip")
+                        else:
+                            print(f"[CREATE-EVENT] ⚠ Partida sem vídeos registrados")
+                    finally:
+                        regen_session.close()
+                        
+            except Exception as clip_error:
+                print(f"[CREATE-EVENT] ⚠ Erro ao gerar clip automaticamente: {clip_error}")
+                import traceback
+                traceback.print_exc()
+        
+        # Retornar evento criado (com ou sem clip)
+        event_dict['clip_generated'] = clip_result['generated']
+        return jsonify(event_dict), 201
+        
     except Exception as e:
         session.rollback()
+        import traceback
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 400
     finally:
-        session.close()
+        try:
+            session.close()
+        except:
+            pass
 
 
 @app.route('/api/events/<event_id>', methods=['GET'])
