@@ -69,7 +69,32 @@ download_jobs = {}  # Para jobs de download por URL
 conversion_jobs = {}
 
 app = Flask(__name__)
-CORS(app)
+
+# Configuração explícita de CORS para todos os endpoints de API
+CORS(app, resources={
+    r"/api/*": {
+        "origins": "*",
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
+        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With", "ngrok-skip-browser-warning"],
+        "expose_headers": ["Content-Disposition", "Content-Length"],
+        "supports_credentials": False
+    }
+})
+
+
+def add_cors_headers(response):
+    """Adiciona headers CORS em todas as respostas."""
+    response.headers['Access-Control-Allow-Origin'] = '*'
+    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, ngrok-skip-browser-warning'
+    response.headers['Access-Control-Expose-Headers'] = 'Content-Disposition, Content-Length'
+    return response
+
+
+@app.after_request
+def after_request(response):
+    """Garante CORS headers em TODAS as respostas, incluindo send_from_directory."""
+    return add_cors_headers(response)
 
 # Initialize database
 init_db()
@@ -1309,15 +1334,22 @@ def detect_ngrok():
 # Structure: storage/{match_id}/{subfolder}/{filename}
 # Subfolders: videos, clips, images, audio, texts, srt, json
 
-@app.route('/api/storage/<match_id>/<subfolder>/<path:filename>', methods=['GET'])
+@app.route('/api/storage/<match_id>/<subfolder>/<path:filename>', methods=['GET', 'OPTIONS'])
 def serve_storage_file(match_id: str, subfolder: str, filename: str):
     """Serve arquivo do storage local organizado por partida."""
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        return add_cors_headers(response)
+    
     try:
         folder_path = get_subfolder_path(match_id, subfolder)
         file_path = folder_path / filename
         if not file_path.exists():
             return jsonify({'error': 'Arquivo não encontrado'}), 404
-        return send_from_directory(folder_path, filename)
+        
+        response = send_from_directory(folder_path, filename)
+        return add_cors_headers(response)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
@@ -1338,9 +1370,14 @@ def list_subfolder_files(match_id: str, subfolder: str):
     return jsonify({'files': files})
 
 
-@app.route('/api/storage/<match_id>/<subfolder>', methods=['POST'])
+@app.route('/api/storage/<match_id>/<subfolder>', methods=['POST', 'OPTIONS'])
 def upload_to_match(match_id: str, subfolder: str):
     """Upload de arquivo para subfolder da partida. Se for vídeo, cria registro automático no banco."""
+    # Handle preflight OPTIONS request
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        return add_cors_headers(response)
+    
     if 'file' not in request.files:
         return jsonify({'error': 'Nenhum arquivo enviado'}), 400
     
