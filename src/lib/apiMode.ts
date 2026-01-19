@@ -51,10 +51,34 @@ export const autoConfigureProductionUrl = (): boolean => {
   if (isArenaPlayProduction()) {
     localStorage.setItem('arenaApiUrl', PRODUCTION_API_URL);
     console.log('[ApiMode] Auto-configurada URL de produção:', PRODUCTION_API_URL);
+    // Limpar túneis legados automaticamente
+    cleanupLegacyTunnels();
     return true;
   }
   
   return false;
+};
+
+/**
+ * Limpa túneis Cloudflare/Ngrok quando em produção com subdomínio dedicado
+ * Isso evita que túneis expirados interfiram na conectividade
+ */
+export const cleanupLegacyTunnels = (): void => {
+  if (isArenaPlayProduction()) {
+    const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
+    
+    // Se temos subdomínio dedicado, limpar túneis antigos
+    if (arenaApiUrl && arenaApiUrl.includes('api.arenaplay')) {
+      const hadCloudflare = localStorage.getItem('cloudflare_tunnel_url');
+      const hadNgrok = localStorage.getItem('ngrok_fallback_url');
+      
+      if (hadCloudflare || hadNgrok) {
+        localStorage.removeItem('cloudflare_tunnel_url');
+        localStorage.removeItem('ngrok_fallback_url');
+        console.log('[ApiMode] ✓ Túneis legados removidos em favor do subdomínio dedicado');
+      }
+    }
+  }
 };
 
 /**
@@ -138,12 +162,29 @@ export const needsProductionApiUrl = (): boolean => {
 
 /**
  * Retorna a URL base da API.
- * Prioridade: Subdomínio → Cloudflare → Ngrok → IP Local (ou URL padrão em produção)
+ * Em produção do Arena Play: SEMPRE prioriza o subdomínio dedicado
+ * Em outros ambientes: Subdomínio → Cloudflare → Ngrok → IP Local
  */
 export const getApiBase = (): string => {
-  // Tentar auto-configurar em primeiro acesso em produção
-  autoConfigureProductionUrl();
+  // Em produção do Arena Play, SEMPRE priorizar o subdomínio dedicado
+  if (isArenaPlayProduction()) {
+    const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
+    
+    // Se já tem o subdomínio configurado, usar
+    if (arenaApiUrl) {
+      // Limpar túneis legados se ainda existirem
+      cleanupLegacyTunnels();
+      return arenaApiUrl;
+    }
+    
+    // Auto-configurar com URL de produção
+    localStorage.setItem('arenaApiUrl', PRODUCTION_API_URL);
+    console.log('[ApiMode] Auto-configurada URL de produção:', PRODUCTION_API_URL);
+    cleanupLegacyTunnels();
+    return PRODUCTION_API_URL;
+  }
   
+  // Para ambientes não-produção, manter lógica de fallback
   // 1. Subdomínio dedicado (maior prioridade)
   const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
   if (arenaApiUrl) return arenaApiUrl;
@@ -161,13 +202,7 @@ export const getApiBase = (): string => {
     return LOCAL_SERVER_URL;
   }
   
-  // 5. Em produção no domínio correto sem configuração, usar URL padrão
-  if (isArenaPlayProduction()) {
-    return PRODUCTION_API_URL;
-  }
-  
-  // 6. Em produção genérica sem URL configurada - retornar vazio
-  // O ServerStatusIndicator vai alertar o usuário
+  // 5. Em produção genérica sem URL configurada - retornar vazio
   return '';
 };
 
