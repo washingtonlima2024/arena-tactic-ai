@@ -83,6 +83,13 @@ export default function Settings() {
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
   const [ollamaModel, setOllamaModel] = useState('llama3.2');
   const [ollamaEnabled, setOllamaEnabled] = useState(true);
+  const [ollamaStatus, setOllamaStatus] = useState<{
+    connected: boolean;
+    checking: boolean;
+    error?: string;
+    models?: string[];
+    modelLoaded?: boolean;
+  }>({ connected: false, checking: false });
 
   // Local Whisper settings (FREE transcription) - ATIVADO por padrão e prioritário
   const [localWhisperEnabled, setLocalWhisperEnabled] = useState(true);
@@ -262,6 +269,33 @@ export default function Settings() {
       toast.success('Todas as configurações foram salvas!');
     } catch (error) {
       toast.error('Erro ao salvar configurações');
+    }
+  };
+
+  // Função para testar conexão com Ollama
+  const testOllamaConnection = async () => {
+    setOllamaStatus({ connected: false, checking: true });
+    try {
+      const result = await apiClient.testOllama({ url: ollamaUrl, model: ollamaModel });
+      setOllamaStatus({
+        connected: result.connected,
+        checking: false,
+        error: result.error,
+        models: result.availableModels,
+        modelLoaded: result.modelLoaded
+      });
+      if (result.connected) {
+        toast.success(`Ollama conectado! ${result.availableModels?.length || 0} modelo(s) disponível(is)`);
+      } else {
+        toast.error(result.error || 'Falha ao conectar com Ollama');
+      }
+    } catch (error) {
+      setOllamaStatus({
+        connected: false,
+        checking: false,
+        error: 'Erro ao testar conexão'
+      });
+      toast.error('Erro ao testar conexão com Ollama');
     }
   };
 
@@ -1055,6 +1089,54 @@ export default function Settings() {
                 <p className="text-xs text-muted-foreground">
                   Instale o Ollama em <a href="https://ollama.com" target="_blank" className="text-primary hover:underline">ollama.com</a> e execute: <code className="bg-muted px-1 rounded">ollama pull {ollamaModel}</code>
                 </p>
+                
+                {/* Indicador de status de conexão real */}
+                <div className={`rounded-lg border p-3 ${
+                  ollamaStatus.checking ? 'border-yellow-500/30 bg-yellow-500/5' :
+                  ollamaStatus.connected ? 'border-green-500/30 bg-green-500/5' :
+                  'border-muted bg-muted/30'
+                }`}>
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      {ollamaStatus.checking ? (
+                        <Loader2 className="h-4 w-4 text-yellow-500 animate-spin" />
+                      ) : ollamaStatus.connected ? (
+                        <CheckCircle2 className="h-4 w-4 text-green-500" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      <span className={`text-sm ${
+                        ollamaStatus.checking ? 'text-yellow-500' :
+                        ollamaStatus.connected ? 'text-green-500' :
+                        'text-muted-foreground'
+                      }`}>
+                        {ollamaStatus.checking ? 'Verificando conexão...' :
+                         ollamaStatus.connected ? 
+                           `Conectado (${ollamaStatus.models?.length || 0} modelo${ollamaStatus.models?.length !== 1 ? 's' : ''})${ollamaStatus.modelLoaded ? ` - ${ollamaModel} disponível` : ''}` :
+                         ollamaStatus.error || 'Não verificado'}
+                      </span>
+                    </div>
+                    <Button 
+                      variant="outline" 
+                      size="sm" 
+                      onClick={testOllamaConnection}
+                      disabled={ollamaStatus.checking}
+                    >
+                      <RefreshCw className={`h-4 w-4 mr-1 ${ollamaStatus.checking ? 'animate-spin' : ''}`} />
+                      Testar
+                    </Button>
+                  </div>
+                  {ollamaStatus.connected && ollamaStatus.models && ollamaStatus.models.length > 0 && (
+                    <div className="mt-2 pt-2 border-t border-green-500/20">
+                      <p className="text-xs text-muted-foreground">
+                        Modelos: {ollamaStatus.models.slice(0, 5).join(', ')}
+                        {ollamaStatus.models.length > 5 && ` +${ollamaStatus.models.length - 5} mais`}
+                      </p>
+                    </div>
+                  )}
+                </div>
+                
+                {/* Status de ativação */}
                 <div className={`rounded-lg border p-3 ${ollamaEnabled ? 'border-orange-500/30 bg-orange-500/5' : 'border-muted bg-muted/30'}`}>
                   <div className="flex items-center gap-2">
                     {ollamaEnabled ? (
