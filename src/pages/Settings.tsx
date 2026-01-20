@@ -79,13 +79,13 @@ export default function Settings() {
   const [elevenlabsApiKey, setElevenlabsApiKey] = useState('');
   const [elevenlabsEnabled, setElevenlabsEnabled] = useState(true);
 
-  // Ollama settings
+  // Ollama settings - ATIVADO por padrão (modelo local)
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
   const [ollamaModel, setOllamaModel] = useState('llama3.2');
-  const [ollamaEnabled, setOllamaEnabled] = useState(false);
+  const [ollamaEnabled, setOllamaEnabled] = useState(true);
 
-  // Local Whisper settings (FREE transcription)
-  const [localWhisperEnabled, setLocalWhisperEnabled] = useState(false);
+  // Local Whisper settings (FREE transcription) - ATIVADO por padrão e prioritário
+  const [localWhisperEnabled, setLocalWhisperEnabled] = useState(true);
   const [localWhisperModel, setLocalWhisperModel] = useState('base');
 
   // Ngrok URL setting
@@ -152,13 +152,15 @@ export default function Settings() {
       setElevenlabsApiKey(apiSettings.find(s => s.setting_key === 'elevenlabs_api_key')?.setting_value || '');
       setElevenlabsEnabled(apiSettings.find(s => s.setting_key === 'elevenlabs_enabled')?.setting_value !== 'false');
       
-      // Ollama settings
+      // Ollama settings - default to enabled if not explicitly set to false
       setOllamaUrl(apiSettings.find(s => s.setting_key === 'ollama_url')?.setting_value || 'http://localhost:11434');
       setOllamaModel(apiSettings.find(s => s.setting_key === 'ollama_model')?.setting_value || 'llama3.2');
-      setOllamaEnabled(apiSettings.find(s => s.setting_key === 'ollama_enabled')?.setting_value === 'true');
+      const savedOllamaEnabled = apiSettings.find(s => s.setting_key === 'ollama_enabled')?.setting_value;
+      setOllamaEnabled(savedOllamaEnabled === undefined ? true : savedOllamaEnabled !== 'false');
       
-      // Local Whisper settings
-      setLocalWhisperEnabled(apiSettings.find(s => s.setting_key === 'local_whisper_enabled')?.setting_value === 'true');
+      // Local Whisper settings - default to enabled and prioritized if not explicitly set to false
+      const savedWhisperEnabled = apiSettings.find(s => s.setting_key === 'local_whisper_enabled')?.setting_value;
+      setLocalWhisperEnabled(savedWhisperEnabled === undefined ? true : savedWhisperEnabled !== 'false');
       setLocalWhisperModel(apiSettings.find(s => s.setting_key === 'local_whisper_model')?.setting_value || 'base');
       
       // Ngrok URL - load from localStorage first, then from settings

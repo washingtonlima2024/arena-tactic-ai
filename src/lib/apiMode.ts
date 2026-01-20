@@ -81,6 +81,19 @@ export const cleanupLegacyTunnels = (): void => {
   }
 };
 
+// Auto-executar configuração de produção no carregamento do módulo
+if (typeof window !== 'undefined') {
+  // Garantir URL correta em produção Arena Play
+  if (isArenaPlayProduction()) {
+    const currentUrl = localStorage.getItem('arenaApiUrl');
+    if (!currentUrl || !currentUrl.includes('api.arenaplay')) {
+      localStorage.setItem('arenaApiUrl', PRODUCTION_API_URL);
+      console.log('[ApiMode] 🔧 URL de produção configurada automaticamente');
+    }
+    cleanupLegacyTunnels();
+  }
+}
+
 /**
  * Detecta se está rodando em ambiente local (localhost/rede interna)
  */
