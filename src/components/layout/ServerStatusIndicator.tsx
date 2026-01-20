@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Server, RefreshCw, WifiOff, AlertTriangle, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { checkLocalServerAvailable, getApiBase, isProductionEnvironment, needsProductionApiUrl, getActiveConnectionMethod } from '@/lib/apiMode';
+import { checkLocalServerAvailable, getApiBase, isProductionEnvironment, needsProductionApiUrl } from '@/lib/apiMode';
 import { resetServerAvailability } from '@/lib/apiClient';
 import {
   Tooltip,
@@ -128,18 +128,8 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
   const getStatusConfig = () => {
     const isProd = isProductionEnvironment();
     const apiBase = getApiBase();
-    const activeConnection = getActiveConnectionMethod();
+    const serverLabel = isProd ? 'Produção' : 'Local';
     const serverLocation = apiBase || (isProd ? 'não configurado' : '10.0.0.20:5000');
-    
-    // Extrair hostname da URL para exibição compacta
-    const getHostname = (url: string) => {
-      try {
-        return new URL(url).hostname;
-      } catch {
-        return url;
-      }
-    };
-    const displayHost = apiBase ? getHostname(apiBase) : serverLocation;
 
     switch (status) {
       case 'needs-config':
@@ -158,7 +148,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           color: 'bg-yellow-500',
           textColor: 'text-yellow-500',
           label: 'Verificando...',
-          tooltip: `Verificando servidor em ${displayHost}...`,
+          tooltip: `Verificando servidor em ${serverLocation}...`,
           icon: Server,
           iconColor: 'text-muted-foreground',
           animate: true,
@@ -170,8 +160,8 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           textColor: 'text-green-500',
           label: serverHealth?.version ? `v${serverHealth.version}` : 'Online',
           tooltip: serverHealth?.version 
-            ? `${activeConnection.label}: ${displayHost}\nv${serverHealth.version} (${serverHealth.build_date})` 
-            : `${activeConnection.label}: ${displayHost}`,
+            ? `Servidor Python v${serverHealth.version} (${serverHealth.build_date}) - ${serverLocation}` 
+            : `Servidor Python online em ${serverLocation}`,
           icon: Server,
           iconColor: 'text-primary',
           animate: false,
@@ -182,7 +172,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           color: 'bg-red-500',
           textColor: 'text-red-500',
           label: 'Offline',
-          tooltip: `Servidor offline: ${displayHost}\nClique para reconectar`,
+          tooltip: `Servidor Python offline em ${serverLocation} - clique para reconectar`,
           icon: WifiOff,
           iconColor: 'text-red-500',
           animate: true,
@@ -193,7 +183,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           color: 'bg-orange-500',
           textColor: 'text-orange-500',
           label: 'Desatualizado',
-          tooltip: serverHealth?.warning || `${displayHost} precisa ser reiniciado`,
+          tooltip: serverHealth?.warning || 'Servidor precisa ser reiniciado para carregar novas funções',
           icon: RefreshCw,
           iconColor: 'text-orange-500',
           animate: true,

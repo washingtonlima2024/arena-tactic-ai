@@ -69,32 +69,7 @@ download_jobs = {}  # Para jobs de download por URL
 conversion_jobs = {}
 
 app = Flask(__name__)
-
-# Configuração explícita de CORS para todos os endpoints de API
-CORS(app, resources={
-    r"/api/*": {
-        "origins": "*",
-        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-        "allow_headers": ["Content-Type", "Authorization", "X-Requested-With", "ngrok-skip-browser-warning"],
-        "expose_headers": ["Content-Disposition", "Content-Length"],
-        "supports_credentials": False
-    }
-})
-
-
-def add_cors_headers(response):
-    """Adiciona headers CORS em todas as respostas."""
-    response.headers['Access-Control-Allow-Origin'] = '*'
-    response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, ngrok-skip-browser-warning'
-    response.headers['Access-Control-Expose-Headers'] = 'Content-Disposition, Content-Length'
-    return response
-
-
-@app.after_request
-def after_request(response):
-    """Garante CORS headers em TODAS as respostas, incluindo send_from_directory."""
-    return add_cors_headers(response)
+CORS(app)
 
 # Initialize database
 init_db()
@@ -151,8 +126,8 @@ def load_api_keys_from_db():
         openai_enabled = _bool_from_setting(values.get('openai_enabled'), True)
         elevenlabs_enabled = _bool_from_setting(values.get('elevenlabs_enabled'), True)
         
-        # Local Whisper settings (FREE transcription) - Default True para priorizar transcrição local
-        local_whisper_enabled = _bool_from_setting(values.get('local_whisper_enabled'), True)
+        # Local Whisper settings (FREE transcription)
+        local_whisper_enabled = _bool_from_setting(values.get('local_whisper_enabled'), False)
         local_whisper_model = values.get('local_whisper_model') or 'base'
 
         # Prefer DB values, fallback to environment variables if DB is missing
@@ -174,10 +149,10 @@ def load_api_keys_from_db():
             ai_services.set_api_keys(lovable_key=lovable_key)
             keys_loaded.append('LOVABLE')
 
-        # Ollama optional settings - Default True para usar modelo local
-        ollama_url = values.get('ollama_url') or 'http://localhost:11434'
-        ollama_model = values.get('ollama_model') or 'llama3.2'
-        ollama_enabled = _bool_from_setting(values.get('ollama_enabled'), True)
+        # Ollama optional settings
+        ollama_url = values.get('ollama_url')
+        ollama_model = values.get('ollama_model')
+        ollama_enabled = _bool_from_setting(values.get('ollama_enabled'), False)
 
         if ollama_url or ollama_model or ollama_enabled:
             ai_services.set_api_keys(
@@ -1264,58 +1239,6 @@ def health_check():
     return jsonify(response_data)
 
 
-@app.route('/api/ollama/test', methods=['POST'])
-def test_ollama_connection():
-    """
-    Testa conexão real com servidor Ollama.
-    Verifica se o servidor está acessível e lista modelos disponíveis.
-    """
-    data = request.json or {}
-    url = data.get('url', ai_services.OLLAMA_URL or 'http://localhost:11434')
-    model = data.get('model', ai_services.OLLAMA_MODEL or 'llama3.2')
-    
-    try:
-        # Testar lista de modelos
-        response = requests.get(f"{url}/api/tags", timeout=5)
-        
-        if not response.ok:
-            return jsonify({
-                'connected': False,
-                'error': f'HTTP {response.status_code}: {response.text[:100]}'
-            }), 200
-        
-        models_data = response.json()
-        available_models = [m.get('name', m.get('model', 'unknown')) for m in models_data.get('models', [])]
-        
-        # Verificar se o modelo solicitado está disponível
-        model_loaded = model in available_models or any(model in m for m in available_models)
-        
-        return jsonify({
-            'connected': True,
-            'url': url,
-            'availableModels': available_models,
-            'requestedModel': model,
-            'modelLoaded': model_loaded,
-            'message': f'Conectado! {len(available_models)} modelo(s) disponível(is)'
-        })
-        
-    except requests.exceptions.ConnectionError:
-        return jsonify({
-            'connected': False,
-            'error': f'Servidor Ollama não acessível em {url}. Verifique se o Ollama está rodando.'
-        }), 200
-    except requests.exceptions.Timeout:
-        return jsonify({
-            'connected': False,
-            'error': 'Timeout ao conectar com o servidor Ollama'
-        }), 200
-    except Exception as e:
-        return jsonify({
-            'connected': False,
-            'error': str(e)
-        }), 200
-
-
 @app.route('/api/detect-ngrok', methods=['GET'])
 def detect_ngrok():
     """
@@ -1386,22 +1309,15 @@ def detect_ngrok():
 # Structure: storage/{match_id}/{subfolder}/{filename}
 # Subfolders: videos, clips, images, audio, texts, srt, json
 
-@app.route('/api/storage/<match_id>/<subfolder>/<path:filename>', methods=['GET', 'OPTIONS'])
+@app.route('/api/storage/<match_id>/<subfolder>/<path:filename>', methods=['GET'])
 def serve_storage_file(match_id: str, subfolder: str, filename: str):
     """Serve arquivo do storage local organizado por partida."""
-    # Handle preflight OPTIONS request
-    if request.method == 'OPTIONS':
-        response = app.make_default_options_response()
-        return add_cors_headers(response)
-    
     try:
         folder_path = get_subfolder_path(match_id, subfolder)
         file_path = folder_path / filename
         if not file_path.exists():
             return jsonify({'error': 'Arquivo não encontrado'}), 404
-        
-        response = send_from_directory(folder_path, filename)
-        return add_cors_headers(response)
+        return send_from_directory(folder_path, filename)
     except ValueError as e:
         return jsonify({'error': str(e)}), 400
 
@@ -1422,14 +1338,9 @@ def list_subfolder_files(match_id: str, subfolder: str):
     return jsonify({'files': files})
 
 
-@app.route('/api/storage/<match_id>/<subfolder>', methods=['POST', 'OPTIONS'])
+@app.route('/api/storage/<match_id>/<subfolder>', methods=['POST'])
 def upload_to_match(match_id: str, subfolder: str):
     """Upload de arquivo para subfolder da partida. Se for vídeo, cria registro automático no banco."""
-    # Handle preflight OPTIONS request
-    if request.method == 'OPTIONS':
-        response = app.make_default_options_response()
-        return add_cors_headers(response)
-    
     if 'file' not in request.files:
         return jsonify({'error': 'Nenhum arquivo enviado'}), 400
     
@@ -2261,13 +2172,10 @@ def get_match_events(match_id: str):
 
 @app.route('/api/matches/<match_id>/events', methods=['POST'])
 def create_match_event(match_id: str):
-    """Cria um evento de partida e gera clip/thumbnail automaticamente."""
+    """Cria um evento de partida."""
     data = request.json
     session = get_session()
     try:
-        # Usar event_metadata (não metadata) para compatibilidade
-        event_metadata = data.get('event_metadata') or data.get('metadata', {})
-        
         event = MatchEvent(
             match_id=match_id,
             event_type=data['event_type'],
@@ -2280,126 +2188,16 @@ def create_match_event(match_id: str):
             position_x=data.get('position_x'),
             position_y=data.get('position_y'),
             is_highlight=data.get('is_highlight', False),
-            event_metadata=event_metadata
+            metadata=data.get('metadata', {})
         )
         session.add(event)
         session.commit()
-        
-        event_id = event.id
-        event_dict = event.to_dict()
-        session.close()
-        
-        # ═══════════════════════════════════════════════════════════════
-        # AUTO-GENERATE CLIP E THUMBNAIL
-        # ═══════════════════════════════════════════════════════════════
-        auto_clip = data.get('auto_clip', True)  # Default: gerar automaticamente
-        clip_result = {'generated': False, 'clip_url': None, 'thumbnail_url': None}
-        
-        if auto_clip:
-            try:
-                print(f"[CREATE-EVENT] Iniciando geração automática de clip para evento {event_id}...")
-                
-                # Chamar internamente o regenerate_clips apenas para este evento
-                with app.test_request_context(
-                    f'/api/matches/{match_id}/regenerate-clips',
-                    method='POST',
-                    json={'eventIds': [event_id]}
-                ):
-                    # Executar regeneração apenas deste evento
-                    regen_session = get_session()
-                    try:
-                        # Buscar vídeos da partida
-                        videos = regen_session.query(Video).filter_by(match_id=match_id).all()
-                        if videos:
-                            # Mapear vídeos por tipo
-                            video_paths = {}
-                            for video in videos:
-                                video_type = video.video_type or 'full'
-                                file_url = video.file_url or ''
-                                
-                                local_path = None
-                                if '/api/storage/' in file_url:
-                                    parts = file_url.split('/api/storage/')[-1].split('/')
-                                    if len(parts) >= 3:
-                                        vid_match_id = parts[0]
-                                        subfolder = parts[1]
-                                        filename = '/'.join(parts[2:])
-                                        local_path = str(get_file_path(vid_match_id, subfolder, filename))
-                                elif file_url.startswith('/') or os.path.isabs(file_url):
-                                    local_path = file_url
-                                
-                                if local_path and os.path.exists(local_path):
-                                    video_paths[video_type] = local_path
-                            
-                            # Fallback: buscar na pasta
-                            if not video_paths:
-                                storage_videos_path = get_match_storage_path(match_id) / 'videos'
-                                if storage_videos_path.exists():
-                                    for f in storage_videos_path.iterdir():
-                                        if f.suffix.lower() in {'.mp4', '.mov', '.mkv', '.webm', '.avi'}:
-                                            video_paths['full'] = str(f)
-                                            break
-                            
-                            if video_paths:
-                                # Buscar evento atualizado
-                                fresh_event = regen_session.query(MatchEvent).filter_by(id=event_id).first()
-                                if fresh_event:
-                                    # Buscar times
-                                    match_obj = regen_session.query(Match).filter_by(id=match_id).first()
-                                    home_team = regen_session.query(Team).filter_by(id=match_obj.home_team_id).first() if match_obj else None
-                                    away_team = regen_session.query(Team).filter_by(id=match_obj.away_team_id).first() if match_obj else None
-                                    home_team_name = home_team.name if home_team else 'Time A'
-                                    away_team_name = away_team.name if away_team else 'Time B'
-                                    
-                                    # Escolher vídeo apropriado
-                                    event_half = fresh_event.match_half or 'first_half'
-                                    video_path = video_paths.get(event_half) or video_paths.get('full') or list(video_paths.values())[0]
-                                    
-                                    # Extrair clip
-                                    clip_url, thumb_url = extract_event_clips_auto(
-                                        [fresh_event],
-                                        video_path,
-                                        match_id,
-                                        home_team_name,
-                                        away_team_name
-                                    )
-                                    
-                                    # Atualizar evento com URLs
-                                    fresh_event = regen_session.merge(fresh_event)
-                                    if clip_url:
-                                        fresh_event.clip_url = clip_url[0] if isinstance(clip_url, list) and clip_url else clip_url
-                                        clip_result['clip_url'] = fresh_event.clip_url
-                                        clip_result['generated'] = True
-                                        print(f"[CREATE-EVENT] ✓ Clip gerado: {fresh_event.clip_url}")
-                                    
-                                    regen_session.commit()
-                                    event_dict = fresh_event.to_dict()
-                            else:
-                                print(f"[CREATE-EVENT] ⚠ Nenhum vídeo encontrado para gerar clip")
-                        else:
-                            print(f"[CREATE-EVENT] ⚠ Partida sem vídeos registrados")
-                    finally:
-                        regen_session.close()
-                        
-            except Exception as clip_error:
-                print(f"[CREATE-EVENT] ⚠ Erro ao gerar clip automaticamente: {clip_error}")
-                import traceback
-                traceback.print_exc()
-        
-        # Retornar evento criado (com ou sem clip)
-        event_dict['clip_generated'] = clip_result['generated']
-        return jsonify(event_dict), 201
-        
+        return jsonify(event.to_dict()), 201
     except Exception as e:
         session.rollback()
-        import traceback
-        traceback.print_exc()
         return jsonify({'error': str(e)}), 400
     finally:
-        try:
-            session.close()
-        except:
-            pass
+        session.close()
 
 
 @app.route('/api/events/<event_id>', methods=['GET'])

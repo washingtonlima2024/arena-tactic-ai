@@ -770,12 +770,7 @@ export default function Events() {
   };
   const getEventThumbnail = (eventId: string) => {
     const thumb = thumbnails.find(t => t.event_id === eventId);
-    if (thumb?.image_url) {
-      // Normalizar URL para usar API base atual (resolver localhost → produção)
-      const normalizedUrl = normalizeStorageUrl(thumb.image_url);
-      return { imageUrl: normalizedUrl };
-    }
-    return undefined;
+    return thumb ? { imageUrl: thumb.image_url } : undefined;
   };
 
   // Handle clip generation - supports multiple videos (first_half, second_half)

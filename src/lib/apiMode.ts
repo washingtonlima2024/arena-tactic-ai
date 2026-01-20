@@ -11,9 +11,6 @@
 // Servidor padrão para rede local
 const LOCAL_SERVER_URL = 'http://10.0.0.20:5000';
 
-// URL de produção padrão (subdomínio dedicado)
-export const PRODUCTION_API_URL = 'https://api.arenaplay.kakttus.com';
-
 export type ApiMode = 'local';
 
 export type ConnectionMethod = 'subdomain' | 'cloudflare' | 'ngrok' | 'local';
@@ -22,76 +19,6 @@ export interface ActiveConnection {
   method: ConnectionMethod;
   url: string;
   label: string;
-}
-
-/**
- * Retorna a URL padrão de produção
- */
-export const getDefaultProductionUrl = (): string => PRODUCTION_API_URL;
-
-/**
- * Verifica se está rodando no domínio de produção do Arena Play
- */
-export const isArenaPlayProduction = (): boolean => {
-  const hostname = window.location.hostname;
-  return hostname.includes('arenaplay') || hostname.includes('kakttus');
-};
-
-/**
- * Auto-configura a URL de produção se estiver no domínio correto e sem configuração
- * Retorna true se auto-configurou, false caso contrário
- */
-export const autoConfigureProductionUrl = (): boolean => {
-  const existingUrl = localStorage.getItem('arenaApiUrl')?.trim();
-  
-  // Se já tem URL configurada, não fazer nada
-  if (existingUrl) return false;
-  
-  // Se está no domínio de produção, auto-configurar
-  if (isArenaPlayProduction()) {
-    localStorage.setItem('arenaApiUrl', PRODUCTION_API_URL);
-    console.log('[ApiMode] Auto-configurada URL de produção:', PRODUCTION_API_URL);
-    // Limpar túneis legados automaticamente
-    cleanupLegacyTunnels();
-    return true;
-  }
-  
-  return false;
-};
-
-/**
- * Limpa túneis Cloudflare/Ngrok quando em produção com subdomínio dedicado
- * Isso evita que túneis expirados interfiram na conectividade
- */
-export const cleanupLegacyTunnels = (): void => {
-  if (isArenaPlayProduction()) {
-    const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
-    
-    // Se temos subdomínio dedicado, limpar túneis antigos
-    if (arenaApiUrl && arenaApiUrl.includes('api.arenaplay')) {
-      const hadCloudflare = localStorage.getItem('cloudflare_tunnel_url');
-      const hadNgrok = localStorage.getItem('ngrok_fallback_url');
-      
-      if (hadCloudflare || hadNgrok) {
-        localStorage.removeItem('cloudflare_tunnel_url');
-        localStorage.removeItem('ngrok_fallback_url');
-        console.log('[ApiMode] ✓ Túneis legados removidos em favor do subdomínio dedicado');
-      }
-    }
-  }
-};
-
-// Auto-executar configuração de produção no carregamento do módulo
-if (typeof window !== 'undefined') {
-  // Garantir URL correta em produção Arena Play
-  if (isArenaPlayProduction()) {
-    const currentUrl = localStorage.getItem('arenaApiUrl');
-    if (!currentUrl || !currentUrl.includes('api.arenaplay')) {
-      localStorage.setItem('arenaApiUrl', PRODUCTION_API_URL);
-      console.log('[ApiMode] 🔧 URL de produção configurada automaticamente');
-    }
-    cleanupLegacyTunnels();
-  }
 }
 
 /**
@@ -175,29 +102,9 @@ export const needsProductionApiUrl = (): boolean => {
 
 /**
  * Retorna a URL base da API.
- * Em produção do Arena Play: SEMPRE prioriza o subdomínio dedicado
- * Em outros ambientes: Subdomínio → Cloudflare → Ngrok → IP Local
+ * Prioridade: Subdomínio → Cloudflare → Ngrok → IP Local
  */
 export const getApiBase = (): string => {
-  // Em produção do Arena Play, SEMPRE priorizar o subdomínio dedicado
-  if (isArenaPlayProduction()) {
-    const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
-    
-    // Se já tem o subdomínio configurado, usar
-    if (arenaApiUrl) {
-      // Limpar túneis legados se ainda existirem
-      cleanupLegacyTunnels();
-      return arenaApiUrl;
-    }
-    
-    // Auto-configurar com URL de produção
-    localStorage.setItem('arenaApiUrl', PRODUCTION_API_URL);
-    console.log('[ApiMode] Auto-configurada URL de produção:', PRODUCTION_API_URL);
-    cleanupLegacyTunnels();
-    return PRODUCTION_API_URL;
-  }
-  
-  // Para ambientes não-produção, manter lógica de fallback
   // 1. Subdomínio dedicado (maior prioridade)
   const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
   if (arenaApiUrl) return arenaApiUrl;
@@ -215,7 +122,8 @@ export const getApiBase = (): string => {
     return LOCAL_SERVER_URL;
   }
   
-  // 5. Em produção genérica sem URL configurada - retornar vazio
+  // 5. Em produção sem URL configurada - retornar vazio
+  // O ServerStatusIndicator vai alertar o usuário
   return '';
 };
 

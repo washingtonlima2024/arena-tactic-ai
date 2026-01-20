@@ -1431,25 +1431,6 @@ export const apiClient = {
     }, 600000); // 10 minutos
   },
 
-  // ============== Ollama Test API ==============
-  /**
-   * Testa conexão real com servidor Ollama.
-   * Retorna status de conexão e lista de modelos disponíveis.
-   */
-  testOllama: (params: { url?: string; model?: string }) => 
-    apiRequest<{
-      connected: boolean;
-      url?: string;
-      error?: string;
-      availableModels?: string[];
-      requestedModel?: string;
-      modelLoaded?: boolean;
-      message?: string;
-    }>('/api/ollama/test', {
-      method: 'POST',
-      body: JSON.stringify(params)
-    }),
-
   // ============== Admin API (Local) ==============
   admin: {
     // Organizations
