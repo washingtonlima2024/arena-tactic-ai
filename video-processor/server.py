@@ -151,8 +151,8 @@ def load_api_keys_from_db():
         openai_enabled = _bool_from_setting(values.get('openai_enabled'), True)
         elevenlabs_enabled = _bool_from_setting(values.get('elevenlabs_enabled'), True)
         
-        # Local Whisper settings (FREE transcription)
-        local_whisper_enabled = _bool_from_setting(values.get('local_whisper_enabled'), False)
+        # Local Whisper settings (FREE transcription) - Default True para priorizar transcrição local
+        local_whisper_enabled = _bool_from_setting(values.get('local_whisper_enabled'), True)
         local_whisper_model = values.get('local_whisper_model') or 'base'
 
         # Prefer DB values, fallback to environment variables if DB is missing
@@ -174,10 +174,10 @@ def load_api_keys_from_db():
             ai_services.set_api_keys(lovable_key=lovable_key)
             keys_loaded.append('LOVABLE')
 
-        # Ollama optional settings
-        ollama_url = values.get('ollama_url')
-        ollama_model = values.get('ollama_model')
-        ollama_enabled = _bool_from_setting(values.get('ollama_enabled'), False)
+        # Ollama optional settings - Default True para usar modelo local
+        ollama_url = values.get('ollama_url') or 'http://localhost:11434'
+        ollama_model = values.get('ollama_model') or 'llama3.2'
+        ollama_enabled = _bool_from_setting(values.get('ollama_enabled'), True)
 
         if ollama_url or ollama_model or ollama_enabled:
             ai_services.set_api_keys(
@@ -1262,6 +1262,58 @@ def health_check():
         response_data['storage'] = get_storage_stats()
     
     return jsonify(response_data)
+
+
+@app.route('/api/ollama/test', methods=['POST'])
+def test_ollama_connection():
+    """
+    Testa conexão real com servidor Ollama.
+    Verifica se o servidor está acessível e lista modelos disponíveis.
+    """
+    data = request.json or {}
+    url = data.get('url', ai_services.OLLAMA_URL or 'http://localhost:11434')
+    model = data.get('model', ai_services.OLLAMA_MODEL or 'llama3.2')
+    
+    try:
+        # Testar lista de modelos
+        response = requests.get(f"{url}/api/tags", timeout=5)
+        
+        if not response.ok:
+            return jsonify({
+                'connected': False,
+                'error': f'HTTP {response.status_code}: {response.text[:100]}'
+            }), 200
+        
+        models_data = response.json()
+        available_models = [m.get('name', m.get('model', 'unknown')) for m in models_data.get('models', [])]
+        
+        # Verificar se o modelo solicitado está disponível
+        model_loaded = model in available_models or any(model in m for m in available_models)
+        
+        return jsonify({
+            'connected': True,
+            'url': url,
+            'availableModels': available_models,
+            'requestedModel': model,
+            'modelLoaded': model_loaded,
+            'message': f'Conectado! {len(available_models)} modelo(s) disponível(is)'
+        })
+        
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'connected': False,
+            'error': f'Servidor Ollama não acessível em {url}. Verifique se o Ollama está rodando.'
+        }), 200
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'connected': False,
+            'error': 'Timeout ao conectar com o servidor Ollama'
+        }), 200
+    except Exception as e:
+        return jsonify({
+            'connected': False,
+            'error': str(e)
+        }), 200
 
 
 @app.route('/api/detect-ngrok', methods=['GET'])
