@@ -173,16 +173,16 @@ export function useEventHeatZones(
       });
     }
     
-    // Normalize heat zones
+    // Normalize heat zones with minimum base intensity for visibility
     const heatZones = zones
       .map(z => ({
         x: z.x,
         y: z.y,
-        intensity: Math.min(1, z.intensity * (1 + Math.log10(z.count + 1) * 0.3)),
+        intensity: Math.min(1, z.intensity * (1 + Math.log10(z.count + 1) * 0.3) + 0.25),
         team: z.team
       }))
       .sort((a, b) => b.intensity - a.intensity)
-      .slice(0, 15);
+      .slice(0, 20);
     
     // Generate players with intensities based on events
     const calculatePlayerIntensity = (

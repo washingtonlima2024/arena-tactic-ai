@@ -166,7 +166,13 @@ function metersTo3D(x: number, y: number): [number, number, number] {
 }
 
 function normalizedTo3D(x: number, y: number): [number, number, number] {
-  return [(x / 100 - 0.5) * 10, 0, (y / 100 - 0.5) * 6];
+  const halfLength = FIELD_CALCULATIONS.halfLength;  // 52.5m
+  const halfWidth = FIELD_CALCULATIONS.halfWidth;    // 34m
+  return [
+    (x / 100 - 0.5) * (halfLength * 2),  // Maps 0-100 to -52.5 to +52.5
+    0,
+    (y / 100 - 0.5) * (halfWidth * 2)    // Maps 0-100 to -34 to +34
+  ];
 }
 
 // ============= Volumetric Heat Cloud =============
@@ -216,10 +222,13 @@ function VolumetricHeatCloud({
   const outerColor = isHot ? "#ff9933" : "#d0d0ff";
   const glowColor = isHot ? "#ff4400" : "#aaaaff";
 
+  // Scale factor for heat zones to be visible on 105x68m field
+  const heatScale = 8;
+  
   return (
     <group ref={groupRef} position={position}>
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-        <circleGeometry args={[0.9 * intensity, 32]} />
+        <circleGeometry args={[0.9 * intensity * heatScale, 32]} />
         <meshBasicMaterial 
           color={glowColor}
           transparent
@@ -230,8 +239,8 @@ function VolumetricHeatCloud({
       </mesh>
 
       <group ref={cloudsRef}>
-        <mesh position={[0, 0.15 * intensity, 0]}>
-          <sphereGeometry args={[0.25 * intensity, 16, 16]} />
+        <mesh position={[0, 0.15 * intensity * heatScale, 0]}>
+          <sphereGeometry args={[0.25 * intensity * heatScale, 16, 16]} />
           <meshBasicMaterial 
             color={coreColor}
             transparent
@@ -240,8 +249,8 @@ function VolumetricHeatCloud({
             depthWrite={false}
           />
         </mesh>
-        <mesh position={[0, 0.12 * intensity, 0]}>
-          <sphereGeometry args={[0.55 * intensity, 10, 10]} />
+        <mesh position={[0, 0.12 * intensity * heatScale, 0]}>
+          <sphereGeometry args={[0.55 * intensity * heatScale, 10, 10]} />
           <meshBasicMaterial 
             color={outerColor}
             transparent
@@ -273,8 +282,8 @@ function VolumetricHeatCloud({
       </points>
 
       {isHot && (
-        <mesh position={[0, 0.3 * intensity, 0]}>
-          <cylinderGeometry args={[0.02, 0.2 * intensity, 0.5 * intensity, 8]} />
+        <mesh position={[0, 0.3 * intensity * heatScale, 0]}>
+          <cylinderGeometry args={[0.02 * heatScale, 0.2 * intensity * heatScale, 0.5 * intensity * heatScale, 8]} />
           <meshBasicMaterial 
             color="#ff6600"
             transparent
@@ -648,7 +657,7 @@ function HeatmapScene({
           team="home"
           teamColor={homeColor}
           intensity={player.intensity || 0.7}
-          scale={0.02}
+          scale={0.048}
           showNumber={true}
           facingDirection="right"
         />
@@ -663,7 +672,7 @@ function HeatmapScene({
           team="away"
           teamColor={awayColor}
           intensity={player.intensity || 0.7}
-          scale={0.02}
+          scale={0.048}
           showNumber={true}
           facingDirection="left"
         />
@@ -671,10 +680,10 @@ function HeatmapScene({
 
       {/* Referee */}
       <SoccerPlayerModel
-        position={[1.5, 0, 0]}
+        position={[15, 0, 0]}
         team="referee"
         teamColor="#ffcc00"
-        scale={0.02}
+        scale={0.048}
         showNumber={false}
         facingDirection="up"
       />
