@@ -20,6 +20,7 @@ import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { useSidebarContext } from '@/contexts/SidebarContext';
 import { useAuth } from '@/hooks/useAuth';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { ServerStatusIndicator } from './ServerStatusIndicator';
 import arenaIcon from '@/assets/arena-play-icon.png';
 import arenaWordmark from '@/assets/arena-play-wordmark.png';
@@ -51,7 +52,11 @@ export function Sidebar() {
   const { isAdmin } = useAuth();
   const { collapsed, toggle } = useSidebarContext();
   const [searchParams] = useSearchParams();
+  const isMobile = useIsMobile();
   const currentMatchId = searchParams.get('match') || sessionStorage.getItem('arena_selected_match');
+
+  // Hide sidebar completely on mobile - use MobileNav instead
+  if (isMobile) return null;
 
   // Helper to build path with match parameter for context pages
   const getNavPath = (basePath: string) => {

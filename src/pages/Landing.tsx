@@ -213,17 +213,17 @@ export default function Landing() {
       {/* Animated Gradient Overlay */}
       <div className="absolute inset-0 bg-gradient-to-b from-background/40 via-background/60 to-background" />
       
-      {/* Spotlight Effect */}
+      {/* Spotlight Effect - smaller on mobile */}
       <div 
-        className="absolute top-0 left-1/2 -translate-x-1/2 w-[1200px] h-[600px] rounded-full opacity-30"
+        className="absolute top-0 left-1/2 -translate-x-1/2 w-[600px] md:w-[1200px] h-[300px] md:h-[600px] rounded-full opacity-30"
         style={{
           background: 'radial-gradient(ellipse at center, hsl(var(--primary) / 0.3) 0%, transparent 70%)',
           animation: 'pulse-glow 4s ease-in-out infinite',
         }}
       />
 
-      {/* Floating Particles */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+      {/* Floating Particles - fewer on mobile */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none hidden md:block">
         <FloatingParticle delay={0} size={8} left="10%" duration={6} />
         <FloatingParticle delay={1} size={6} left="25%" duration={8} />
         <FloatingParticle delay={2} size={10} left="40%" duration={7} />
@@ -233,50 +233,50 @@ export default function Landing() {
         <FloatingParticle delay={3} size={7} left="95%" duration={7} />
       </div>
       
-      {/* Header */}
-      <header className="relative z-10 flex items-center justify-between px-6 py-4 border-b border-border/20 backdrop-blur-sm bg-background/10">
-        <div className="flex items-center gap-3">
+      {/* Header - responsive */}
+      <header className="relative z-10 flex items-center justify-between px-4 md:px-6 py-3 md:py-4 border-b border-border/20 backdrop-blur-sm bg-background/10 safe-area-top">
+        <div className="flex items-center gap-2 md:gap-3">
           <img 
             src={logoKakttus} 
             alt="Kakttus Solutions" 
-            className="h-10 w-10 object-contain animate-fade-in"
+            className="h-8 w-8 md:h-10 md:w-10 object-contain animate-fade-in"
           />
           <div className="animate-fade-in" style={{ animationDelay: '0.1s' }}>
-            <h1 className="font-semibold text-foreground">Kakttus Solutions</h1>
-            <p className="text-xs text-muted-foreground">Tecnologia com Inteligência</p>
+            <h1 className="font-semibold text-foreground text-sm md:text-base">Kakttus Solutions</h1>
+            <p className="text-[10px] md:text-xs text-muted-foreground hidden sm:block">Tecnologia com Inteligência</p>
           </div>
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="relative z-10 flex flex-col lg:flex-row items-center justify-center gap-12 lg:gap-24 px-6 py-12 min-h-[calc(100vh-80px)]">
+      {/* Main Content - responsive */}
+      <main className="relative z-10 flex flex-col lg:flex-row items-center justify-center gap-8 lg:gap-24 px-4 md:px-6 py-8 md:py-12 min-h-[calc(100vh-80px)]">
         
         {/* Left Side - Branding & Info */}
-        <div className="flex flex-col items-center lg:items-start text-center lg:text-left max-w-xl">
+        <div className="flex flex-col items-center lg:items-start text-center lg:text-left max-w-xl w-full">
           
-          {/* Logo Section */}
-          <div className="flex items-center gap-4 mb-6 animate-fade-up">
+          {/* Logo Section - responsive */}
+          <div className="flex items-center gap-3 md:gap-4 mb-4 md:mb-6 animate-fade-up">
             <div className="relative">
               <div className="absolute inset-0 bg-primary/30 blur-2xl rounded-full animate-pulse-glow" />
               <img 
                 src={arenaIcon} 
                 alt="Arena Play" 
-                className="h-20 w-20 md:h-24 md:w-24 object-contain relative z-10"
+                className="h-14 w-14 md:h-20 lg:h-24 md:w-20 lg:w-24 object-contain relative z-10"
               />
             </div>
             <img 
               src={arenaWordmark} 
               alt="Arena Play" 
-              className="h-14 md:h-16 object-contain"
+              className="h-10 md:h-14 lg:h-16 object-contain"
             />
           </div>
 
-          {/* Animated Soccer Ball */}
-          <div className="relative w-full flex justify-center lg:justify-start mb-8">
+          {/* Animated Soccer Ball - smaller on mobile */}
+          <div className="relative w-full flex justify-center lg:justify-start mb-6 md:mb-8">
             <div className="relative">
               {/* Glow effect behind ball */}
               <div 
-                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-40 h-40 bg-primary/20 blur-3xl rounded-full animate-pulse-glow"
+                className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-28 md:w-40 h-28 md:h-40 bg-primary/20 blur-3xl rounded-full animate-pulse-glow"
               />
               
               {/* Soccer Ball */}
@@ -284,7 +284,7 @@ export default function Landing() {
                 <img 
                   src={soccerBall} 
                   alt="Soccer Ball" 
-                  className="w-32 h-32 md:w-40 md:h-40 object-contain drop-shadow-2xl"
+                  className="w-24 h-24 md:w-32 lg:w-40 md:h-32 lg:h-40 object-contain drop-shadow-2xl"
                   style={{
                     filter: 'drop-shadow(0 0 30px hsl(var(--primary) / 0.5))',
                     animation: 'ball-spin 8s linear infinite',
@@ -294,15 +294,15 @@ export default function Landing() {
               
               {/* Shadow */}
               <div 
-                className="absolute bottom-0 left-1/2 w-24 h-3 bg-black/30 blur-md rounded-full"
+                className="absolute bottom-0 left-1/2 w-20 md:w-24 h-2 md:h-3 bg-black/30 blur-md rounded-full"
                 style={{ animation: 'ball-shadow 3s ease-in-out infinite' }}
               />
             </div>
           </div>
 
-          {/* Headline */}
+          {/* Headline - responsive typography */}
           <h2 
-            className="text-4xl md:text-5xl lg:text-6xl font-display font-bold mb-4 animate-fade-up"
+            className="text-3xl md:text-4xl lg:text-5xl xl:text-6xl font-display font-bold mb-3 md:mb-4 animate-fade-up"
             style={{ animationDelay: '0.2s' }}
           >
             <span className="bg-gradient-to-r from-primary via-arena-teal to-primary bg-clip-text text-transparent bg-[length:200%_100%] animate-shimmer">
@@ -313,25 +313,25 @@ export default function Landing() {
           </h2>
 
           <p 
-            className="text-lg text-muted-foreground mb-8 max-w-md animate-fade-up"
+            className="text-base md:text-lg text-muted-foreground mb-6 md:mb-8 max-w-md animate-fade-up px-2 md:px-0"
             style={{ animationDelay: '0.3s' }}
           >
             Revolucione seu futebol com Inteligência Artificial. 
             Análise em tempo real, detecção de eventos e geração automática de highlights.
           </p>
 
-          {/* Stats Grid */}
+          {/* Stats Grid - always 2 columns */}
           <div 
-            className="grid grid-cols-2 md:grid-cols-4 gap-4 w-full animate-fade-up"
+            className="grid grid-cols-2 gap-2 md:gap-4 w-full animate-fade-up"
             style={{ animationDelay: '0.4s' }}
           >
             {stats.map((stat, index) => (
               <div 
                 key={stat.label}
-                className="glass rounded-xl p-4 text-center border border-primary/20 hover:border-primary/40 transition-all duration-300 hover:scale-105 group"
+                className="glass rounded-lg md:rounded-xl p-3 md:p-4 text-center border border-primary/20 hover:border-primary/40 transition-all duration-300 active:scale-95 md:hover:scale-105 group touch-manipulation"
               >
-                <stat.icon className="w-5 h-5 mx-auto mb-2 text-primary group-hover:scale-110 transition-transform" />
-                <div className="text-2xl md:text-3xl font-bold text-primary">
+                <stat.icon className="w-4 h-4 md:w-5 md:h-5 mx-auto mb-1.5 md:mb-2 text-primary group-hover:scale-110 transition-transform" />
+                <div className="text-xl md:text-2xl lg:text-3xl font-bold text-primary">
                   {showStats ? (
                     <AnimatedCounter 
                       value={stat.value} 
@@ -340,7 +340,7 @@ export default function Landing() {
                     />
                   ) : '0'}
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">{stat.label}</div>
+                <div className="text-[10px] md:text-xs text-muted-foreground mt-0.5 md:mt-1 leading-tight">{stat.label}</div>
               </div>
             ))}
           </div>
@@ -348,32 +348,32 @@ export default function Landing() {
 
         {/* Right Side - Login Form */}
         <div 
-          className="w-full max-w-md animate-fade-up"
+          className="w-full max-w-md animate-fade-up px-2 md:px-0"
           style={{ animationDelay: '0.5s' }}
         >
-          {/* Login Card - Glassmorphism */}
-          <div className="backdrop-blur-xl bg-card/30 border border-primary/20 rounded-2xl p-8 shadow-glow relative overflow-hidden">
+          {/* Login Card - Glassmorphism - responsive padding */}
+          <div className="backdrop-blur-xl bg-card/30 border border-primary/20 rounded-xl md:rounded-2xl p-5 md:p-8 shadow-glow relative overflow-hidden">
             {/* Card glow effect */}
-            <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-64 h-32 bg-primary/20 blur-3xl rounded-full" />
+            <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 w-48 md:w-64 h-24 md:h-32 bg-primary/20 blur-3xl rounded-full" />
             
             <div className="relative z-10">
-              {/* Header */}
-              <div className="text-center mb-8">
-                <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-primary/20 mb-4 animate-pulse-glow">
-                  <Play className="w-8 h-8 text-primary" />
+              {/* Header - responsive */}
+              <div className="text-center mb-6 md:mb-8">
+                <div className="inline-flex items-center justify-center w-12 h-12 md:w-16 md:h-16 rounded-full bg-primary/20 mb-3 md:mb-4 animate-pulse-glow">
+                  <Play className="w-6 h-6 md:w-8 md:h-8 text-primary" />
                 </div>
-                <h3 className="text-2xl font-display font-bold text-foreground mb-2">
+                <h3 className="text-xl md:text-2xl font-display font-bold text-foreground mb-1 md:mb-2">
                   Acesse o Sistema
                 </h3>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-xs md:text-sm text-muted-foreground">
                   Entre com suas credenciais para começar
                 </p>
               </div>
 
-              {/* Form */}
-              <form onSubmit={handleLogin} className="space-y-5">
-                <div className="space-y-2">
-                  <Label htmlFor="email" className="text-foreground flex items-center gap-2">
+              {/* Form - touch-friendly inputs */}
+              <form onSubmit={handleLogin} className="space-y-4 md:space-y-5">
+                <div className="space-y-1.5 md:space-y-2">
+                  <Label htmlFor="email" className="text-foreground flex items-center gap-2 text-sm">
                     <Mail className="w-4 h-4 text-primary" />
                     Email
                   </Label>
@@ -383,13 +383,13 @@ export default function Landing() {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     placeholder="seu@email.com"
-                    className="bg-background/50 border-primary/30 focus:border-primary focus:ring-2 focus:ring-primary/20 placeholder:text-muted-foreground/50"
+                    className="bg-background/50 border-primary/30 focus:border-primary focus:ring-2 focus:ring-primary/20 placeholder:text-muted-foreground/50 h-11 md:h-10 text-base"
                     required
                   />
                 </div>
 
-                <div className="space-y-2">
-                  <Label htmlFor="password" className="text-foreground flex items-center gap-2">
+                <div className="space-y-1.5 md:space-y-2">
+                  <Label htmlFor="password" className="text-foreground flex items-center gap-2 text-sm">
                     <Lock className="w-4 h-4 text-primary" />
                     Senha
                   </Label>
@@ -399,7 +399,7 @@ export default function Landing() {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="bg-background/50 border-primary/30 focus:border-primary focus:ring-2 focus:ring-primary/20 placeholder:text-muted-foreground/50"
+                    className="bg-background/50 border-primary/30 focus:border-primary focus:ring-2 focus:ring-primary/20 placeholder:text-muted-foreground/50 h-11 md:h-10 text-base"
                     required
                   />
                 </div>
@@ -407,7 +407,7 @@ export default function Landing() {
                 <Button
                   type="submit"
                   disabled={isLoading}
-                  className="w-full h-12 text-lg font-semibold bg-gradient-to-r from-primary to-arena-teal hover:from-primary/90 hover:to-arena-teal/90 text-primary-foreground shadow-glow group"
+                  className="w-full h-11 md:h-12 text-base md:text-lg font-semibold bg-gradient-to-r from-primary to-arena-teal hover:from-primary/90 hover:to-arena-teal/90 text-primary-foreground shadow-glow group touch-manipulation"
                 >
                   {isLoading ? (
                     <Loader2 className="w-5 h-5 animate-spin" />
@@ -421,7 +421,7 @@ export default function Landing() {
               </form>
 
               {/* Divider */}
-              <div className="flex items-center gap-4 my-6">
+              <div className="flex items-center gap-4 my-4 md:my-6">
                 <div className="flex-1 h-px bg-border/50" />
                 <span className="text-xs text-muted-foreground">ou</span>
                 <div className="flex-1 h-px bg-border/50" />
@@ -431,7 +431,7 @@ export default function Landing() {
               <Button
                 type="button"
                 variant="outline"
-                className="w-full border-primary/30 hover:bg-primary/10 hover:border-primary/50"
+                className="w-full h-10 md:h-11 border-primary/30 hover:bg-primary/10 hover:border-primary/50 touch-manipulation"
                 onClick={() => navigate('/auth')}
               >
                 <Sparkles className="w-4 h-4 mr-2 text-primary" />
@@ -439,7 +439,7 @@ export default function Landing() {
               </Button>
 
               {/* Demo credentials hint */}
-              <p className="text-xs text-center text-muted-foreground mt-4">
+              <p className="text-[10px] md:text-xs text-center text-muted-foreground mt-3 md:mt-4">
                 Demonstração: credenciais já preenchidas
               </p>
             </div>

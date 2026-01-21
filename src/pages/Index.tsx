@@ -282,36 +282,36 @@ export default function Dashboard() {
 
   return (
     <AppLayout key={currentMatchId}>
-      <div className="space-y-8">
-        {/* Hero Section */}
-        <section className="relative -mx-6 -mt-6 overflow-hidden">
+      <div className="space-y-6 md:space-y-8">
+        {/* Hero Section - responsive */}
+        <section className="relative -mx-4 md:-mx-6 -mt-4 md:-mt-6 overflow-hidden">
           <div 
             className="absolute inset-0 bg-cover bg-center"
             style={{ backgroundImage: `url(${heroBg})` }}
           />
           <div className="absolute inset-0 bg-gradient-to-r from-background via-background/80 to-transparent" />
-          <div className="relative px-6 py-16">
-            <Badge variant="arena" className="mb-4">
+          <div className="relative px-4 md:px-6 py-8 md:py-16">
+            <Badge variant="arena" className="mb-3 md:mb-4">
               <Zap className="mr-1 h-3 w-3" />
               Powered by AI
             </Badge>
             <img 
               src={arenaWordmark} 
               alt="Arena Play" 
-              className="h-10 md:h-12 object-contain"
+              className="h-8 md:h-10 lg:h-12 object-contain"
             />
-            <p className="mt-2 max-w-xl text-lg text-muted-foreground">
+            <p className="mt-2 max-w-xl text-sm md:text-lg text-muted-foreground">
               A Inteligência Artificial que Transforma Dados em Vantagem Competitiva. 
               Análise tática automatizada e insights preditivos.
             </p>
-            <div className="mt-6 flex gap-3">
-              <Button variant="arena" size="lg" asChild>
+            <div className="mt-4 md:mt-6 flex flex-col sm:flex-row gap-2 md:gap-3">
+              <Button variant="arena" size="default" className="w-full sm:w-auto" asChild>
                 <Link to="/upload">
-                  <Video className="mr-2 h-5 w-5" />
+                  <Video className="mr-2 h-4 w-4 md:h-5 md:w-5" />
                   Importar Partida
                 </Link>
               </Button>
-              <Button variant="arena-outline" size="lg" asChild>
+              <Button variant="arena-outline" size="default" className="w-full sm:w-auto" asChild>
                 <Link to="/matches">
                   Ver Análises
                 </Link>
@@ -320,8 +320,8 @@ export default function Dashboard() {
           </div>
         </section>
 
-        {/* Stats Grid */}
-        <section className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+        {/* Stats Grid - responsive */}
+        <section className="grid gap-3 md:gap-4 grid-cols-2 lg:grid-cols-4">
           <StatCard
             title="Partidas Analisadas"
             value={globalStats?.analyzedMatches || 0}
@@ -348,13 +348,13 @@ export default function Dashboard() {
           />
         </section>
 
-        {/* Main Content Grid */}
-        <div className="grid gap-6 lg:grid-cols-3">
+        {/* Main Content Grid - responsive */}
+        <div className="grid gap-4 md:gap-6 lg:grid-cols-3">
           {/* Recent Matches */}
-          <div className="lg:col-span-2 space-y-6">
+          <div className="lg:col-span-2 space-y-4 md:space-y-6">
             <div className="flex items-center justify-between">
-              <h2 className="font-display text-2xl font-semibold">Partidas Recentes</h2>
-              <Button variant="ghost" asChild>
+              <h2 className="font-display text-xl md:text-2xl font-semibold">Partidas Recentes</h2>
+              <Button variant="ghost" size="sm" asChild>
                 <Link to="/matches">Ver todas</Link>
               </Button>
             </div>
@@ -364,7 +364,7 @@ export default function Dashboard() {
                 <Loader2 className="h-8 w-8 animate-spin text-primary" />
               </div>
             ) : realMatches.length > 0 ? (
-              <div className="grid gap-4 md:grid-cols-2">
+              <div className="grid gap-3 md:gap-4 grid-cols-1 sm:grid-cols-2">
                 {realMatches.slice(0, 4).map(match => (
                   <MatchCard 
                     key={match.id} 
@@ -400,10 +400,10 @@ export default function Dashboard() {
               </div>
             ) : (
               <Card variant="glass">
-                <CardContent className="flex flex-col items-center justify-center py-12">
-                  <Video className="h-12 w-12 text-muted-foreground mb-4" />
-                  <h3 className="text-lg font-semibold mb-2">Nenhuma partida importada</h3>
-                  <p className="text-muted-foreground text-center mb-4">
+                <CardContent className="flex flex-col items-center justify-center py-8 md:py-12">
+                  <Video className="h-10 w-10 md:h-12 md:w-12 text-muted-foreground mb-3 md:mb-4" />
+                  <h3 className="text-base md:text-lg font-semibold mb-2">Nenhuma partida importada</h3>
+                  <p className="text-sm text-muted-foreground text-center mb-4">
                     Importe seu primeiro vídeo para começar a análise
                   </p>
                   <Button variant="arena" asChild>

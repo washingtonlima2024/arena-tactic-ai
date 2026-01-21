@@ -1,7 +1,10 @@
-import { ReactNode } from 'react';
+import { ReactNode, useState } from 'react';
 import { Sidebar } from './Sidebar';
 import { Header } from './Header';
+import { BottomNav } from './BottomNav';
+import { MobileNav } from './MobileNav';
 import { useSidebarContext } from '@/contexts/SidebarContext';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { cn } from '@/lib/utils';
 
 interface AppLayoutProps {
@@ -10,21 +13,34 @@ interface AppLayoutProps {
 
 export function AppLayout({ children }: AppLayoutProps) {
   const { collapsed } = useSidebarContext();
+  const isMobile = useIsMobile();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-background">
-      <Sidebar />
+      {/* Desktop Sidebar */}
+      {!isMobile && <Sidebar />}
+      
+      {/* Mobile Navigation Sheet */}
+      <MobileNav open={mobileNavOpen} onOpenChange={setMobileNavOpen} />
+      
       <div 
         className={cn(
           "flex min-h-screen flex-col transition-all duration-300",
-          collapsed ? "ml-20" : "ml-64"
+          !isMobile && (collapsed ? "ml-20" : "ml-64")
         )}
       >
-        <Header />
-        <main className="flex-1 p-6">
+        <Header onMenuClick={() => setMobileNavOpen(true)} />
+        <main className={cn(
+          "flex-1 p-4 md:p-6",
+          isMobile && "pb-20" // Space for bottom nav
+        )}>
           {children}
         </main>
       </div>
+      
+      {/* Mobile Bottom Navigation */}
+      <BottomNav onMenuClick={() => setMobileNavOpen(true)} />
     </div>
   );
 }
