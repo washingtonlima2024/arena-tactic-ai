@@ -31,6 +31,7 @@ interface SoccerPlayerModelProps {
   showNumber?: boolean;
   facingDirection?: 'left' | 'right' | 'up' | 'down';
   uniformColors?: UniformColors;
+  hasAudio?: boolean;
 }
 
 // Default uniform colors for each team type
@@ -103,7 +104,8 @@ function SoccerPlayerModelInner({
   isDraggable = false,
   showNumber = true,
   facingDirection = 'right',
-  uniformColors
+  uniformColors,
+  hasAudio = false
 }: SoccerPlayerModelProps) {
   const groupRef = useRef<THREE.Group>(null);
   const modelRef = useRef<THREE.Group>(null);
@@ -304,12 +306,13 @@ function SoccerPlayerModelInner({
             userSelect: 'none',
           }}
         >
-          <div className={`px-2 py-0.5 rounded-full text-xs font-bold shadow-lg whitespace-nowrap ${
+          <div className={`px-2 py-0.5 rounded-full text-xs font-bold shadow-lg whitespace-nowrap flex items-center gap-1 ${
             isScorer 
               ? 'bg-yellow-500 text-black' 
               : 'bg-white/90 text-black'
           }`}>
             {isScorer ? '⚽ ' : ''}{name}
+            {hasAudio && <span className="text-[10px]">🔊</span>}
           </div>
         </Html>
       )}
@@ -336,6 +339,22 @@ function SoccerPlayerModelInner({
         </Html>
       )}
       
+      {/* Audio indicator for scorer (fallback if no name displayed) */}
+      {!name && isScorer && hasAudio && (
+        <Html
+          position={[0, 0.85, 0]}
+          center
+          style={{
+            pointerEvents: 'none',
+            userSelect: 'none',
+          }}
+        >
+          <div className="px-2 py-0.5 rounded-full text-xs font-bold shadow-lg whitespace-nowrap bg-yellow-500 text-black flex items-center gap-1">
+            ⚽ 🔊
+          </div>
+        </Html>
+      )}
+      
       {/* Hover tooltip */}
       {(hovered || isDragging) && isDraggable && (
         <Html
@@ -346,6 +365,7 @@ function SoccerPlayerModelInner({
             fontSize: '10px',
             background: 'rgba(0,0,0,0.8)',
             padding: '4px 8px',
+            marginTop: hasAudio || isScorer ? '35px' : '0',
             borderRadius: '4px',
             whiteSpace: 'nowrap',
             pointerEvents: 'none',
