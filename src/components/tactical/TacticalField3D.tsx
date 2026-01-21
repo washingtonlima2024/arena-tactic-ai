@@ -797,6 +797,23 @@ export function TacticalField3D({
     return () => clearInterval(interval);
   }, [isPlaying, totalFrames, playbackSpeed, mode]);
 
+  // Sync audio with animation play/pause
+  useEffect(() => {
+    if (!audioRef.current || !goalAudio?.audioUrl) return;
+    
+    if (isPlaying && mode === 'animation') {
+      // Start audio when animation plays
+      audioRef.current.play().catch(() => {
+        // Ignore autoplay errors
+      });
+      setIsAudioPlaying(true);
+    } else {
+      // Pause audio when animation pauses
+      audioRef.current.pause();
+      setIsAudioPlaying(false);
+    }
+  }, [isPlaying, mode, goalAudio?.audioUrl]);
+
   // Reset frame when goal changes
   useEffect(() => {
     setCurrentFrame(0);
@@ -811,6 +828,10 @@ export function TacticalField3D({
   const handlePlayPause = useCallback(() => {
     if (currentFrame >= totalFrames - 1) {
       setCurrentFrame(0);
+      // Reset audio too when restarting
+      if (audioRef.current) {
+        audioRef.current.currentTime = 0;
+      }
     }
     setIsPlaying(!isPlaying);
   }, [isPlaying, currentFrame, totalFrames]);
@@ -827,7 +848,12 @@ export function TacticalField3D({
 
   const handleSeek = useCallback((value: number[]) => {
     setCurrentFrame(value[0]);
-  }, []);
+    // Sync audio position proportionally
+    if (audioRef.current && goalAudio?.duration && totalFrames > 0) {
+      const proportion = value[0] / totalFrames;
+      audioRef.current.currentTime = proportion * goalAudio.duration;
+    }
+  }, [goalAudio?.duration, totalFrames]);
 
   const handlePlayAudio = useCallback(() => {
     if (!audioRef.current) return;
