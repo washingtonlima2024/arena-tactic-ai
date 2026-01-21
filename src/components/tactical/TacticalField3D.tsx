@@ -10,6 +10,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { WebGLWrapper } from '@/components/ui/WebGLWrapper';
 import { OfficialFootballField } from '@/components/tactical/OfficialFootballField';
 import { SoccerPlayerModel } from '@/components/tactical/SoccerPlayerModel';
+import { PlayerNameLabel3D } from '@/components/tactical/PlayerNameLabel3D';
+import { PrePlayAnnouncement } from '@/components/tactical/PrePlayAnnouncement';
 import { useIsMobile } from '@/hooks/use-mobile';
 import { 
   Play, 
@@ -691,7 +693,11 @@ function AnimationScene({
   scorerName,
   assisterName,
   scoringTeam,
-  hasAudio
+  hasAudio,
+  showPreAnnouncement = false,
+  goalMinute = 0,
+  teamName,
+  onAnnouncementComplete
 }: {
   frame: PlayFrame;
   homeTeamColor: string;
@@ -703,6 +709,10 @@ function AnimationScene({
   assisterName?: string | null;
   scoringTeam?: 'home' | 'away';
   hasAudio?: boolean;
+  showPreAnnouncement?: boolean;
+  goalMinute?: number;
+  teamName?: string;
+  onAnnouncementComplete?: () => void;
 }) {
   const ballPos = metersTo3D(frame.ball.x, frame.ball.y);
   
@@ -723,9 +733,34 @@ function AnimationScene({
       closestPlayerIdx = idx;
     }
   });
+
+  // Find second closest for assister
+  let secondClosestPlayerIdx = -1;
+  let secondClosestDistance = Infinity;
+  scoringTeamPlayers.forEach((player, idx) => {
+    if (idx === closestPlayerIdx) return;
+    const dx = player.x - frame.ball.x;
+    const dy = player.y - frame.ball.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    if (distance < secondClosestDistance) {
+      secondClosestDistance = distance;
+      secondClosestPlayerIdx = idx;
+    }
+  });
   
   return (
     <FIFAFieldScene showGoalCelebration={showGoalCelebration} goalPosition={goalPosition}>
+      {/* Pre-play announcement overlay */}
+      {showPreAnnouncement && (
+        <PrePlayAnnouncement
+          goalMinute={goalMinute}
+          scorerName={scorerName}
+          teamName={teamName}
+          onComplete={onAnnouncementComplete || (() => {})}
+          isActive={showPreAnnouncement}
+        />
+      )}
+
       {frame.players.map((player, idx) => {
         const pos = metersTo3D(player.x, player.y);
         
@@ -735,24 +770,35 @@ function AnimationScene({
         
         // Scorer is the player closest to the ball on the scoring team
         const isScorer = scorerName && isOnScoringTeam && scoringTeamIdx === closestPlayerIdx;
-        // Assister is the second closest or idx 1
-        const isAssister = assisterName && isOnScoringTeam && scoringTeamIdx === 1 && !isScorer;
+        // Assister is the second closest
+        const isAssister = assisterName && isOnScoringTeam && scoringTeamIdx === secondClosestPlayerIdx && !isScorer;
         const playerName = isScorer ? scorerName : (isAssister ? assisterName : null);
         
         return (
-          <SoccerPlayerModel
-            key={player.id}
-            position={pos}
-            team={player.team}
-            number={player.number}
-            name={playerName}
-            isScorer={!!isScorer}
-            hasAudio={!!isScorer && !!hasAudio}
-            teamColor={player.team === 'home' ? homeTeamColor : awayTeamColor}
-            isMoving={true}
-            showNumber={true}
-            scale={playerScale}
-          />
+          <React.Fragment key={player.id}>
+            <SoccerPlayerModel
+              position={pos}
+              team={player.team}
+              number={player.number}
+              isScorer={!!isScorer}
+              hasAudio={!!isScorer && !!hasAudio}
+              teamColor={player.team === 'home' ? homeTeamColor : awayTeamColor}
+              isMoving={true}
+              showNumber={!playerName}
+              scale={playerScale}
+            />
+            
+            {/* Floating name label with arrow - only for scorer/assister */}
+            {playerName && (
+              <PlayerNameLabel3D
+                position={pos}
+                name={playerName}
+                isScorer={!!isScorer}
+                hasAudio={!!isScorer && !!hasAudio}
+                teamColor={player.team === 'home' ? homeTeamColor : awayTeamColor}
+              />
+            )}
+          </React.Fragment>
         );
       })}
       
@@ -786,6 +832,7 @@ export function TacticalField3D({
   const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [showPreAnnouncement, setShowPreAnnouncement] = useState(false);
   
   // Audio state
   const audioRef = useRef<HTMLAudioElement>(null);
@@ -869,6 +916,7 @@ export function TacticalField3D({
     setCurrentFrame(0);
     setIsPlaying(false);
     setIsAudioPlaying(false);
+    setShowPreAnnouncement(false);
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -883,13 +931,25 @@ export function TacticalField3D({
         audioRef.current.currentTime = 0;
       }
     }
-    setIsPlaying(!isPlaying);
+    
+    // If starting from beginning, show announcement first
+    if (currentFrame === 0 && !isPlaying) {
+      setShowPreAnnouncement(true);
+    } else {
+      setIsPlaying(!isPlaying);
+    }
   }, [isPlaying, currentFrame, totalFrames]);
+
+  const handleAnnouncementComplete = useCallback(() => {
+    setShowPreAnnouncement(false);
+    setIsPlaying(true);
+  }, []);
 
   const handleReset = useCallback(() => {
     setCurrentFrame(0);
     setIsPlaying(false);
     setIsAudioPlaying(false);
+    setShowPreAnnouncement(false);
     if (audioRef.current) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
@@ -1064,6 +1124,10 @@ export function TacticalField3D({
                 assisterName={playerNames.assister}
                 scoringTeam={selectedGoal?.team}
                 hasAudio={!!goalAudio?.audioUrl}
+                showPreAnnouncement={showPreAnnouncement}
+                goalMinute={selectedGoal?.minute || 0}
+                teamName={selectedGoal?.team === 'away' ? awayTeamName : homeTeamName}
+                onAnnouncementComplete={handleAnnouncementComplete}
               />
             )}
 

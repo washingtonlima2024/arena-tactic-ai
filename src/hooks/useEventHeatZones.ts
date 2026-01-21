@@ -83,6 +83,20 @@ export function useEventHeatZones(
   homeTeamName?: string,
   awayTeamName?: string
 ): EventHeatData {
+  // Memoize player formations separately to avoid random regeneration
+  const stableFormations = useMemo(() => {
+    // Generate stable random offsets once
+    const homeOffsets = DEFAULT_HOME_FORMATION.map(() => ({
+      x: (Math.random() - 0.5) * 4,
+      y: (Math.random() - 0.5) * 4
+    }));
+    const awayOffsets = DEFAULT_AWAY_FORMATION.map(() => ({
+      x: (Math.random() - 0.5) * 4,
+      y: (Math.random() - 0.5) * 4
+    }));
+    return { homeOffsets, awayOffsets };
+  }, []);
+
   return useMemo(() => {
     const homeName = homeTeamName?.toLowerCase() || '';
     const awayName = awayTeamName?.toLowerCase() || '';
@@ -197,12 +211,11 @@ export function useEventHeatZones(
       return Math.min(1, baseIntensity + activityBonus + proximityBonus);
     };
     
-    // Generate home players with slight random offset for natural look
-    const homePlayers: Player[] = DEFAULT_HOME_FORMATION.map(pos => {
-      const offsetX = (Math.random() - 0.5) * 4;
-      const offsetY = (Math.random() - 0.5) * 4;
-      const x = Math.max(2, Math.min(98, pos.x + offsetX));
-      const y = Math.max(2, Math.min(98, pos.y + offsetY));
+    // Generate home players with stable offsets for natural look
+    const homePlayers: Player[] = DEFAULT_HOME_FORMATION.map((pos, idx) => {
+      const offset = stableFormations.homeOffsets[idx];
+      const x = Math.max(2, Math.min(98, pos.x + offset.x));
+      const y = Math.max(2, Math.min(98, pos.y + offset.y));
       
       return {
         x,
@@ -213,12 +226,11 @@ export function useEventHeatZones(
       };
     });
     
-    // Generate away players
-    const awayPlayers: Player[] = DEFAULT_AWAY_FORMATION.map(pos => {
-      const offsetX = (Math.random() - 0.5) * 4;
-      const offsetY = (Math.random() - 0.5) * 4;
-      const x = Math.max(2, Math.min(98, pos.x + offsetX));
-      const y = Math.max(2, Math.min(98, pos.y + offsetY));
+    // Generate away players with stable offsets
+    const awayPlayers: Player[] = DEFAULT_AWAY_FORMATION.map((pos, idx) => {
+      const offset = stableFormations.awayOffsets[idx];
+      const x = Math.max(2, Math.min(98, pos.x + offset.x));
+      const y = Math.max(2, Math.min(98, pos.y + offset.y));
       
       return {
         x,
@@ -230,5 +242,5 @@ export function useEventHeatZones(
     });
     
     return { heatZones, homePlayers, awayPlayers };
-  }, [events, homeTeamName, awayTeamName]);
+  }, [events, homeTeamName, awayTeamName, stableFormations]);
 }
