@@ -21,6 +21,8 @@ interface SoccerPlayerModelProps {
   scale?: number;
   teamColor: string;
   number?: number;
+  name?: string | null;
+  isScorer?: boolean;
   isMoving?: boolean;
   team: 'home' | 'away' | 'referee' | 'linesman';
   intensity?: number;
@@ -92,6 +94,8 @@ function SoccerPlayerModelInner({
   scale = 0.005,
   teamColor,
   number,
+  name,
+  isScorer = false,
   isMoving = false,
   team,
   intensity = 0.7,
@@ -290,8 +294,28 @@ function SoccerPlayerModelInner({
         />
       </group>
       
-      {/* Player number badge */}
-      {showNumber && number && (
+      {/* Player name label (priority over number) */}
+      {name && (
+        <Html
+          position={[0, 0.85, 0]}
+          center
+          style={{
+            pointerEvents: 'none',
+            userSelect: 'none',
+          }}
+        >
+          <div className={`px-2 py-0.5 rounded-full text-xs font-bold shadow-lg whitespace-nowrap ${
+            isScorer 
+              ? 'bg-yellow-500 text-black' 
+              : 'bg-white/90 text-black'
+          }`}>
+            {isScorer ? '⚽ ' : ''}{name}
+          </div>
+        </Html>
+      )}
+      
+      {/* Player number badge (only if no name) */}
+      {showNumber && number && !name && (
         <Html
           position={[0, 0.65, 0]}
           center
@@ -308,7 +332,7 @@ function SoccerPlayerModelInner({
             border: `1px solid ${colors.shirt}`,
           }}
         >
-          #{number}
+          {number}
         </Html>
       )}
       
