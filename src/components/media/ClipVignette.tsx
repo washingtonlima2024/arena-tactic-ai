@@ -3,6 +3,34 @@ import { Badge } from '@/components/ui/badge';
 import { Clock, Play } from 'lucide-react';
 import { useVignetteAudio } from '@/hooks/useVignetteAudio';
 
+// Dicionário de tradução de tipos de eventos para português
+const EVENT_TYPE_LABELS_PT: Record<string, string> = {
+  'goal': 'GOL',
+  'shot': 'CHUTE',
+  'shot_on_target': 'CHUTE NO GOL',
+  'foul': 'FALTA',
+  'corner': 'ESCANTEIO',
+  'offside': 'IMPEDIMENTO',
+  'yellow_card': 'CARTÃO AMARELO',
+  'red_card': 'CARTÃO VERMELHO',
+  'substitution': 'SUBSTITUIÇÃO',
+  'penalty': 'PÊNALTI',
+  'free_kick': 'TIRO LIVRE',
+  'save': 'DEFESA',
+  'clearance': 'CORTE',
+  'assist': 'ASSISTÊNCIA',
+  'high_press': 'PRESSÃO ALTA',
+  'transition': 'TRANSIÇÃO',
+  'ball_recovery': 'RECUPERAÇÃO',
+  'cross': 'CRUZAMENTO',
+  'tackle': 'DESARME',
+  'interception': 'INTERCEPTAÇÃO',
+  'dribble': 'DRIBLE',
+  'pass': 'PASSE',
+  'header': 'CABECEIO',
+  'block': 'BLOQUEIO',
+};
+
 interface ClipVignetteProps {
   thumbnailUrl: string;
   eventType: string;
@@ -271,11 +299,11 @@ export function ClipVignette({
         />
       </div>
 
-      {/* Cinematic letterbox bars */}
-      <div className={`absolute top-0 left-0 right-0 h-[10%] bg-black transition-all duration-700 ${
+      {/* Cinematic letterbox bars - reduced height */}
+      <div className={`absolute top-0 left-0 right-0 h-[5%] bg-black transition-all duration-700 ${
         phase === 'hold' ? 'translate-y-0' : '-translate-y-full'
       }`} />
-      <div className={`absolute bottom-0 left-0 right-0 h-[10%] bg-black transition-all duration-700 ${
+      <div className={`absolute bottom-0 left-0 right-0 h-[5%] bg-black transition-all duration-700 ${
         phase === 'hold' ? 'translate-y-0' : 'translate-y-full'
       }`} />
 
@@ -348,7 +376,7 @@ export function ClipVignette({
           />
           <Badge 
             variant="arena" 
-            className={`relative mb-2 sm:mb-3 md:mb-4 text-[10px] sm:text-sm md:text-lg px-2 sm:px-4 md:px-6 py-1 sm:py-1.5 md:py-2 uppercase tracking-widest border-primary/50 backdrop-blur-sm transition-all duration-500 ${
+            className={`relative mb-1 sm:mb-2 md:mb-3 text-[8px] sm:text-xs md:text-sm px-1.5 sm:px-3 md:px-4 py-0.5 sm:py-1 md:py-1.5 uppercase tracking-wider border-primary/50 backdrop-blur-sm transition-all duration-500 ${
               phase === 'hold' ? 'scale-100' : 'scale-0'
             }`}
             style={{
@@ -356,13 +384,13 @@ export function ClipVignette({
               animation: phase === 'hold' ? 'popIn 0.4s ease-out' : undefined,
             }}
           >
-            {eventType.replace(/_/g, ' ')}
+            {EVENT_TYPE_LABELS_PT[eventType] || eventType.replace(/_/g, ' ').toUpperCase()}
           </Badge>
         </div>
 
         {/* Minute with dramatic reveal - responsive */}
         <div 
-          className={`flex items-center gap-1.5 sm:gap-2 md:gap-3 text-3xl sm:text-5xl md:text-7xl font-black mb-2 sm:mb-4 md:mb-6 transition-all duration-600 ${
+          className={`flex items-center gap-1 sm:gap-1.5 md:gap-2 text-2xl sm:text-4xl md:text-5xl font-black mb-1 sm:mb-2 md:mb-4 transition-all duration-600 ${
             phase === 'hold' ? 'scale-100 opacity-100' : 'scale-50 opacity-0'
           }`}
           style={{
@@ -370,7 +398,7 @@ export function ClipVignette({
             animation: phase === 'hold' ? 'slideUp 0.5s ease-out' : undefined,
           }}
         >
-          <Clock className="h-6 w-6 sm:h-10 sm:w-10 md:h-14 md:w-14 text-primary drop-shadow-[0_0_15px_hsl(var(--primary)/0.5)]" />
+          <Clock className="h-5 w-5 sm:h-8 sm:w-8 md:h-10 md:w-10 text-primary drop-shadow-[0_0_15px_hsl(var(--primary)/0.5)]" />
           <span 
             className="bg-gradient-to-r from-primary via-emerald-400 to-primary bg-clip-text text-transparent drop-shadow-lg"
             style={{
@@ -384,7 +412,7 @@ export function ClipVignette({
 
         {/* Teams score with slide-in effect - responsive */}
         <div 
-          className={`flex items-center gap-2 sm:gap-4 md:gap-8 text-xs sm:text-lg md:text-2xl font-semibold mb-2 sm:mb-3 md:mb-4 transition-all duration-500 ${
+          className={`flex items-center gap-1 sm:gap-2 md:gap-4 text-[10px] sm:text-sm md:text-lg font-semibold mb-1 sm:mb-2 md:mb-3 transition-all duration-500 ${
             phase === 'hold' ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0'
           }`}
           style={{
@@ -392,21 +420,21 @@ export function ClipVignette({
           }}
         >
           <span 
-            className="transition-transform duration-500 max-w-[60px] sm:max-w-[100px] md:max-w-none truncate"
+            className="transition-transform duration-500 max-w-[50px] sm:max-w-[80px] md:max-w-[120px] truncate text-right"
             style={{
               animation: phase === 'hold' ? 'slideInLeft 0.6s ease-out' : undefined,
             }}
           >
             {homeTeam}
           </span>
-          <div className="relative">
+          <div className="relative flex-shrink-0">
             <div className="absolute inset-0 blur-lg bg-primary/40 animate-pulse" />
-            <span className="relative text-xl sm:text-3xl md:text-5xl font-black text-primary drop-shadow-[0_0_20px_hsl(var(--primary)/0.6)]">
+            <span className="relative text-lg sm:text-2xl md:text-3xl font-black text-primary drop-shadow-[0_0_20px_hsl(var(--primary)/0.6)]">
               {homeScore} - {awayScore}
             </span>
           </div>
           <span 
-            className="transition-transform duration-500 max-w-[60px] sm:max-w-[100px] md:max-w-none truncate"
+            className="transition-transform duration-500 max-w-[50px] sm:max-w-[80px] md:max-w-[120px] truncate text-left"
             style={{
               animation: phase === 'hold' ? 'slideInRight 0.6s ease-out' : undefined,
             }}
@@ -417,7 +445,7 @@ export function ClipVignette({
 
         {/* Title with typewriter-like reveal - responsive */}
         <p 
-          className={`text-[10px] sm:text-sm md:text-lg text-muted-foreground max-w-[200px] sm:max-w-sm md:max-w-lg text-center px-2 transition-all duration-500 line-clamp-2 ${
+          className={`text-[9px] sm:text-xs md:text-sm text-muted-foreground max-w-[140px] sm:max-w-[200px] md:max-w-sm text-center px-1 transition-all duration-500 line-clamp-2 ${
             phase === 'hold' ? 'translate-y-0 opacity-100' : 'translate-y-8 opacity-0'
           }`}
           style={{
@@ -446,7 +474,7 @@ export function ClipVignette({
 
       {/* Progress bar at bottom */}
       <div 
-        className={`absolute bottom-[10%] left-0 right-0 h-0.5 sm:h-1 bg-white/10 transition-opacity duration-300 ${
+        className={`absolute bottom-[6%] left-0 right-0 h-0.5 sm:h-1 bg-white/10 transition-opacity duration-300 ${
           phase === 'hold' ? 'opacity-100' : 'opacity-0'
         }`}
       >
@@ -459,25 +487,25 @@ export function ClipVignette({
       </div>
 
       {/* Corner decorations with animation - responsive */}
-      <div className={`absolute top-[12%] left-2 sm:left-3 md:left-4 w-10 h-10 sm:w-14 sm:h-14 md:w-20 md:h-20 transition-all duration-700 ${
+      <div className={`absolute top-[7%] left-2 sm:left-3 md:left-4 w-8 h-8 sm:w-10 sm:h-10 md:w-14 md:h-14 transition-all duration-700 ${
         phase === 'hold' ? 'opacity-100 scale-100' : 'opacity-0 scale-0'
       }`}>
         <div className="absolute top-0 left-0 w-full h-0.5 bg-gradient-to-r from-primary to-transparent" />
         <div className="absolute top-0 left-0 h-full w-0.5 bg-gradient-to-b from-primary to-transparent" />
       </div>
-      <div className={`absolute top-[12%] right-2 sm:right-3 md:right-4 w-10 h-10 sm:w-14 sm:h-14 md:w-20 md:h-20 transition-all duration-700 ${
+      <div className={`absolute top-[7%] right-2 sm:right-3 md:right-4 w-8 h-8 sm:w-10 sm:h-10 md:w-14 md:h-14 transition-all duration-700 ${
         phase === 'hold' ? 'opacity-100 scale-100' : 'opacity-0 scale-0'
       }`}>
         <div className="absolute top-0 right-0 w-full h-0.5 bg-gradient-to-l from-primary to-transparent" />
         <div className="absolute top-0 right-0 h-full w-0.5 bg-gradient-to-b from-primary to-transparent" />
       </div>
-      <div className={`absolute bottom-[12%] left-2 sm:left-3 md:left-4 w-10 h-10 sm:w-14 sm:h-14 md:w-20 md:h-20 transition-all duration-700 ${
+      <div className={`absolute bottom-[7%] left-2 sm:left-3 md:left-4 w-8 h-8 sm:w-10 sm:h-10 md:w-14 md:h-14 transition-all duration-700 ${
         phase === 'hold' ? 'opacity-100 scale-100' : 'opacity-0 scale-0'
       }`}>
         <div className="absolute bottom-0 left-0 w-full h-0.5 bg-gradient-to-r from-primary to-transparent" />
         <div className="absolute bottom-0 left-0 h-full w-0.5 bg-gradient-to-t from-primary to-transparent" />
       </div>
-      <div className={`absolute bottom-[12%] right-2 sm:right-3 md:right-4 w-10 h-10 sm:w-14 sm:h-14 md:w-20 md:h-20 transition-all duration-700 ${
+      <div className={`absolute bottom-[7%] right-2 sm:right-3 md:right-4 w-8 h-8 sm:w-10 sm:h-10 md:w-14 md:h-14 transition-all duration-700 ${
         phase === 'hold' ? 'opacity-100 scale-100' : 'opacity-0 scale-0'
       }`}>
         <div className="absolute bottom-0 right-0 w-full h-0.5 bg-gradient-to-l from-primary to-transparent" />

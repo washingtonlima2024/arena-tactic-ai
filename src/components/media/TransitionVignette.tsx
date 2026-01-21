@@ -2,6 +2,34 @@ import { useState, useEffect, useRef } from 'react';
 import { useVignetteAudio } from '@/hooks/useVignetteAudio';
 import { ArrowRight, Zap } from 'lucide-react';
 
+// Dicionário de tradução de tipos de eventos para português
+const EVENT_TYPE_LABELS_PT: Record<string, string> = {
+  'goal': 'GOL',
+  'shot': 'CHUTE',
+  'shot_on_target': 'CHUTE NO GOL',
+  'foul': 'FALTA',
+  'corner': 'ESCANTEIO',
+  'offside': 'IMPEDIMENTO',
+  'yellow_card': 'CARTÃO AMARELO',
+  'red_card': 'CARTÃO VERMELHO',
+  'substitution': 'SUBSTITUIÇÃO',
+  'penalty': 'PÊNALTI',
+  'free_kick': 'TIRO LIVRE',
+  'save': 'DEFESA',
+  'clearance': 'CORTE',
+  'assist': 'ASSISTÊNCIA',
+  'high_press': 'PRESSÃO ALTA',
+  'transition': 'TRANSIÇÃO',
+  'ball_recovery': 'RECUPERAÇÃO',
+  'cross': 'CRUZAMENTO',
+  'tackle': 'DESARME',
+  'interception': 'INTERCEPTAÇÃO',
+  'dribble': 'DRIBLE',
+  'pass': 'PASSE',
+  'header': 'CABECEIO',
+  'block': 'BLOQUEIO',
+};
+
 interface TransitionVignetteProps {
   nextClipTitle: string;
   nextClipMinute: number;
@@ -99,7 +127,9 @@ export function TransitionVignette({
           <div className="h-6 sm:h-10 md:h-12 w-px bg-primary/50" />
           <div className="text-left max-w-[150px] sm:max-w-[200px] md:max-w-none">
             <p className="text-xs sm:text-sm md:text-lg font-medium text-foreground truncate">{nextClipTitle}</p>
-            <p className="text-[10px] sm:text-xs md:text-sm text-muted-foreground uppercase tracking-wide">{nextClipType.replace(/_/g, ' ')}</p>
+            <p className="text-[10px] sm:text-xs md:text-sm text-muted-foreground uppercase tracking-wide">
+              {EVENT_TYPE_LABELS_PT[nextClipType] || nextClipType.replace(/_/g, ' ').toUpperCase()}
+            </p>
           </div>
         </div>
       </div>
