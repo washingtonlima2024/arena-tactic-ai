@@ -1001,6 +1001,7 @@ export const apiClient = {
       const xhr = new XMLHttpRequest();
       const formData = new FormData();
       formData.append('file', blob, filename);
+      formData.append('filename', filename);
 
       xhr.upload.addEventListener('progress', (e) => {
         if (e.lengthComputable && onProgress) {
@@ -1017,15 +1018,26 @@ export const apiClient = {
             reject(new Error('Resposta inválida do servidor'));
           }
         } else {
-          reject(new Error(`Upload failed: ${xhr.status}`));
+          const errorMsg = xhr.responseText || `HTTP ${xhr.status}`;
+          console.error(`[uploadBlobWithProgress] Upload failed: ${xhr.status}`, errorMsg);
+          reject(new Error(`Upload failed: ${xhr.status} - ${errorMsg}`));
         }
       };
 
-      xhr.onerror = () => reject(new Error('Erro de rede durante upload'));
+      xhr.onerror = () => {
+        console.error('[uploadBlobWithProgress] Network error - check CORS and server availability');
+        reject(new Error('Erro de rede durante upload - verifique se o servidor aceita CORS'));
+      };
       xhr.ontimeout = () => reject(new Error('Upload expirou após 15 minutos'));
 
       xhr.timeout = 900000; // 15 minutos
       xhr.open('POST', `${getApiBase()}/api/storage/${matchId}/${subfolder}`);
+      
+      // Headers necessários para túneis (ngrok, Cloudflare Tunnel)
+      xhr.setRequestHeader('ngrok-skip-browser-warning', 'true');
+      xhr.setRequestHeader('Accept', 'application/json');
+      
+      console.log(`[uploadBlobWithProgress] Starting upload: ${filename} (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
       xhr.send(formData);
     });
   },
