@@ -2,34 +2,7 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Clock, Play } from 'lucide-react';
 import { useVignetteAudio } from '@/hooks/useVignetteAudio';
-
-// Dicionário de tradução de tipos de eventos para português
-const EVENT_TYPE_LABELS_PT: Record<string, string> = {
-  'goal': 'GOL',
-  'shot': 'CHUTE',
-  'shot_on_target': 'CHUTE NO GOL',
-  'foul': 'FALTA',
-  'corner': 'ESCANTEIO',
-  'offside': 'IMPEDIMENTO',
-  'yellow_card': 'CARTÃO AMARELO',
-  'red_card': 'CARTÃO VERMELHO',
-  'substitution': 'SUBSTITUIÇÃO',
-  'penalty': 'PÊNALTI',
-  'free_kick': 'TIRO LIVRE',
-  'save': 'DEFESA',
-  'clearance': 'CORTE',
-  'assist': 'ASSISTÊNCIA',
-  'high_press': 'PRESSÃO ALTA',
-  'transition': 'TRANSIÇÃO',
-  'ball_recovery': 'RECUPERAÇÃO',
-  'cross': 'CRUZAMENTO',
-  'tackle': 'DESARME',
-  'interception': 'INTERCEPTAÇÃO',
-  'dribble': 'DRIBLE',
-  'pass': 'PASSE',
-  'header': 'CABECEIO',
-  'block': 'BLOQUEIO',
-};
+import { getEventLabelUpper } from '@/lib/eventLabels';
 
 interface ClipVignetteProps {
   thumbnailUrl: string;
@@ -384,7 +357,7 @@ export function ClipVignette({
               animation: phase === 'hold' ? 'popIn 0.4s ease-out' : undefined,
             }}
           >
-            {EVENT_TYPE_LABELS_PT[eventType] || eventType.replace(/_/g, ' ').toUpperCase()}
+            {getEventLabelUpper(eventType)}
           </Badge>
         </div>
 

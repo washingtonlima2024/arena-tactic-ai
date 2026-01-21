@@ -48,6 +48,7 @@ import {
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
+import { getEventLabel } from '@/lib/eventLabels';
 import { Link } from 'react-router-dom';
 import { EventEditDialog } from '@/components/events/EventEditDialog';
 import { ReanalyzeHalfDialog } from '@/components/events/ReanalyzeHalfDialog';
@@ -156,7 +157,7 @@ const EventRow = ({
       </Badge>
       <div className="flex-1 min-w-0">
         <p className="font-medium capitalize truncate text-sm">
-          {event.event_type.replace(/_/g, ' ')}
+          {getEventLabel(event.event_type)}
         </p>
         {event.description && (
           <p className="text-xs text-muted-foreground truncate">

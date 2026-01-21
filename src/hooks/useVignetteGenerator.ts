@@ -2,6 +2,7 @@
 // These are simplified versions of the React vignette components
 
 import { useCallback, useRef } from 'react';
+import { getEventLabelUpper } from '@/lib/eventLabels';
 
 export interface VignetteConfig {
   width: number;
@@ -233,7 +234,7 @@ export function useVignetteGenerator() {
     const scale = config.width / 1080;
 
     // Draw event type badge
-    const eventLabel = data.eventType.replace(/_/g, ' ').toUpperCase();
+    const eventLabel = getEventLabelUpper(data.eventType);
     ctx.fillStyle = 'rgba(16, 185, 129, 0.8)';
     const badgeWidth = Math.min(200 * scale, ctx.measureText(eventLabel).width + 40 * scale);
     const badgeHeight = 36 * scale;
@@ -331,7 +332,7 @@ export function useVignetteGenerator() {
     });
 
     // Draw event type
-    const eventLabel = data.nextEventType.replace(/_/g, ' ').toUpperCase();
+    const eventLabel = getEventLabelUpper(data.nextEventType);
     drawText(ctx, eventLabel, centerX, centerY + 70 * scale, {
       fontSize: 16 * scale,
       fontWeight: '500',
