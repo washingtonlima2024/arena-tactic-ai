@@ -917,7 +917,7 @@ export const apiClient = {
     await ensureServerAvailable();
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 300000); // 5 minutos
+    const timeoutId = setTimeout(() => controller.abort(), 900000); // 15 minutos - compatível com Nginx
     
     try {
       const formData = new FormData();
@@ -948,7 +948,7 @@ export const apiClient = {
     }
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes timeout
+    const timeoutId = setTimeout(() => controller.abort(), 900000); // 15 minutos - compatível com Nginx
     
     try {
       const formData = new FormData();
@@ -982,6 +982,52 @@ export const apiClient = {
       console.error('[uploadBlob] Upload error:', error);
       throw error;
     }
+  },
+
+  // Upload com progresso real usando XMLHttpRequest
+  uploadBlobWithProgress: async (
+    matchId: string,
+    subfolder: string,
+    blob: Blob,
+    filename: string,
+    onProgress?: (percent: number, loaded: number, total: number) => void
+  ): Promise<{ url: string; filename: string; match_id: string; subfolder: string }> => {
+    const serverUp = await isLocalServerAvailable();
+    if (!serverUp) {
+      throw new LocalServerOfflineError();
+    }
+
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      const formData = new FormData();
+      formData.append('file', blob, filename);
+
+      xhr.upload.addEventListener('progress', (e) => {
+        if (e.lengthComputable && onProgress) {
+          const percent = Math.round((e.loaded / e.total) * 100);
+          onProgress(percent, e.loaded, e.total);
+        }
+      });
+
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try {
+            resolve(JSON.parse(xhr.responseText));
+          } catch {
+            reject(new Error('Resposta inválida do servidor'));
+          }
+        } else {
+          reject(new Error(`Upload failed: ${xhr.status}`));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error('Erro de rede durante upload'));
+      xhr.ontimeout = () => reject(new Error('Upload expirou após 15 minutos'));
+
+      xhr.timeout = 900000; // 15 minutos
+      xhr.open('POST', `${getApiBase()}/api/storage/${matchId}/${subfolder}`);
+      xhr.send(formData);
+    });
   },
 
   deleteMatchFile: (matchId: string, subfolder: string, filename: string) =>
