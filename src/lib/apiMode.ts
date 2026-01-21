@@ -2,9 +2,10 @@
  * Arena Play - Configuração de API
  * 
  * Modo híbrido com auto-descoberta:
- * 1. Variável de ambiente VITE_API_BASE_URL (produção PM2)
- * 2. Auto-descoberta de servidor local (IPs comuns)
- * 3. Cloudflare Tunnel (fallback para acesso remoto)
+ * 1. Domínio de produção arenaplay.kakttus.com (proxy Nginx /api)
+ * 2. Variável de ambiente VITE_API_BASE_URL (produção PM2 local)
+ * 3. Auto-descoberta de servidor local (IPs comuns)
+ * 4. Cloudflare Tunnel (fallback para acesso remoto)
  */
 
 // Lista de endpoints locais para auto-descoberta
@@ -18,8 +19,8 @@ const DEFAULT_LOCAL_URL = 'http://10.0.0.20:5000';
 const CLOUDFLARE_STORAGE_KEY = 'arena_cloudflare_url';
 const DISCOVERED_SERVER_KEY = 'arena_discovered_server';
 
-export type ApiMode = 'local' | 'cloudflare' | 'production';
-export type ConnectionMethod = 'local' | 'cloudflare' | 'production' | 'discovering';
+export type ApiMode = 'local' | 'cloudflare' | 'production' | 'nginx';
+export type ConnectionMethod = 'local' | 'cloudflare' | 'production' | 'nginx' | 'discovering';
 
 export interface ActiveConnection {
   method: ConnectionMethod;
@@ -38,6 +39,14 @@ let discoveryPromise: Promise<string | null> | null = null;
 export const isLovableEnvironment = (): boolean => {
   const host = window.location.hostname;
   return host.includes('lovable.app') || host.includes('lovable.dev') || host.includes('lovableproject.com');
+};
+
+/**
+ * Detecta se estamos no domínio de produção Kakttus (proxy Nginx)
+ */
+export const isKakttusProduction = (): boolean => {
+  const host = window.location.hostname;
+  return host.includes('arenaplay.kakttus.com');
 };
 
 /**
@@ -159,31 +168,37 @@ export const autoDiscoverServer = async (): Promise<string | null> => {
 /**
  * Retorna a URL base da API
  * Prioridade:
- * 1. Variável de ambiente VITE_API_BASE_URL (produção PM2)
- * 2. Servidor descoberto automaticamente
- * 3. Cloudflare Tunnel (fallback remoto)
- * 4. IP local padrão
+ * 1. Domínio de produção Kakttus (proxy Nginx /api)
+ * 2. Variável de ambiente VITE_API_BASE_URL (produção PM2)
+ * 3. Servidor descoberto automaticamente
+ * 4. Cloudflare Tunnel (fallback remoto)
+ * 5. IP local padrão
  */
 export const getApiBase = (): string => {
-  // 1. Variável de ambiente tem prioridade máxima (produção PM2)
+  // 1. Se estiver no domínio de produção kakttus, usar /api (proxy Nginx)
+  if (isKakttusProduction()) {
+    return '/api';
+  }
+  
+  // 2. Variável de ambiente (produção PM2 local)
   const envApiUrl = import.meta.env.VITE_API_BASE_URL;
   if (envApiUrl) {
     return envApiUrl.replace(/\/$/, '');
   }
   
-  // 2. Servidor descoberto automaticamente
+  // 3. Servidor descoberto automaticamente
   const discovered = getDiscoveredServer();
   if (discovered) {
     return discovered;
   }
   
-  // 3. Cloudflare Tunnel como fallback
+  // 4. Cloudflare Tunnel como fallback
   const cloudflareUrl = getCloudflareUrl();
   if (cloudflareUrl) {
     return cloudflareUrl;
   }
   
-  // 4. Default: IP local padrão
+  // 5. Default: IP local padrão
   return DEFAULT_LOCAL_URL;
 };
 
@@ -191,6 +206,9 @@ export const getApiBase = (): string => {
  * Retorna o modo atual da API
  */
 export const getApiMode = (): ApiMode => {
+  if (isKakttusProduction()) {
+    return 'nginx';
+  }
   if (isPM2Production()) {
     return 'production';
   }
@@ -244,7 +262,16 @@ export const needsCloudflareConfig = (): boolean => {
  * Retorna informações sobre o método de conexão ativo
  */
 export const getActiveConnectionMethod = (): ActiveConnection => {
-  // Produção PM2
+  // Produção Kakttus (proxy Nginx)
+  if (isKakttusProduction()) {
+    return { 
+      method: 'nginx', 
+      url: '/api', 
+      label: 'Produção (Nginx)' 
+    };
+  }
+  
+  // Produção PM2 local
   if (isPM2Production()) {
     const envUrl = import.meta.env.VITE_API_BASE_URL;
     return { 
