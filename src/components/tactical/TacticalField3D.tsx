@@ -700,40 +700,26 @@ function AnimationScene({
       {frame.players.map((player, idx) => {
         const pos = metersTo3D(player.x, player.y);
         
-        // Check if this player is the scorer or assister (by index - first player is usually involved)
-        // Scorer typically has the ball at end, assister is nearby
-        const isScorer = scorerName && idx === 0;
-        const isAssister = assisterName && idx === 1;
-        const playerLabel = isScorer ? scorerName : (isAssister ? assisterName : null);
+        // Identify scorer/assister - scorer is usually the player closest to the ball in final frames
+        // For simplicity, use first home player as scorer if scorer name exists, second as assister
+        const isHomeTeamScorer = player.team === 'home';
+        const isScorer = scorerName && isHomeTeamScorer && idx === 0;
+        const isAssister = assisterName && isHomeTeamScorer && idx === 1;
+        const playerName = isScorer ? scorerName : (isAssister ? assisterName : null);
         
         return (
-          <group key={player.id}>
-            <SoccerPlayerModel
-              position={pos}
-              team={player.team}
-              number={player.number}
-              teamColor={player.team === 'home' ? homeTeamColor : awayTeamColor}
-              isMoving={true}
-              showNumber={true}
-              scale={playerScale}
-            />
-            {/* Player name label */}
-            {playerLabel && (
-              <Html
-                position={[pos[0], 3.5, pos[2]]}
-                center
-                style={{ pointerEvents: 'none', userSelect: 'none' }}
-              >
-                <div className={`px-2 py-0.5 rounded-full text-xs font-bold shadow-lg animate-fade-in ${
-                  isScorer 
-                    ? 'bg-yellow-500 text-black' 
-                    : 'bg-white/90 text-black'
-                }`}>
-                  {isScorer ? '⚽ ' : '👟 '}{playerLabel}
-                </div>
-              </Html>
-            )}
-          </group>
+          <SoccerPlayerModel
+            key={player.id}
+            position={pos}
+            team={player.team}
+            number={player.number}
+            name={playerName}
+            isScorer={!!isScorer}
+            teamColor={player.team === 'home' ? homeTeamColor : awayTeamColor}
+            isMoving={true}
+            showNumber={true}
+            scale={playerScale}
+          />
         );
       })}
       
