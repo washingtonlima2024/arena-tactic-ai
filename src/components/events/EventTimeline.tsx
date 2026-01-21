@@ -190,8 +190,8 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
               </Button>
             )}
 
-            {/* Play Audio Button */}
-            {hasVideo && matchId && (
+            {/* Play Audio Button - shows whenever matchId exists (doesn't require video) */}
+            {matchId && (
               <Button
                 variant="ghost"
                 size="icon"

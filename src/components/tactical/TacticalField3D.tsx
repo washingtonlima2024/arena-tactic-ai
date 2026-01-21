@@ -75,20 +75,30 @@ function extractPlayerNames(description: string | undefined): {
 } {
   if (!description) return { scorer: null, assister: null };
   
+  // Expanded patterns to capture more variations (Portuguese + English)
   const scorerPatterns = [
-    /goo+l!?\s+(\w+\s?\w*)/i,
-    /gol de (\w+\s?\w*)/i,
-    /(\w+)\s+(marca|mete|abre|amplia|fecha|faz)/i,
-    /(\w+)\s+chuta/i,
-    /gol!\s*(\w+\s?\w*)/i,
+    // Portuguese variations
+    /gola[çc]o\s+(?:de\s+)?(\w+(?:\s+\w+)?)/i,     // Golaço de Felipe Coutinho
+    /goo+l!?\s+(?:de\s+)?(\w+(?:\s+\w+)?)/i,       // Gooool de Neymar
+    /gol(?:!+)?\s+(?:de\s+)?(\w+(?:\s+\w+)?)/i,    // Gol de Neymar, Gol! Neymar
+    /(\w+(?:\s+\w+)?)\s+(?:marca|mete|abre|amplia|fecha|faz|converte)/i, // Neymar marca
+    /(\w+(?:\s+\w+)?)\s+chuta\s+e\s+(?:marca|faz)/i, // Neymar chuta e marca
+    /(\w+(?:\s+\w+)?)\s+finaliza/i,                 // Neymar finaliza
+    /(\w+(?:\s+\w+)?)\s+cabeceia/i,                 // Neymar cabeceia
+    /(\w+(?:\s+\w+)?)\s+completa/i,                 // Neymar completa
+    // English variations
+    /goal\s+(?:by\s+)?(\w+(?:\s+\w+)?)/i,          // Goal by Messi
+    /(\w+(?:\s+\w+)?)\s+scores/i,                  // Messi scores
   ];
   
   const assisterPatterns = [
-    /após passe de (\w+\s?\w*)/i,
-    /assistência de (\w+\s?\w*)/i,
-    /cruzamento de (\w+\s?\w*)/i,
-    /passe de (\w+\s?\w*)/i,
-    /lançamento de (\w+\s?\w*)/i,
+    /após\s+passe\s+de\s+(\w+(?:\s+\w+)?)/i,
+    /assist[eê]ncia\s+de\s+(\w+(?:\s+\w+)?)/i,
+    /cruzamento\s+de\s+(\w+(?:\s+\w+)?)/i,
+    /passe\s+de\s+(\w+(?:\s+\w+)?)/i,
+    /lan[çc]amento\s+de\s+(\w+(?:\s+\w+)?)/i,
+    /toque\s+de\s+(\w+(?:\s+\w+)?)/i,
+    /assist(?:ed)?\s+by\s+(\w+(?:\s+\w+)?)/i,
   ];
   
   let scorer = null;
@@ -679,7 +689,9 @@ function AnimationScene({
   showGoalCelebration,
   goalPosition,
   scorerName,
-  assisterName
+  assisterName,
+  scoringTeam,
+  hasAudio
 }: {
   frame: PlayFrame;
   homeTeamColor: string;
@@ -689,22 +701,42 @@ function AnimationScene({
   goalPosition: [number, number, number];
   scorerName?: string | null;
   assisterName?: string | null;
+  scoringTeam?: 'home' | 'away';
+  hasAudio?: boolean;
 }) {
   const ballPos = metersTo3D(frame.ball.x, frame.ball.y);
   
   // Increased scale by 59% (0.03 * 1.59 ≈ 0.048)
   const playerScale = 0.048;
   
+  // Find the player closest to the ball for the scoring team
+  const scoringTeamPlayers = frame.players.filter(p => p.team === (scoringTeam || 'home'));
+  let closestPlayerIdx = 0;
+  let closestDistance = Infinity;
+  
+  scoringTeamPlayers.forEach((player, idx) => {
+    const dx = player.x - frame.ball.x;
+    const dy = player.y - frame.ball.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    if (distance < closestDistance) {
+      closestDistance = distance;
+      closestPlayerIdx = idx;
+    }
+  });
+  
   return (
     <FIFAFieldScene showGoalCelebration={showGoalCelebration} goalPosition={goalPosition}>
       {frame.players.map((player, idx) => {
         const pos = metersTo3D(player.x, player.y);
         
-        // Identify scorer/assister - scorer is usually the player closest to the ball in final frames
-        // For simplicity, use first home player as scorer if scorer name exists, second as assister
-        const isHomeTeamScorer = player.team === 'home';
-        const isScorer = scorerName && isHomeTeamScorer && idx === 0;
-        const isAssister = assisterName && isHomeTeamScorer && idx === 1;
+        // Find actual index within the scoring team
+        const scoringTeamIdx = scoringTeamPlayers.findIndex(p => p.id === player.id);
+        const isOnScoringTeam = player.team === (scoringTeam || 'home');
+        
+        // Scorer is the player closest to the ball on the scoring team
+        const isScorer = scorerName && isOnScoringTeam && scoringTeamIdx === closestPlayerIdx;
+        // Assister is the second closest or idx 1
+        const isAssister = assisterName && isOnScoringTeam && scoringTeamIdx === 1 && !isScorer;
         const playerName = isScorer ? scorerName : (isAssister ? assisterName : null);
         
         return (
@@ -715,6 +747,7 @@ function AnimationScene({
             number={player.number}
             name={playerName}
             isScorer={!!isScorer}
+            hasAudio={!!isScorer && !!hasAudio}
             teamColor={player.team === 'home' ? homeTeamColor : awayTeamColor}
             isMoving={true}
             showNumber={true}
@@ -1029,6 +1062,8 @@ export function TacticalField3D({
                 goalPosition={goalPosition}
                 scorerName={playerNames.scorer}
                 assisterName={playerNames.assister}
+                scoringTeam={selectedGoal?.team}
+                hasAudio={!!goalAudio?.audioUrl}
               />
             )}
 
