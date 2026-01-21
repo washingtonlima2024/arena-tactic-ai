@@ -5884,6 +5884,69 @@ def text_to_speech_endpoint():
 
 
 
+@app.route('/api/extract-goal-audio', methods=['POST'])
+def extract_goal_audio():
+    """Extract audio clip from goal moment in match video."""
+    data = request.json
+    match_id = data.get('matchId')
+    video_second = float(data.get('videoSecond', 0))
+    duration = float(data.get('duration', 15))
+    
+    if not match_id:
+        return jsonify({'error': 'matchId é obrigatório'}), 400
+    
+    session = get_session()
+    try:
+        # Find video for this match
+        video = session.query(Video).filter_by(match_id=match_id).first()
+        if not video:
+            return jsonify({'error': 'Vídeo não encontrado'}), 404
+        
+        # Resolve video path
+        video_path = resolve_video_path(video.file_url)
+        if not video_path or not os.path.exists(video_path):
+            return jsonify({'error': 'Arquivo de vídeo não encontrado'}), 404
+        
+        # Calculate start (a few seconds before the goal)
+        start_seconds = max(0, video_second - 5)
+        
+        # Generate unique audio filename
+        audio_filename = f"goal-{int(video_second)}.mp3"
+        audio_dir = get_match_storage_path(match_id) / "audio"
+        audio_dir.mkdir(parents=True, exist_ok=True)
+        audio_path = audio_dir / audio_filename
+        
+        # Extract audio using FFmpeg
+        cmd = [
+            'ffmpeg', '-y',
+            '-ss', str(start_seconds),
+            '-t', str(duration),
+            '-i', video_path,
+            '-vn',
+            '-acodec', 'libmp3lame',
+            '-ab', '128k',
+            str(audio_path)
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        
+        if result.returncode != 0:
+            print(f"[AUDIO] FFmpeg error: {result.stderr}")
+            return jsonify({'error': 'Erro ao extrair áudio'}), 500
+        
+        audio_url = f"/api/storage/{match_id}/audio/{audio_filename}"
+        
+        return jsonify({
+            'audioUrl': audio_url,
+            'duration': duration
+        })
+        
+    except Exception as e:
+        print(f"[AUDIO] Error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
 
 def _status_from_ai_error(err: str) -> int:
     """Best effort mapping from upstream AI errors to HTTP status codes."""
