@@ -7,9 +7,7 @@ import {
   Activity,
   Loader2,
   Play,
-  Target,
-  Scan,
-  Sparkles
+  Scan
 } from 'lucide-react';
 import { AppLayout } from '@/components/layout/AppLayout';
 import { StatCard } from '@/components/dashboard/StatCard';
@@ -17,12 +15,10 @@ import { MatchCard } from '@/components/matches/MatchCard';
 import { EventTimeline } from '@/components/events/EventTimeline';
 import { LiveTacticalField } from '@/components/tactical/LiveTacticalField';
 import { FootballField } from '@/components/tactical/FootballField';
-import { Heatmap3D } from '@/components/tactical/Heatmap3D';
-import { GoalPlayAnimation3D } from '@/components/tactical/GoalPlayAnimation3D';
+import { TacticalField3D } from '@/components/tactical/TacticalField3D';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import heroBg from '@/assets/hero-bg.jpg';
@@ -36,7 +32,7 @@ import { useGoalPlayAnalysis } from '@/hooks/useGoalPlayAnalysis';
 import { apiClient } from '@/lib/apiClient';
 import { useQuery } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
-import { useDynamicMatchStats, calculateScoreFromEvents } from '@/hooks/useDynamicMatchStats';
+import { useDynamicMatchStats } from '@/hooks/useDynamicMatchStats';
 
 export default function Dashboard() {
   // Use centralized match selection hook
@@ -416,44 +412,14 @@ export default function Dashboard() {
               </Card>
             )}
 
-            {/* 3D Visualization */}
+            {/* Unified 3D Tactical Visualization */}
             {realMatches.length > 0 && (
-              <Card variant="glow" className="mt-6">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="flex items-center gap-2">
-                      <BarChart3 className="h-5 w-5 text-primary" />
-                      Mapa de Calor 3D
-                    </CardTitle>
-                    <Badge variant="arena">Visualização Interativa</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <Heatmap3D
-                    homeTeam={selectedMatch?.home_team?.name || 'Time Casa'}
-                    awayTeam={selectedMatch?.away_team?.name || 'Time Visitante'}
-                    homeColor={selectedMatch?.home_team?.primary_color || '#10b981'}
-                    awayColor={selectedMatch?.away_team?.primary_color || '#3b82f6'}
-                    height={700}
-                    eventHeatZones={heatZones}
-                    homePlayers={homePlayers}
-                    awayPlayers={awayPlayers}
-                  />
-                  <p className="mt-3 text-center text-sm text-muted-foreground">
-                    Arraste para rotacionar • Scroll para zoom
-                  </p>
-                </CardContent>
-              </Card>
-            )}
-
-            {/* Goal Animation 3D */}
-            {goalEvents.length > 0 && realMatches.length > 0 && (
               <Card variant="glow" className="mt-6">
                 <CardHeader>
                   <div className="flex items-center justify-between flex-wrap gap-2">
                     <CardTitle className="flex items-center gap-2">
-                      <Target className="h-5 w-5 text-primary" />
-                      Animação de Gol 3D
+                      <BarChart3 className="h-5 w-5 text-primary" />
+                      Análise Tática 3D
                       {useYoloDetection && (
                         <Badge variant="outline" className="ml-2 text-xs border-green-500 text-green-500">
                           <Scan className="h-3 w-3 mr-1" />
@@ -462,24 +428,26 @@ export default function Dashboard() {
                       )}
                     </CardTitle>
                     <div className="flex items-center gap-2 flex-wrap">
-                      <Select 
-                        value={selectedGoalId || goalEvents[0]?.id} 
-                        onValueChange={handleGoalChange}
-                      >
-                        <SelectTrigger className="w-[180px]">
-                          <SelectValue placeholder="Selecione o gol" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {goalEvents.map((goal) => (
-                            <SelectItem key={goal.id} value={goal.id}>
-                              ⚽ {goal.minute}' - {goal.description?.slice(0, 20) || 'Gol'}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                      {goalEvents.length > 0 && (
+                        <Select 
+                          value={selectedGoalId || goalEvents[0]?.id} 
+                          onValueChange={handleGoalChange}
+                        >
+                          <SelectTrigger className="w-[180px]">
+                            <SelectValue placeholder="Selecione o gol" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {goalEvents.map((goal) => (
+                              <SelectItem key={goal.id} value={goal.id}>
+                                ⚽ {goal.minute}' - {goal.description?.slice(0, 20) || 'Gol'}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      )}
                       
                       {/* YOLO Detection Button */}
-                      {matchVideo && !matchVideo.file_url.includes('/embed/') && (
+                      {matchVideo && !matchVideo.file_url.includes('/embed/') && goalEvents.length > 0 && (
                         <Button
                           variant="outline"
                           size="sm"
@@ -495,21 +463,8 @@ export default function Dashboard() {
                           {isDetecting ? 'Detectando...' : 'Detectar Jogadores'}
                         </Button>
                       )}
-                      
-                      <Badge variant="arena">Campo FIFA 105m × 68m</Badge>
                     </div>
                   </div>
-                  
-                  {/* Detection Progress */}
-                  {isDetecting && (
-                    <div className="mt-3 space-y-2">
-                      <div className="flex items-center justify-between text-sm">
-                        <span className="text-muted-foreground">Analisando frames com visão computacional...</span>
-                        <span className="text-primary font-medium">{Math.round(detectionProgress)}%</span>
-                      </div>
-                      <Progress value={detectionProgress} className="h-2" />
-                    </div>
-                  )}
                 </CardHeader>
                 <CardContent>
                   {/* Hidden video element for frame extraction */}
@@ -523,16 +478,25 @@ export default function Dashboard() {
                     />
                   )}
                   
-                  <GoalPlayAnimation3D
-                    frames={goalAnimationFrames}
-                    homeTeamColor={selectedMatch?.home_team?.primary_color || '#10b981'}
-                    awayTeamColor={selectedMatch?.away_team?.primary_color || '#3b82f6'}
+                  <TacticalField3D
                     homeTeamName={selectedMatch?.home_team?.name || 'Time Casa'}
                     awayTeamName={selectedMatch?.away_team?.name || 'Time Visitante'}
-                    goalMinute={selectedGoal?.minute || 0}
-                    goalTeam={(selectedGoal?.metadata as any)?.team === 'away' ? 'away' : 'home'}
-                    description={selectedGoal?.description || ''}
-                    height={550}
+                    homeTeamColor={selectedMatch?.home_team?.primary_color || '#10b981'}
+                    awayTeamColor={selectedMatch?.away_team?.primary_color || '#3b82f6'}
+                    defaultMode={goalEvents.length > 0 ? 'animation' : 'heatmap'}
+                    heatZones={heatZones}
+                    homePlayers={homePlayers}
+                    awayPlayers={awayPlayers}
+                    animationFrames={goalAnimationFrames}
+                    selectedGoal={selectedGoal ? {
+                      id: selectedGoal.id,
+                      minute: selectedGoal.minute || 0,
+                      description: selectedGoal.description || undefined,
+                      team: (selectedGoal.metadata as any)?.team === 'away' ? 'away' : 'home'
+                    } : null}
+                    height={650}
+                    isLoading={isDetecting}
+                    detectionProgress={detectionProgress}
                   />
                   
                   {/* Detection info */}
