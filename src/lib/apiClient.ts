@@ -923,19 +923,36 @@ export const apiClient = {
       const formData = new FormData();
       formData.append('file', file);
       if (filename) formData.append('filename', filename);
+      
+      console.log(`[uploadFile] Starting upload: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB) to ${matchId}/${subfolder}`);
+      
       const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
         method: 'POST',
         body: formData,
         signal: controller.signal,
+        headers: {
+          // Headers para túneis (ngrok, Cloudflare Tunnel) - NÃO incluir Content-Type para FormData
+          'ngrok-skip-browser-warning': 'true',
+          'Accept': 'application/json',
+        },
       });
       clearTimeout(timeoutId);
-      if (!response.ok) throw new Error('Upload failed');
-      return response.json();
+      
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Unknown error');
+        console.error(`[uploadFile] Upload failed: ${response.status}`, errorText);
+        throw new Error(`Upload failed: ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log(`[uploadFile] Upload success: ${result.url}`);
+      return result;
     } catch (error: any) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
         throw new Error('Upload expirou - arquivo muito grande ou conexão lenta');
       }
+      console.error('[uploadFile] Upload error:', error.message);
       throw error;
     }
   },
