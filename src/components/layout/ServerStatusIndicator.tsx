@@ -1,7 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Server, RefreshCw, WifiOff, Settings } from 'lucide-react';
+import { Server, RefreshCw, WifiOff, Wifi, Globe } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { checkLocalServerAvailable, getApiBase, needsCloudflareConfig, getActiveConnectionMethod } from '@/lib/apiMode';
+import { 
+  checkLocalServerAvailable, 
+  getApiBase, 
+  getActiveConnectionMethod,
+  autoDiscoverServer,
+  resetDiscoveryCache,
+  getCloudflareUrl
+} from '@/lib/apiMode';
 import { resetServerAvailability } from '@/lib/apiClient';
 import {
   Tooltip,
@@ -10,13 +17,12 @@ import {
 } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
-import { useNavigate } from 'react-router-dom';
 
 interface ServerStatusIndicatorProps {
   collapsed?: boolean;
 }
 
-type ConnectionStatus = 'checking' | 'online' | 'offline' | 'outdated' | 'needs-config';
+type ConnectionStatus = 'checking' | 'online' | 'offline' | 'outdated';
 
 interface ServerHealth {
   version?: string;
@@ -30,19 +36,14 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
   const [status, setStatus] = useState<ConnectionStatus>('checking');
   const [serverHealth, setServerHealth] = useState<ServerHealth | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
-  const navigate = useNavigate();
 
   const checkStatus = useCallback(async () => {
-    // Verificar se precisa configurar Cloudflare primeiro
-    if (needsCloudflareConfig()) {
-      setStatus('needs-config');
-      return;
-    }
-
     const apiBase = getApiBase();
 
     try {
-      const response = await fetch(`${apiBase}/health`);
+      const response = await fetch(`${apiBase}/health`, {
+        signal: AbortSignal.timeout(5000),
+      });
       
       if (response.ok) {
         const data = await response.json();
@@ -66,51 +67,58 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
     setIsReconnecting(true);
     setStatus('checking');
     
-    // Reset cache do servidor
+    // Reset caches
     resetServerAvailability();
+    resetDiscoveryCache();
     
-    const MAX_RETRIES = 3;
-    const RETRY_DELAY = 2000;
+    toast.info('Buscando servidor...');
     
-    for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
-      toast.info(`Tentativa ${attempt}/${MAX_RETRIES}...`);
-      
-      resetServerAvailability();
-      
-      try {
-        const available = await checkLocalServerAvailable();
-        
-        if (available) {
-          setStatus('online');
-          setIsReconnecting(false);
-          toast.success('Servidor reconectado!');
-          await checkStatus();
-          return;
+    // Tentar auto-descoberta
+    const discovered = await autoDiscoverServer();
+    
+    if (discovered) {
+      setStatus('online');
+      toast.success(`Servidor conectado: ${discovered.replace('http://', '')}`);
+      await checkStatus();
+    } else {
+      // Tentar Cloudflare se disponível
+      const cloudflare = getCloudflareUrl();
+      if (cloudflare) {
+        try {
+          const response = await fetch(`${cloudflare}/health?light=true`, {
+            signal: AbortSignal.timeout(5000),
+          });
+          if (response.ok) {
+            setStatus('online');
+            toast.success('Conectado via Cloudflare Tunnel');
+            await checkStatus();
+            setIsReconnecting(false);
+            return;
+          }
+        } catch {
+          // Continuar para erro
         }
-      } catch {
-        // Continuar para próxima tentativa
       }
       
-      if (attempt < MAX_RETRIES) {
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY));
-      }
+      setStatus('offline');
+      toast.error('Servidor não encontrado. Verifique se está rodando.');
     }
     
-    setStatus('offline');
-    toast.error('Servidor não disponível. Verifique se o Python está rodando em 10.0.0.20:5000');
     setIsReconnecting(false);
   }, [checkStatus]);
 
   useEffect(() => {
+    // Iniciar verificação
     checkStatus();
-    const interval = setInterval(checkStatus, 10000);
+    
+    // Verificar periodicamente
+    const interval = setInterval(checkStatus, 15000);
 
-    // Listen for auto-recovery event from apiClient
+    // Ouvir evento de reconexão automática
     const handleServerReconnected = () => {
-      console.log('[ServerStatus] Servidor reconectado automaticamente');
+      console.log('[ServerStatus] Servidor reconectado');
       setStatus('checking');
       checkStatus();
-      toast.success('Servidor reconectado automaticamente!');
     };
     
     window.addEventListener('server-reconnected', handleServerReconnected);
@@ -130,22 +138,11 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           color: 'bg-yellow-500',
           textColor: 'text-yellow-500',
           label: 'Verificando...',
-          tooltip: `Verificando servidor...`,
-          icon: Server,
+          tooltip: 'Buscando servidor...',
+          icon: RefreshCw,
           iconColor: 'text-muted-foreground',
           animate: true,
           clickable: false
-        };
-      case 'needs-config':
-        return {
-          color: 'bg-orange-500',
-          textColor: 'text-orange-500',
-          label: 'Config Necessária',
-          tooltip: 'Configure o Cloudflare Tunnel nas Configurações para conectar ao servidor',
-          icon: Settings,
-          iconColor: 'text-orange-500',
-          animate: true,
-          clickable: true
         };
       case 'online':
         return {
@@ -153,9 +150,9 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           textColor: 'text-green-500',
           label: serverHealth?.version ? `v${serverHealth.version}` : 'Online',
           tooltip: serverHealth?.version 
-            ? `Servidor Python v${serverHealth.version} (${serverHealth.build_date}) - ${connection.label}` 
-            : `Servidor Python online - ${connection.label}`,
-          icon: Server,
+            ? `Servidor v${serverHealth.version} - ${connection.label}` 
+            : `Servidor online - ${connection.label}`,
+          icon: connection.method === 'cloudflare' ? Globe : (connection.method === 'production' ? Server : Wifi),
           iconColor: 'text-primary',
           animate: false,
           clickable: false
@@ -165,7 +162,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           color: 'bg-red-500',
           textColor: 'text-red-500',
           label: 'Offline',
-          tooltip: `Servidor Python offline - ${connection.label} - clique para reconectar`,
+          tooltip: 'Servidor não encontrado - clique para buscar',
           icon: WifiOff,
           iconColor: 'text-red-500',
           animate: true,
@@ -176,7 +173,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           color: 'bg-orange-500',
           textColor: 'text-orange-500',
           label: 'Desatualizado',
-          tooltip: serverHealth?.warning || 'Servidor precisa ser reiniciado para carregar novas funções',
+          tooltip: serverHealth?.warning || 'Reinicie o servidor Python',
           icon: RefreshCw,
           iconColor: 'text-orange-500',
           animate: true,
@@ -187,12 +184,10 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
 
   const config = getStatusConfig();
   const Icon = config.icon;
+  const connection = getActiveConnectionMethod();
 
   const handleClick = () => {
-    if (status === 'needs-config') {
-      navigate('/settings');
-      toast.info('Configure o Cloudflare Tunnel para conectar ao servidor');
-    } else if (status === 'offline') {
+    if (status === 'offline') {
       handleReconnect();
     } else if (status === 'outdated') {
       const missingFns = serverHealth?.critical_functions 
@@ -202,7 +197,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
         : [];
       
       toast.error('Servidor Desatualizado', {
-        description: `Funções não carregadas: ${missingFns.join(', ')}. Reinicie o servidor Python (Ctrl+C e python server.py).`,
+        description: `Funções: ${missingFns.join(', ')}. Reinicie o servidor.`,
         duration: 10000,
       });
     }
@@ -235,9 +230,12 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
       </div>
       {!collapsed && (
         <div className="flex flex-col flex-1">
-          <span className="font-medium text-foreground">Local</span>
+          <span className="font-medium text-foreground">
+            {connection.method === 'cloudflare' ? 'Túnel' : 
+             connection.method === 'production' ? 'PM2' : 'Local'}
+          </span>
           <span className={cn("text-[10px]", config.textColor)}>
-            {isReconnecting ? 'Reconectando...' : config.label}
+            {isReconnecting ? 'Buscando...' : config.label}
           </span>
         </div>
       )}
@@ -252,7 +250,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           }}
         >
           <RefreshCw className="h-3 w-3 mr-1" />
-          Reconectar
+          Buscar
         </Button>
       )}
     </div>
