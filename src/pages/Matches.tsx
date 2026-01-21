@@ -566,26 +566,28 @@ export default function Matches() {
 
   return (
     <AppLayout>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="space-y-4 md:space-y-6">
+        {/* Header - responsive */}
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="font-display text-3xl font-bold">Partidas</h1>
-            <p className="text-muted-foreground">
-              Gerencie e analise suas partidas de futebol
+            <h1 className="font-display text-2xl md:text-3xl font-bold">Partidas</h1>
+            <p className="text-sm md:text-base text-muted-foreground">
+              Gerencie e analise suas partidas
             </p>
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" asChild>
+            <Button variant="outline" size="sm" className="flex-1 sm:flex-none" asChild>
               <Link to="/live">
-                <Mic className="mr-2 h-4 w-4" />
-                Ao Vivo
+                <Radio className="mr-1.5 h-4 w-4" />
+                <span className="hidden sm:inline">Ao Vivo</span>
+                <span className="sm:hidden">Live</span>
               </Link>
             </Button>
-            <Button variant="arena" asChild>
+            <Button variant="arena" size="sm" className="flex-1 sm:flex-none" asChild>
               <Link to="/upload">
-                <Plus className="mr-2 h-4 w-4" />
-                Importar Partida
+                <Plus className="mr-1.5 h-4 w-4" />
+                <span className="hidden sm:inline">Importar</span>
+                <span className="sm:hidden">Novo</span>
               </Link>
             </Button>
           </div>
