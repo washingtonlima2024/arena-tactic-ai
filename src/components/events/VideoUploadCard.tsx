@@ -14,6 +14,14 @@ import {
   LinkIcon
 } from 'lucide-react';
 
+const formatBytes = (bytes: number): string => {
+  if (bytes === 0) return '0 B';
+  const k = 1024;
+  const sizes = ['B', 'KB', 'MB', 'GB'];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+};
+
 interface VideoUploadCardProps {
   matchId: string;
   onVideoUploaded: (videoUrl: string, videoId: string) => void;
@@ -24,7 +32,10 @@ export function VideoUploadCard({ matchId, onVideoUploaded, eventsCount = 0 }: V
   const [isUploading, setIsUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [isDragging, setIsDragging] = useState(false);
+  const [uploadSpeed, setUploadSpeed] = useState<string>('');
+  const [uploadedSize, setUploadedSize] = useState<string>('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const lastProgressRef = useRef<{ time: number; loaded: number }>({ time: Date.now(), loaded: 0 });
 
   const handleFileSelect = async (file: File) => {
     if (!file) return;
@@ -44,27 +55,41 @@ export function VideoUploadCard({ matchId, onVideoUploaded, eventsCount = 0 }: V
     }
 
     setIsUploading(true);
-    setUploadProgress(10);
+    setUploadProgress(0);
+    setUploadSpeed('');
+    setUploadedSize('');
+    lastProgressRef.current = { time: Date.now(), loaded: 0 };
 
     try {
       // Get video duration
       const duration = await getVideoDuration(file);
       const durationMinutes = Math.ceil(duration / 60);
-      
-      setUploadProgress(20);
 
-      // Upload to local server storage
+      // Upload to local server storage with real progress
       const extension = file.name.split('.').pop() || 'mp4';
       const fileName = `manual-${matchId}-${Date.now()}.${extension}`;
 
-      setUploadProgress(40);
-
-      // Upload blob to local server
-      const uploadResult = await apiClient.uploadBlob(
+      // Upload blob to local server with progress tracking
+      const uploadResult = await apiClient.uploadBlobWithProgress(
         matchId,
         'videos',
         file,
-        fileName
+        fileName,
+        (percent, loaded, total) => {
+          setUploadProgress(percent);
+          setUploadedSize(`${formatBytes(loaded)} / ${formatBytes(total)}`);
+          
+          // Calcular velocidade
+          const now = Date.now();
+          const timeDiff = (now - lastProgressRef.current.time) / 1000;
+          const bytesDiff = loaded - lastProgressRef.current.loaded;
+          
+          if (timeDiff > 0.5) { // Atualizar a cada 0.5s
+            const speed = bytesDiff / timeDiff;
+            setUploadSpeed(formatBytes(speed) + '/s');
+            lastProgressRef.current = { time: now, loaded };
+          }
+        }
       );
 
       if (!uploadResult?.url) {
@@ -72,8 +97,6 @@ export function VideoUploadCard({ matchId, onVideoUploaded, eventsCount = 0 }: V
       }
 
       const videoUrl = uploadResult.url;
-
-      setUploadProgress(70);
 
       // Create video record via local API
       const videoRecord = await apiClient.post('/api/videos', {
@@ -178,11 +201,11 @@ export function VideoUploadCard({ matchId, onVideoUploaded, eventsCount = 0 }: V
               <div className="flex-1">
                 <p className="font-medium">Enviando vídeo...</p>
                 <p className="text-sm text-muted-foreground">
-                  {uploadProgress < 70 
-                    ? 'Fazendo upload do arquivo' 
-                    : uploadProgress < 90 
-                    ? 'Vinculando eventos ao vídeo'
-                    : 'Finalizando...'}
+                  {uploadProgress < 100 
+                    ? uploadedSize 
+                      ? `${uploadedSize}${uploadSpeed ? ` • ${uploadSpeed}` : ''}`
+                      : 'Iniciando upload...'
+                    : 'Vinculando eventos ao vídeo...'}
                 </p>
               </div>
               <Badge variant="outline">{uploadProgress}%</Badge>
