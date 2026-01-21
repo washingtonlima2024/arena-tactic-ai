@@ -10,6 +10,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { VolumeIndicator } from "./VolumeIndicator";
 import { useToast } from "@/hooks/use-toast";
+import { generateUUID } from "@/lib/utils";
 
 const LANGUAGES = [
   { code: "pt", label: "Português", flag: "🇧🇷" },
@@ -210,7 +211,7 @@ export const LiveTranscriptRealtime = ({
     const second = recordingTimeRef.current % 60;
     
     const newChunk: TranscriptChunk = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       text,
       minute,
       second,

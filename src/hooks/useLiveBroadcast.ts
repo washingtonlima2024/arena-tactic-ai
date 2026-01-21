@@ -2,6 +2,7 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { apiClient } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
+import { generateUUID } from "@/lib/utils";
 
 export interface MatchInfo {
   homeTeam: string;
@@ -548,7 +549,7 @@ export const useLiveBroadcast = () => {
 
           if (transcriptData?.text && transcriptData.text.trim()) {
             const newChunk: TranscriptChunk = {
-              id: crypto.randomUUID(),
+              id: generateUUID(),
               text: transcriptData.text,
               minute: currentMinute,
               second: currentSecond,
@@ -578,7 +579,7 @@ export const useLiveBroadcast = () => {
               if (eventsData?.events && eventsData.events.length > 0) {
                 const currentRecordingTime = recordingTime;
                 const newEvents: LiveEvent[] = eventsData.events.map((e: any) => ({
-                  id: crypto.randomUUID(),
+                  id: generateUUID(),
                   type: e.type,
                   minute: e.minute || currentMinute,
                   second: e.second || 0,
@@ -668,7 +669,7 @@ export const useLiveBroadcast = () => {
     const minute = Math.floor(recordingTime / 60);
     const second = recordingTime % 60;
 
-    const eventId = crypto.randomUUID();
+    const eventId = generateUUID();
     const newEvent: LiveEvent = {
       id: eventId,
       type,
@@ -729,7 +730,7 @@ export const useLiveBroadcast = () => {
     source?: string;
   }) => {
     const newEvent: LiveEvent = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       type: eventData.type,
       minute: eventData.minute,
       second: eventData.second,
