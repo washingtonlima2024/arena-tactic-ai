@@ -1032,6 +1032,11 @@ export const apiClient = {
           } catch {
             reject(new Error('Resposta inválida do servidor'));
           }
+        } else if (xhr.status === 413) {
+          // 413 Content Too Large - provavelmente limite do Cloudflare ou Nginx
+          const sizeMB = (blob.size / 1024 / 1024).toFixed(1);
+          console.error(`[uploadBlobWithProgress] 413 Content Too Large - arquivo de ${sizeMB}MB excede limite do servidor`);
+          reject(new Error(`Arquivo muito grande (${sizeMB}MB). Limite do servidor/proxy excedido. Use "Transferência Direta (SCP/Rsync)" ou link externo.`));
         } else {
           const errorMsg = xhr.responseText || `HTTP ${xhr.status}`;
           console.error(`[uploadBlobWithProgress] Upload failed: ${xhr.status}`, errorMsg);
@@ -1040,16 +1045,22 @@ export const apiClient = {
       };
 
       xhr.onerror = () => {
-        console.error('[uploadBlobWithProgress] Network error - check CORS and server availability');
-        reject(new Error('Erro de rede durante upload - verifique se o servidor aceita CORS'));
+        // xhr.onerror é chamado para erros de rede OU quando o servidor rejeita com 4xx/5xx sem CORS
+        // Se o servidor retorna 413 mas sem headers CORS, vai cair aqui
+        const sizeMB = (blob.size / 1024 / 1024).toFixed(1);
+        console.error(`[uploadBlobWithProgress] Network error for ${sizeMB}MB file - likely 413 or CORS issue`);
+        
+        if (blob.size > 100 * 1024 * 1024) {
+          // Arquivos > 100MB provavelmente estão batendo no limite do Cloudflare (Free = 100MB)
+          reject(new Error(`Arquivo muito grande (${sizeMB}MB). Cloudflare Free limita a 100MB. Use "Transferência Direta (SCP/Rsync)" para arquivos grandes.`));
+        } else {
+          reject(new Error(`Erro de rede (${sizeMB}MB) - verifique CORS e limites do servidor/proxy`));
+        }
       };
       xhr.ontimeout = () => reject(new Error('Upload expirou após 15 minutos'));
 
       xhr.timeout = 900000; // 15 minutos
       xhr.open('POST', `${getApiBase()}/api/storage/${matchId}/${subfolder}`);
-      
-      // NÃO adicionar headers customizados para evitar preflight CORS
-      // FormData POST sem headers extras = simple request (sem preflight)
       
       console.log(`[uploadBlobWithProgress] Starting upload: ${filename} (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
       xhr.send(formData);
