@@ -175,9 +175,10 @@ export const autoDiscoverServer = async (): Promise<string | null> => {
  * 5. IP local padrão
  */
 export const getApiBase = (): string => {
-  // 1. Se estiver no domínio de produção kakttus, usar /api (proxy Nginx)
+  // 1. Se estiver no domínio de produção kakttus, retornar vazio
+  // Os endpoints já incluem /api, então o Nginx faz proxy corretamente
   if (isKakttusProduction()) {
-    return '/api';
+    return '';
   }
   
   // 2. Variável de ambiente (produção PM2 local)
@@ -266,7 +267,7 @@ export const getActiveConnectionMethod = (): ActiveConnection => {
   if (isKakttusProduction()) {
     return { 
       method: 'nginx', 
-      url: '/api', 
+      url: '', 
       label: 'Produção (Nginx)' 
     };
   }
