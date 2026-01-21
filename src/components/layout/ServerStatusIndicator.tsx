@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Server, RefreshCw, WifiOff } from 'lucide-react';
+import { Server, RefreshCw, WifiOff, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { checkLocalServerAvailable, getApiBase } from '@/lib/apiMode';
+import { checkLocalServerAvailable, getApiBase, needsCloudflareConfig, getActiveConnectionMethod } from '@/lib/apiMode';
 import { resetServerAvailability } from '@/lib/apiClient';
 import {
   Tooltip,
@@ -10,12 +10,13 @@ import {
 } from '@/components/ui/tooltip';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
+import { useNavigate } from 'react-router-dom';
 
 interface ServerStatusIndicatorProps {
   collapsed?: boolean;
 }
 
-type ConnectionStatus = 'checking' | 'online' | 'offline' | 'outdated';
+type ConnectionStatus = 'checking' | 'online' | 'offline' | 'outdated' | 'needs-config';
 
 interface ServerHealth {
   version?: string;
@@ -29,8 +30,15 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
   const [status, setStatus] = useState<ConnectionStatus>('checking');
   const [serverHealth, setServerHealth] = useState<ServerHealth | null>(null);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const navigate = useNavigate();
 
   const checkStatus = useCallback(async () => {
+    // Verificar se precisa configurar Cloudflare primeiro
+    if (needsCloudflareConfig()) {
+      setStatus('needs-config');
+      return;
+    }
+
     const apiBase = getApiBase();
 
     try {
@@ -114,7 +122,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
   }, [checkStatus]);
 
   const getStatusConfig = () => {
-    const serverLocation = '10.0.0.20:5000';
+    const connection = getActiveConnectionMethod();
 
     switch (status) {
       case 'checking':
@@ -122,11 +130,22 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           color: 'bg-yellow-500',
           textColor: 'text-yellow-500',
           label: 'Verificando...',
-          tooltip: `Verificando servidor em ${serverLocation}...`,
+          tooltip: `Verificando servidor...`,
           icon: Server,
           iconColor: 'text-muted-foreground',
           animate: true,
           clickable: false
+        };
+      case 'needs-config':
+        return {
+          color: 'bg-orange-500',
+          textColor: 'text-orange-500',
+          label: 'Config Necessária',
+          tooltip: 'Configure o Cloudflare Tunnel nas Configurações para conectar ao servidor',
+          icon: Settings,
+          iconColor: 'text-orange-500',
+          animate: true,
+          clickable: true
         };
       case 'online':
         return {
@@ -134,8 +153,8 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           textColor: 'text-green-500',
           label: serverHealth?.version ? `v${serverHealth.version}` : 'Online',
           tooltip: serverHealth?.version 
-            ? `Servidor Python v${serverHealth.version} (${serverHealth.build_date}) - ${serverLocation}` 
-            : `Servidor Python online em ${serverLocation}`,
+            ? `Servidor Python v${serverHealth.version} (${serverHealth.build_date}) - ${connection.label}` 
+            : `Servidor Python online - ${connection.label}`,
           icon: Server,
           iconColor: 'text-primary',
           animate: false,
@@ -146,7 +165,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           color: 'bg-red-500',
           textColor: 'text-red-500',
           label: 'Offline',
-          tooltip: `Servidor Python offline em ${serverLocation} - clique para reconectar`,
+          tooltip: `Servidor Python offline - ${connection.label} - clique para reconectar`,
           icon: WifiOff,
           iconColor: 'text-red-500',
           animate: true,
@@ -170,7 +189,10 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
   const Icon = config.icon;
 
   const handleClick = () => {
-    if (status === 'offline') {
+    if (status === 'needs-config') {
+      navigate('/settings');
+      toast.info('Configure o Cloudflare Tunnel para conectar ao servidor');
+    } else if (status === 'offline') {
       handleReconnect();
     } else if (status === 'outdated') {
       const missingFns = serverHealth?.critical_functions 

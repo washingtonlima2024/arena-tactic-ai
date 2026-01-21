@@ -40,7 +40,7 @@ import {
   Wifi
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getApiBase } from '@/lib/apiMode';
+import { getApiBase, getCloudflareUrl as getStoredCloudflareUrl, setCloudflareUrl as saveCloudflareUrl, isLovableEnvironment, needsCloudflareConfig } from '@/lib/apiMode';
 
 export default function Settings() {
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
@@ -152,8 +152,8 @@ export default function Settings() {
       const storedNgrokUrl = localStorage.getItem('ngrok_fallback_url') || '';
       setNgrokUrl(storedNgrokUrl);
       
-      // Cloudflare Tunnel URL - legacy (não mais usado)
-      const storedCloudflareUrl = localStorage.getItem('cloudflare_tunnel_url') || '';
+      // Cloudflare Tunnel URL
+      const storedCloudflareUrl = getStoredCloudflareUrl() || '';
       setCloudflareUrl(storedCloudflareUrl);
     }
   }, [apiSettings]);
@@ -974,7 +974,7 @@ export default function Settings() {
               </CardContent>
             </Card>
 
-            {/* Servidor Python - Configuração Simplificada */}
+            {/* Servidor Python - Configuração Híbrida */}
             <Card variant="glow">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
@@ -986,18 +986,80 @@ export default function Settings() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Indicador de IP fixo */}
+                {/* Indicador de modo atual */}
                 <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-4">
                   <div className="flex items-center gap-3">
                     <CheckCircle2 className="h-5 w-5 text-green-500" />
                     <div>
                       <p className="font-medium text-green-600">Modo Local Ativo</p>
                       <p className="text-sm text-muted-foreground">
-                        Conectado diretamente ao IP: <code className="bg-muted px-1 rounded font-mono">10.0.0.20:5000</code>
+                        IP Fixo: <code className="bg-muted px-1 rounded font-mono">10.0.0.20:5000</code>
                       </p>
                     </div>
                   </div>
                 </div>
+
+                <Separator />
+
+                {/* Cloudflare Tunnel (Opcional - para Lovable Cloud) */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <Label className="flex items-center gap-2">
+                        <Globe className="h-4 w-4 text-orange-500" />
+                        Cloudflare Tunnel (Opcional)
+                      </Label>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        Necessário apenas para acessar via Lovable Cloud
+                      </p>
+                    </div>
+                    {isLovableEnvironment() && (
+                      <Badge variant={needsCloudflareConfig() ? 'destructive' : 'outline'}>
+                        {needsCloudflareConfig() ? 'Necessário' : 'Configurado'}
+                      </Badge>
+                    )}
+                  </div>
+                  
+                  <div className="flex gap-2">
+                    <Input 
+                      value={cloudflareUrl}
+                      onChange={(e) => setCloudflareUrl(e.target.value)}
+                      placeholder="https://api.arenaplay.kakttus.com"
+                      className="flex-1"
+                    />
+                    <Button 
+                      variant="outline" 
+                      onClick={() => {
+                        if (cloudflareUrl) {
+                          saveCloudflareUrl(cloudflareUrl);
+                          toast.success('URL Cloudflare salva!');
+                        } else {
+                          saveCloudflareUrl('');
+                          toast.info('URL Cloudflare removida');
+                        }
+                      }}
+                    >
+                      Salvar
+                    </Button>
+                  </div>
+
+                  {isLovableEnvironment() && needsCloudflareConfig() && (
+                    <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-3">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="h-4 w-4 text-orange-500 mt-0.5" />
+                        <div className="text-xs">
+                          <p className="font-medium text-orange-600">Configuração necessária</p>
+                          <p className="text-muted-foreground">
+                            Você está acessando via Lovable Cloud. Configure a URL do Cloudflare Tunnel 
+                            para conectar ao servidor Python local.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <Separator />
 
                 {/* Botão testar conexão */}
                 <Button 
@@ -1010,7 +1072,9 @@ export default function Settings() {
                 </Button>
 
                 <p className="text-xs text-muted-foreground text-center">
-                  Frontend e backend na mesma máquina - sem necessidade de túneis ou proxies.
+                  {isLovableEnvironment() 
+                    ? 'Conectando via: ' + (cloudflareUrl || 'IP local (pode não funcionar)')
+                    : 'Ambiente local: conectando diretamente ao IP 10.0.0.20:5000'}
                 </p>
               </CardContent>
             </Card>
