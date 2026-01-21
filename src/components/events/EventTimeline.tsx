@@ -1,11 +1,13 @@
+import { useState, useRef } from 'react';
 import { MatchEvent, Team } from '@/types/arena';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { TeamBadge } from '@/components/teams/TeamBadge';
-import { Star, Pencil, Play } from 'lucide-react';
+import { Star, Pencil, Play, Volume2, VolumeX, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { getEventTeam, getEventTimeMs, formatEventTime } from '@/lib/eventHelpers';
+import { apiClient } from '@/lib/apiClient';
 
 interface EventTimelineProps {
   events: MatchEvent[];
@@ -13,6 +15,7 @@ interface EventTimelineProps {
   onEditEvent?: (event: MatchEvent) => void;
   onPlayVideo?: (eventId: string, eventMinute: number) => void;
   hasVideo?: boolean;
+  matchId?: string;
   homeTeam?: Team | { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string };
   awayTeam?: Team | { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string };
 }
@@ -70,8 +73,11 @@ const eventBadgeVariants: Record<string, any> = {
 // Events that should be highlighted
 const highlightEventTypes = ['goal', 'penalty'];
 
-export function EventTimeline({ events, className, onEditEvent, onPlayVideo, hasVideo, homeTeam, awayTeam }: EventTimelineProps) {
+export function EventTimeline({ events, className, onEditEvent, onPlayVideo, hasVideo, matchId, homeTeam, awayTeam }: EventTimelineProps) {
   const { isAdmin } = useAuth();
+  const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
+  const [loadingAudioId, setLoadingAudioId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const getTeam = (event: MatchEvent) => {
     const { team } = getEventTeam(
@@ -93,11 +99,64 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
       second: event.second, 
       metadata: event.metadata as any 
     });
+    const videoSecond = (event.metadata as any)?.videoSecond;
     return {
       formatted: formatEventTime(totalMs),
       totalMs,
-      totalSeconds: Math.floor(totalMs / 1000)
+      totalSeconds: Math.floor(totalMs / 1000),
+      videoSecond: videoSecond ?? Math.floor(totalMs / 1000)
     };
+  };
+
+  const handlePlayAudio = async (event: MatchEvent) => {
+    const timeDisplay = formatEventTimeDisplay(event);
+    
+    // If already playing this event, stop it
+    if (playingAudioId === event.id) {
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current = null;
+      }
+      setPlayingAudioId(null);
+      return;
+    }
+    
+    // Stop any existing audio
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current = null;
+    }
+    
+    if (!matchId) return;
+    
+    setLoadingAudioId(event.id);
+    
+    try {
+      // Extract audio for 15 seconds starting 5 seconds before the event
+      const result = await apiClient.extractGoalAudio(matchId, timeDisplay.videoSecond, 15);
+      
+      if (result?.audioUrl) {
+        const audio = new Audio(result.audioUrl);
+        audioRef.current = audio;
+        
+        audio.onended = () => {
+          setPlayingAudioId(null);
+          audioRef.current = null;
+        };
+        
+        audio.onerror = () => {
+          setPlayingAudioId(null);
+          audioRef.current = null;
+        };
+        
+        await audio.play();
+        setPlayingAudioId(event.id);
+      }
+    } catch (error) {
+      console.error('Error extracting audio:', error);
+    } finally {
+      setLoadingAudioId(null);
+    }
   };
 
   return (
@@ -118,7 +177,7 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
             )}
             style={{ animationDelay: `${index * 50}ms` }}
           >
-            {/* Play Button */}
+            {/* Play Video Button */}
             {hasVideo && onPlayVideo && (
               <Button
                 variant="ghost"
@@ -128,6 +187,31 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
                 title="Reproduzir vídeo"
               >
                 <Play className="h-4 w-4 text-primary" />
+              </Button>
+            )}
+
+            {/* Play Audio Button */}
+            {hasVideo && matchId && (
+              <Button
+                variant="ghost"
+                size="icon"
+                className={cn(
+                  "h-8 w-8 shrink-0",
+                  playingAudioId === event.id 
+                    ? "bg-yellow-500/20 hover:bg-yellow-500/30" 
+                    : "hover:bg-primary/20"
+                )}
+                onClick={() => handlePlayAudio(event)}
+                title={playingAudioId === event.id ? "Pausar áudio" : "Ouvir narração"}
+                disabled={loadingAudioId === event.id}
+              >
+                {loadingAudioId === event.id ? (
+                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                ) : playingAudioId === event.id ? (
+                  <VolumeX className="h-4 w-4 text-yellow-500" />
+                ) : (
+                  <Volume2 className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                )}
               </Button>
             )}
 

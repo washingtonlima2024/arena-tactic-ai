@@ -550,6 +550,8 @@ export default function Dashboard() {
                       id: e.id,
                       type: e.event_type as any,
                       minute: e.minute || 0,
+                      second: e.second || 0,
+                      metadata: e.metadata,
                       team: 'home' as const,
                       matchId: currentMatchId || '',
                       teamId: '',
@@ -557,6 +559,7 @@ export default function Dashboard() {
                       player: { id: '', name: '', number: 0, position: '' }
                     }))} 
                     hasVideo={!!matchVideo}
+                    matchId={currentMatchId || undefined}
                     onPlayVideo={handlePlayVideo}
                   />
                 </CardContent>
