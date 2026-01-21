@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { apiClient } from '@/lib/apiClient';
 import { toast } from '@/hooks/use-toast';
+import { generateUUID } from '@/lib/utils';
 
 export interface TranscriptionQueueItem {
   id: string;
@@ -38,7 +39,7 @@ export function useTranscriptionQueue(): UseTranscriptionQueueReturn {
   const processingRef = useRef(false);
 
   const addToQueue = useCallback((item: Omit<TranscriptionQueueItem, 'id' | 'status' | 'progress' | 'message'>): string => {
-    const id = crypto.randomUUID();
+    const id = generateUUID();
     const newItem: TranscriptionQueueItem = {
       ...item,
       id,

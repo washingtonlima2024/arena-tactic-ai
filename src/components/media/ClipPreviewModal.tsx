@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Input } from '@/components/ui/input';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { generateUUID } from '@/lib/utils';
 import * as VisuallyHidden from '@radix-ui/react-visually-hidden';
 import {
   Accordion,
@@ -479,7 +480,7 @@ export function ClipPreviewModal({
   // Custom text handlers
   const addCustomText = () => {
     const newText: CustomText = {
-      id: crypto.randomUUID(),
+      id: generateUUID(),
       content: 'Novo texto',
       position: 'bottom-center',
       fontSize: 16,

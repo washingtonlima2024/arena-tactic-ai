@@ -4,6 +4,7 @@ import { useToast } from "@/hooks/use-toast";
 import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { VideoSegmentBuffer, VideoSegment, calculateClipWindow } from '@/utils/videoSegmentBuffer';
+import { generateUUID } from "@/lib/utils";
 
 export interface MatchInfo {
   homeTeam: string;
@@ -775,7 +776,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
 
           if (transcriptData?.text && transcriptData.text.trim()) {
             const newChunk: TranscriptChunk = {
-              id: crypto.randomUUID(),
+              id: generateUUID(),
               text: transcriptData.text,
               minute: currentMinute,
               second: currentSecond,
@@ -871,7 +872,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       save: 'Defesa',
     };
 
-    const eventId = crypto.randomUUID();
+    const eventId = generateUUID();
     const newEvent: LiveEvent = {
       id: eventId,
       type,
@@ -1212,7 +1213,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const eventId = crypto.randomUUID();
+    const eventId = generateUUID();
     const currentRecordingTime = recordingTimeRef.current;
     
     // Use AI-defined window or defaults
@@ -2290,7 +2291,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
     
     // Create event with real timestamps
-    const eventId = crypto.randomUUID();
+    const eventId = generateUUID();
     const startMinute = Math.floor(clipStartTime / 60);
     const startSecond = clipStartTime % 60;
     

@@ -59,7 +59,7 @@ import { HalfDropzone, getDefaultVideoType, getDefaultMinutes } from '@/componen
 import { LocalFileBrowser } from '@/components/upload/LocalFileBrowser';
 import { TransferCommandsDialog } from '@/components/upload/TransferCommandsDialog';
 import { splitVideoInBrowser, calculateOptimalParts, shouldSplitInBrowser, downloadVideoWithProgress } from '@/lib/videoSplitter';
-import { cn } from '@/lib/utils';
+import { cn, generateUUID } from '@/lib/utils';
 
 // Helper to extract embed URL from various formats
 const extractEmbedUrl = (input: string): string => {
@@ -356,7 +356,7 @@ export default function VideoUpload() {
   const UPLOAD_TIMEOUT = 300000;
 
   const uploadFile = async (file: File, half?: 'first' | 'second') => {
-    const segmentId = crypto.randomUUID();
+    const segmentId = generateUUID();
     const suggestedType = half ? getDefaultVideoType(half) : suggestVideoType(file.name);
     const defaultMins = half ? getDefaultMinutes(half) : {
       full: { start: 0, end: 90 },
@@ -646,7 +646,7 @@ export default function VideoUpload() {
       const durationSeconds = newDuration ? parseInt(newDuration) : null;
 
       const newSegment: VideoSegment = {
-        id: crypto.randomUUID(),
+        id: generateUUID(),
         name: `${validation.platform}: ${embedUrl.slice(0, 40)}...`,
         url: embedUrl,
         videoType: newLinkType,
@@ -827,7 +827,7 @@ export default function VideoUpload() {
     const videoType = localBrowserHalf === 'first' ? 'first_half' : 
                       localBrowserHalf === 'second' ? 'second_half' : 'full';
     
-    const segmentId = crypto.randomUUID();
+    const segmentId = generateUUID();
     const defaultMins = {
       first_half: { start: 0, end: 45 },
       second_half: { start: 45, end: 90 },
@@ -1135,7 +1135,7 @@ export default function VideoUpload() {
           console.log('[FFmpeg] Tentando extrair áudio do MP4...');
           
           // Generate a unique videoId for the audio file
-          const videoId = segment.id || crypto.randomUUID();
+          const videoId = segment.id || generateUUID();
           
           try {
             // Use FFmpeg to extract audio, upload, and transcribe

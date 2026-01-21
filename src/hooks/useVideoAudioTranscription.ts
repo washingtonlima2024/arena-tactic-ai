@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { apiClient } from "@/lib/apiClient";
+import { generateUUID } from "@/lib/utils";
 
 interface UseVideoAudioTranscriptionOptions {
   onTranscript?: (text: string) => void;
@@ -248,7 +249,7 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
         console.log("Video audio transcription:", transcriptText);
 
         const newTranscript = {
-          id: crypto.randomUUID(),
+          id: generateUUID(),
           text: transcriptText,
           timestamp: new Date(),
         };
