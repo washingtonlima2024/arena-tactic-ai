@@ -1048,9 +1048,8 @@ export const apiClient = {
       xhr.timeout = 900000; // 15 minutos
       xhr.open('POST', `${getApiBase()}/api/storage/${matchId}/${subfolder}`);
       
-      // Headers necessários para túneis (ngrok, Cloudflare Tunnel)
-      xhr.setRequestHeader('ngrok-skip-browser-warning', 'true');
-      xhr.setRequestHeader('Accept', 'application/json');
+      // NÃO adicionar headers customizados para evitar preflight CORS
+      // FormData POST sem headers extras = simple request (sem preflight)
       
       console.log(`[uploadBlobWithProgress] Starting upload: ${filename} (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
       xhr.send(formData);
