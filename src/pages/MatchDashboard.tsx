@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { AppLayout } from "@/components/layout/AppLayout";
 import { SoccerBallLoader } from "@/components/ui/SoccerBallLoader";
 import { Progress } from "@/components/ui/progress";
+import { getEventLabel } from '@/lib/eventLabels';
 import {
   LineChart,
   Line,
@@ -654,7 +655,7 @@ function EventDetailPanel({
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
           <div>
             <p className="text-xs text-muted-foreground">Tipo</p>
-            <Badge variant="outline">{event.event_type}</Badge>
+            <Badge variant="outline">{getEventLabel(event.event_type)}</Badge>
           </div>
           <div>
             <p className="text-xs text-muted-foreground">Minuto</p>
