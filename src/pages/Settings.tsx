@@ -40,7 +40,7 @@ import {
   Wifi
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getApiBase, getCloudflareUrl as getStoredCloudflareUrl, setCloudflareUrl as saveCloudflareUrl, isLovableEnvironment, needsCloudflareConfig } from '@/lib/apiMode';
+import { getApiBase, getCloudflareUrl as getStoredCloudflareUrl, setCloudflareUrl as saveCloudflareUrl, isLovableEnvironment, getActiveConnectionMethod, autoDiscoverServer, resetDiscoveryCache } from '@/lib/apiMode';
 
 export default function Settings() {
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
@@ -1001,7 +1001,7 @@ export default function Settings() {
 
                 <Separator />
 
-                {/* Cloudflare Tunnel (Opcional - para Lovable Cloud) */}
+                {/* Cloudflare Tunnel (Opcional - para acesso remoto) */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
                     <div>
@@ -1010,13 +1010,11 @@ export default function Settings() {
                         Cloudflare Tunnel (Opcional)
                       </Label>
                       <p className="text-xs text-muted-foreground mt-1">
-                        Necessário apenas para acessar via Lovable Cloud
+                        Use apenas para acesso fora da rede local
                       </p>
                     </div>
-                    {isLovableEnvironment() && (
-                      <Badge variant={needsCloudflareConfig() ? 'destructive' : 'outline'}>
-                        {needsCloudflareConfig() ? 'Necessário' : 'Configurado'}
-                      </Badge>
+                    {cloudflareUrl && (
+                      <Badge variant="outline">Configurado</Badge>
                     )}
                   </div>
                   
@@ -1043,15 +1041,15 @@ export default function Settings() {
                     </Button>
                   </div>
 
-                  {isLovableEnvironment() && needsCloudflareConfig() && (
-                    <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-3">
+                  {isLovableEnvironment() && !cloudflareUrl && (
+                    <div className="rounded-lg border border-yellow-500/30 bg-yellow-500/5 p-3">
                       <div className="flex items-start gap-2">
-                        <AlertCircle className="h-4 w-4 text-orange-500 mt-0.5" />
+                        <AlertCircle className="h-4 w-4 text-yellow-500 mt-0.5" />
                         <div className="text-xs">
-                          <p className="font-medium text-orange-600">Configuração necessária</p>
+                          <p className="font-medium text-yellow-600">Acesso remoto</p>
                           <p className="text-muted-foreground">
-                            Você está acessando via Lovable Cloud. Configure a URL do Cloudflare Tunnel 
-                            para conectar ao servidor Python local.
+                            Se estiver acessando de fora da rede local, configure a URL do 
+                            Cloudflare Tunnel para conectar ao servidor.
                           </p>
                         </div>
                       </div>
@@ -1061,20 +1059,37 @@ export default function Settings() {
 
                 <Separator />
 
-                {/* Botão testar conexão */}
-                <Button 
-                  variant="outline" 
-                  onClick={testServerConnection}
-                  className="w-full"
-                >
-                  <Wifi className="h-4 w-4 mr-2" />
-                  Testar Conexão
-                </Button>
+                {/* Botões de ação */}
+                <div className="flex gap-2">
+                  <Button 
+                    variant="outline" 
+                    onClick={async () => {
+                      toast.info('Buscando servidor...');
+                      resetDiscoveryCache();
+                      const discovered = await autoDiscoverServer();
+                      if (discovered) {
+                        toast.success(`Servidor encontrado: ${discovered.replace('http://', '')}`);
+                      } else {
+                        toast.error('Nenhum servidor encontrado na rede local');
+                      }
+                    }}
+                    className="flex-1"
+                  >
+                    <RefreshCw className="h-4 w-4 mr-2" />
+                    Buscar Servidor
+                  </Button>
+                  <Button 
+                    variant="outline" 
+                    onClick={testServerConnection}
+                    className="flex-1"
+                  >
+                    <Wifi className="h-4 w-4 mr-2" />
+                    Testar Conexão
+                  </Button>
+                </div>
 
                 <p className="text-xs text-muted-foreground text-center">
-                  {isLovableEnvironment() 
-                    ? 'Conectando via: ' + (cloudflareUrl || 'IP local (pode não funcionar)')
-                    : 'Ambiente local: conectando diretamente ao IP 10.0.0.20:5000'}
+                  Conexão ativa: {getActiveConnectionMethod().label}
                 </p>
               </CardContent>
             </Card>

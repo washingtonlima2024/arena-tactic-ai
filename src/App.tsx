@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -9,7 +9,7 @@ import { LiveBroadcastProvider } from "./contexts/LiveBroadcastContext";
 import { ClipSyncProvider } from "./contexts/ClipSyncContext";
 import { ClipSyncIndicator } from "./components/media/ClipSyncIndicator";
 import { FloatingLivePlayer } from "./components/live/FloatingLivePlayer";
-import { getApiBase } from "./lib/apiMode";
+import { getApiBase, autoDiscoverServer, getDiscoveredServer } from "./lib/apiMode";
 import Landing from "./pages/Landing";
 import Index from "./pages/Index";
 import Matches from "./pages/Matches";
@@ -46,9 +46,28 @@ function ClipSyncWrapper({ children }: { children: React.ReactNode }) {
 const queryClient = new QueryClient();
 
 const App = () => {
-  // Log da URL base da API na inicialização
+  const [serverReady, setServerReady] = useState(!!getDiscoveredServer());
+
+  // Auto-descoberta do servidor na inicialização
   useEffect(() => {
-    console.log('[App] API Base:', getApiBase());
+    const initializeServerConnection = async () => {
+      console.log('[App] Iniciando auto-descoberta do servidor...');
+      
+      const discovered = await autoDiscoverServer();
+      
+      if (discovered) {
+        console.log(`[App] ✅ Servidor conectado: ${discovered}`);
+        setServerReady(true);
+      } else {
+        console.warn('[App] ⚠️ Nenhum servidor local encontrado');
+        // Ainda permite a app funcionar, apenas sem backend
+        setServerReady(true);
+      }
+      
+      console.log('[App] API Base:', getApiBase());
+    };
+    
+    initializeServerConnection();
   }, []);
 
   return (
