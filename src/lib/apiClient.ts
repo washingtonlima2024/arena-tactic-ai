@@ -372,7 +372,7 @@ export const apiClient = {
   resetServerCache: resetServerAvailability,
 
   // ============== Health ==============
-  health: () => apiRequest<{ status: string; ffmpeg: boolean }>('/health'),
+  health: () => apiRequest<{ status: string; ffmpeg: boolean }>('/api/health'),
   
   // ============== AI Status ==============
   checkAiStatus: () => apiRequest<{
