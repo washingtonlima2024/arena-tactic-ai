@@ -1207,6 +1207,7 @@ def get_conversion_status(job_id: str):
 # ============================================================================
 
 @app.route('/health', methods=['GET'])
+@app.route('/api/health', methods=['GET'])
 def health_check():
     """Verifica status do servidor. Modo light=true para resposta rápida."""
     from database import get_database_path, get_base_dir
