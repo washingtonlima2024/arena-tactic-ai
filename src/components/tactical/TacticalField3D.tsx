@@ -20,9 +20,13 @@ import {
   Map,
   Target,
   Users,
-  Loader2
+  Loader2,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import { FIFA_FIELD, FIELD_CALCULATIONS } from '@/constants/fieldDimensions';
+import { apiClient } from '@/lib/apiClient';
+import { useQuery } from '@tanstack/react-query';
 
 // ============= Types =============
 export interface HeatZone {
@@ -56,6 +60,57 @@ export interface GoalEvent {
   minute: number;
   description?: string;
   team?: 'home' | 'away';
+  metadata?: {
+    videoSecond?: number;
+    teamName?: string;
+    isOwnGoal?: boolean;
+    [key: string]: any;
+  };
+}
+
+// ============= Player Name Extraction =============
+function extractPlayerNames(description: string | undefined): {
+  scorer: string | null;
+  assister: string | null;
+} {
+  if (!description) return { scorer: null, assister: null };
+  
+  const scorerPatterns = [
+    /goo+l!?\s+(\w+\s?\w*)/i,
+    /gol de (\w+\s?\w*)/i,
+    /(\w+)\s+(marca|mete|abre|amplia|fecha|faz)/i,
+    /(\w+)\s+chuta/i,
+    /gol!\s*(\w+\s?\w*)/i,
+  ];
+  
+  const assisterPatterns = [
+    /após passe de (\w+\s?\w*)/i,
+    /assistência de (\w+\s?\w*)/i,
+    /cruzamento de (\w+\s?\w*)/i,
+    /passe de (\w+\s?\w*)/i,
+    /lançamento de (\w+\s?\w*)/i,
+  ];
+  
+  let scorer = null;
+  let assister = null;
+  
+  for (const pattern of scorerPatterns) {
+    const match = description.match(pattern);
+    if (match) { 
+      scorer = match[1].trim(); 
+      break; 
+    }
+  }
+  
+  for (const pattern of assisterPatterns) {
+    const match = description.match(pattern);
+    if (match) { 
+      assister = match[1].trim(); 
+      break; 
+    }
+  }
+  
+  return { scorer, assister };
 }
 
 export interface TacticalField3DProps {
@@ -82,6 +137,9 @@ export interface TacticalField3DProps {
   editable?: boolean;
   isLoading?: boolean;
   detectionProgress?: number;
+  
+  // Audio
+  matchId?: string;
 }
 
 // ============= Coordinate conversion =============
@@ -227,11 +285,10 @@ function AnimatedBall({
   trail?: [number, number, number][];
 }) {
   const ballRef = useRef<THREE.Group>(null);
-  const trailGlowRef = useRef<THREE.Points>(null);
 
-  // Ball size increased 70%
+  // Ball size
   const ballRadius = 0.35;
-  const shadowRadius = 0.45;
+  const shadowRadius = 0.4;
 
   useFrame((state) => {
     if (ballRef.current) {
@@ -239,7 +296,7 @@ function AnimatedBall({
       ballRef.current.rotation.x += 0.1;
       ballRef.current.rotation.z += 0.06;
       // Bounce effect
-      ballRef.current.position.y = ballRadius + Math.abs(Math.sin(time * 6)) * 0.15;
+      ballRef.current.position.y = ballRadius + Math.abs(Math.sin(time * 6)) * 0.1;
     }
   });
 
@@ -247,48 +304,26 @@ function AnimatedBall({
   const trailPoints = useMemo(() => {
     if (trail.length < 2) return null;
     // Adjust trail positions to be slightly above ground
-    return trail.map(p => [p[0], 0.1, p[2]] as [number, number, number]);
+    return trail.map(p => [p[0], 0.08, p[2]] as [number, number, number]);
   }, [trail]);
 
   return (
     <group position={position}>
-      {/* Main trajectory trail - thicker, colored */}
+      {/* Thin white trajectory trail */}
       {trailPoints && trailPoints.length > 1 && (
-        <>
-          {/* Primary trail line */}
-          <Line
-            points={trailPoints}
-            color="#fbbf24"
-            lineWidth={4}
-            transparent
-            opacity={0.7}
-          />
-          {/* Secondary glow trail */}
-          <Line
-            points={trailPoints}
-            color="#ffffff"
-            lineWidth={8}
-            transparent
-            opacity={0.2}
-          />
-        </>
+        <Line
+          points={trailPoints}
+          color="#ffffff"
+          lineWidth={1.5}
+          transparent
+          opacity={0.6}
+        />
       )}
       
       {/* Ball shadow on ground */}
       <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
         <circleGeometry args={[shadowRadius, 24]} />
-        <meshBasicMaterial color="#000000" transparent opacity={0.4} />
-      </mesh>
-      
-      {/* Ground glow effect */}
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
-        <circleGeometry args={[shadowRadius * 1.5, 24]} />
-        <meshBasicMaterial 
-          color="#fbbf24" 
-          transparent 
-          opacity={0.15}
-          blending={THREE.AdditiveBlending}
-        />
+        <meshBasicMaterial color="#000000" transparent opacity={0.3} />
       </mesh>
       
       {/* Main ball group */}
@@ -334,23 +369,8 @@ function AnimatedBall({
         </mesh>
         
         {/* Ball glow light */}
-        <pointLight intensity={1} distance={5} color="#ffffff" />
-        <pointLight intensity={0.5} distance={3} color="#fbbf24" />
+        <pointLight intensity={0.8} distance={4} color="#ffffff" />
       </group>
-      
-      {/* Position indicator above ball */}
-      <Html
-        position={[0, ballRadius * 2 + 0.5, 0]}
-        center
-        style={{
-          pointerEvents: 'none',
-          userSelect: 'none',
-        }}
-      >
-        <div className="bg-yellow-500/80 text-black text-xs font-bold px-2 py-0.5 rounded-full shadow-lg">
-          ⚽
-        </div>
-      </Html>
     </group>
   );
 }
@@ -706,7 +726,8 @@ export function TacticalField3D({
   height = 600,
   editable = false,
   isLoading = false,
-  detectionProgress = 0
+  detectionProgress = 0,
+  matchId
 }: TacticalField3DProps) {
   const isMobile = useIsMobile();
   const [mode, setMode] = useState<'heatmap' | 'animation' | 'formation'>(defaultMode);
@@ -715,10 +736,35 @@ export function TacticalField3D({
   const [currentFrame, setCurrentFrame] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  
+  // Audio state
+  const audioRef = useRef<HTMLAudioElement>(null);
+  const [isAudioPlaying, setIsAudioPlaying] = useState(false);
 
   const totalFrames = animationFrames.length;
   const currentData = animationFrames[currentFrame] || animationFrames[0];
   const showGoalCelebration = currentFrame >= totalFrames - 1 && totalFrames > 0;
+
+  // Extract player names from goal description
+  const playerNames = useMemo(() => {
+    return extractPlayerNames(selectedGoal?.description);
+  }, [selectedGoal?.description]);
+
+  // Fetch goal audio
+  const { data: goalAudio } = useQuery({
+    queryKey: ['goal-audio', matchId, selectedGoal?.id],
+    queryFn: async () => {
+      if (!selectedGoal?.metadata?.videoSecond || !matchId) return null;
+      try {
+        const result = await apiClient.extractGoalAudio(matchId, selectedGoal.metadata.videoSecond, 15);
+        return result;
+      } catch (error) {
+        console.log('Goal audio not available:', error);
+        return null;
+      }
+    },
+    enabled: !!selectedGoal?.metadata?.videoSecond && !!matchId
+  });
 
   // Ball trail - show last 30 frames for longer trajectory visualization
   const ballTrail = useMemo(() => {
@@ -755,6 +801,11 @@ export function TacticalField3D({
   useEffect(() => {
     setCurrentFrame(0);
     setIsPlaying(false);
+    setIsAudioPlaying(false);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
   }, [selectedGoal?.id]);
 
   const handlePlayPause = useCallback(() => {
@@ -767,11 +818,27 @@ export function TacticalField3D({
   const handleReset = useCallback(() => {
     setCurrentFrame(0);
     setIsPlaying(false);
+    setIsAudioPlaying(false);
+    if (audioRef.current) {
+      audioRef.current.pause();
+      audioRef.current.currentTime = 0;
+    }
   }, []);
 
   const handleSeek = useCallback((value: number[]) => {
     setCurrentFrame(value[0]);
   }, []);
+
+  const handlePlayAudio = useCallback(() => {
+    if (!audioRef.current) return;
+    if (isAudioPlaying) {
+      audioRef.current.pause();
+      setIsAudioPlaying(false);
+    } else {
+      audioRef.current.play();
+      setIsAudioPlaying(true);
+    }
+  }, [isAudioPlaying]);
 
   // Mobile: show 2D fallback
   if (isMobile) {
@@ -940,6 +1007,71 @@ export function TacticalField3D({
             />
           </Canvas>
         </WebGLWrapper>
+
+        {/* Goal Info Panel with Player Names and Audio */}
+        {mode === 'animation' && selectedGoal && (
+          <div className="bg-black/80 backdrop-blur-sm rounded-lg p-4 border border-white/10">
+            {/* Row 1: Minute + Description */}
+            <div className="flex items-start gap-3 mb-3">
+              <Badge variant="arena" className="text-lg px-3 py-1 shrink-0">
+                {selectedGoal.minute}'
+              </Badge>
+              <p className="text-white font-medium text-sm leading-relaxed">
+                {selectedGoal.description || 'Gol marcado'}
+              </p>
+            </div>
+            
+            {/* Row 2: Identified players */}
+            {(playerNames.scorer || playerNames.assister) && (
+              <div className="flex flex-wrap items-center gap-4 text-sm mb-3">
+                {playerNames.scorer && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">⚽ Autor:</span>
+                    <span className="text-white font-bold">{playerNames.scorer}</span>
+                  </div>
+                )}
+                {playerNames.assister && (
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">👟 Assistência:</span>
+                    <span className="text-white">{playerNames.assister}</span>
+                  </div>
+                )}
+              </div>
+            )}
+            
+            {/* Row 3: Audio player */}
+            {goalAudio?.audioUrl && (
+              <div className="flex items-center gap-3 pt-2 border-t border-white/10">
+                <Button 
+                  variant="outline" 
+                  size="sm"
+                  onClick={handlePlayAudio}
+                  className="gap-2"
+                >
+                  {isAudioPlaying ? (
+                    <>
+                      <VolumeX className="h-4 w-4" />
+                      Pausar
+                    </>
+                  ) : (
+                    <>
+                      <Volume2 className="h-4 w-4" />
+                      Ouvir Narração
+                    </>
+                  )}
+                </Button>
+                <audio 
+                  ref={audioRef} 
+                  src={goalAudio.audioUrl}
+                  onEnded={() => setIsAudioPlaying(false)}
+                />
+                <span className="text-xs text-muted-foreground">
+                  {goalAudio.duration}s
+                </span>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Animation Controls */}
         {mode === 'animation' && hasAnimationData && (

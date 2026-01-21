@@ -492,8 +492,10 @@ export default function Dashboard() {
                       id: selectedGoal.id,
                       minute: selectedGoal.minute || 0,
                       description: selectedGoal.description || undefined,
-                      team: (selectedGoal.metadata as any)?.team === 'away' ? 'away' : 'home'
+                      team: (selectedGoal.metadata as any)?.team === 'away' ? 'away' : 'home',
+                      metadata: selectedGoal.metadata as any
                     } : null}
+                    matchId={currentMatchId || undefined}
                     height={650}
                     isLoading={isDetecting}
                     detectionProgress={detectionProgress}

@@ -1541,6 +1541,25 @@ export const apiClient = {
     }, 600000); // 10 minutos
   },
 
+  /**
+   * Extract audio clip from goal moment in match video.
+   * Returns an MP3 audio file URL for the goal narration.
+   */
+  extractGoalAudio: async (matchId: string, videoSecond: number, duration: number = 15): Promise<{
+    audioUrl: string;
+    duration: number;
+  }> => {
+    await ensureServerAvailable();
+    
+    return apiRequest<{
+      audioUrl: string;
+      duration: number;
+    }>('/api/extract-goal-audio', {
+      method: 'POST',
+      body: JSON.stringify({ matchId, videoSecond, duration })
+    });
+  },
+
   // ============== Admin API (Local) ==============
   admin: {
     // Organizations
