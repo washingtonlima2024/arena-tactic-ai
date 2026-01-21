@@ -77,7 +77,7 @@ def add_cors_headers(response):
     """Garantir headers CORS em TODAS as respostas, incluindo erros e uploads."""
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, ngrok-skip-browser-warning, Accept'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, ngrok-skip-browser-warning, Accept, Cache-Control'
     response.headers['Access-Control-Expose-Headers'] = 'Content-Length, Content-Type'
     response.headers['Access-Control-Max-Age'] = '86400'  # Cache preflight por 24h
     return response
@@ -90,7 +90,7 @@ def handle_options(path=''):
     response = app.make_default_options_response()
     response.headers['Access-Control-Allow-Origin'] = '*'
     response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS, PATCH'
-    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, ngrok-skip-browser-warning, Accept'
+    response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-Requested-With, ngrok-skip-browser-warning, Accept, Cache-Control'
     response.headers['Access-Control-Max-Age'] = '86400'
     return response
 
