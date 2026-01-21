@@ -227,57 +227,130 @@ function AnimatedBall({
   trail?: [number, number, number][];
 }) {
   const ballRef = useRef<THREE.Group>(null);
+  const trailGlowRef = useRef<THREE.Points>(null);
+
+  // Ball size increased 70%
+  const ballRadius = 0.35;
+  const shadowRadius = 0.45;
 
   useFrame((state) => {
     if (ballRef.current) {
       const time = state.clock.elapsedTime;
-      ballRef.current.rotation.x += 0.08;
-      ballRef.current.rotation.z += 0.04;
-      ballRef.current.position.y = 0.15 + Math.abs(Math.sin(time * 5)) * 0.05;
+      ballRef.current.rotation.x += 0.1;
+      ballRef.current.rotation.z += 0.06;
+      // Bounce effect
+      ballRef.current.position.y = ballRadius + Math.abs(Math.sin(time * 6)) * 0.15;
     }
   });
 
+  // Create trail points with fading opacity
+  const trailPoints = useMemo(() => {
+    if (trail.length < 2) return null;
+    // Adjust trail positions to be slightly above ground
+    return trail.map(p => [p[0], 0.1, p[2]] as [number, number, number]);
+  }, [trail]);
+
   return (
     <group position={position}>
-      {trail.length > 1 && (
-        <Line
-          points={trail}
-          color="#ffffff"
-          lineWidth={2}
-          transparent
-          opacity={0.3}
-        />
+      {/* Main trajectory trail - thicker, colored */}
+      {trailPoints && trailPoints.length > 1 && (
+        <>
+          {/* Primary trail line */}
+          <Line
+            points={trailPoints}
+            color="#fbbf24"
+            lineWidth={4}
+            transparent
+            opacity={0.7}
+          />
+          {/* Secondary glow trail */}
+          <Line
+            points={trailPoints}
+            color="#ffffff"
+            lineWidth={8}
+            transparent
+            opacity={0.2}
+          />
+        </>
       )}
       
-      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.01, 0]}>
-        <circleGeometry args={[0.15, 16]} />
-        <meshBasicMaterial color="#000000" transparent opacity={0.3} />
+      {/* Ball shadow on ground */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.02, 0]}>
+        <circleGeometry args={[shadowRadius, 24]} />
+        <meshBasicMaterial color="#000000" transparent opacity={0.4} />
       </mesh>
       
-      <group ref={ballRef} position={[0, 0.15, 0]}>
+      {/* Ground glow effect */}
+      <mesh rotation={[-Math.PI / 2, 0, 0]} position={[0, 0.03, 0]}>
+        <circleGeometry args={[shadowRadius * 1.5, 24]} />
+        <meshBasicMaterial 
+          color="#fbbf24" 
+          transparent 
+          opacity={0.15}
+          blending={THREE.AdditiveBlending}
+        />
+      </mesh>
+      
+      {/* Main ball group */}
+      <group ref={ballRef} position={[0, ballRadius, 0]}>
+        {/* Inner ball core */}
         <mesh>
-          <icosahedronGeometry args={[0.12, 2]} />
+          <sphereGeometry args={[ballRadius, 32, 32]} />
           <meshStandardMaterial 
             color="#ffffff"
-            metalness={0.2}
-            roughness={0.3}
+            metalness={0.15}
+            roughness={0.25}
+            emissive="#ffffff"
+            emissiveIntensity={0.1}
           />
         </mesh>
+        
+        {/* Pentagon patches (black) */}
         {[0, 72, 144, 216, 288].map((angle, i) => (
           <mesh 
             key={i} 
             position={[
-              Math.cos(angle * Math.PI / 180) * 0.15,
-              Math.sin(angle * Math.PI / 180) * 0.15,
-              0.1
+              Math.cos(angle * Math.PI / 180) * ballRadius * 0.7,
+              Math.sin(angle * Math.PI / 180) * ballRadius * 0.7,
+              ballRadius * 0.6
             ]}
+            rotation={[0, 0, angle * Math.PI / 180]}
           >
-            <circleGeometry args={[0.04, 5]} />
-            <meshBasicMaterial color="#000000" />
+            <circleGeometry args={[ballRadius * 0.25, 5]} />
+            <meshBasicMaterial color="#1a1a1a" />
           </mesh>
         ))}
-        <pointLight intensity={0.5} distance={2} color="#ffffff" />
+        
+        {/* Top pentagon */}
+        <mesh position={[0, ballRadius * 0.85, 0]} rotation={[Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[ballRadius * 0.25, 5]} />
+          <meshBasicMaterial color="#1a1a1a" />
+        </mesh>
+        
+        {/* Bottom pentagon */}
+        <mesh position={[0, -ballRadius * 0.85, 0]} rotation={[-Math.PI / 2, 0, 0]}>
+          <circleGeometry args={[ballRadius * 0.25, 5]} />
+          <meshBasicMaterial color="#1a1a1a" />
+        </mesh>
+        
+        {/* Ball glow light */}
+        <pointLight intensity={1} distance={5} color="#ffffff" />
+        <pointLight intensity={0.5} distance={3} color="#fbbf24" />
       </group>
+      
+      {/* Position indicator above ball */}
+      <Html
+        position={[0, ballRadius * 2 + 0.5, 0]}
+        center
+        style={{
+          pointerEvents: 'none',
+          userSelect: 'none',
+        }}
+      >
+        <div className="bg-yellow-500/80 text-black text-xs font-bold px-2 py-0.5 rounded-full shadow-lg">
+          ⚽
+        </div>
+      </Html>
     </group>
   );
 }
@@ -647,9 +720,9 @@ export function TacticalField3D({
   const currentData = animationFrames[currentFrame] || animationFrames[0];
   const showGoalCelebration = currentFrame >= totalFrames - 1 && totalFrames > 0;
 
-  // Ball trail
+  // Ball trail - show last 30 frames for longer trajectory visualization
   const ballTrail = useMemo(() => {
-    return animationFrames.slice(Math.max(0, currentFrame - 10), currentFrame + 1)
+    return animationFrames.slice(Math.max(0, currentFrame - 30), currentFrame + 1)
       .map(f => metersTo3D(f.ball.x, f.ball.y));
   }, [animationFrames, currentFrame]);
 
