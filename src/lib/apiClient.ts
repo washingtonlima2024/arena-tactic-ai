@@ -137,11 +137,18 @@ export function normalizeStorageUrl(url: string | null | undefined): string | nu
   // Se já é a mesma base, retornar como está
   if (url.startsWith(apiBase)) return url;
   
-  // Substituir localhost:5000 ou 127.0.0.1:5000 pela base atual
-  if (url.includes('localhost:5000') || url.includes('127.0.0.1:5000')) {
-    return url
-      .replace('http://localhost:5000', apiBase)
-      .replace('http://127.0.0.1:5000', apiBase);
+  // Lista de hosts locais que precisam ser substituídos
+  const localHosts = [
+    'http://localhost:5000',
+    'http://127.0.0.1:5000',
+    'http://10.0.0.20:5000'
+  ];
+  
+  // Substituir qualquer host local pela base atual
+  for (const localHost of localHosts) {
+    if (url.includes(localHost.replace('http://', ''))) {
+      return url.replace(localHost, apiBase);
+    }
   }
   
   // Se é caminho relativo /api/storage/..., prefixar com base

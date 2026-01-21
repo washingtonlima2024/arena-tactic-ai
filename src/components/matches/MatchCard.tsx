@@ -8,7 +8,7 @@ import { Link } from 'react-router-dom';
 import { VideoPlayerModal } from '@/components/media/VideoPlayerModal';
 import { MatchEditDialog } from '@/components/matches/MatchEditDialog';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { apiClient } from '@/lib/apiClient';
+import { apiClient, normalizeStorageUrl } from '@/lib/apiClient';
 import { useAuth } from '@/hooks/useAuth';
 import { TeamBadge } from '@/components/teams/TeamBadge';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
@@ -144,6 +144,11 @@ export function MatchCard({ match }: MatchCardProps) {
 
   const thumbnailUrl = getVideoThumbnail();
 
+  // Normalizar URL do vídeo para funcionar via Cloudflare Tunnel
+  const normalizedVideoUrl = matchVideo?.file_url 
+    ? normalizeStorageUrl(matchVideo.file_url) 
+    : null;
+
   return (
     <>
       <Card variant="glow" className="overflow-hidden">
@@ -164,7 +169,7 @@ export function MatchCard({ match }: MatchCardProps) {
             <>
               {isEmbedUrl ? (
                 <iframe
-                  src={matchVideo.file_url}
+                  src={normalizedVideoUrl || ''}
                   className="absolute inset-0 w-full h-full"
                   frameBorder="0"
                   allow="autoplay; fullscreen; picture-in-picture"
@@ -173,7 +178,7 @@ export function MatchCard({ match }: MatchCardProps) {
                 />
               ) : (
                 <video
-                  src={matchVideo.file_url}
+                  src={normalizedVideoUrl || ''}
                   className="absolute inset-0 w-full h-full object-cover"
                   muted
                   playsInline
@@ -389,7 +394,7 @@ export function MatchCard({ match }: MatchCardProps) {
           description: `${match.competition} - ${formattedDate}`,
         } : null}
         matchVideo={matchVideo ? {
-          file_url: matchVideo.file_url,
+          file_url: normalizedVideoUrl || matchVideo.file_url,
           start_minute: matchVideo.start_minute || 0,
         } : null}
         homeTeam={match.homeTeam.name}
