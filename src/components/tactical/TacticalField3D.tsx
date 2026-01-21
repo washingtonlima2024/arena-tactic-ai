@@ -543,7 +543,7 @@ function HeatmapScene({
           team="home"
           teamColor={homeColor}
           intensity={player.intensity || 0.7}
-          scale={0.012}
+          scale={0.02}
           showNumber={true}
           facingDirection="right"
         />
@@ -558,7 +558,7 @@ function HeatmapScene({
           team="away"
           teamColor={awayColor}
           intensity={player.intensity || 0.7}
-          scale={0.012}
+          scale={0.02}
           showNumber={true}
           facingDirection="left"
         />
@@ -569,7 +569,7 @@ function HeatmapScene({
         position={[1.5, 0, 0]}
         team="referee"
         teamColor="#ffcc00"
-        scale={0.012}
+        scale={0.02}
         showNumber={false}
         facingDirection="up"
       />
@@ -608,7 +608,7 @@ function AnimationScene({
             teamColor={player.team === 'home' ? homeTeamColor : awayTeamColor}
             isMoving={true}
             showNumber={true}
-            scale={0.018}
+            scale={0.03}
           />
         );
       })}
