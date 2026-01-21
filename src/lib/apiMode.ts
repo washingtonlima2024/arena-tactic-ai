@@ -1,22 +1,16 @@
 /**
- * Arena Play - Detecção Automática de Ambiente
+ * Arena Play - Configuração de API
  * 
- * Prioridade de resolução de URL:
- * 1. Subdomínio dedicado (arenaApiUrl) - ex: https://api.arenaplay.kakttus.com
- * 2. Túnel Cloudflare (cloudflare_tunnel_url) - temporário
- * 3. Túnel Ngrok (ngrok_fallback_url) - temporário
- * 4. IP local (10.0.0.20:5000) - apenas em ambiente local
+ * Modo simplificado: sempre usa IP local fixo (10.0.0.20:5000)
+ * Front-end e back-end rodam na mesma máquina.
  */
 
-// Servidor padrão para rede local
+// Servidor fixo para todas as requisições
 const LOCAL_SERVER_URL = 'http://10.0.0.20:5000';
-
-// URL padrão para produção Arena Play
-const ARENA_PLAY_API_URL = 'https://api.arenaplay.kakttus.com';
 
 export type ApiMode = 'local';
 
-export type ConnectionMethod = 'subdomain' | 'cloudflare' | 'ngrok' | 'local';
+export type ConnectionMethod = 'local';
 
 export interface ActiveConnection {
   method: ConnectionMethod;
@@ -25,40 +19,15 @@ export interface ActiveConnection {
 }
 
 /**
- * Detecta se está rodando em ambiente local (localhost/rede interna)
+ * Retorna a URL base da API - sempre o IP local fixo
  */
-export const isLocalEnvironment = (): boolean => {
-  const hostname = window.location.hostname;
-  return (
-    hostname === 'localhost' ||
-    hostname === '127.0.0.1' ||
-    hostname.startsWith('192.168.') ||
-    hostname.startsWith('10.') ||
-    hostname.endsWith('.local') ||
-    hostname.includes('localhost')
-  );
+export const getApiBase = (): string => {
+  return LOCAL_SERVER_URL;
 };
 
 /**
- * Detecta se está em ambiente de produção Arena Play (Lovable, kakttus, arenaplay)
+ * Sempre retorna 'local' - sem modo cloud
  */
-export const isArenaPlayProduction = (): boolean => {
-  const hostname = window.location.hostname;
-  return (
-    hostname.includes('arenaplay') ||
-    hostname.includes('kakttus') ||
-    hostname.includes('lovable')
-  );
-};
-
-/**
- * Detecta se está rodando em produção (domínio externo)
- */
-export const isProductionEnvironment = (): boolean => {
-  return !isLocalEnvironment();
-};
-
-// Sempre retorna 'local' - sem modo Supabase
 export const getApiMode = (): ApiMode => {
   return 'local';
 };
@@ -72,119 +41,37 @@ export const isLocalMode = (): boolean => {
 };
 
 /**
- * Limpa URLs de túneis legados quando em produção com subdomínio dedicado
+ * Servidor sempre configurado com IP fixo
  */
-export const cleanupLegacyTunnelUrls = (): void => {
-  if (!isArenaPlayProduction()) return;
-  
-  const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
-  
-  // Se usando subdomínio dedicado, limpar túneis antigos
-  if (arenaApiUrl && arenaApiUrl.includes('api.arenaplay.kakttus.com')) {
-    const cloudflareUrl = localStorage.getItem('cloudflare_tunnel_url');
-    const ngrokUrl = localStorage.getItem('ngrok_fallback_url');
-    
-    if (cloudflareUrl || ngrokUrl) {
-      console.log('[apiMode] Limpando URLs de túneis legados em ambiente de produção');
-      localStorage.removeItem('cloudflare_tunnel_url');
-      localStorage.removeItem('ngrok_fallback_url');
-    }
-  }
+export const hasServerUrlConfigured = (): boolean => {
+  return true;
+};
+
+/**
+ * Nunca precisa de URL em produção - IP fixo sempre disponível
+ */
+export const needsProductionApiUrl = (): boolean => {
+  return false;
 };
 
 /**
  * Retorna informações sobre o método de conexão ativo
  */
 export const getActiveConnectionMethod = (): ActiveConnection => {
-  const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
-  const cloudflareUrl = localStorage.getItem('cloudflare_tunnel_url')?.trim();
-  const ngrokUrl = localStorage.getItem('ngrok_fallback_url')?.trim();
-  
-  if (arenaApiUrl) {
-    return { method: 'subdomain', url: arenaApiUrl, label: 'Subdomínio Dedicado' };
-  }
-  if (cloudflareUrl) {
-    return { method: 'cloudflare', url: cloudflareUrl, label: 'Túnel Cloudflare' };
-  }
-  if (ngrokUrl) {
-    return { method: 'ngrok', url: ngrokUrl, label: 'Túnel Ngrok' };
-  }
-  return { method: 'local', url: LOCAL_SERVER_URL, label: 'IP Local' };
+  return { 
+    method: 'local', 
+    url: LOCAL_SERVER_URL, 
+    label: 'IP Local (10.0.0.20:5000)' 
+  };
 };
 
 /**
- * Verifica se há uma URL de servidor configurada.
- * Em produção, requer URL customizada.
+ * Verifica se o servidor local está disponível
  */
-export const hasServerUrlConfigured = (): boolean => {
-  const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
-  const cloudflareUrl = localStorage.getItem('cloudflare_tunnel_url')?.trim();
-  const ngrokUrl = localStorage.getItem('ngrok_fallback_url')?.trim();
-  
-  if (isLocalEnvironment()) {
-    return true; // Em ambiente local, sempre tem o IP fixo
-  }
-  
-  // Em produção Arena Play, auto-configura se necessário
-  if (isArenaPlayProduction() && !arenaApiUrl && !cloudflareUrl && !ngrokUrl) {
-    console.log('[apiMode] Auto-configurando URL padrão Arena Play:', ARENA_PLAY_API_URL);
-    localStorage.setItem('arenaApiUrl', ARENA_PLAY_API_URL);
-    return true;
-  }
-  
-  // Em produção, precisa de pelo menos uma URL pública configurada
-  return !!(arenaApiUrl || cloudflareUrl || ngrokUrl);
-};
-
-/**
- * Verifica se está em produção sem URL configurada
- */
-export const needsProductionApiUrl = (): boolean => {
-  return isProductionEnvironment() && !hasServerUrlConfigured();
-};
-
-/**
- * Retorna a URL base da API.
- * Prioridade: Subdomínio → Cloudflare → Ngrok → Auto-config Arena Play → IP Local
- */
-export const getApiBase = (): string => {
-  // 1. Subdomínio dedicado (maior prioridade)
-  const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
-  if (arenaApiUrl) return arenaApiUrl;
-  
-  // 2. Túnel Cloudflare
-  const cloudflareUrl = localStorage.getItem('cloudflare_tunnel_url')?.trim();
-  if (cloudflareUrl) return cloudflareUrl;
-  
-  // 3. Túnel Ngrok
-  const ngrokUrl = localStorage.getItem('ngrok_fallback_url')?.trim();
-  if (ngrokUrl) return ngrokUrl;
-  
-  // 4. Em ambiente local, usar IP fixo
-  if (isLocalEnvironment()) {
-    return LOCAL_SERVER_URL;
-  }
-  
-  // 5. Em ambiente Arena Play, auto-configurar URL padrão
-  if (isArenaPlayProduction()) {
-    console.log('[apiMode] Auto-configurando URL padrão Arena Play:', ARENA_PLAY_API_URL);
-    localStorage.setItem('arenaApiUrl', ARENA_PLAY_API_URL);
-    return ARENA_PLAY_API_URL;
-  }
-  
-  // 6. Em produção sem URL configurada - retornar vazio
-  // O ServerStatusIndicator vai alertar o usuário
-  return '';
-};
-
 export const checkLocalServerAvailable = async (): Promise<boolean> => {
   try {
-    const apiUrl = getApiBase();
-    if (!apiUrl) return false;
-    
-    const response = await fetch(`${apiUrl}/health?light=true`, {
+    const response = await fetch(`${LOCAL_SERVER_URL}/health?light=true`, {
       signal: AbortSignal.timeout(5000),
-      headers: { 'ngrok-skip-browser-warning': 'true' }
     });
     return response.ok;
   } catch {
@@ -193,8 +80,25 @@ export const checkLocalServerAvailable = async (): Promise<boolean> => {
 };
 
 /**
- * Verifica se o servidor está disponível.
+ * Verifica se o servidor está disponível
  */
 export const checkAndRecoverConnection = async (): Promise<boolean> => {
   return await checkLocalServerAvailable();
+};
+
+// Funções legadas mantidas para compatibilidade (no-op)
+export const cleanupLegacyTunnelUrls = (): void => {
+  // No-op - não há mais túneis para limpar
+};
+
+export const isLocalEnvironment = (): boolean => {
+  return true; // Sempre ambiente local
+};
+
+export const isArenaPlayProduction = (): boolean => {
+  return false; // Nunca em produção externa
+};
+
+export const isProductionEnvironment = (): boolean => {
+  return false; // Sempre local
 };

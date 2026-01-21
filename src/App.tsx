@@ -9,7 +9,7 @@ import { LiveBroadcastProvider } from "./contexts/LiveBroadcastContext";
 import { ClipSyncProvider } from "./contexts/ClipSyncContext";
 import { ClipSyncIndicator } from "./components/media/ClipSyncIndicator";
 import { FloatingLivePlayer } from "./components/live/FloatingLivePlayer";
-import { cleanupLegacyTunnelUrls, getApiBase } from "./lib/apiMode";
+import { getApiBase } from "./lib/apiMode";
 import Landing from "./pages/Landing";
 import Index from "./pages/Index";
 import Matches from "./pages/Matches";
@@ -46,12 +46,9 @@ function ClipSyncWrapper({ children }: { children: React.ReactNode }) {
 const queryClient = new QueryClient();
 
 const App = () => {
-  // Inicialização: limpar túneis legados e auto-configurar URL em produção
+  // Log da URL base da API na inicialização
   useEffect(() => {
-    cleanupLegacyTunnelUrls();
-    // Forçar inicialização da URL base (auto-configura em produção Arena Play)
-    const apiBase = getApiBase();
-    console.log('[App] API Base configurada:', apiBase || '(não configurada)');
+    console.log('[App] API Base:', getApiBase());
   }, []);
 
   return (

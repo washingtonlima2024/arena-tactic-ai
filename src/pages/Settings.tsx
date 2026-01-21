@@ -29,7 +29,6 @@ import {
   AlertCircle,
   Loader2,
   Server,
-  Cloud,
   Eye,
   EyeOff,
   Sparkles,
@@ -38,13 +37,10 @@ import {
   Trash2,
   HardDrive,
   RefreshCw,
-  Wifi,
-  ChevronDown,
-  Link2
+  Wifi
 } from 'lucide-react';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { getApiMode, setApiMode, type ApiMode, isLocalEnvironment, getApiBase, getActiveConnectionMethod } from '@/lib/apiMode';
+import { getApiBase } from '@/lib/apiMode';
 
 export default function Settings() {
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
@@ -88,20 +84,11 @@ export default function Settings() {
   const [localWhisperEnabled, setLocalWhisperEnabled] = useState(false);
   const [localWhisperModel, setLocalWhisperModel] = useState('base');
 
-  // Ngrok URL setting
+  // Ngrok URL setting (legacy - mantido para compatibilidade)
   const [ngrokUrl, setNgrokUrl] = useState('');
-  const [detectingNgrok, setDetectingNgrok] = useState(false);
   
-  // Cloudflare Tunnel URL setting
+  // Cloudflare Tunnel URL setting (legacy - mantido para compatibilidade)
   const [cloudflareUrl, setCloudflareUrl] = useState('');
-  const [detectingCloudflare, setDetectingCloudflare] = useState(false);
-  
-  // Servidor Python URL (para acesso remoto/produção)
-  const [serverUrl, setServerUrl] = useState('');
-  const [testingServerConnection, setTestingServerConnection] = useState(false);
-  // Lovable API Key (para geração de thumbnails)
-  const [lovableApiKey, setLovableApiKey] = useState('');
-  const [showLovableKey, setShowLovableKey] = useState(false);
 
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   
@@ -114,7 +101,7 @@ export default function Settings() {
   const [showElevenlabsKey, setShowElevenlabsKey] = useState(false);
 
   // API Mode - Sempre local
-  const apiMode: ApiMode = 'local';
+  const apiMode = 'local';
 
   // Teams
   const { data: teams, isLoading: teamsLoading } = useTeams();
@@ -161,22 +148,13 @@ export default function Settings() {
       setLocalWhisperEnabled(apiSettings.find(s => s.setting_key === 'local_whisper_enabled')?.setting_value === 'true');
       setLocalWhisperModel(apiSettings.find(s => s.setting_key === 'local_whisper_model')?.setting_value || 'base');
       
-      // Ngrok URL - load from localStorage first, then from settings
-      const storedNgrokUrl = localStorage.getItem('ngrok_fallback_url') || 
-        apiSettings.find(s => s.setting_key === 'ngrok_fallback_url')?.setting_value || '';
+      // Ngrok URL - legacy (não mais usado)
+      const storedNgrokUrl = localStorage.getItem('ngrok_fallback_url') || '';
       setNgrokUrl(storedNgrokUrl);
       
-      // Cloudflare Tunnel URL - load from localStorage first, then from settings
-      const storedCloudflareUrl = localStorage.getItem('cloudflare_tunnel_url') || 
-        apiSettings.find(s => s.setting_key === 'cloudflare_tunnel_url')?.setting_value || '';
+      // Cloudflare Tunnel URL - legacy (não mais usado)
+      const storedCloudflareUrl = localStorage.getItem('cloudflare_tunnel_url') || '';
       setCloudflareUrl(storedCloudflareUrl);
-      
-      // Lovable API Key
-      setLovableApiKey(apiSettings.find(s => s.setting_key === 'LOVABLE_API_KEY')?.setting_value || '');
-      
-      // Servidor Python URL - carregar de localStorage
-      const storedServerUrl = localStorage.getItem('arenaApiUrl') || '';
-      setServerUrl(storedServerUrl);
     }
   }, [apiSettings]);
 
@@ -213,44 +191,9 @@ export default function Settings() {
         ...(geminiApiKey ? [upsertApiSetting.mutateAsync({ key: 'GOOGLE_GENERATIVE_AI_API_KEY', value: geminiApiKey })] : []),
         ...(openaiApiKey ? [upsertApiSetting.mutateAsync({ key: 'OPENAI_API_KEY', value: openaiApiKey })] : []),
         ...(elevenlabsApiKey ? [upsertApiSetting.mutateAsync({ key: 'ELEVENLABS_API_KEY', value: elevenlabsApiKey })] : []),
-        ...(lovableApiKey ? [upsertApiSetting.mutateAsync({ key: 'LOVABLE_API_KEY', value: lovableApiKey })] : []),
         upsertApiSetting.mutateAsync({ key: 'OLLAMA_URL', value: ollamaUrl }),
         upsertApiSetting.mutateAsync({ key: 'OLLAMA_MODEL', value: ollamaModel }),
-        // Ngrok URL (trimmed)
-        ...(ngrokUrl.trim() ? [upsertApiSetting.mutateAsync({ key: 'ngrok_fallback_url', value: ngrokUrl.trim() })] : []),
-        // Cloudflare Tunnel URL (trimmed)
-        ...(cloudflareUrl.trim() ? [upsertApiSetting.mutateAsync({ key: 'cloudflare_tunnel_url', value: cloudflareUrl.trim() })] : []),
       ]);
-      
-      // Also save ngrok URL to localStorage for immediate use (trimmed)
-      const trimmedNgrokUrl = ngrokUrl.trim();
-      if (trimmedNgrokUrl) {
-        localStorage.setItem('ngrok_fallback_url', trimmedNgrokUrl);
-        setNgrokUrl(trimmedNgrokUrl);
-      } else {
-        localStorage.removeItem('ngrok_fallback_url');
-      }
-      
-      // Also save Cloudflare URL to localStorage for immediate use (trimmed)
-      const trimmedCloudflareUrl = cloudflareUrl.trim();
-      if (trimmedCloudflareUrl) {
-        localStorage.setItem('cloudflare_tunnel_url', trimmedCloudflareUrl);
-        setCloudflareUrl(trimmedCloudflareUrl);
-      } else {
-        localStorage.removeItem('cloudflare_tunnel_url');
-      }
-      
-      // Salvar URL do servidor Python no localStorage
-      const trimmedServerUrl = serverUrl.trim();
-      if (trimmedServerUrl) {
-        localStorage.setItem('arenaApiUrl', trimmedServerUrl);
-        setServerUrl(trimmedServerUrl);
-      } else {
-        localStorage.removeItem('arenaApiUrl');
-      }
-      
-      // Emitir evento para atualizar indicador de status
-      window.dispatchEvent(new CustomEvent('arena-reconnect'));
       
       toast.success('Todas as configurações foram salvas!');
     } catch (error) {
@@ -363,18 +306,11 @@ export default function Settings() {
 
   // Testar conexão com servidor Python
   const testServerConnection = async () => {
-    setTestingServerConnection(true);
     try {
-      const urlToTest = serverUrl.trim() || getApiBase();
-      if (!urlToTest) {
-        toast.error('Nenhuma URL configurada');
-        setTestingServerConnection(false);
-        return;
-      }
+      const urlToTest = getApiBase();
       
       const response = await fetch(`${urlToTest}/health?light=true`, {
         signal: AbortSignal.timeout(5000),
-        headers: { 'ngrok-skip-browser-warning': 'true' }
       });
       
       if (response.ok) {
@@ -385,8 +321,6 @@ export default function Settings() {
       }
     } catch (error) {
       toast.error('Não foi possível conectar ao servidor');
-    } finally {
-      setTestingServerConnection(false);
     }
   };
 
@@ -940,61 +874,6 @@ export default function Settings() {
               </CardContent>
             </Card>
 
-            {/* Lovable API Key Configuration (for thumbnail generation) */}
-            <Card variant="glow">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Sparkles className="h-5 w-5 text-pink-500" />
-                  Lovable AI (Thumbnails)
-                </CardTitle>
-                <CardDescription>
-                  Geração de capas e imagens via IA do Lovable
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="space-y-2">
-                  <Label>Chave de API Lovable</Label>
-                  <div className="relative">
-                    <Input 
-                      type={showLovableKey ? 'text' : 'password'}
-                      value={lovableApiKey}
-                      onChange={(e) => setLovableApiKey(e.target.value)}
-                      placeholder="lv_..."
-                      className="pr-10"
-                    />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="absolute right-0 top-0 h-full px-3"
-                      onClick={() => setShowLovableKey(!showLovableKey)}
-                    >
-                      {showLovableKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                  <p className="text-xs text-muted-foreground">
-                    Opcional: provisionada automaticamente no Lovable Cloud. 
-                    O servidor local usará a API do Google Gemini se esta não estiver configurada.
-                  </p>
-                </div>
-                <div className={`rounded-lg border p-3 ${lovableApiKey ? 'border-green-500/30 bg-green-500/5' : 'border-muted bg-muted/30'}`}>
-                  <div className="flex items-center gap-2">
-                    {lovableApiKey ? (
-                      <>
-                        <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        <span className="text-sm text-green-500">Configurado e ativo</span>
-                      </>
-                    ) : (
-                      <>
-                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
-                        <span className="text-sm text-muted-foreground">Aguardando chave de API</span>
-                      </>
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-
             {/* Ollama Configuration */}
             <Card variant="glow">
               <CardHeader>
@@ -1095,314 +974,44 @@ export default function Settings() {
               </CardContent>
             </Card>
 
-            {/* Servidor Python - Configuração Unificada */}
+            {/* Servidor Python - Configuração Simplificada */}
             <Card variant="glow">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
-                  <Server className="h-5 w-5 text-orange-500" />
+                  <Server className="h-5 w-5 text-green-500" />
                   Servidor Python
                 </CardTitle>
                 <CardDescription>
-                  Configure o acesso ao servidor de processamento de vídeo
+                  Servidor de processamento de vídeo
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {/* Indicador de ambiente e método ativo */}
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  {isLocalEnvironment() ? (
-                    <Badge variant="outline" className="text-green-500 border-green-500">
-                      Ambiente Local
-                    </Badge>
-                  ) : (
-                    <Badge variant="outline" className="text-orange-500 border-orange-500">
-                      Ambiente de Produção
-                    </Badge>
-                  )}
-                  
-                  {(() => {
-                    const active = getActiveConnectionMethod();
-                    const colors: Record<string, string> = {
-                      subdomain: 'text-emerald-500 border-emerald-500 bg-emerald-500/10',
-                      cloudflare: 'text-orange-500 border-orange-500 bg-orange-500/10',
-                      ngrok: 'text-blue-500 border-blue-500 bg-blue-500/10',
-                      local: 'text-muted-foreground border-muted'
-                    };
-                    return (
-                      <Badge variant="outline" className={colors[active.method]}>
-                        <Link2 className="h-3 w-3 mr-1" />
-                        Usando: {active.label}
-                      </Badge>
-                    );
-                  })()}
-                </div>
-
-                {/* Subdomínio Dedicado */}
-                <Collapsible defaultOpen={!!serverUrl}>
-                  <CollapsibleTrigger asChild>
-                    <Button variant="ghost" className="w-full justify-between p-3 h-auto border rounded-lg hover:bg-muted/50">
-                      <div className="flex items-center gap-2">
-                        <Globe className="h-4 w-4 text-emerald-500" />
-                        <span className="font-medium">Subdomínio Dedicado</span>
-                        <Badge variant="outline" className="text-xs text-emerald-500 border-emerald-500">
-                          Recomendado
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {serverUrl && <CheckCircle2 className="h-4 w-4 text-emerald-500" />}
-                        <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform" />
-                      </div>
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="pt-3 pl-2 space-y-3">
-                    <p className="text-xs text-muted-foreground">
-                      URL permanente via DNS próprio. Ideal para produção.
-                    </p>
-                    <div className="flex gap-2">
-                      <Input 
-                        value={serverUrl}
-                        onChange={(e) => setServerUrl(e.target.value)}
-                        placeholder="https://api.arenaplay.kakttus.com"
-                        className="flex-1"
-                      />
-                      <Button 
-                        variant="outline" 
-                        onClick={testServerConnection}
-                        disabled={testingServerConnection}
-                      >
-                        {testingServerConnection ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          <>
-                            <Wifi className="h-4 w-4 mr-2" />
-                            Testar
-                          </>
-                        )}
-                      </Button>
+                {/* Indicador de IP fixo */}
+                <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-4">
+                  <div className="flex items-center gap-3">
+                    <CheckCircle2 className="h-5 w-5 text-green-500" />
+                    <div>
+                      <p className="font-medium text-green-600">Modo Local Ativo</p>
+                      <p className="text-sm text-muted-foreground">
+                        Conectado diretamente ao IP: <code className="bg-muted px-1 rounded font-mono">10.0.0.20:5000</code>
+                      </p>
                     </div>
-                    {serverUrl && (
-                      <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-2">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-                          <span className="text-sm text-emerald-500">Configurado - Prioridade máxima</span>
-                        </div>
-                      </div>
-                    )}
-                  </CollapsibleContent>
-                </Collapsible>
-
-                {/* Túnel Cloudflare */}
-                <Collapsible defaultOpen={!!cloudflareUrl && !serverUrl}>
-                  <CollapsibleTrigger asChild>
-                    <Button variant="ghost" className="w-full justify-between p-3 h-auto border rounded-lg hover:bg-muted/50">
-                      <div className="flex items-center gap-2">
-                        <Cloud className="h-4 w-4 text-orange-500" />
-                        <span className="font-medium">Túnel Cloudflare</span>
-                        <Badge variant="outline" className="text-xs text-muted-foreground">
-                          Temporário
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {cloudflareUrl && <CheckCircle2 className="h-4 w-4 text-orange-500" />}
-                        <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform" />
-                      </div>
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="pt-3 pl-2 space-y-3">
-                    <p className="text-xs text-muted-foreground">
-                      URL temporária via <code className="bg-muted px-1 rounded">cloudflared tunnel</code>. Muda a cada reinício.
-                    </p>
-                    <div className="flex gap-2">
-                      <Input 
-                        value={cloudflareUrl}
-                        onChange={(e) => setCloudflareUrl(e.target.value)}
-                        placeholder="https://xxxxx.trycloudflare.com"
-                        className="flex-1"
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={async () => {
-                          setDetectingCloudflare(true);
-                          try {
-                            const baseUrl = 'http://localhost:5000';
-                            const response = await fetch(`${baseUrl}/api/detect-cloudflare`, {
-                              signal: AbortSignal.timeout(5000)
-                            });
-                            
-                            if (response.ok) {
-                              const data = await response.json();
-                              if (data.success && data.url) {
-                                setCloudflareUrl(data.url);
-                                toast.success(`Cloudflare detectado: ${data.url}`);
-                              } else if (data.running) {
-                                toast.info(data.hint || 'Copie a URL do terminal do cloudflared');
-                              } else {
-                                toast.error(data.error || 'Nenhum túnel Cloudflare ativo');
-                              }
-                            } else {
-                              toast.error('Servidor local não respondeu');
-                            }
-                          } catch {
-                            toast.error('Servidor Python offline');
-                          } finally {
-                            setDetectingCloudflare(false);
-                          }
-                        }}
-                        disabled={detectingCloudflare}
-                      >
-                        {detectingCloudflare ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          'Detectar'
-                        )}
-                      </Button>
-                      {cloudflareUrl && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            setCloudflareUrl('');
-                            localStorage.removeItem('cloudflare_tunnel_url');
-                            toast.success('URL do Cloudflare removida');
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                      )}
-                    </div>
-                    {cloudflareUrl && !serverUrl && (
-                      <div className="rounded-lg border border-orange-500/30 bg-orange-500/5 p-2">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="h-4 w-4 text-orange-500" />
-                          <span className="text-sm text-orange-500">Ativo como fallback</span>
-                        </div>
-                      </div>
-                    )}
-                  </CollapsibleContent>
-                </Collapsible>
-
-                {/* Túnel Ngrok */}
-                <Collapsible defaultOpen={!!ngrokUrl && !serverUrl && !cloudflareUrl}>
-                  <CollapsibleTrigger asChild>
-                    <Button variant="ghost" className="w-full justify-between p-3 h-auto border rounded-lg hover:bg-muted/50">
-                      <div className="flex items-center gap-2">
-                        <Globe className="h-4 w-4 text-blue-500" />
-                        <span className="font-medium">Túnel Ngrok</span>
-                        <Badge variant="outline" className="text-xs text-muted-foreground">
-                          Temporário
-                        </Badge>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {ngrokUrl && <CheckCircle2 className="h-4 w-4 text-blue-500" />}
-                        <ChevronDown className="h-4 w-4 text-muted-foreground transition-transform" />
-                      </div>
-                    </Button>
-                  </CollapsibleTrigger>
-                  <CollapsibleContent className="pt-3 pl-2 space-y-3">
-                    <p className="text-xs text-muted-foreground">
-                      URL temporária via ngrok. Requer conta gratuita em <a href="https://ngrok.com" target="_blank" className="text-primary hover:underline">ngrok.com</a>.
-                    </p>
-                    <div className="flex gap-2">
-                      <Input 
-                        value={ngrokUrl}
-                        onChange={(e) => setNgrokUrl(e.target.value)}
-                        placeholder="https://xxxxx.ngrok-free.app"
-                        className="flex-1"
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={async () => {
-                          setDetectingNgrok(true);
-                          try {
-                            const baseUrl = 'http://localhost:5000';
-                            const response = await fetch(`${baseUrl}/api/detect-ngrok`, {
-                              signal: AbortSignal.timeout(5000)
-                            });
-                            
-                            if (response.ok) {
-                              const data = await response.json();
-                              if (data.success && data.url) {
-                                setNgrokUrl(data.url);
-                                toast.success(`Ngrok detectado: ${data.url}`);
-                              } else {
-                                toast.error(data.error || 'Nenhum túnel ngrok ativo');
-                              }
-                            } else {
-                              toast.error('Servidor local não respondeu');
-                            }
-                          } catch {
-                            toast.error('Servidor Python offline');
-                          } finally {
-                            setDetectingNgrok(false);
-                          }
-                        }}
-                        disabled={detectingNgrok}
-                      >
-                        {detectingNgrok ? (
-                          <Loader2 className="h-4 w-4 animate-spin" />
-                        ) : (
-                          'Detectar'
-                        )}
-                      </Button>
-                      {ngrokUrl && (
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          onClick={() => {
-                            setNgrokUrl('');
-                            localStorage.removeItem('ngrok_fallback_url');
-                            toast.success('URL do ngrok removida');
-                          }}
-                        >
-                          <Trash2 className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                      )}
-                    </div>
-                    {ngrokUrl && !serverUrl && !cloudflareUrl && (
-                      <div className="rounded-lg border border-blue-500/30 bg-blue-500/5 p-2">
-                        <div className="flex items-center gap-2">
-                          <CheckCircle2 className="h-4 w-4 text-blue-500" />
-                          <span className="text-sm text-blue-500">Ativo como fallback</span>
-                        </div>
-                      </div>
-                    )}
-                  </CollapsibleContent>
-                </Collapsible>
-
-                {/* Prioridade de resolução */}
-                <div className="rounded-lg border border-muted bg-muted/30 p-3">
-                  <p className="text-xs font-medium text-muted-foreground mb-2">Ordem de prioridade:</p>
-                  <div className="flex flex-wrap gap-2 text-xs">
-                    <Badge variant="outline" className={serverUrl ? 'text-emerald-500 border-emerald-500' : ''}>
-                      1. Subdomínio
-                    </Badge>
-                    <span className="text-muted-foreground">→</span>
-                    <Badge variant="outline" className={!serverUrl && cloudflareUrl ? 'text-orange-500 border-orange-500' : ''}>
-                      2. Cloudflare
-                    </Badge>
-                    <span className="text-muted-foreground">→</span>
-                    <Badge variant="outline" className={!serverUrl && !cloudflareUrl && ngrokUrl ? 'text-blue-500 border-blue-500' : ''}>
-                      3. Ngrok
-                    </Badge>
-                    <span className="text-muted-foreground">→</span>
-                    <Badge variant="outline" className={!serverUrl && !cloudflareUrl && !ngrokUrl && isLocalEnvironment() ? 'text-green-500 border-green-500' : ''}>
-                      4. IP Local
-                    </Badge>
                   </div>
                 </div>
 
-                {/* Modo 100% Local Info */}
-                {isLocalEnvironment() && !serverUrl && !cloudflareUrl && !ngrokUrl && (
-                  <div className="rounded-lg border border-green-500/30 bg-green-500/5 p-3">
-                    <div className="flex items-center gap-2">
-                      <Server className="h-4 w-4 text-green-500" />
-                      <span className="text-sm text-green-600">
-                        Usando IP local padrão: <code className="bg-muted px-1 rounded">10.0.0.20:5000</code>
-                      </span>
-                    </div>
-                  </div>
-                )}
+                {/* Botão testar conexão */}
+                <Button 
+                  variant="outline" 
+                  onClick={testServerConnection}
+                  className="w-full"
+                >
+                  <Wifi className="h-4 w-4 mr-2" />
+                  Testar Conexão
+                </Button>
+
+                <p className="text-xs text-muted-foreground text-center">
+                  Frontend e backend na mesma máquina - sem necessidade de túneis ou proxies.
+                </p>
               </CardContent>
             </Card>
 
