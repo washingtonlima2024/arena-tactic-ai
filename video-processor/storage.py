@@ -173,7 +173,7 @@ def save_clip_file(
         "half_type": normalized_half,
         "filename": filename,
         "path": str(file_path),
-        "url": f"http://localhost:5000/api/storage/{match_id}/clips/{normalized_half}/{filename}",
+        "url": f"/api/storage/{match_id}/clips/{normalized_half}/{filename}",
         "size": len(file_data),
         "created_at": datetime.now().isoformat()
     }
@@ -240,7 +240,7 @@ def save_file(match_id: str, subfolder: str, file_data: bytes, filename: str = N
         "subfolder": subfolder,
         "filename": filename,
         "path": str(file_path),
-        "url": f"http://localhost:5000/api/storage/{match_id}/{subfolder}/{filename}",
+        "url": f"/api/storage/{match_id}/{subfolder}/{filename}",
         "size": len(file_data),
         "created_at": datetime.now().isoformat()
     }
@@ -274,7 +274,7 @@ def save_uploaded_file(match_id: str, subfolder: str, file_storage, filename: st
         "subfolder": subfolder,
         "filename": filename,
         "path": str(file_path),
-        "url": f"http://localhost:5000/api/storage/{match_id}/{subfolder}/{filename}",
+        "url": f"/api/storage/{match_id}/{subfolder}/{filename}",
         "size": file_size,
         "original_filename": file_storage.filename,
         "created_at": datetime.now().isoformat()
@@ -549,7 +549,7 @@ def save_optimized_video(
         "subfolder": "videos/optimized",
         "filename": filename,
         "path": str(file_path),
-        "url": f"http://localhost:5000/api/storage/{match_id}/videos/optimized/{filename}",
+        "url": f"/api/storage/{match_id}/videos/optimized/{filename}",
         "size": len(file_data),
         "video_type": video_type,
         "original_filename": original_filename,

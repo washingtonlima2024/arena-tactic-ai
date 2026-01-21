@@ -134,26 +134,25 @@ export function normalizeStorageUrl(url: string | null | undefined): string | nu
   
   const apiBase = getApiBase();
   
-  // Se já é a mesma base, retornar como está
+  // Se já é URL absoluta com a base correta, retornar
   if (url.startsWith(apiBase)) return url;
   
-  // Lista de hosts locais que precisam ser substituídos
+  // PRIORIDADE: Se é URL relativa (/api/storage/...), prefixar com base atual
+  if (url.startsWith('/api/storage/')) {
+    return `${apiBase}${url}`;
+  }
+  
+  // FALLBACK: Lidar com URLs antigas que ainda têm hosts absolutos (migração)
   const localHosts = [
     'http://localhost:5000',
     'http://127.0.0.1:5000',
     'http://10.0.0.20:5000'
   ];
   
-  // Substituir qualquer host local pela base atual
   for (const localHost of localHosts) {
-    if (url.includes(localHost.replace('http://', ''))) {
+    if (url.startsWith(localHost)) {
       return url.replace(localHost, apiBase);
     }
-  }
-  
-  // Se é caminho relativo /api/storage/..., prefixar com base
-  if (url.startsWith('/api/storage/')) {
-    return `${apiBase}${url}`;
   }
   
   return url;
