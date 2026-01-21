@@ -426,26 +426,6 @@ export default function VideoUpload() {
         );
       });
 
-      // Timeout tracking - update progress indicator every second
-      const startTime = Date.now();
-      const progressInterval = setInterval(() => {
-        const elapsed = Date.now() - startTime;
-        const elapsedSeconds = Math.floor(elapsed / 1000);
-        
-        setSegments(prev => 
-          prev.map(s => {
-            if (s.id === segmentId && s.status === 'uploading') {
-              // Mark as timeout if exceeded
-              if (elapsed > UPLOAD_TIMEOUT) {
-                return { ...s, status: 'timeout', elapsedSeconds };
-              }
-              return { ...s, elapsedSeconds };
-            }
-            return s;
-          })
-        );
-      }, 1000);
-
       // Validar que temos uma partida selecionada ANTES de fazer upload
       // Fallback: ler diretamente da URL caso o estado ainda não esteja sincronizado
       const urlMatchId = new URLSearchParams(window.location.search).get('match');
@@ -456,14 +436,28 @@ export default function VideoUpload() {
       if (!matchId) {
         throw new Error('Selecione uma partida primeiro antes de fazer upload.');
       }
-      const result = await apiClient.uploadFile(matchId, 'videos', file, fileName);
 
-      clearInterval(progressInterval);
+      // Usar uploadBlobWithProgress (XMLHttpRequest) - mais confiável que fetch para uploads grandes
+      const result = await apiClient.uploadBlobWithProgress(
+        matchId,
+        'videos',
+        file,
+        fileName,
+        (percent, loaded, total) => {
+          setSegments(prev => 
+            prev.map(s => 
+              s.id === segmentId 
+                ? { ...s, progress: percent }
+                : s
+            )
+          );
+        }
+      );
 
       setSegments(prev => 
         prev.map(s => 
           s.id === segmentId 
-            ? { ...s, progress: 100, status: 'complete', url: result.url, elapsedSeconds: undefined }
+            ? { ...s, progress: 100, status: 'complete', url: result.url }
             : s
         )
       );
