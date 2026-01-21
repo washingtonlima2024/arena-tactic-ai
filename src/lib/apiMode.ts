@@ -11,6 +11,9 @@
 // Servidor padrão para rede local
 const LOCAL_SERVER_URL = 'http://10.0.0.20:5000';
 
+// URL padrão para produção Arena Play
+const ARENA_PLAY_API_URL = 'https://api.arenaplay.kakttus.com';
+
 export type ApiMode = 'local';
 
 export type ConnectionMethod = 'subdomain' | 'cloudflare' | 'ngrok' | 'local';
@@ -37,6 +40,18 @@ export const isLocalEnvironment = (): boolean => {
 };
 
 /**
+ * Detecta se está em ambiente de produção Arena Play (Lovable, kakttus, arenaplay)
+ */
+export const isArenaPlayProduction = (): boolean => {
+  const hostname = window.location.hostname;
+  return (
+    hostname.includes('arenaplay') ||
+    hostname.includes('kakttus') ||
+    hostname.includes('lovable')
+  );
+};
+
+/**
  * Detecta se está rodando em produção (domínio externo)
  */
 export const isProductionEnvironment = (): boolean => {
@@ -54,6 +69,27 @@ export const setApiMode = (_mode: ApiMode) => {
 
 export const isLocalMode = (): boolean => {
   return true;
+};
+
+/**
+ * Limpa URLs de túneis legados quando em produção com subdomínio dedicado
+ */
+export const cleanupLegacyTunnelUrls = (): void => {
+  if (!isArenaPlayProduction()) return;
+  
+  const arenaApiUrl = localStorage.getItem('arenaApiUrl')?.trim();
+  
+  // Se usando subdomínio dedicado, limpar túneis antigos
+  if (arenaApiUrl && arenaApiUrl.includes('api.arenaplay.kakttus.com')) {
+    const cloudflareUrl = localStorage.getItem('cloudflare_tunnel_url');
+    const ngrokUrl = localStorage.getItem('ngrok_fallback_url');
+    
+    if (cloudflareUrl || ngrokUrl) {
+      console.log('[apiMode] Limpando URLs de túneis legados em ambiente de produção');
+      localStorage.removeItem('cloudflare_tunnel_url');
+      localStorage.removeItem('ngrok_fallback_url');
+    }
+  }
 };
 
 /**
@@ -89,6 +125,13 @@ export const hasServerUrlConfigured = (): boolean => {
     return true; // Em ambiente local, sempre tem o IP fixo
   }
   
+  // Em produção Arena Play, auto-configura se necessário
+  if (isArenaPlayProduction() && !arenaApiUrl && !cloudflareUrl && !ngrokUrl) {
+    console.log('[apiMode] Auto-configurando URL padrão Arena Play:', ARENA_PLAY_API_URL);
+    localStorage.setItem('arenaApiUrl', ARENA_PLAY_API_URL);
+    return true;
+  }
+  
   // Em produção, precisa de pelo menos uma URL pública configurada
   return !!(arenaApiUrl || cloudflareUrl || ngrokUrl);
 };
@@ -102,7 +145,7 @@ export const needsProductionApiUrl = (): boolean => {
 
 /**
  * Retorna a URL base da API.
- * Prioridade: Subdomínio → Cloudflare → Ngrok → IP Local
+ * Prioridade: Subdomínio → Cloudflare → Ngrok → Auto-config Arena Play → IP Local
  */
 export const getApiBase = (): string => {
   // 1. Subdomínio dedicado (maior prioridade)
@@ -122,7 +165,14 @@ export const getApiBase = (): string => {
     return LOCAL_SERVER_URL;
   }
   
-  // 5. Em produção sem URL configurada - retornar vazio
+  // 5. Em ambiente Arena Play, auto-configurar URL padrão
+  if (isArenaPlayProduction()) {
+    console.log('[apiMode] Auto-configurando URL padrão Arena Play:', ARENA_PLAY_API_URL);
+    localStorage.setItem('arenaApiUrl', ARENA_PLAY_API_URL);
+    return ARENA_PLAY_API_URL;
+  }
+  
+  // 6. Em produção sem URL configurada - retornar vazio
   // O ServerStatusIndicator vai alertar o usuário
   return '';
 };

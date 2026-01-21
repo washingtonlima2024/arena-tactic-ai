@@ -103,13 +103,24 @@ export function resetServerAvailability(): void {
 // Erro customizado para servidor offline
 class LocalServerOfflineError extends Error {
   constructor() {
-    super(
-      'Servidor Python não disponível.\n\n' +
-      'Para usar o Arena Play:\n' +
-      '1. Abra o terminal na pasta video-processor\n' +
-      '2. Execute: python server.py\n' +
-      '3. Aguarde "Running on http://localhost:5000"'
-    );
+    const apiBase = getApiBase();
+    const isProduction = !apiBase.includes('localhost') && !apiBase.includes('10.0.0') && !apiBase.includes('192.168.');
+    
+    const message = isProduction
+      ? `Servidor Python não disponível em ${apiBase || 'URL não configurada'}.\n\n` +
+        'Verifique:\n' +
+        '1. O servidor Python está rodando no servidor remoto?\n' +
+        '2. O DNS api.arenaplay.kakttus.com está configurado?\n' +
+        '3. O certificado SSL está válido?\n' +
+        '4. O reverse proxy (Nginx/Caddy) está apontando para porta 5000?\n' +
+        '5. O firewall permite conexões na porta 443?'
+      : 'Servidor Python não disponível.\n\n' +
+        'Para usar o Arena Play:\n' +
+        '1. Abra o terminal na pasta video-processor\n' +
+        '2. Execute: python server.py\n' +
+        '3. Aguarde "Running on http://localhost:5000"';
+    
+    super(message);
     this.name = 'LocalServerOfflineError';
   }
 }
@@ -159,8 +170,18 @@ async function apiRequest<T>(
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
   const apiBase = getApiBase();
 
+  // Validação: bloquear requisições quando não há URL configurada
+  if (!apiBase) {
+    throw new Error(
+      'Servidor Python não configurado.\n\n' +
+      'Acesse Configurações → APIs → Servidor Python e configure a URL pública ' +
+      '(ex: https://api.arenaplay.kakttus.com)'
+    );
+  }
+
   try {
-    console.log(`[API] ${options.method || 'GET'} ${endpoint} → ${apiBase}`);
+    // Log com URL completa para debug
+    console.log(`[API] ${options.method || 'GET'} ${apiBase}${endpoint}`);
     
     const response = await fetch(`${apiBase}${endpoint}`, {
       ...options,
