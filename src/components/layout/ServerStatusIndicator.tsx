@@ -7,7 +7,8 @@ import {
   getActiveConnectionMethod,
   autoDiscoverServer,
   resetDiscoveryCache,
-  getCloudflareUrl
+  getCloudflareUrl,
+  isKakttusProduction
 } from '@/lib/apiMode';
 import { resetServerAvailability } from '@/lib/apiClient';
 import {
@@ -145,6 +146,9 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           clickable: false
         };
       case 'online':
+        const isNginx = connection.method === 'nginx';
+        const isCloudflare = connection.method === 'cloudflare';
+        const isProduction = connection.method === 'production';
         return {
           color: 'bg-green-500',
           textColor: 'text-green-500',
@@ -152,7 +156,7 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
           tooltip: serverHealth?.version 
             ? `Servidor v${serverHealth.version} - ${connection.label}` 
             : `Servidor online - ${connection.label}`,
-          icon: connection.method === 'cloudflare' ? Globe : (connection.method === 'production' ? Server : Wifi),
+          icon: isNginx ? Globe : (isCloudflare ? Globe : (isProduction ? Server : Wifi)),
           iconColor: 'text-primary',
           animate: false,
           clickable: false
@@ -231,7 +235,8 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
       {!collapsed && (
         <div className="flex flex-col flex-1">
           <span className="font-medium text-foreground">
-            {connection.method === 'cloudflare' ? 'Túnel' : 
+            {connection.method === 'nginx' ? 'Nginx' :
+             connection.method === 'cloudflare' ? 'Túnel' : 
              connection.method === 'production' ? 'PM2' : 'Local'}
           </span>
           <span className={cn("text-[10px]", config.textColor)}>
