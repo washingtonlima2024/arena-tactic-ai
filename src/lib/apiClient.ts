@@ -917,7 +917,7 @@ export const apiClient = {
     await ensureServerAvailable();
     
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 900000); // 15 minutos - compatível com Nginx
+    const timeoutId = setTimeout(() => controller.abort(), 900000); // 15 minutos
     
     try {
       const formData = new FormData();
@@ -926,22 +926,20 @@ export const apiClient = {
       
       console.log(`[uploadFile] Starting upload: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB) to ${matchId}/${subfolder}`);
       
+      // NÃO adicionar headers customizados para evitar preflight CORS desnecessário
+      // FormData com POST simples não precisa de preflight se não tiver headers extras
       const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
         method: 'POST',
         body: formData,
         signal: controller.signal,
-        headers: {
-          // Headers para túneis (ngrok, Cloudflare Tunnel) - NÃO incluir Content-Type para FormData
-          'ngrok-skip-browser-warning': 'true',
-          'Accept': 'application/json',
-        },
+        // Deixar o navegador definir Content-Type automaticamente com boundary
       });
       clearTimeout(timeoutId);
       
       if (!response.ok) {
         const errorText = await response.text().catch(() => 'Unknown error');
         console.error(`[uploadFile] Upload failed: ${response.status}`, errorText);
-        throw new Error(`Upload failed: ${response.status}`);
+        throw new Error(`Upload failed: ${response.status} - ${errorText}`);
       }
       
       const result = await response.json();
@@ -949,10 +947,10 @@ export const apiClient = {
       return result;
     } catch (error: any) {
       clearTimeout(timeoutId);
+      console.error('[uploadFile] Error:', error.message);
       if (error.name === 'AbortError') {
         throw new Error('Upload expirou - arquivo muito grande ou conexão lenta');
       }
-      console.error('[uploadFile] Upload error:', error.message);
       throw error;
     }
   },
