@@ -286,9 +286,9 @@ function AnimatedBall({
 }) {
   const ballRef = useRef<THREE.Group>(null);
 
-  // Ball size
-  const ballRadius = 0.35;
-  const shadowRadius = 0.4;
+  // Ball size increased 59% to match player scale (0.35 * 1.59 ≈ 0.56)
+  const ballRadius = 0.56;
+  const shadowRadius = 0.65;
 
   useFrame((state) => {
     if (ballRef.current) {
