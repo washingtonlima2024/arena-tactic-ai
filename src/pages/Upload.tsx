@@ -1524,9 +1524,12 @@ export default function VideoUpload() {
       setProcessingMessage('Registrando vídeos na partida...');
 
       // Register all video segments - USANDO currentSegments
+      // CRITICAL: Atualizar segment.id com o ID retornado pelo backend
+      const updatedSegmentIds: Record<string, string> = {};
+      
       for (const segment of currentSegments) {
         if (segment.status === 'complete' || segment.status === 'ready') {
-          await apiClient.createVideo({
+          const result = await apiClient.createVideo({
             match_id: matchId,
             file_url: segment.url || '',
             file_name: segment.title || segment.name,
@@ -1536,7 +1539,20 @@ export default function VideoUpload() {
             duration_seconds: segment.durationSeconds,
             status: 'pending'
           });
+          
+          // Mapear ID local para ID do backend
+          if (result?.id) {
+            updatedSegmentIds[segment.id] = result.id;
+            console.log(`[Video] Segment ${segment.id} → Backend ID: ${result.id}`);
+          }
         }
+      }
+      
+      // Atualizar segments com IDs do backend para uso posterior
+      if (Object.keys(updatedSegmentIds).length > 0) {
+        setSegments(prev => prev.map(s => 
+          updatedSegmentIds[s.id] ? { ...s, id: updatedSegmentIds[s.id] } : s
+        ));
       }
       
       setProcessingProgress(30);
@@ -1918,21 +1934,23 @@ export default function VideoUpload() {
       setProcessingProgress(95);
       setProcessingMessage('Salvando eventos...');
 
-      // Atualizar status dos vídeos para 'analyzed' (apenas se existirem no banco)
-      const processedSegments = segments.filter(s => s.status === 'complete' || s.status === 'ready');
+      // Atualizar status dos vídeos para 'analyzed' (usando IDs do backend)
+      const processedSegments = currentSegments.filter(s => s.status === 'complete' || s.status === 'ready');
       for (const segment of processedSegments) {
-        if (segment.id) {
+        // Usar ID do backend se disponível, senão usar ID local
+        const backendId = updatedSegmentIds[segment.id] || segment.id;
+        if (backendId) {
           try {
             // Verificar se o vídeo existe antes de atualizar
-            const video = await apiClient.getVideo(segment.id);
+            const video = await apiClient.getVideo(backendId);
             if (video) {
-              await apiClient.updateVideo(segment.id, { status: 'analyzed' });
-              console.log(`[Upload] Vídeo ${segment.id} status atualizado para 'analyzed'`);
+              await apiClient.updateVideo(backendId, { status: 'analyzed' });
+              console.log(`[Upload] Vídeo ${backendId} status atualizado para 'analyzed'`);
             } else {
-              console.warn(`[Upload] Vídeo ${segment.id} não encontrado no banco, ignorando atualização`);
+              console.warn(`[Upload] Vídeo ${backendId} não encontrado no banco, ignorando atualização`);
             }
           } catch (err) {
-            console.warn(`[Upload] Falha ao atualizar status do vídeo ${segment.id}:`, err);
+            console.warn(`[Upload] Falha ao atualizar status do vídeo ${backendId}:`, err);
           }
         }
       }
