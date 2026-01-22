@@ -177,7 +177,8 @@ export function normalizeStorageUrl(url: string | null | undefined): string | nu
   
   for (const localHost of localHosts) {
     if (url.startsWith(localHost)) {
-      return url.replace(localHost, apiBase);
+      const pathOnly = url.replace(localHost, "");
+      return buildApiUrl(apiBase, pathOnly);
     }
   }
   
@@ -226,11 +227,31 @@ async function apiRequest<T>(
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP ${response.status}`);
+      const errorText = await response.text().catch(() => 'Request failed');
+      let errorMessage = `HTTP ${response.status}`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage = errorJson.error || errorMessage;
+      } catch {
+        if (errorText && errorText.length < 200) {
+          errorMessage = errorText;
+        }
+      }
+      throw new Error(errorMessage);
     }
 
-    return response.json();
+    // Parsing resiliente - verificar content-type antes de assumir JSON
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      return response.json();
+    }
+
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text as any;
+    }
   } catch (error: any) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
@@ -304,11 +325,31 @@ async function apiRequestLongRunning<T>(
     clearTimeout(timeoutId);
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Request failed' }));
-      throw new Error(error.error || `HTTP ${response.status}`);
+      const errorText = await response.text().catch(() => 'Request failed');
+      let errorMessage = `HTTP ${response.status}`;
+      try {
+        const errorJson = JSON.parse(errorText);
+        errorMessage = errorJson.error || errorMessage;
+      } catch {
+        if (errorText && errorText.length < 200) {
+          errorMessage = errorText;
+        }
+      }
+      throw new Error(errorMessage);
     }
 
-    return response.json();
+    // Parsing resiliente - verificar content-type antes de assumir JSON
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      return response.json();
+    }
+
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return text as any;
+    }
   } catch (error: any) {
     clearTimeout(timeoutId);
     if (error.name === 'AbortError') {
@@ -1174,6 +1215,8 @@ export const apiClient = {
     openingVignette?: string;
     closingVignette?: string;
   }): Promise<Blob> => {
+    await ensureServerAvailable();
+    
     const response = await fetch(buildApiUrl(getApiBase(), '/api/extract-batch'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
