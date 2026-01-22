@@ -8421,6 +8421,144 @@ def get_all_settings():
 
 
 # ============================================================================
+# OLLAMA ENDPOINTS
+# ============================================================================
+
+@app.route('/api/ollama/models', methods=['GET'])
+def get_ollama_models():
+    """Lista modelos instalados no Ollama local."""
+    try:
+        ollama_url = ai_services.OLLAMA_URL or 'http://localhost:11434'
+        response = requests.get(f"{ollama_url}/api/tags", timeout=5)
+        
+        if response.ok:
+            data = response.json()
+            models = []
+            for model in data.get('models', []):
+                name = model.get('name', '')
+                size = model.get('size', 0)
+                # Formatar tamanho em GB
+                size_gb = round(size / (1024**3), 1) if size > 0 else 0
+                details = model.get('details', {})
+                models.append({
+                    'name': name,
+                    'size': f"{size_gb}GB",
+                    'size_bytes': size,
+                    'family': details.get('family', 'unknown'),
+                    'parameter_size': details.get('parameter_size', ''),
+                    'quantization': details.get('quantization_level', '')
+                })
+            return jsonify({
+                'models': models, 
+                'connected': True,
+                'url': ollama_url
+            })
+        else:
+            return jsonify({
+                'models': [], 
+                'connected': False, 
+                'error': f'Ollama returned {response.status_code}'
+            })
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'models': [], 
+            'connected': False, 
+            'error': 'Ollama not running'
+        })
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'models': [], 
+            'connected': False, 
+            'error': 'Ollama timeout'
+        })
+    except Exception as e:
+        return jsonify({
+            'models': [], 
+            'connected': False, 
+            'error': str(e)
+        })
+
+
+@app.route('/api/ollama/test', methods=['POST'])
+def test_ollama_connection():
+    """Testa conexão com Ollama e verifica se modelo responde."""
+    try:
+        data = request.json or {}
+        ollama_url = data.get('url') or ai_services.OLLAMA_URL or 'http://localhost:11434'
+        model = data.get('model') or ai_services.OLLAMA_MODEL or 'llama3.2'
+        
+        # Primeiro verificar se Ollama está rodando
+        try:
+            tags_response = requests.get(f"{ollama_url}/api/tags", timeout=5)
+            if not tags_response.ok:
+                return jsonify({
+                    'success': False,
+                    'error': f'Ollama não está respondendo em {ollama_url}'
+                })
+            
+            # Verificar se o modelo está instalado
+            tags_data = tags_response.json()
+            installed_models = [m.get('name', '') for m in tags_data.get('models', [])]
+            model_found = any(model in m or m in model for m in installed_models)
+            
+            if not model_found:
+                return jsonify({
+                    'success': False,
+                    'error': f'Modelo "{model}" não encontrado. Modelos instalados: {", ".join(installed_models) or "nenhum"}',
+                    'installed_models': installed_models
+                })
+            
+        except requests.exceptions.ConnectionError:
+            return jsonify({
+                'success': False,
+                'error': f'Não foi possível conectar ao Ollama em {ollama_url}. Verifique se o serviço está rodando.'
+            })
+        
+        # Testar geração simples
+        test_payload = {
+            'model': model,
+            'prompt': 'Responda apenas com "OK" sem explicações.',
+            'stream': False,
+            'options': {
+                'num_predict': 10,
+                'temperature': 0.1
+            }
+        }
+        
+        gen_response = requests.post(
+            f"{ollama_url}/api/generate",
+            json=test_payload,
+            timeout=30
+        )
+        
+        if gen_response.ok:
+            result = gen_response.json()
+            return jsonify({
+                'success': True,
+                'message': f'Ollama conectado! Modelo {model} respondeu.',
+                'model': model,
+                'url': ollama_url,
+                'response_preview': result.get('response', '')[:100]
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Erro ao gerar resposta: {gen_response.status_code}'
+            })
+            
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'success': False,
+            'error': 'Timeout ao testar Ollama. O modelo pode estar carregando.'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+
+# ============================================================================
 # TRANSCRIPTION JOBS ENDPOINTS  
 # ============================================================================
 
