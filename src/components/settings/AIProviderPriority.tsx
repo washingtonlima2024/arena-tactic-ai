@@ -131,9 +131,13 @@ export function AIProviderPriority({
 
   // Separate effect to update hasApiKey status without resetting order
   useEffect(() => {
-    if (isInitialized && providers.length > 0) {
-      setProviders(prev => prev.map(p => {
-        let hasApiKey = true;
+    if (!isInitialized) return;
+    
+    setProviders(prev => {
+      if (prev.length === 0) return prev;
+      
+      return prev.map(p => {
+        let hasApiKey = p.hasApiKey;
         
         if (p.id === 'gemini') {
           hasApiKey = !!geminiApiKey;
@@ -141,9 +145,11 @@ export function AIProviderPriority({
           hasApiKey = !!openaiApiKey;
         }
         
+        // Only update if hasApiKey actually changed
+        if (hasApiKey === p.hasApiKey) return p;
         return { ...p, hasApiKey };
-      }));
-    }
+      });
+    });
   }, [geminiApiKey, openaiApiKey, isInitialized]);
 
   const moveUp = (index: number) => {
