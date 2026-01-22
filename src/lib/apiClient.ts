@@ -3,7 +3,7 @@
  * Modo 100% Local - Sem dependências de Supabase
  */
 
-import { getApiBase } from './apiMode';
+import { getApiBase, isKakttusProduction } from './apiMode';
 
 // Re-exporta getApiBase para manter compatibilidade com código existente
 export { getApiBase };
@@ -177,7 +177,9 @@ async function apiRequest<T>(
   const apiBase = getApiBase();
 
   // Validação: bloquear requisições quando não há URL configurada
-  if (!apiBase) {
+  // Em produção Kakttus, apiBase é vazio mas isso é intencional
+  // pois os endpoints já incluem /api/ e o Nginx faz proxy
+  if (!apiBase && !isKakttusProduction()) {
     throw new Error(
       'Servidor Python não configurado.\n\n' +
       'Acesse Configurações → APIs → Servidor Python e configure a URL pública ' +
