@@ -12,6 +12,7 @@ import { TeamFormDialog } from '@/components/teams/TeamFormDialog';
 import { TeamCard } from '@/components/teams/TeamCard';
 import { useTeams, useCreateTeam, useUpdateTeam, useDeleteTeam, type Team } from '@/hooks/useTeams';
 import { useApiSettings, useUpsertApiSetting } from '@/hooks/useApiSettings';
+import { AIProviderPriority } from '@/components/settings/AIProviderPriority';
 import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 import { 
@@ -602,6 +603,16 @@ export default function Settings() {
 
           {/* API Tab */}
           <TabsContent value="api" className="space-y-6">
+            {/* AI Provider Priority - NEW */}
+            <AIProviderPriority
+              apiSettings={apiSettings}
+              ollamaEnabled={ollamaEnabled}
+              geminiEnabled={geminiEnabled}
+              geminiApiKey={geminiApiKey}
+              openaiEnabled={openaiEnabled}
+              openaiApiKey={openaiApiKey}
+            />
+
             {/* Google Gemini Configuration */}
             <Card variant="glow">
               <CardHeader>
