@@ -80,11 +80,12 @@ export function AIProviderPriority({
 }: AIProviderPriorityProps) {
   const [providers, setProviders] = useState<AIProvider[]>([]);
   const [hasChanges, setHasChanges] = useState(false);
+  const [isInitialized, setIsInitialized] = useState(false);
   const upsertApiSetting = useUpsertApiSetting();
 
-  // Load provider priorities from settings
+  // Load provider priorities from settings - ONLY on initial load
   useEffect(() => {
-    if (apiSettings) {
+    if (apiSettings && !isInitialized) {
       const loadedProviders: AIProvider[] = DEFAULT_PROVIDERS.map((p, index) => {
         const priorityKey = `ai_provider_${p.id}_priority`;
         const storedPriority = apiSettings.find(s => s.setting_key === priorityKey)?.setting_value;
@@ -124,8 +125,26 @@ export function AIProviderPriority({
       });
 
       setProviders(loadedProviders);
+      setIsInitialized(true);
     }
-  }, [apiSettings, ollamaEnabled, geminiEnabled, geminiApiKey, openaiEnabled, openaiApiKey]);
+  }, [apiSettings, ollamaEnabled, geminiEnabled, geminiApiKey, openaiEnabled, openaiApiKey, isInitialized]);
+
+  // Separate effect to update hasApiKey status without resetting order
+  useEffect(() => {
+    if (isInitialized && providers.length > 0) {
+      setProviders(prev => prev.map(p => {
+        let hasApiKey = true;
+        
+        if (p.id === 'gemini') {
+          hasApiKey = !!geminiApiKey;
+        } else if (p.id === 'openai') {
+          hasApiKey = !!openaiApiKey;
+        }
+        
+        return { ...p, hasApiKey };
+      }));
+    }
+  }, [geminiApiKey, openaiApiKey, isInitialized]);
 
   const moveUp = (index: number) => {
     if (index === 0) return;
