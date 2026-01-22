@@ -79,6 +79,9 @@ export default function Settings() {
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
   const [ollamaModel, setOllamaModel] = useState('llama3.2');
   const [ollamaEnabled, setOllamaEnabled] = useState(false);
+  const [ollamaModels, setOllamaModels] = useState<Array<{name: string; size: string; family: string}>>([]);
+  const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
+  const [testingOllama, setTestingOllama] = useState(false);
 
   // Local Whisper settings (FREE transcription)
   const [localWhisperEnabled, setLocalWhisperEnabled] = useState(false);
@@ -323,6 +326,52 @@ export default function Settings() {
       toast.error('Não foi possível conectar ao servidor');
     }
   };
+
+  // Buscar modelos Ollama instalados
+  const fetchOllamaModels = async () => {
+    setLoadingOllamaModels(true);
+    try {
+      const data = await apiClient.getOllamaModels();
+      if (data.connected && data.models.length > 0) {
+        setOllamaModels(data.models);
+        // Se modelo atual não está na lista, selecionar o primeiro
+        const modelNames = data.models.map(m => m.name);
+        if (!modelNames.includes(ollamaModel) && !modelNames.some(m => m.includes(ollamaModel))) {
+          // Manter o modelo atual se for customizado
+        }
+      } else if (data.error) {
+        console.warn('Ollama não disponível:', data.error);
+      }
+    } catch (error) {
+      console.error('Failed to fetch Ollama models:', error);
+    } finally {
+      setLoadingOllamaModels(false);
+    }
+  };
+
+  // Testar conexão Ollama
+  const testOllamaConnection = async () => {
+    setTestingOllama(true);
+    try {
+      const result = await apiClient.testOllamaConnection(ollamaUrl, ollamaModel);
+      if (result.success) {
+        toast.success(result.message || 'Ollama conectado!');
+      } else {
+        toast.error(result.error || 'Falha ao conectar');
+      }
+    } catch (error) {
+      toast.error('Erro ao testar conexão');
+    } finally {
+      setTestingOllama(false);
+    }
+  };
+
+  // Buscar modelos quando Ollama for ativado ou URL mudar
+  useEffect(() => {
+    if (ollamaEnabled) {
+      fetchOllamaModels();
+    }
+  }, [ollamaEnabled]);
 
   return (
     <AppLayout>
@@ -904,26 +953,78 @@ export default function Settings() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label>Modelo</Label>
+                    <div className="flex items-center gap-2">
+                      <Label>Modelo</Label>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={fetchOllamaModels}
+                        disabled={loadingOllamaModels}
+                        className="h-6 px-2"
+                      >
+                        <RefreshCw className={`h-3 w-3 ${loadingOllamaModels ? 'animate-spin' : ''}`} />
+                      </Button>
+                    </div>
                     <Select value={ollamaModel} onValueChange={setOllamaModel}>
                       <SelectTrigger>
-                        <SelectValue />
+                        <SelectValue placeholder={loadingOllamaModels ? "Carregando..." : "Selecione um modelo"} />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="llama3.2">Llama 3.2 (8B)</SelectItem>
-                        <SelectItem value="llama3.2:1b">Llama 3.2 (1B - Rápido)</SelectItem>
-                        <SelectItem value="llama3.1">Llama 3.1 (8B)</SelectItem>
-                        <SelectItem value="llama3.1:70b">Llama 3.1 (70B - Avançado)</SelectItem>
-                        <SelectItem value="mistral">Mistral (7B)</SelectItem>
-                        <SelectItem value="mixtral">Mixtral 8x7B</SelectItem>
-                        <SelectItem value="qwen2.5">Qwen 2.5 (7B)</SelectItem>
-                        <SelectItem value="gemma2">Gemma 2 (9B)</SelectItem>
-                        <SelectItem value="deepseek-r1">DeepSeek R1</SelectItem>
-                        <SelectItem value="phi3">Phi-3 (3.8B)</SelectItem>
+                        {/* Modelos instalados dinamicamente */}
+                        {ollamaModels.length > 0 ? (
+                          <>
+                            <SelectItem value="" disabled className="text-xs text-muted-foreground">
+                              📦 Modelos Instalados
+                            </SelectItem>
+                            {ollamaModels.map(model => (
+                              <SelectItem key={model.name} value={model.name}>
+                                {model.name} ({model.size})
+                              </SelectItem>
+                            ))}
+                          </>
+                        ) : (
+                          <>
+                            {/* Fallback para lista estática se Ollama offline */}
+                            <SelectItem value="llama3.2">Llama 3.2 (8B)</SelectItem>
+                            <SelectItem value="llama3.2:1b">Llama 3.2 (1B - Rápido)</SelectItem>
+                            <SelectItem value="llama3.1">Llama 3.1 (8B)</SelectItem>
+                            <SelectItem value="mistral">Mistral (7B)</SelectItem>
+                            <SelectItem value="qwen2.5">Qwen 2.5 (7B)</SelectItem>
+                            <SelectItem value="gemma2">Gemma 2 (9B)</SelectItem>
+                            <SelectItem value="deepseek-r1">DeepSeek R1</SelectItem>
+                            <SelectItem value="phi3">Phi-3 (3.8B)</SelectItem>
+                          </>
+                        )}
+                        
+                        {/* Sempre incluir modelo atual se não estiver na lista */}
+                        {ollamaModel && !ollamaModels.find(m => m.name === ollamaModel) && ollamaModels.length > 0 && (
+                          <SelectItem value={ollamaModel}>{ollamaModel} (atual)</SelectItem>
+                        )}
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
+                
+                {/* Botão de teste */}
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={testOllamaConnection}
+                    disabled={testingOllama || !ollamaEnabled}
+                  >
+                    {testingOllama ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : (
+                      <Wifi className="h-4 w-4 mr-2" />
+                    )}
+                    Testar Conexão
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Verifica se o Ollama está rodando e o modelo responde
+                  </p>
+                </div>
+                
                 <p className="text-xs text-muted-foreground">
                   Instale o Ollama em <a href="https://ollama.com" target="_blank" className="text-primary hover:underline">ollama.com</a> e execute: <code className="bg-muted px-1 rounded">ollama pull {ollamaModel}</code>
                 </p>

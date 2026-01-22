@@ -480,6 +480,33 @@ export const apiClient = {
     };
   }>('/api/ai-status'),
 
+  // ============== Ollama ==============
+  getOllamaModels: () => apiRequest<{
+    models: Array<{
+      name: string;
+      size: string;
+      size_bytes: number;
+      family: string;
+      parameter_size: string;
+      quantization: string;
+    }>;
+    connected: boolean;
+    url?: string;
+    error?: string;
+  }>('/api/ollama/models'),
+
+  testOllamaConnection: (url?: string, model?: string) => apiRequest<{
+    success: boolean;
+    message?: string;
+    error?: string;
+    model?: string;
+    url?: string;
+    installed_models?: string[];
+  }>('/api/ollama/test', {
+    method: 'POST',
+    body: JSON.stringify({ url, model })
+  }),
+
   // ============== Teams ==============
   getTeams: () => apiRequest<any[]>('/api/teams'),
   getTeam: (id: string) => apiRequest<any>(`/api/teams/${id}`),
