@@ -23,7 +23,7 @@ function buildApiUrl(apiBase: string, endpoint: string): string {
 
   // Verificar se ambos têm /api para evitar duplicação
   const baseEndsWithApi = base.endsWith("/api");
-  const epStartsWithApi = ep.startsWith("/api/") || ep.startsWith("/api?");
+  const epStartsWithApi = ep === "/api" || ep.startsWith("/api/") || ep.startsWith("/api?");
 
   if (baseEndsWithApi && epStartsWithApi) {
     // Remover /api do início do endpoint para evitar /api/api/
@@ -165,7 +165,7 @@ export function normalizeStorageUrl(url: string | null | undefined): string | nu
   
   // PRIORIDADE: Se é URL relativa (/api/storage/...), prefixar com base atual
   if (url.startsWith('/api/storage/')) {
-    return `${apiBase}${url}`;
+    return buildApiUrl(apiBase, url);
   }
   
   // FALLBACK: Lidar com URLs antigas que ainda têm hosts absolutos (migração)
@@ -186,7 +186,6 @@ export function normalizeStorageUrl(url: string | null | undefined): string | nu
 
 // Headers padrão para compatibilidade com túneis (ngrok, Cloudflare)
 const getDefaultHeaders = () => ({
-  'Content-Type': 'application/json',
   'ngrok-skip-browser-warning': 'true',
   'Accept': 'application/json',
   'Cache-Control': 'no-cache',
@@ -212,11 +211,14 @@ async function apiRequest<T>(
     // Log com URL completa para debug
     console.log(`[API] ${options.method || 'GET'} ${fullUrl}`);
     
+    const hasJsonBody = typeof options.body === 'string';
+    
     const response = await fetch(fullUrl, {
       ...options,
       signal: controller.signal,
       headers: {
         ...getDefaultHeaders(),
+        ...(hasJsonBody ? { 'Content-Type': 'application/json' } : {}),
         ...options.headers,
       },
     });
@@ -287,11 +289,14 @@ async function apiRequestLongRunning<T>(
     const url = buildApiUrl(apiBase, endpoint);
     console.log(`[API-LongRunning] ${options.method || 'GET'} ${url} (timeout: ${Math.round(timeoutMs/60000)}min)`);
     
+    const hasJsonBody = typeof options.body === 'string';
+    
     const response = await fetch(url, {
       ...options,
       signal: controller.signal,
       headers: {
         ...getDefaultHeaders(),
+        ...(hasJsonBody ? { 'Content-Type': 'application/json' } : {}),
         ...options.headers,
       },
     });
