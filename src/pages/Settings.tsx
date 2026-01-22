@@ -359,8 +359,13 @@ export default function Settings() {
       } else {
         toast.error(result.error || 'Falha ao conectar');
       }
-    } catch (error) {
-      toast.error('Erro ao testar conexão');
+    } catch (error: any) {
+      // Tratamento específico para erro 405 (servidor desatualizado)
+      if (error.message?.includes('405') || error.message?.includes('Method Not Allowed')) {
+        toast.error('Servidor desatualizado. Execute: pm2 restart arena-backend');
+      } else {
+        toast.error('Erro ao testar conexão. Verifique se o servidor está rodando.');
+      }
     } finally {
       setTestingOllama(false);
     }
@@ -961,47 +966,41 @@ export default function Settings() {
                         onClick={fetchOllamaModels}
                         disabled={loadingOllamaModels}
                         className="h-6 px-2"
+                        title="Atualizar lista de modelos"
                       >
                         <RefreshCw className={`h-3 w-3 ${loadingOllamaModels ? 'animate-spin' : ''}`} />
                       </Button>
                     </div>
-                    <Select value={ollamaModel} onValueChange={setOllamaModel}>
-                      <SelectTrigger>
-                        <SelectValue placeholder={loadingOllamaModels ? "Carregando..." : "Selecione um modelo"} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {/* Modelos instalados dinamicamente */}
-                        {ollamaModels.length > 0 ? (
-                          <>
-                            <SelectItem value="" disabled className="text-xs text-muted-foreground">
-                              📦 Modelos Instalados
+                    {/* Dropdown com modelos detectados */}
+                    {ollamaModels.length > 0 && (
+                      <Select value={ollamaModels.find(m => m.name === ollamaModel) ? ollamaModel : ''} onValueChange={setOllamaModel}>
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione um modelo instalado" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ollamaModels.map(model => (
+                            <SelectItem key={model.name} value={model.name}>
+                              {model.name} ({model.size})
                             </SelectItem>
-                            {ollamaModels.map(model => (
-                              <SelectItem key={model.name} value={model.name}>
-                                {model.name} ({model.size})
-                              </SelectItem>
-                            ))}
-                          </>
-                        ) : (
-                          <>
-                            {/* Fallback para lista estática se Ollama offline */}
-                            <SelectItem value="llama3.2">Llama 3.2 (8B)</SelectItem>
-                            <SelectItem value="llama3.2:1b">Llama 3.2 (1B - Rápido)</SelectItem>
-                            <SelectItem value="llama3.1">Llama 3.1 (8B)</SelectItem>
-                            <SelectItem value="mistral">Mistral (7B)</SelectItem>
-                            <SelectItem value="qwen2.5">Qwen 2.5 (7B)</SelectItem>
-                            <SelectItem value="gemma2">Gemma 2 (9B)</SelectItem>
-                            <SelectItem value="deepseek-r1">DeepSeek R1</SelectItem>
-                            <SelectItem value="phi3">Phi-3 (3.8B)</SelectItem>
-                          </>
-                        )}
-                        
-                        {/* Sempre incluir modelo atual se não estiver na lista */}
-                        {ollamaModel && !ollamaModels.find(m => m.name === ollamaModel) && ollamaModels.length > 0 && (
-                          <SelectItem value={ollamaModel}>{ollamaModel} (atual)</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    )}
+                    {/* Input manual para modelo customizado */}
+                    <div className="space-y-1">
+                      <Input 
+                        value={ollamaModel}
+                        onChange={(e) => setOllamaModel(e.target.value)}
+                        placeholder="Ex: washingtonlima/kakttus ou llama3.2"
+                        className="font-mono text-sm"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        {ollamaModels.length > 0 
+                          ? 'Selecione acima ou digite o nome do modelo manualmente'
+                          : 'Digite o nome do modelo (clique em ↻ para buscar modelos instalados)'
+                        }
+                      </p>
+                    </div>
                   </div>
                 </div>
                 
