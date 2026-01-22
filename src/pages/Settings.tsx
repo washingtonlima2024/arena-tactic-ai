@@ -144,7 +144,7 @@ export default function Settings() {
       
       // Ollama settings
       setOllamaUrl(apiSettings.find(s => s.setting_key === 'ollama_url')?.setting_value || 'http://localhost:11434');
-      setOllamaModel(apiSettings.find(s => s.setting_key === 'ollama_model')?.setting_value || 'llama3.2');
+      setOllamaModel(apiSettings.find(s => s.setting_key === 'ollama_model')?.setting_value || 'washingtonlima/kakttus');
       setOllamaEnabled(apiSettings.find(s => s.setting_key === 'ollama_enabled')?.setting_value === 'true');
       
       // Local Whisper settings
