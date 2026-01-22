@@ -59,8 +59,7 @@ export async function isLocalServerAvailable(): Promise<boolean> {
     // Usar health check light para resposta mais rápida
     const apiBase = getApiBase();
     const response = await fetch(buildApiUrl(apiBase, "/api/health?light=true"), { 
-      signal: controller.signal,
-      headers: { 'ngrok-skip-browser-warning': 'true' }
+      signal: controller.signal
     });
     clearTimeout(timeout);
     
@@ -185,9 +184,9 @@ export function normalizeStorageUrl(url: string | null | undefined): string | nu
   return url;
 }
 
-// Headers padrão para compatibilidade com túneis (ngrok, Cloudflare)
+// Headers padrão para requisições JSON
+// Nota: removido ngrok-skip-browser-warning pois causa preflight CORS e erro 405
 const getDefaultHeaders = () => ({
-  'ngrok-skip-browser-warning': 'true',
   'Accept': 'application/json',
   'Cache-Control': 'no-cache',
 });

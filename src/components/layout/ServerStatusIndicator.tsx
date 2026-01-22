@@ -36,9 +36,14 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
 
   const checkStatus = useCallback(async () => {
     const apiBase = getApiBase();
+    
+    // Construir URL correta: se apiBase vazio, usar /api/health; senão apiBase/health
+    const healthUrl = apiBase 
+      ? `${apiBase}/health` 
+      : '/api/health';
 
     try {
-      const response = await fetch(`${apiBase}/health`, {
+      const response = await fetch(healthUrl, {
         signal: AbortSignal.timeout(5000),
       });
       
@@ -82,7 +87,9 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
       const cloudflare = getCloudflareUrl();
       if (cloudflare) {
         try {
-          const response = await fetch(`${cloudflare}/health?light=true`, {
+          // Cloudflare tunnel expõe /health diretamente (sem /api prefix)
+          const healthUrl = `${cloudflare}/health?light=true`;
+          const response = await fetch(healthUrl, {
             signal: AbortSignal.timeout(5000),
           });
           if (response.ok) {
