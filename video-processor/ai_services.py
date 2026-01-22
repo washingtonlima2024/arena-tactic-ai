@@ -936,60 +936,106 @@ def get_ai_status() -> Dict[str, Any]:
     }
 
 
+def get_ai_priority_order(settings: Dict[str, str] = None) -> List[str]:
+    """
+    Get the AI provider priority order from settings.
+    Providers with priority=0 are disabled and excluded.
+    
+    Args:
+        settings: Dict of setting_key -> setting_value
+        
+    Returns:
+        List of provider IDs in priority order (e.g., ['lovable', 'gemini'])
+    """
+    if settings is None:
+        settings = {}
+    
+    providers = []
+    for provider_id in ['ollama', 'lovable', 'gemini', 'openai']:
+        key = f'ai_provider_{provider_id}_priority'
+        priority_str = settings.get(key, '0')
+        try:
+            priority = int(priority_str)
+        except (ValueError, TypeError):
+            priority = 0
+        
+        if priority > 0:
+            providers.append((provider_id, priority))
+    
+    # Sort by priority ascending (1 = first, 2 = second, etc.)
+    providers.sort(key=lambda x: x[1])
+    
+    result = [p[0] for p in providers]
+    
+    # Fallback if nothing configured - use Lovable then Gemini
+    if not result:
+        print("[AI] ⚠ No priority configured, using fallback: lovable → gemini")
+        result = ['lovable', 'gemini']
+    
+    return result
+
+
 def call_ai(
     messages: List[Dict[str, str]],
     model: str = 'gemini-2.5-flash',
     temperature: float = 0.7,
-    max_tokens: int = 4096
+    max_tokens: int = 4096,
+    settings: Dict[str, str] = None
 ) -> Optional[str]:
     """
-    Universal AI caller - tries Ollama (if enabled), then Lovable AI, then Google Gemini, then OpenAI.
+    Universal AI caller with dynamic priority from database settings.
     
     Args:
         messages: List of message dicts
         model: Model to use
         temperature: Sampling temperature
         max_tokens: Maximum tokens
+        settings: Optional settings dict with priority configuration
     
     Returns:
         AI response text or None
     """
-    # Try Ollama first if enabled (local, free)
-    if OLLAMA_ENABLED:
-        try:
-            result = call_ollama(messages, model=OLLAMA_MODEL, temperature=temperature, max_tokens=max_tokens)
-            if result:
-                print(f"[AI] Using Ollama ({OLLAMA_MODEL})")
-                return result
-        except Exception as e:
-            print(f"Ollama failed, trying cloud APIs: {e}")
+    priority_order = get_ai_priority_order(settings)
+    print(f"[AI] Priority order: {' → '.join(priority_order)}")
     
-    # Try Lovable AI (if key available)
-    if LOVABLE_API_KEY:
-        try:
-            result = call_lovable_ai(messages, model, temperature, max_tokens)
-            if result:
-                return result
-        except Exception as e:
-            print(f"Lovable AI failed, trying fallback: {e}")
+    last_error = None
     
-    # Try Google Gemini directly (if enabled)
-    if GEMINI_ENABLED and GOOGLE_API_KEY:
+    for provider in priority_order:
         try:
-            result = call_google_gemini(messages, model, temperature, max_tokens)
-            if result:
-                return result
+            print(f"[AI] Trying {provider}...")
+            
+            if provider == 'ollama' and OLLAMA_ENABLED:
+                result = call_ollama(messages, model=OLLAMA_MODEL, temperature=temperature, max_tokens=max_tokens)
+                if result:
+                    print(f"[AI] ✓ Success with Ollama ({OLLAMA_MODEL})")
+                    return result
+                    
+            elif provider == 'lovable' and LOVABLE_API_KEY:
+                result = call_lovable_ai(messages, model, temperature, max_tokens)
+                if result:
+                    print(f"[AI] ✓ Success with Lovable AI")
+                    return result
+                    
+            elif provider == 'gemini' and GEMINI_ENABLED and GOOGLE_API_KEY:
+                result = call_google_gemini(messages, model, temperature, max_tokens)
+                if result:
+                    print(f"[AI] ✓ Success with Gemini")
+                    return result
+                    
+            elif provider == 'openai' and OPENAI_ENABLED and OPENAI_API_KEY:
+                result = call_openai(messages, 'gpt-4o-mini', temperature, max_tokens)
+                if result:
+                    print(f"[AI] ✓ Success with OpenAI")
+                    return result
+            else:
+                print(f"[AI] ⚠ {provider} not available (disabled or no API key)")
+                
         except Exception as e:
-            print(f"Google Gemini failed, trying OpenAI: {e}")
+            last_error = e
+            print(f"[AI] ✗ {provider} failed: {e}")
+            continue
     
-    # Fallback to OpenAI (if enabled)
-    if OPENAI_ENABLED and OPENAI_API_KEY:
-        try:
-            return call_openai(messages, 'gpt-4o-mini', temperature, max_tokens)
-        except Exception as e:
-            print(f"OpenAI also failed: {e}")
-    
-    raise ValueError("No AI API configured. Enable Ollama or configure API keys in Settings > API.")
+    raise ValueError(f"All AI providers failed. Last error: {last_error}")
 
 
 def call_lovable_ai(
@@ -2083,7 +2129,8 @@ def analyze_match_events(
     game_end_minute: int = 45,
     max_retries: int = 3,
     match_id: str = None,
-    use_dual_verification: bool = True
+    use_dual_verification: bool = True,
+    settings: Dict[str, str] = None
 ) -> List[Dict[str, Any]]:
     """
     Analyze match transcription to extract events using dual AI verification.
@@ -2391,7 +2438,7 @@ RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL."""
             response = call_ai([
                 {'role': 'system', 'content': system_prompt},
                 {'role': 'user', 'content': user_prompt}
-            ], model='google/gemini-2.5-flash', max_tokens=8192)
+            ], model='google/gemini-2.5-flash', max_tokens=8192, settings=settings)
             
             if not response:
                 last_error = "Empty response from AI"
