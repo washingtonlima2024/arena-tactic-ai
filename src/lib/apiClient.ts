@@ -3,7 +3,7 @@
  * Modo 100% Local - Sem dependências de Supabase
  */
 
-import { getApiBase } from './apiMode';
+import { getApiBase, isLovableEnvironment, getCloudflareUrl } from './apiMode';
 
 // Re-exporta getApiBase para manter compatibilidade com código existente
 export { getApiBase };
@@ -153,32 +153,49 @@ class LocalServerOfflineError extends Error {
 /**
  * Normaliza URLs de storage local para usar a base de API atual.
  * Corrige URLs localhost:5000 para usar o túnel configurado (ngrok/cloudflare).
+ * 
+ * IMPORTANTE: No Lovable Cloud, força uso do Cloudflare Tunnel para mídia.
  */
 export function normalizeStorageUrl(url: string | null | undefined): string | null {
   if (!url) return null;
   
-  const apiBase = getApiBase();
+  // Determinar a base correta
+  let apiBase = getApiBase();
+  
+  // CRÍTICO: No Lovable, forçar Cloudflare para que mídia carregue
+  if (isLovableEnvironment()) {
+    const cloudflareUrl = getCloudflareUrl();
+    if (cloudflareUrl) {
+      apiBase = cloudflareUrl;
+    }
+  }
   
   // Se já é URL absoluta com a base correta, retornar
-  if (url.startsWith(apiBase)) return url;
+  if (apiBase && url.startsWith(apiBase)) return url;
   
   // PRIORIDADE: Se é URL relativa (/api/storage/...), prefixar com base atual
-  if (url.startsWith('/api/storage/')) {
-    return buildApiUrl(apiBase, url);
+  if (url.startsWith('/api/storage/') || url.startsWith('/api/storage\\')) {
+    return buildApiUrl(apiBase, url.replace(/\\/g, '/'));
   }
   
   // FALLBACK: Lidar com URLs antigas que ainda têm hosts absolutos (migração)
   const localHosts = [
     'http://localhost:5000',
     'http://127.0.0.1:5000',
-    'http://10.0.0.20:5000'
+    'http://10.0.0.20:5000',
+    'http://10.0.0.20',
   ];
   
   for (const localHost of localHosts) {
     if (url.startsWith(localHost)) {
-      const pathOnly = url.replace(localHost, "");
-      return buildApiUrl(apiBase, pathOnly);
+      const pathOnly = url.replace(localHost, "").replace(/^:5000/, "");
+      return buildApiUrl(apiBase, pathOnly.replace(/\\/g, '/'));
     }
+  }
+  
+  // Se começa com /storage/ sem /api, adicionar prefixo
+  if (url.startsWith('/storage/')) {
+    return buildApiUrl(apiBase, `/api${url}`);
   }
   
   return url;
