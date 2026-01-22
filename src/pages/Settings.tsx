@@ -77,7 +77,7 @@ export default function Settings() {
 
   // Ollama settings
   const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
-  const [ollamaModel, setOllamaModel] = useState('llama3.2');
+  const [ollamaModel, setOllamaModel] = useState('washingtonlima/kakttus');
   const [ollamaEnabled, setOllamaEnabled] = useState(false);
   const [ollamaModels, setOllamaModels] = useState<Array<{name: string; size: string; family: string}>>([]);
   const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
