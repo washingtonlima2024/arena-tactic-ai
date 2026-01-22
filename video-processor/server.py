@@ -83,6 +83,79 @@ def add_cors_headers(response):
     return response
 
 
+# ============================================================================
+# HEALTH CHECK - Definido ANTES do handler OPTIONS para prioridade de rota
+# ============================================================================
+
+@app.route('/health', methods=['GET', 'OPTIONS'])
+@app.route('/api/health', methods=['GET', 'OPTIONS'])
+def health_check():
+    """Verifica status do servidor. Modo light=true para resposta rápida."""
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        response.headers['Access-Control-Allow-Methods'] = 'GET, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Accept, Cache-Control'
+        return response
+    
+    from database import get_database_path, get_base_dir
+    
+    light_mode = request.args.get('light', 'false').lower() == 'true'
+    
+    try:
+        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, timeout=5)
+        ffmpeg_ok = result.returncode == 0
+    except:
+        ffmpeg_ok = False
+    
+    # Verificar funções críticas carregadas
+    critical_functions = {
+        '_transcribe_with_gemini': hasattr(ai_services, '_transcribe_with_gemini'),
+        'transcribe_large_video': hasattr(ai_services, 'transcribe_large_video'),
+        'analyze_match_events': hasattr(ai_services, 'analyze_match_events'),
+    }
+    
+    all_functions_loaded = all(critical_functions.values())
+    
+    response_data = {
+        'status': 'ok',
+        'version': SERVER_VERSION,
+        'build_date': SERVER_BUILD_DATE,
+        'ffmpeg': ffmpeg_ok,
+        'functions_loaded': all_functions_loaded,
+        'critical_functions': critical_functions,
+        'paths': {
+            'base_dir': get_base_dir(),
+            'database': get_database_path(),
+            'storage': str(STORAGE_DIR.absolute()),
+            'vignettes': str(VIGNETTES_DIR.absolute()),
+            'working_dir': str(Path.cwd())
+        },
+        'providers': {
+            'gemini': bool(ai_services.GOOGLE_API_KEY) and ai_services.GEMINI_ENABLED,
+            'openai': bool(ai_services.OPENAI_API_KEY) and ai_services.OPENAI_ENABLED,
+            'elevenlabs': bool(ai_services.ELEVENLABS_API_KEY) and ai_services.ELEVENLABS_ENABLED,
+            'lovable': bool(ai_services.LOVABLE_API_KEY),
+            'ollama': ai_services.OLLAMA_ENABLED
+        }
+    }
+    
+    # Aviso se servidor desatualizado
+    if not all_functions_loaded:
+        missing = [k for k, v in critical_functions.items() if not v]
+        response_data['warning'] = f"Servidor desatualizado! Funções não carregadas: {', '.join(missing)}. Reinicie o servidor."
+    
+    # Só inclui estatísticas completas do storage se não for modo light
+    if not light_mode:
+        response_data['storage'] = get_storage_stats()
+    
+    return jsonify(response_data)
+
+
+# ============================================================================
+# GLOBAL OPTIONS HANDLER - Após rotas específicas para não interferir
+# ============================================================================
+
 @app.route('/<path:path>', methods=['OPTIONS'])
 @app.route('/', methods=['OPTIONS'])
 def handle_options(path=''):
@@ -1203,65 +1276,8 @@ def get_conversion_status(job_id: str):
 
 
 # ============================================================================
-# HEALTH & STATUS
+# TUNNEL DETECTION & STATUS
 # ============================================================================
-
-@app.route('/health', methods=['GET'])
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Verifica status do servidor. Modo light=true para resposta rápida."""
-    from database import get_database_path, get_base_dir
-    
-    light_mode = request.args.get('light', 'false').lower() == 'true'
-    
-    try:
-        result = subprocess.run(['ffmpeg', '-version'], capture_output=True, text=True, timeout=5)
-        ffmpeg_ok = result.returncode == 0
-    except:
-        ffmpeg_ok = False
-    
-    # Verificar funções críticas carregadas
-    critical_functions = {
-        '_transcribe_with_gemini': hasattr(ai_services, '_transcribe_with_gemini'),
-        'transcribe_large_video': hasattr(ai_services, 'transcribe_large_video'),
-        'analyze_match_events': hasattr(ai_services, 'analyze_match_events'),
-    }
-    
-    all_functions_loaded = all(critical_functions.values())
-    
-    response_data = {
-        'status': 'ok',
-        'version': SERVER_VERSION,
-        'build_date': SERVER_BUILD_DATE,
-        'ffmpeg': ffmpeg_ok,
-        'functions_loaded': all_functions_loaded,
-        'critical_functions': critical_functions,
-        'paths': {
-            'base_dir': get_base_dir(),
-            'database': get_database_path(),
-            'storage': str(STORAGE_DIR.absolute()),
-            'vignettes': str(VIGNETTES_DIR.absolute()),
-            'working_dir': str(Path.cwd())
-        },
-        'providers': {
-            'gemini': bool(ai_services.GOOGLE_API_KEY) and ai_services.GEMINI_ENABLED,
-            'openai': bool(ai_services.OPENAI_API_KEY) and ai_services.OPENAI_ENABLED,
-            'elevenlabs': bool(ai_services.ELEVENLABS_API_KEY) and ai_services.ELEVENLABS_ENABLED,
-            'lovable': bool(ai_services.LOVABLE_API_KEY),
-            'ollama': ai_services.OLLAMA_ENABLED
-        }
-    }
-    
-    # Aviso se servidor desatualizado
-    if not all_functions_loaded:
-        missing = [k for k, v in critical_functions.items() if not v]
-        response_data['warning'] = f"Servidor desatualizado! Funções não carregadas: {', '.join(missing)}. Reinicie o servidor."
-    
-    # Só inclui estatísticas completas do storage se não for modo light
-    if not light_mode:
-        response_data['storage'] = get_storage_stats()
-    
-    return jsonify(response_data)
 
 
 @app.route('/api/detect-ngrok', methods=['GET'])
