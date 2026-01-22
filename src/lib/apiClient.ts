@@ -188,10 +188,21 @@ async function apiRequest<T>(
   }
 
   try {
-    // Log com URL completa para debug
-    console.log(`[API] ${options.method || 'GET'} ${apiBase}${endpoint}`);
+    // Normalizar URL para evitar duplicação de /api/
+    let fullUrl = `${apiBase}${endpoint}`;
     
-    const response = await fetch(`${apiBase}${endpoint}`, {
+    // Se apiBase termina com /api e endpoint começa com /api/, remove duplicação
+    if (apiBase.endsWith('/api') && endpoint.startsWith('/api/')) {
+      fullUrl = `${apiBase}${endpoint.slice(4)}`;
+    }
+    
+    // Também normaliza /api/api/ para /api/ caso apareça
+    fullUrl = fullUrl.replace(/\/api\/api\//g, '/api/');
+    
+    // Log com URL completa para debug
+    console.log(`[API] ${options.method || 'GET'} ${fullUrl}`);
+    
+    const response = await fetch(fullUrl, {
       ...options,
       signal: controller.signal,
       headers: {
