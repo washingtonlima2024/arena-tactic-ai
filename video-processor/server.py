@@ -152,7 +152,65 @@ def health_check():
     return jsonify(response_data)
 
 
-# ============================================================================
+@app.route('/api/ai/priorities', methods=['GET', 'OPTIONS'])
+def get_ai_priorities():
+    """Return configured AI provider priorities for debugging."""
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        return response
+    
+    # Force refresh settings from Supabase Cloud
+    cloud_settings = get_cloud_settings(force_refresh=True)
+    priority_order = ai_services.get_ai_priority_order(cloud_settings)
+    
+    # Get individual priority values
+    priorities = {}
+    for provider in ['ollama', 'lovable', 'gemini', 'openai']:
+        key = f'ai_provider_{provider}_priority'
+        value = cloud_settings.get(key, '0')
+        priorities[provider] = {
+            'priority': int(value) if value and value.isdigit() else 0,
+            'enabled': int(value) > 0 if value and value.isdigit() else False
+        }
+    
+    return jsonify({
+        'success': True,
+        'priority_order': priority_order,
+        'priorities': priorities,
+        'source': 'supabase_cloud' if cloud_settings else 'fallback',
+        'settings_count': len(cloud_settings),
+        'providers': {
+            'lovable': bool(ai_services.LOVABLE_API_KEY),
+            'gemini': bool(ai_services.GOOGLE_API_KEY) and ai_services.GEMINI_ENABLED,
+            'openai': bool(ai_services.OPENAI_API_KEY) and ai_services.OPENAI_ENABLED,
+            'ollama': ai_services.OLLAMA_ENABLED
+        }
+    })
+
+
+@app.route('/api/ai/reload-settings', methods=['POST', 'OPTIONS'])
+def reload_ai_settings():
+    """Reload AI settings from Supabase Cloud."""
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        return response
+    
+    # Force refresh settings
+    cloud_settings = get_cloud_settings(force_refresh=True)
+    
+    # Re-load API keys with new settings
+    load_api_keys_from_db()
+    
+    priority_order = ai_services.get_ai_priority_order(cloud_settings)
+    
+    return jsonify({
+        'success': True,
+        'message': 'AI settings reloaded from Supabase Cloud',
+        'priority_order': priority_order,
+        'settings_count': len(cloud_settings)
+    })
+
+
 # GLOBAL OPTIONS HANDLER - Após rotas específicas para não interferir
 # ============================================================================
 
@@ -206,16 +264,69 @@ def _bool_from_setting(value: str, default: bool = False) -> bool:
     return default
 
 
+def load_settings_from_supabase() -> Dict[str, str]:
+    """Load settings from Supabase Cloud (for priority sync)."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        print("[Settings] Supabase not configured, using only local SQLite")
+        return {}
+    
+    try:
+        response = requests.get(
+            f"{SUPABASE_URL}/rest/v1/api_settings?select=setting_key,setting_value",
+            headers={
+                'apikey': SUPABASE_SERVICE_KEY,
+                'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'
+            },
+            timeout=10
+        )
+        
+        if response.ok:
+            settings = {s['setting_key']: s['setting_value'] for s in response.json()}
+            print(f"[Settings] ✓ Loaded {len(settings)} settings from Supabase Cloud")
+            return settings
+        else:
+            print(f"[Settings] ⚠ Error reading Supabase: {response.status_code}")
+            return {}
+    except Exception as e:
+        print(f"[Settings] Error loading from Supabase: {e}")
+        return {}
+
+
+# Global cached settings from Supabase (updated on demand)
+_cached_cloud_settings: Dict[str, str] = {}
+_cloud_settings_loaded = False
+
+
+def get_cloud_settings(force_refresh: bool = False) -> Dict[str, str]:
+    """Get settings from Supabase Cloud with caching."""
+    global _cached_cloud_settings, _cloud_settings_loaded
+    
+    if not _cloud_settings_loaded or force_refresh:
+        _cached_cloud_settings = load_settings_from_supabase()
+        _cloud_settings_loaded = True
+    
+    return _cached_cloud_settings
+
+
 def load_api_keys_from_db():
     """Load API keys and provider flags from database on server startup."""
     session = get_session()
     try:
+        # Load from local SQLite
         settings = session.query(ApiSetting).all()
-
-        values = {}
+        local_values = {}
         for s in settings:
             k = _normalize_setting_key(s.setting_key)
-            values[k] = s.setting_value
+            local_values[k] = s.setting_value
+        
+        # Load from Supabase Cloud (priority settings)
+        cloud_values = get_cloud_settings()
+        
+        # Merge: Cloud > Local for priority settings
+        values = {**local_values}
+        for key in cloud_values:
+            if key.startswith('ai_provider_') or key.endswith('_enabled'):
+                values[key] = cloud_values[key]
 
         keys_loaded = []
         # Provider enabled flags (default True for backward compatibility)
@@ -272,6 +383,10 @@ def load_api_keys_from_db():
         # Log Local Whisper status
         if local_whisper_enabled:
             keys_loaded.append(f'LOCAL_WHISPER ({local_whisper_model})')
+        
+        # Log AI priority order
+        priority_order = ai_services.get_ai_priority_order(values)
+        print(f"[Settings] AI Priority: {' → '.join(priority_order)}")
 
         if keys_loaded:
             status_parts = []
@@ -3605,10 +3720,12 @@ def analyze_match():
             # PRIORIDADE ÚNICA: Análise por IA (mais confiável, menos duplicatas)
             # ═══════════════════════════════════════════════════════════════
             print(f"[ANALYZE-MATCH] 🤖 Usando análise de IA (modo: {analysis_mode})...")
+            cloud_settings = get_cloud_settings()
             ai_events = ai_services.analyze_match_events(
                 transcription, home_team, away_team, game_start_minute, game_end_minute,
                 match_id=match_id,
-                use_dual_verification=(analysis_mode == 'text')
+                use_dual_verification=(analysis_mode == 'text'),
+                settings=cloud_settings
             )
             
             events = ai_events
@@ -5162,10 +5279,12 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
                     session.close()
                 
                 # Analyze transcription
+                cloud_settings = get_cloud_settings()
                 events = ai_services.analyze_match_events(
                     transcription, home_team, away_team, start_minute, end_minute,
                     match_id=match_id,
-                    use_dual_verification=True
+                    use_dual_verification=True,
+                    settings=cloud_settings
                 )
                 
                 if not events:
@@ -7634,10 +7753,12 @@ def _process_match_pipeline(job_id: str, data: dict):
                 finally:
                     session.close()
                 
+                cloud_settings = get_cloud_settings()
                 events = ai_services.analyze_match_events(
                     first_half_text, home_team, away_team, 0, 45,
                     match_id=match_id,
-                    use_dual_verification=True
+                    use_dual_verification=True,
+                    settings=cloud_settings
                 )
                 if events:
                     # Save events
@@ -7677,10 +7798,12 @@ def _process_match_pipeline(job_id: str, data: dict):
                 finally:
                     session.close()
                 
+                cloud_settings = get_cloud_settings()
                 events = ai_services.analyze_match_events(
                     second_half_text, home_team, away_team, 45, 90,
                     match_id=match_id,
-                    use_dual_verification=True
+                    use_dual_verification=True,
+                    settings=cloud_settings
                 )
                 if events:
                     session = get_session()
