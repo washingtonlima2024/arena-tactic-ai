@@ -22,6 +22,8 @@ interface EventTimelineProps {
 
 const eventIcons: Record<string, string> = {
   goal: '⚽',
+  goal_home: '⚽',
+  goal_away: '⚽',
   assist: '👟',
   shot: '🎯',
   shot_on_target: '🎯',
@@ -37,10 +39,15 @@ const eventIcons: Record<string, string> = {
   high_press: '⚡',
   transition: '💨',
   ball_recovery: '🔃',
+  halftime: '⏸️',
+  kickoff: '▶️',
+  fulltime: '🏁',
 };
 
 const eventLabels: Record<string, string> = {
   goal: 'Gol',
+  goal_home: 'Gol Casa',
+  goal_away: 'Gol Fora',
   assist: 'Assistência',
   shot: 'Finalização',
   shot_on_target: 'Finalização no Gol',
@@ -56,10 +63,15 @@ const eventLabels: Record<string, string> = {
   high_press: 'Pressão Alta',
   transition: 'Transição',
   ball_recovery: 'Recuperação',
+  halftime: 'Intervalo',
+  kickoff: 'Início',
+  fulltime: 'Fim de Jogo',
 };
 
 const eventBadgeVariants: Record<string, any> = {
   goal: 'goal',
+  goal_home: 'goal',
+  goal_away: 'goal',
   assist: 'assist',
   shot: 'shot',
   shot_on_target: 'shot',

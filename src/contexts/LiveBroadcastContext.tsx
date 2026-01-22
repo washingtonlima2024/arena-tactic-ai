@@ -5,6 +5,7 @@ import { FFmpeg } from '@ffmpeg/ffmpeg';
 import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { VideoSegmentBuffer, VideoSegment, calculateClipWindow } from '@/utils/videoSegmentBuffer';
 import { generateUUID } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 
 export interface MatchInfo {
   homeTeam: string;
@@ -1235,39 +1236,69 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       recordingTimestamp: currentRecordingTime,
     };
 
-    const isDuplicate = detectedEvents.some(
+    // Check for duplicates in local state
+    const isDuplicateLocal = detectedEvents.some(
       (e) =>
         e.type === newEvent.type &&
         Math.abs((e.recordingTimestamp || 0) - (newEvent.recordingTimestamp || 0)) < 30
     );
 
-    if (!isDuplicate) {
-      setDetectedEvents((prev) => [...prev, newEvent]);
+    if (isDuplicateLocal) {
+      console.log(`⚠️ Duplicate event in local state: ${eventData.type} at ${currentRecordingTime}s`);
+      return;
+    }
+
+    // Also check database for recent similar events (prevent duplicates on page reload)
+    try {
+      const { data: existingEvents } = await supabase
+        .from('match_events')
+        .select('id, event_type, metadata')
+        .eq('match_id', matchId)
+        .eq('event_type', eventData.type)
+        .order('created_at', { ascending: false })
+        .limit(5);
       
-      try {
-        await apiClient.createEvent(matchId, {
-          id: eventId,
-          match_id: matchId,
-          video_id: videoId || null,
-          event_type: eventData.type,
-          minute: eventData.minute,
-          second: eventData.second,
-          description: eventData.description,
-          approval_status: "pending",
-          is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(eventData.type),
-          match_half: eventData.minute < 45 ? 'first' : 'second',
-          clip_pending: true,
-          metadata: {
-            eventMs: currentRecordingTime * 1000,
-            videoSecond: currentRecordingTime,
-            clipStartTime,
-            clipEndTime,
-            windowBefore,
-            windowAfter,
-            source: eventData.source || 'live-detected',
-            confidence: eventData.confidence
-          }
+      if (existingEvents?.length) {
+        const isDuplicateDb = existingEvents.some((e) => {
+          const existingVideoSecond = (e.metadata as any)?.videoSecond ?? 0;
+          return Math.abs(existingVideoSecond - currentRecordingTime) < 30;
         });
+        
+        if (isDuplicateDb) {
+          console.log(`⚠️ Duplicate event found in database: ${eventData.type} near ${currentRecordingTime}s`);
+          return;
+        }
+      }
+    } catch (dbErr) {
+      console.warn('Could not check for duplicates in DB:', dbErr);
+    }
+
+    setDetectedEvents((prev) => [...prev, newEvent]);
+    
+    try {
+      await apiClient.createEvent(matchId, {
+        id: eventId,
+        match_id: matchId,
+        video_id: videoId || null,
+        event_type: eventData.type,
+        minute: eventData.minute,
+        second: eventData.second,
+        description: eventData.description,
+        approval_status: "pending",
+        is_highlight: ['goal', 'goal_home', 'goal_away', 'red_card', 'penalty'].includes(eventData.type),
+        match_half: eventData.minute < 45 ? 'first' : 'second',
+        clip_pending: true,
+        metadata: {
+          eventMs: currentRecordingTime * 1000,
+          videoSecond: currentRecordingTime,
+          clipStartTime,
+          clipEndTime,
+          windowBefore,
+          windowAfter,
+          source: eventData.source || 'live-detected',
+          confidence: eventData.confidence
+        }
+      });
         console.log(`✅ Detected event saved at ${currentRecordingTime}s:`, eventData.type);
         
         // Try to extract clip from buffer immediately (automatic clip)
@@ -1339,7 +1370,6 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
           duration: 3000,
         });
       }
-    }
   }, [detectedEvents, matchInfo, toast, currentMatchId, saveVideoChunk]);
 
   // Keep ref synchronized
