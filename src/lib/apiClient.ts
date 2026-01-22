@@ -8,6 +8,31 @@ import { getApiBase, isKakttusProduction } from './apiMode';
 // Re-exporta getApiBase para manter compatibilidade com código existente
 export { getApiBase };
 
+/**
+ * Monta URL da API normalizando prefixos para evitar duplicação de /api/
+ * Funciona em todos os cenários: local, produção, túnel
+ */
+function buildApiUrl(apiBase: string, endpoint: string): string {
+  // Limpar trailing slashes do base
+  const base = (apiBase || "").replace(/\/+$/, "");
+  // Garantir que endpoint começa com /
+  const ep = endpoint.startsWith("/") ? endpoint : `/${endpoint}`;
+
+  // Se base está vazio (produção Kakttus), retornar apenas o endpoint
+  if (!base) return ep;
+
+  // Verificar se ambos têm /api para evitar duplicação
+  const baseEndsWithApi = base.endsWith("/api");
+  const epStartsWithApi = ep.startsWith("/api/") || ep.startsWith("/api?");
+
+  if (baseEndsWithApi && epStartsWithApi) {
+    // Remover /api do início do endpoint para evitar /api/api/
+    return `${base}${ep.replace(/^\/api/, "")}`;
+  }
+
+  return `${base}${ep}`;
+}
+
 // Check if local server is available
 let serverAvailable: boolean | null = null;
 let lastServerCheck = 0;
@@ -32,7 +57,8 @@ export async function isLocalServerAvailable(): Promise<boolean> {
     const timeout = setTimeout(() => controller.abort(), 3000);
     
     // Usar health check light para resposta mais rápida
-    const response = await fetch(`${getApiBase()}/health?light=true`, { 
+    const apiBase = getApiBase();
+    const response = await fetch(buildApiUrl(apiBase, "/api/health?light=true"), { 
       signal: controller.signal,
       headers: { 'ngrok-skip-browser-warning': 'true' }
     });
@@ -188,16 +214,8 @@ async function apiRequest<T>(
   }
 
   try {
-    // Normalizar URL para evitar duplicação de /api/
-    let fullUrl = `${apiBase}${endpoint}`;
-    
-    // Se apiBase termina com /api e endpoint começa com /api/, remove duplicação
-    if (apiBase.endsWith('/api') && endpoint.startsWith('/api/')) {
-      fullUrl = `${apiBase}${endpoint.slice(4)}`;
-    }
-    
-    // Também normaliza /api/api/ para /api/ caso apareça
-    fullUrl = fullUrl.replace(/\/api\/api\//g, '/api/');
+    // Usar função centralizada de normalização
+    const fullUrl = buildApiUrl(apiBase, endpoint);
     
     // Log com URL completa para debug
     console.log(`[API] ${options.method || 'GET'} ${fullUrl}`);
@@ -274,9 +292,10 @@ async function apiRequestLongRunning<T>(
   const apiBase = getApiBase();
 
   try {
-    console.log(`[API-LongRunning] ${options.method || 'GET'} ${endpoint} → ${apiBase} (timeout: ${Math.round(timeoutMs/60000)}min)`);
+    const url = buildApiUrl(apiBase, endpoint);
+    console.log(`[API-LongRunning] ${options.method || 'GET'} ${url} (timeout: ${Math.round(timeoutMs/60000)}min)`);
     
-    const response = await fetch(`${apiBase}${endpoint}`, {
+    const response = await fetch(url, {
       ...options,
       signal: controller.signal,
       headers: {
@@ -899,7 +918,7 @@ export const apiClient = {
   // Subfolders: videos, clips, images, audio, texts, srt, json
   
   getStorageUrl: (matchId: string, subfolder: string, filename: string) => 
-    `${getApiBase()}/api/storage/${matchId}/${subfolder}/${filename}`,
+    buildApiUrl(getApiBase(), `/api/storage/${matchId}/${subfolder}/${filename}`),
   
   getMatchStorage: (matchId: string, subfolder?: string) => 
     apiRequest<{ files: any[]; stats: any }>(`/api/storage/${matchId}${subfolder ? `?subfolder=${subfolder}` : ''}`),
@@ -947,7 +966,7 @@ export const apiClient = {
       
       // NÃO adicionar headers customizados para evitar preflight CORS desnecessário
       // FormData com POST simples não precisa de preflight se não tiver headers extras
-      const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
+      const response = await fetch(buildApiUrl(getApiBase(), `/api/storage/${matchId}/${subfolder}`), {
         method: 'POST',
         body: formData,
         signal: controller.signal,
@@ -990,7 +1009,7 @@ export const apiClient = {
       
       console.log(`[uploadBlob] Uploading ${filename} (${(blob.size / 1024).toFixed(1)}KB) to ${matchId}/${subfolder}`);
       
-      const response = await fetch(`${getApiBase()}/api/storage/${matchId}/${subfolder}`, {
+      const response = await fetch(buildApiUrl(getApiBase(), `/api/storage/${matchId}/${subfolder}`), {
         method: 'POST',
         body: formData,
         signal: controller.signal,
@@ -1079,7 +1098,7 @@ export const apiClient = {
       xhr.ontimeout = () => reject(new Error('Upload expirou após 15 minutos'));
 
       xhr.timeout = 900000; // 15 minutos
-      xhr.open('POST', `${getApiBase()}/api/storage/${matchId}/${subfolder}`);
+      xhr.open('POST', buildApiUrl(getApiBase(), `/api/storage/${matchId}/${subfolder}`));
       
       console.log(`[uploadBlobWithProgress] Starting upload: ${filename} (${(blob.size / 1024 / 1024).toFixed(2)} MB)`);
       xhr.send(formData);
@@ -1142,7 +1161,7 @@ export const apiClient = {
   }): Promise<Blob> => {
     await ensureServerAvailable();
     
-    const response = await fetch(`${getApiBase()}/extract-clip`, {
+    const response = await fetch(buildApiUrl(getApiBase(), '/api/extract-clip'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -1158,7 +1177,7 @@ export const apiClient = {
     openingVignette?: string;
     closingVignette?: string;
   }): Promise<Blob> => {
-    const response = await fetch(`${getApiBase()}/extract-batch`, {
+    const response = await fetch(buildApiUrl(getApiBase(), '/api/extract-batch'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
@@ -1167,7 +1186,7 @@ export const apiClient = {
     return response.blob();
   },
 
-  getVignettes: () => apiRequest<{ vignettes: Array<{ name: string; size: number }> }>('/vignettes'),
+  getVignettes: () => apiRequest<{ vignettes: Array<{ name: string; size: number }> }>('/api/vignettes'),
 
   // Video info
   getVideoInfo: (path: string): Promise<VideoInfo> => 
@@ -1378,7 +1397,7 @@ export const apiClient = {
     formData.append('file', file);
     formData.append('video_type', videoType);
     
-    const response = await fetch(`${getApiBase()}/api/storage/${matchId}/videos/upload`, {
+    const response = await fetch(buildApiUrl(getApiBase(), `/api/storage/${matchId}/videos/upload`), {
       method: 'POST',
       body: formData,
       headers: {
