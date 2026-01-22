@@ -339,10 +339,22 @@ def load_api_keys_from_db():
         local_whisper_model = values.get('local_whisper_model') or 'base'
 
         # Prefer DB values, fallback to environment variables if DB is missing
-        openai_key = values.get('openai_api_key') or os.environ.get('OPENAI_API_KEY', '')
-        gemini_key = values.get('gemini_api_key') or os.environ.get('GOOGLE_GENERATIVE_AI_API_KEY', '') or os.environ.get('GOOGLE_API_KEY', '')
-        elevenlabs_key = values.get('elevenlabs_api_key') or os.environ.get('ELEVENLABS_API_KEY', '')
-        lovable_key = values.get('lovable_api_key') or os.environ.get('LOVABLE_API_KEY', '')
+        # CRITICAL: Treat empty strings as None to ensure proper fallback
+        openai_key = values.get('openai_api_key')
+        if not openai_key:  # None, '', or False
+            openai_key = os.environ.get('OPENAI_API_KEY', '')
+        
+        gemini_key = values.get('gemini_api_key')
+        if not gemini_key:
+            gemini_key = os.environ.get('GOOGLE_GENERATIVE_AI_API_KEY', '') or os.environ.get('GOOGLE_API_KEY', '')
+        
+        elevenlabs_key = values.get('elevenlabs_api_key')
+        if not elevenlabs_key:
+            elevenlabs_key = os.environ.get('ELEVENLABS_API_KEY', '')
+        
+        lovable_key = values.get('lovable_api_key')
+        if not lovable_key:
+            lovable_key = os.environ.get('LOVABLE_API_KEY', '')
 
         if openai_key:
             ai_services.set_api_keys(openai_key=openai_key)
