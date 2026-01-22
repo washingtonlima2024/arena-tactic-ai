@@ -37,14 +37,19 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
   const checkStatus = useCallback(async () => {
     const apiBase = getApiBase();
     
-    // Construir URL correta: se apiBase vazio, usar /api/health; senão apiBase/health
-    const healthUrl = apiBase 
-      ? `${apiBase}/health` 
-      : '/api/health';
+    // Comparação explícita: string vazia = produção Kakttus (usa /api/health)
+    // String com valor = IP local descoberto (usa ${apiBase}/health)
+    const healthUrl = apiBase === '' 
+      ? '/api/health' 
+      : `${apiBase}/health`;
 
     try {
       const response = await fetch(healthUrl, {
         signal: AbortSignal.timeout(5000),
+        headers: {
+          'Accept': 'application/json',
+          'Cache-Control': 'no-cache'
+        }
       });
       
       if (response.ok) {
