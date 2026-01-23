@@ -24,74 +24,15 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-# Supabase client for cloud sync
-SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
-SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
-
-# Padrões de chaves que devem sincronizar automaticamente com Supabase Cloud
-# Adicione novos padrões conforme necessário (case-insensitive)
-CLOUD_SYNC_PATTERNS = (
-    '_api_key',       # Chaves de API (openai_api_key, gemini_api_key, etc.)
-    '_enabled',       # Flags de ativação (openai_enabled, ollama_enabled, etc.)
-    'ai_provider_',   # Prioridades de IA (ai_provider_openai_priority, etc.)
-    'ollama_',        # Configurações do Ollama
-    'whisper_',       # Configurações do Whisper local
-    'local_whisper_', # Whisper local
-)
-
-
-def sync_setting_to_cloud(setting_key: str, setting_value: str) -> bool:
-    """Sincroniza uma configuração com Supabase Cloud se aplicável aos padrões."""
-    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-        return False
-    
-    key_lower = setting_key.lower()
-    
-    # Verificar se deve sincronizar baseado nos padrões parametrizados
-    if not any(pattern in key_lower for pattern in CLOUD_SYNC_PATTERNS):
-        return False
-    
-    try:
-        response = requests.post(
-            f"{SUPABASE_URL}/rest/v1/api_settings",
-            headers={
-                "apikey": SUPABASE_SERVICE_KEY,
-                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
-                "Content-Type": "application/json",
-                "Prefer": "resolution=merge-duplicates"
-            },
-            json={
-                "setting_key": setting_key,
-                "setting_value": setting_value or '',
-                "is_encrypted": '_api_key' in key_lower
-            },
-            timeout=10
-        )
-        
-        if response.ok:
-            print(f"[Settings] ☁️ Sincronizado com Cloud: {setting_key}")
-            return True
-        else:
-            print(f"[Settings] ⚠️ Falha ao sincronizar {setting_key}: {response.status_code}")
-            return False
-    except Exception as e:
-        print(f"[Settings] ❌ Erro ao sincronizar {setting_key}: {e}")
-        return False
+# ============================================================================
+# 100% LOCAL MODE - No Supabase/Cloud dependencies
+# ============================================================================
+# All data is stored in SQLite, all AI is local (Whisper + Ollama)
 
 # Log de verificação de configuração na inicialização
 print(f"[STARTUP] Arena Play Server v{SERVER_VERSION} ({SERVER_BUILD_DATE})")
+print(f"[STARTUP] 🏠 Modo 100% LOCAL ativado - Sem dependências de nuvem")
 print(f"[STARTUP] Arquivo .env existe: {'✓' if os.path.exists('.env') else '✗'}")
-print(f"[STARTUP] LOVABLE_API_KEY: {'✓ configurada' if os.environ.get('LOVABLE_API_KEY') else '✗ não configurada'}")
-print(f"[STARTUP] Supabase configurado: {bool(SUPABASE_URL and SUPABASE_SERVICE_KEY)}")
-if SUPABASE_URL and SUPABASE_SERVICE_KEY:
-    print(f"[STARTUP] ✓ SUPABASE_URL: {SUPABASE_URL[:50]}...")
-    print(f"[STARTUP] ✓ SUPABASE_SERVICE_KEY: {'*' * 20}... (configurado)")
-else:
-    if not SUPABASE_URL:
-        print(f"[STARTUP] ⚠ SUPABASE_URL não configurado")
-    if not SUPABASE_SERVICE_KEY:
-        print(f"[STARTUP] ⚠ SUPABASE_SERVICE_KEY não configurado")
-    print(f"[STARTUP] ⚠ Sincronização com Cloud desabilitada - configure as variáveis no .env")
 
 # Import local modules
 from database import init_db, get_session, Session
@@ -3523,7 +3464,7 @@ def force_ollama_config():
     Força IA 100% Local (Gratuito):
     - Ollama (análise de eventos) como provedor primário
     - Whisper Local (faster-whisper) para transcrição gratuita
-    - OpenAI/Gemini desativados (fallback = Lovable)
+    - NENHUM fallback cloud - 100% offline
     """
     if request.method == 'OPTIONS':
         return '', 204
@@ -3536,15 +3477,15 @@ def force_ollama_config():
         
         # === Whisper Local (Transcrição - GRATUITO) ===
         ('local_whisper_enabled', 'true'),
-        ('local_whisper_model', 'base'),  # base é mais rápido, small para melhor qualidade
+        ('local_whisper_model', 'base'),
         
-        # === Prioridades de IA ===
-        ('ai_provider_ollama_priority', '1'),   # Primário: Ollama (local)
-        ('ai_provider_lovable_priority', '2'),  # Fallback: Lovable
+        # === Prioridades de IA - 100% LOCAL ===
+        ('ai_provider_ollama_priority', '1'),   # Único provedor ativo
+        ('ai_provider_lovable_priority', '0'),  # Desativado
         ('ai_provider_gemini_priority', '0'),   # Desativado
         ('ai_provider_openai_priority', '0'),   # Desativado
         
-        # === Desativar provedores pagos ===
+        # === Desativar provedores cloud ===
         ('openai_enabled', 'false'),
         ('gemini_enabled', 'false'),
     ]
@@ -3566,20 +3507,19 @@ def force_ollama_config():
         # Recarregar configurações em memória
         load_api_keys_from_db()
         
-        print(f"[Settings] ✓ IA LOCAL 100% GRATUITA ATIVADA!")
+        print(f"[Settings] ✓ IA 100% LOCAL ATIVADA!")
         print(f"[Settings]   - Transcrição: Whisper Local (faster-whisper)")
         print(f"[Settings]   - Análise: Ollama ({settings_to_update[2][1]})")
-        print(f"[Settings]   - Fallback: Lovable AI")
-        print(f"[Settings] Configurações atualizadas: {len(results)}")
+        print(f"[Settings]   - Cloud: DESATIVADO")
         
         return jsonify({
             'success': True, 
-            'message': 'IA Local ativada! Whisper + Ollama (100% gratuito)',
+            'message': 'IA 100% Local ativada! Whisper + Ollama (gratuito, offline)',
             'updated': results,
             'config': {
                 'transcription': 'local_whisper',
                 'analysis': 'ollama',
-                'fallback': 'lovable'
+                'fallback': 'none'
             }
         })
     except Exception as e:
