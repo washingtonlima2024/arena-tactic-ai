@@ -89,8 +89,9 @@ export default function VideoUpload() {
   const [searchParams] = useSearchParams();
   const queryClient = useQueryClient();
   
-  // Check for existing match ID (when reimporting)
+  // Check for existing match ID and import mode
   const existingMatchId = searchParams.get('match');
+  const importMode = searchParams.get('mode'); // 'new' = fresh analysis, 'reimport' = load existing videos
   
   // Fetch existing match data if reimporting
   // Fetch existing match data - fallback from Python API, treat 406 silently
@@ -331,13 +332,21 @@ export default function VideoUpload() {
   }, [activeMatchId]);
 
   // Auto-load existing videos as segments when page loads with a match ID
+  // 🆕 Skip loading if mode=new (fresh analysis starts empty)
   useEffect(() => {
-    // Only load ONCE
+    // Skip loading existing videos when mode=new (fresh analysis)
+    if (importMode === 'new') {
+      console.log('[Upload] Modo NOVA ANÁLISE - não carregando vídeos anteriores');
+      hasLoadedExistingVideos.current = true; // Prevent future loads
+      return;
+    }
+    
+    // Only load ONCE for reimport mode
     if (existingVideos && 
         existingVideos.length > 0 && 
         !hasLoadedExistingVideos.current) {
       
-      console.log('[Upload] Carregando vídeos existentes:', existingVideos.length);
+      console.log('[Upload] Modo REIMPORTAR - carregando vídeos existentes:', existingVideos.length);
       hasLoadedExistingVideos.current = true;
       
       // Mesclar com segmentos existentes, removendo duplicatas
@@ -378,7 +387,7 @@ export default function VideoUpload() {
         return [...prev, ...newFromDb];
       });
     }
-  }, [existingVideos]);
+  }, [existingVideos, importMode]);
 
   // Detect video duration using HTML5 video element
   const detectVideoDuration = (file: File): Promise<number> => {
