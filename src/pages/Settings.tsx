@@ -1031,10 +1031,15 @@ export default function Settings() {
                         });
                         const data = await response.json();
                         if (data.success) {
-                          toast.success("Ollama ativado como provedor primário!");
+                          toast.success("IA Local ativada! Whisper + Ollama (100% gratuito)");
+                          // Atualizar estados do Ollama
                           setOllamaEnabled(true);
                           setOllamaUrl("http://localhost:11434");
                           setOllamaModel("washingtonlima/kakttus");
+                          // Atualizar estados do Whisper Local
+                          setLocalWhisperEnabled(true);
+                          setLocalWhisperModel("base");
+                          // Desativar provedores pagos
                           setOpenaiEnabled(false);
                           setGeminiEnabled(false);
                         } else {
@@ -1044,10 +1049,10 @@ export default function Settings() {
                         toast.error("Servidor não disponível");
                       }
                     }}
-                    className="bg-orange-600 hover:bg-orange-700"
+                    className="bg-green-600 hover:bg-green-700"
                   >
                     <Zap className="h-4 w-4 mr-2" />
-                    Ativar Ollama Local
+                    Ativar IA Local (Gratuito)
                   </Button>
 
                   <p className="text-xs text-muted-foreground">Força Ollama como provedor primário (localhost:11434)</p>
