@@ -199,38 +199,16 @@ const EventRow = ({
   );
 };
 
-// Sync to Cloud button component
+// Sync to Cloud button - DISABLED in local mode
+// Sistema opera 100% local, dados armazenados no SQLite
 interface SyncToCloudButtonProps {
   matchId: string;
   eventsCount: number;
 }
 
 const SyncToCloudButton = ({ matchId, eventsCount }: SyncToCloudButtonProps) => {
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [lastSync, setLastSync] = useState<Date | null>(null);
-
-  const handleSync = async () => {
-    if (!matchId || eventsCount === 0) {
-      toast.info('Nenhum evento para sincronizar');
-      return;
-    }
-
-    setIsSyncing(true);
-    try {
-      const result = await apiClient.post(`/api/sync-to-supabase/${matchId}`);
-      
-      if (result.success) {
-        setLastSync(new Date());
-        toast.success(`Sincronizado! ${result.events_synced || 0} eventos enviados para Cloud`);
-      } else {
-        toast.error(result.error || 'Falha na sincronização');
-      }
-    } catch (error: any) {
-      console.error('Sync error:', error);
-      toast.error(error.message || 'Erro ao sincronizar com Cloud');
-    } finally {
-      setIsSyncing(false);
-    }
+  const handleSync = () => {
+    toast.info('Sistema em modo local. Dados armazenados no SQLite.');
   };
 
   return (
@@ -238,16 +216,12 @@ const SyncToCloudButton = ({ matchId, eventsCount }: SyncToCloudButtonProps) => 
       variant="outline"
       size="sm"
       onClick={handleSync}
-      disabled={isSyncing || eventsCount === 0}
-      className="gap-2"
-      title={lastSync ? `Último sync: ${lastSync.toLocaleTimeString()}` : 'Sincronizar eventos para Cloud'}
+      disabled={eventsCount === 0}
+      className="gap-2 opacity-60"
+      title="Modo local - dados armazenados no SQLite"
     >
-      {isSyncing ? (
-        <Loader2 className="h-4 w-4 animate-spin" />
-      ) : (
-        <CloudUpload className="h-4 w-4" />
-      )}
-      <span className="hidden sm:inline">Sync Cloud</span>
+      <CloudUpload className="h-4 w-4" />
+      <span className="hidden sm:inline">Local</span>
     </Button>
   );
 };
