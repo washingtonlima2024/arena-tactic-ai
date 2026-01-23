@@ -150,15 +150,15 @@ def get_ai_priorities():
         response = app.make_default_options_response()
         return response
     
-    # Force refresh settings from Supabase Cloud
-    cloud_settings = get_cloud_settings(force_refresh=True)
-    priority_order = ai_services.get_ai_priority_order(cloud_settings)
+    # 100% LOCAL: Load settings from SQLite
+    local_settings = get_local_settings()
+    priority_order = ai_services.get_ai_priority_order(local_settings)
     
     # Get individual priority values
     priorities = {}
     for provider in ['ollama', 'lovable', 'gemini', 'openai']:
         key = f'ai_provider_{provider}_priority'
-        value = cloud_settings.get(key, '0')
+        value = local_settings.get(key, '0')
         priorities[provider] = {
             'priority': int(value) if value and value.isdigit() else 0,
             'enabled': int(value) > 0 if value and value.isdigit() else False
@@ -168,8 +168,8 @@ def get_ai_priorities():
         'success': True,
         'priority_order': priority_order,
         'priorities': priorities,
-        'source': 'supabase_cloud' if cloud_settings else 'fallback',
-        'settings_count': len(cloud_settings),
+        'source': 'sqlite_local',
+        'settings_count': len(local_settings),
         'providers': {
             'lovable': bool(ai_services.LOVABLE_API_KEY),
             'gemini': bool(ai_services.GOOGLE_API_KEY) and ai_services.GEMINI_ENABLED,
@@ -181,24 +181,22 @@ def get_ai_priorities():
 
 @app.route('/api/ai/reload-settings', methods=['POST', 'OPTIONS'])
 def reload_ai_settings():
-    """Reload AI settings from Supabase Cloud."""
+    """Reload AI settings from local SQLite database."""
     if request.method == 'OPTIONS':
         response = app.make_default_options_response()
         return response
     
-    # Force refresh settings
-    cloud_settings = get_cloud_settings(force_refresh=True)
-    
-    # Re-load API keys with new settings
+    # Re-load API keys from local database
     load_api_keys_from_db()
     
-    priority_order = ai_services.get_ai_priority_order(cloud_settings)
+    local_settings = get_local_settings()
+    priority_order = ai_services.get_ai_priority_order(local_settings)
     
     return jsonify({
         'success': True,
-        'message': 'AI settings reloaded from Supabase Cloud',
+        'message': 'AI settings reloaded from local SQLite',
         'priority_order': priority_order,
-        'settings_count': len(cloud_settings)
+        'settings_count': len(local_settings)
     })
 
 
@@ -384,329 +382,17 @@ load_api_keys_from_db()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SUPABASE CLOUD SYNC FUNCTIONS
+# 100% LOCAL MODE - Supabase Cloud Sync Functions REMOVED
 # ═══════════════════════════════════════════════════════════════════════════
-
-def get_supabase_headers() -> Dict[str, str]:
-    """Get headers for Supabase API requests."""
-    return {
-        'apikey': SUPABASE_SERVICE_KEY,
-        'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}',
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
-    }
-
-
-def sync_match_to_supabase(match_id: str) -> Dict[str, Any]:
-    """
-    Sync a match and its events from local SQLite to Supabase Cloud.
-    This ensures data is visible in the frontend.
-    
-    Args:
-        match_id: The match ID to sync
-    
-    Returns:
-        Dict with sync results
-    """
-    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-        print(f"[SUPABASE-SYNC] ⚠ Supabase not configured, skipping sync")
-        return {'success': False, 'error': 'Supabase not configured'}
-    
-    session = get_session()
-    result = {
-        'success': False,
-        'match_synced': False,
-        'events_synced': 0,
-        'videos_synced': 0,
-        'errors': []
-    }
-    
-    try:
-        # Get match from local database
-        match = session.query(Match).filter_by(id=match_id).first()
-        if not match:
-            result['error'] = f'Match {match_id} not found in local database'
-            return result
-        
-        print(f"[SUPABASE-SYNC] Syncing match {match_id}...")
-        
-        # Prepare match data for Supabase
-        match_data = {
-            'id': match.id,
-            'home_team_id': match.home_team_id,
-            'away_team_id': match.away_team_id,
-            'home_score': match.home_score,
-            'away_score': match.away_score,
-            'match_date': match.match_date.isoformat() if match.match_date else None,
-            'competition': match.competition,
-            'venue': match.venue,
-            'status': match.status or 'analyzed',
-        }
-        
-        # Upsert match to Supabase
-        headers = get_supabase_headers()
-        headers['Prefer'] = 'resolution=merge-duplicates,return=representation'
-        
-        response = requests.post(
-            f'{SUPABASE_URL}/rest/v1/matches',
-            json=match_data,
-            headers=headers,
-            timeout=30
-        )
-        
-        if response.status_code in [200, 201]:
-            result['match_synced'] = True
-            print(f"[SUPABASE-SYNC] ✓ Match synced to Supabase")
-        else:
-            error_msg = f"Failed to sync match: {response.status_code} - {response.text[:200]}"
-            result['errors'].append(error_msg)
-            print(f"[SUPABASE-SYNC] ✗ {error_msg}")
-        
-        # Sync events
-        events = session.query(MatchEvent).filter_by(match_id=match_id).all()
-        if events:
-            events_data = []
-            for event in events:
-                event_dict = {
-                    'id': event.id,
-                    'match_id': event.match_id,
-                    'event_type': event.event_type,
-                    'minute': event.minute,
-                    'second': event.second,
-                    'description': event.description,
-                    'match_half': event.match_half,
-                    'is_highlight': event.is_highlight,
-                    'clip_url': event.clip_url,
-                    'clip_pending': event.clip_pending,
-                    'metadata': event.event_metadata
-                }
-                events_data.append(event_dict)
-            
-            # Upsert events to Supabase
-            response = requests.post(
-                f'{SUPABASE_URL}/rest/v1/match_events',
-                json=events_data,
-                headers=headers,
-                timeout=60
-            )
-            
-            if response.status_code in [200, 201]:
-                result['events_synced'] = len(events_data)
-                print(f"[SUPABASE-SYNC] ✓ {len(events_data)} events synced to Supabase")
-            else:
-                error_msg = f"Failed to sync events: {response.status_code} - {response.text[:200]}"
-                result['errors'].append(error_msg)
-                print(f"[SUPABASE-SYNC] ✗ {error_msg}")
-        
-        # Sync videos
-        videos = session.query(Video).filter_by(match_id=match_id).all()
-        if videos:
-            videos_data = []
-            for video in videos:
-                video_dict = {
-                    'id': video.id,
-                    'match_id': video.match_id,
-                    'file_url': video.file_url,
-                    'file_name': video.file_name,
-                    'video_type': video.video_type,
-                    'duration_seconds': video.duration_seconds,
-                    'start_minute': video.start_minute,
-                    'end_minute': video.end_minute,
-                    'status': video.status
-                }
-                videos_data.append(video_dict)
-            
-            response = requests.post(
-                f'{SUPABASE_URL}/rest/v1/videos',
-                json=videos_data,
-                headers=headers,
-                timeout=30
-            )
-            
-            if response.status_code in [200, 201]:
-                result['videos_synced'] = len(videos_data)
-                print(f"[SUPABASE-SYNC] ✓ {len(videos_data)} videos synced to Supabase")
-            else:
-                error_msg = f"Failed to sync videos: {response.status_code} - {response.text[:200]}"
-                result['errors'].append(error_msg)
-                print(f"[SUPABASE-SYNC] ✗ {error_msg}")
-        
-        result['success'] = result['match_synced']
-        return result
-        
-    except Exception as e:
-        error_msg = f"Sync error: {str(e)}"
-        result['errors'].append(error_msg)
-        print(f"[SUPABASE-SYNC] ✗ {error_msg}")
-        return result
-    finally:
-        session.close()
-
-
-def verify_match_exists_in_supabase(match_id: str) -> bool:
-    """Check if a match exists in Supabase Cloud."""
-    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-        return False
-    
-    try:
-        response = requests.get(
-            f'{SUPABASE_URL}/rest/v1/matches?id=eq.{match_id}&select=id',
-            headers=get_supabase_headers(),
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            return len(data) > 0
-        return False
-    except Exception as e:
-        print(f"[SUPABASE-CHECK] Error checking match: {e}")
-        return False
-
-
-@app.route('/api/sync-to-supabase/<match_id>', methods=['POST'])
-def sync_to_supabase_endpoint(match_id: str):
-    """Manually sync a match to Supabase Cloud."""
-    result = sync_match_to_supabase(match_id)
-    if result.get('success'):
-        return jsonify(result)
-    else:
-        return jsonify(result), 400
-
-
-def ensure_teams_in_supabase(home_team_id: Optional[str], away_team_id: Optional[str], session) -> bool:
-    """
-    Ensure both teams exist in Supabase before creating a match.
-    This prevents foreign key errors when syncing matches.
-    """
-    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-        print(f"[TEAM-SYNC] ⚠ Supabase not configured")
-        return False
-    
-    headers = get_supabase_headers()
-    headers['Prefer'] = 'resolution=merge-duplicates,return=representation'
-    
-    synced = 0
-    for team_id in [home_team_id, away_team_id]:
-        if not team_id:
-            continue
-            
-        # Get team from local DB
-        team = session.query(Team).filter_by(id=team_id).first()
-        if not team:
-            print(f"[TEAM-SYNC] ⚠ Team {team_id} not found locally")
-            continue
-        
-        team_data = {
-            'id': team.id,
-            'name': team.name,
-            'short_name': team.short_name,
-            'primary_color': team.primary_color,
-            'secondary_color': team.secondary_color,
-            'logo_url': team.logo_url
-        }
-        
-        try:
-            response = requests.post(
-                f'{SUPABASE_URL}/rest/v1/teams',
-                json=team_data,
-                headers=headers,
-                timeout=15
-            )
-            if response.status_code in [200, 201, 409]:  # 409 = already exists (conflict)
-                synced += 1
-                print(f"[TEAM-SYNC] ✓ Team '{team.name}' synced to Supabase")
-            else:
-                print(f"[TEAM-SYNC] ⚠ Failed to sync team '{team.name}': {response.status_code} - {response.text[:100]}")
-        except Exception as e:
-            print(f"[TEAM-SYNC] ⚠ Error syncing team: {e}")
-    
-    return synced > 0
-
-
-def sync_new_match_to_supabase(match_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Sync a newly created match to Supabase Cloud immediately.
-    This is a lightweight sync that only syncs the match record (no events/videos).
-    
-    Args:
-        match_data: Dictionary with match data from to_dict()
-    
-    Returns:
-        Dict with success status
-    """
-    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-        print(f"[SUPABASE-SYNC] ⚠ Supabase not configured")
-        return {'success': False, 'error': 'Supabase not configured'}
-    
-    try:
-        headers = get_supabase_headers()
-        headers['Prefer'] = 'resolution=merge-duplicates,return=representation'
-        
-        # Prepare match data - only include fields that exist in Supabase schema
-        supabase_match = {
-            'id': match_data['id'],
-            'home_team_id': match_data.get('home_team_id'),
-            'away_team_id': match_data.get('away_team_id'),
-            'home_score': match_data.get('home_score', 0),
-            'away_score': match_data.get('away_score', 0),
-            'match_date': match_data.get('match_date'),
-            'competition': match_data.get('competition'),
-            'venue': match_data.get('venue'),
-            'status': match_data.get('status', 'pending'),
-        }
-        
-        print(f"[SUPABASE-SYNC] Creating match in Supabase: {match_data['id']}")
-        
-        response = requests.post(
-            f'{SUPABASE_URL}/rest/v1/matches',
-            json=supabase_match,
-            headers=headers,
-            timeout=30
-        )
-        
-        if response.status_code in [200, 201]:
-            print(f"[SUPABASE-SYNC] ✓ Match created in Supabase")
-            return {'success': True}
-        elif response.status_code == 409:
-            print(f"[SUPABASE-SYNC] ✓ Match already exists in Supabase")
-            return {'success': True, 'already_exists': True}
-        else:
-            error_msg = f"Failed to create match: {response.status_code} - {response.text[:200]}"
-            print(f"[SUPABASE-SYNC] ✗ {error_msg}")
-            return {'success': False, 'error': error_msg}
-            
-    except Exception as e:
-        error_msg = f"Sync error: {str(e)}"
-        print(f"[SUPABASE-SYNC] ✗ {error_msg}")
-        return {'success': False, 'error': error_msg}
-
-
-@app.route('/api/matches/<match_id>/ensure-supabase', methods=['POST'])
-def ensure_match_in_supabase(match_id: str):
-    """
-    Ensure a match exists in Supabase Cloud.
-    Syncs teams, match, events and videos.
-    """
-    session = get_session()
-    try:
-        match = session.query(Match).filter_by(id=match_id).first()
-        if not match:
-            return jsonify({'error': 'Match not found locally'}), 404
-        
-        # Sync teams first to avoid FK errors
-        teams_synced = ensure_teams_in_supabase(match.home_team_id, match.away_team_id, session)
-        
-        # Full sync of match with events and videos
-        result = sync_match_to_supabase(match_id)
-        result['teams_synced'] = teams_synced
-        
-        if result.get('success'):
-            return jsonify(result)
-        else:
-            return jsonify(result), 400
-    finally:
-        session.close()
+# As funções de sincronização com Supabase Cloud foram removidas.
+# O sistema opera 100% localmente com SQLite.
+# Funções removidas:
+#   - get_supabase_headers()
+#   - sync_match_to_supabase()
+#   - verify_match_exists_in_supabase()
+#   - ensure_teams_in_supabase()
+#   - sync_new_match_to_supabase()
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 # Diretório para vinhetas locais
@@ -2035,16 +1721,13 @@ def get_matches():
 
 @app.route('/api/matches', methods=['POST'])
 def create_match():
-    """Cria uma nova partida e sincroniza automaticamente com Supabase Cloud."""
+    """Cria uma nova partida no SQLite local (100% local mode)."""
     data = request.json
     session = get_session()
     try:
-        # First ensure teams exist in Supabase (to avoid FK errors)
+        # 100% LOCAL: Times validados apenas no SQLite
         home_team_id = data.get('home_team_id')
         away_team_id = data.get('away_team_id')
-        
-        if home_team_id or away_team_id:
-            ensure_teams_in_supabase(home_team_id, away_team_id, session)
         
         # Create match locally
         match = Match(
@@ -5376,13 +5059,13 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
                 finally:
                     session.close()
                 
-                # Analyze transcription
-                cloud_settings = get_cloud_settings()
+                # Analyze transcription (100% LOCAL)
+                local_settings = get_local_settings()
                 events = ai_services.analyze_match_events(
                     transcription, home_team, away_team, start_minute, end_minute,
                     match_id=match_id,
                     use_dual_verification=True,
-                    settings=cloud_settings
+                    settings=local_settings
                 )
                 
                 if not events:
@@ -7851,12 +7534,12 @@ def _process_match_pipeline(job_id: str, data: dict):
                 finally:
                     session.close()
                 
-                cloud_settings = get_cloud_settings()
+                local_settings = get_local_settings()
                 events = ai_services.analyze_match_events(
                     first_half_text, home_team, away_team, 0, 45,
                     match_id=match_id,
                     use_dual_verification=True,
-                    settings=cloud_settings
+                    settings=local_settings
                 )
                 if events:
                     # Save events
@@ -7896,12 +7579,12 @@ def _process_match_pipeline(job_id: str, data: dict):
                 finally:
                     session.close()
                 
-                cloud_settings = get_cloud_settings()
+                local_settings = get_local_settings()
                 events = ai_services.analyze_match_events(
                     second_half_text, home_team, away_team, 45, 90,
                     match_id=match_id,
                     use_dual_verification=True,
-                    settings=cloud_settings
+                    settings=local_settings
                 )
                 if events:
                     session = get_session()
