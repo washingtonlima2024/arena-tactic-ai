@@ -255,48 +255,17 @@ def _bool_from_setting(value: str, default: bool = False) -> bool:
     return default
 
 
-def load_settings_from_supabase() -> Dict[str, str]:
-    """Load settings from Supabase Cloud (for priority sync)."""
-    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-        print("[Settings] Supabase not configured, using only local SQLite")
-        return {}
-    
+def get_local_settings() -> Dict[str, str]:
+    """Get settings from local SQLite database (100% local mode)."""
+    session = get_session()
     try:
-        response = requests.get(
-            f"{SUPABASE_URL}/rest/v1/api_settings?select=setting_key,setting_value",
-            headers={
-                'apikey': SUPABASE_SERVICE_KEY,
-                'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}'
-            },
-            timeout=10
-        )
-        
-        if response.ok:
-            settings = {s['setting_key']: s['setting_value'] for s in response.json()}
-            print(f"[Settings] ✓ Loaded {len(settings)} settings from Supabase Cloud")
-            return settings
-        else:
-            print(f"[Settings] ⚠ Error reading Supabase: {response.status_code}")
-            return {}
+        settings = session.query(ApiSetting).all()
+        return {s.setting_key: s.setting_value for s in settings if s.setting_value}
     except Exception as e:
-        print(f"[Settings] Error loading from Supabase: {e}")
+        print(f"[Settings] Error loading local settings: {e}")
         return {}
-
-
-# Global cached settings from Supabase (updated on demand)
-_cached_cloud_settings: Dict[str, str] = {}
-_cloud_settings_loaded = False
-
-
-def get_cloud_settings(force_refresh: bool = False) -> Dict[str, str]:
-    """Get settings from Supabase Cloud with caching."""
-    global _cached_cloud_settings, _cloud_settings_loaded
-    
-    if not _cloud_settings_loaded or force_refresh:
-        _cached_cloud_settings = load_settings_from_supabase()
-        _cloud_settings_loaded = True
-    
-    return _cached_cloud_settings
+    finally:
+        session.close()
 
 
 def load_api_keys_from_db():
@@ -3849,12 +3818,12 @@ def analyze_match():
             # PRIORIDADE ÚNICA: Análise por IA (mais confiável, menos duplicatas)
             # ═══════════════════════════════════════════════════════════════
             print(f"[ANALYZE-MATCH] 🤖 Usando análise de IA (modo: {analysis_mode})...")
-            cloud_settings = get_cloud_settings()
+            local_settings = get_local_settings()
             ai_events = ai_services.analyze_match_events(
                 transcription, home_team, away_team, game_start_minute, game_end_minute,
                 match_id=match_id,
                 use_dual_verification=(analysis_mode == 'text'),
-                settings=cloud_settings
+                settings=local_settings
             )
             
             events = ai_events
