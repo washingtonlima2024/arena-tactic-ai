@@ -1,22 +1,22 @@
-import { useState, useEffect } from 'react';
-import { AppLayout } from '@/components/layout/AppLayout';
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
-import { Separator } from '@/components/ui/separator';
-import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { TeamFormDialog } from '@/components/teams/TeamFormDialog';
-import { TeamCard } from '@/components/teams/TeamCard';
-import { useTeams, useCreateTeam, useUpdateTeam, useDeleteTeam, type Team } from '@/hooks/useTeams';
-import { useApiSettings, useUpsertApiSetting } from '@/hooks/useApiSettings';
-import { AIProviderPriority } from '@/components/settings/AIProviderPriority';
-import { apiClient } from '@/lib/apiClient';
-import { toast } from 'sonner';
-import { 
-  Settings as SettingsIcon, 
+import { useState, useEffect } from "react";
+import { AppLayout } from "@/components/layout/AppLayout";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Separator } from "@/components/ui/separator";
+import { Badge } from "@/components/ui/badge";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { TeamFormDialog } from "@/components/teams/TeamFormDialog";
+import { TeamCard } from "@/components/teams/TeamCard";
+import { useTeams, useCreateTeam, useUpdateTeam, useDeleteTeam, type Team } from "@/hooks/useTeams";
+import { useApiSettings, useUpsertApiSetting } from "@/hooks/useApiSettings";
+import { AIProviderPriority } from "@/components/settings/AIProviderPriority";
+import { apiClient } from "@/lib/apiClient";
+import { toast } from "sonner";
+import {
+  Settings as SettingsIcon,
   User,
   Bell,
   Palette,
@@ -38,10 +38,18 @@ import {
   Trash2,
   HardDrive,
   RefreshCw,
-  Wifi
-} from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { getApiBase, getCloudflareUrl as getStoredCloudflareUrl, setCloudflareUrl as saveCloudflareUrl, isLovableEnvironment, getActiveConnectionMethod, autoDiscoverServer, resetDiscoveryCache } from '@/lib/apiMode';
+  Wifi,
+} from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  getApiBase,
+  getCloudflareUrl as getStoredCloudflareUrl,
+  setCloudflareUrl as saveCloudflareUrl,
+  isLovableEnvironment,
+  getActiveConnectionMethod,
+  autoDiscoverServer,
+  resetDiscoveryCache,
+} from "@/lib/apiMode";
 
 export default function Settings() {
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
@@ -49,10 +57,10 @@ export default function Settings() {
   const [deleteConfirmTeam, setDeleteConfirmTeam] = useState<Team | null>(null);
 
   // Profile settings
-  const [profileName, setProfileName] = useState('');
-  const [profileEmail, setProfileEmail] = useState('');
-  const [profileOrg, setProfileOrg] = useState('');
-  
+  const [profileName, setProfileName] = useState("");
+  const [profileEmail, setProfileEmail] = useState("");
+  const [profileOrg, setProfileOrg] = useState("");
+
   // Appearance settings
   const [darkMode, setDarkMode] = useState(true);
   const [animations, setAnimations] = useState(true);
@@ -64,40 +72,40 @@ export default function Settings() {
   const [notifyUpdates, setNotifyUpdates] = useState(false);
 
   // AI Provider settings
-  const [geminiApiKey, setGeminiApiKey] = useState('');
-  const [geminiModel, setGeminiModel] = useState('gemini-2.5-flash');
+  const [geminiApiKey, setGeminiApiKey] = useState("");
+  const [geminiModel, setGeminiModel] = useState("gemini-2.5-flash");
   const [geminiEnabled, setGeminiEnabled] = useState(true);
-  
-  const [openaiApiKey, setOpenaiApiKey] = useState('');
-  const [openaiModel, setOpenaiModel] = useState('gpt-4o-mini');
+
+  const [openaiApiKey, setOpenaiApiKey] = useState("");
+  const [openaiModel, setOpenaiModel] = useState("gpt-4o-mini");
   const [openaiEnabled, setOpenaiEnabled] = useState(false);
 
   // ElevenLabs settings
-  const [elevenlabsApiKey, setElevenlabsApiKey] = useState('');
+  const [elevenlabsApiKey, setElevenlabsApiKey] = useState("");
   const [elevenlabsEnabled, setElevenlabsEnabled] = useState(true);
 
   // Ollama settings
-  const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
-  const [ollamaModel, setOllamaModel] = useState('washingtonlima/kakttus');
+  const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
+  const [ollamaModel, setOllamaModel] = useState("washingtonlima/kakttus");
   const [ollamaEnabled, setOllamaEnabled] = useState(false);
-  const [ollamaModels, setOllamaModels] = useState<Array<{name: string; size: string; family: string}>>([]);
+  const [ollamaModels, setOllamaModels] = useState<Array<{ name: string; size: string; family: string }>>([]);
   const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
   const [testingOllama, setTestingOllama] = useState(false);
 
   // Local Whisper settings (FREE transcription)
   const [localWhisperEnabled, setLocalWhisperEnabled] = useState(false);
-  const [localWhisperModel, setLocalWhisperModel] = useState('base');
+  const [localWhisperModel, setLocalWhisperModel] = useState("base");
 
   // Ngrok URL setting (legacy - mantido para compatibilidade)
-  const [ngrokUrl, setNgrokUrl] = useState('');
-  
+  const [ngrokUrl, setNgrokUrl] = useState("");
+
   // Cloudflare Tunnel URL setting (legacy - mantido para compatibilidade)
-  const [cloudflareUrl, setCloudflareUrl] = useState('');
+  const [cloudflareUrl, setCloudflareUrl] = useState("");
 
   const [showGeminiKey, setShowGeminiKey] = useState(false);
-  
+
   // Storage cleanup state
-  const [tempFolders, setTempFolders] = useState<{name: string; size_bytes: number}[]>([]);
+  const [tempFolders, setTempFolders] = useState<{ name: string; size_bytes: number }[]>([]);
   const [loadingTempFolders, setLoadingTempFolders] = useState(false);
   const [cleaningStorage, setCleaningStorage] = useState(false);
   const [cleaningOrphans, setCleaningOrphans] = useState(false);
@@ -105,7 +113,7 @@ export default function Settings() {
   const [showElevenlabsKey, setShowElevenlabsKey] = useState(false);
 
   // API Mode - Sempre local
-  const apiMode = 'local';
+  const apiMode = "local";
 
   // Teams
   const { data: teams, isLoading: teamsLoading } = useTeams();
@@ -120,44 +128,48 @@ export default function Settings() {
   // Load settings from database
   useEffect(() => {
     if (apiSettings) {
-      setProfileName(apiSettings.find(s => s.setting_key === 'profile_name')?.setting_value || '');
-      setProfileEmail(apiSettings.find(s => s.setting_key === 'profile_email')?.setting_value || '');
-      setProfileOrg(apiSettings.find(s => s.setting_key === 'profile_org')?.setting_value || '');
-      setDarkMode(apiSettings.find(s => s.setting_key === 'dark_mode')?.setting_value !== 'false');
-      setAnimations(apiSettings.find(s => s.setting_key === 'animations')?.setting_value !== 'false');
-      setNotifyAnalysis(apiSettings.find(s => s.setting_key === 'notify_analysis')?.setting_value !== 'false');
-      setNotifyInsights(apiSettings.find(s => s.setting_key === 'notify_insights')?.setting_value !== 'false');
-      setNotifyErrors(apiSettings.find(s => s.setting_key === 'notify_errors')?.setting_value !== 'false');
-      setNotifyUpdates(apiSettings.find(s => s.setting_key === 'notify_updates')?.setting_value === 'true');
-      
+      setProfileName(apiSettings.find((s) => s.setting_key === "profile_name")?.setting_value || "");
+      setProfileEmail(apiSettings.find((s) => s.setting_key === "profile_email")?.setting_value || "");
+      setProfileOrg(apiSettings.find((s) => s.setting_key === "profile_org")?.setting_value || "");
+      setDarkMode(apiSettings.find((s) => s.setting_key === "dark_mode")?.setting_value !== "false");
+      setAnimations(apiSettings.find((s) => s.setting_key === "animations")?.setting_value !== "false");
+      setNotifyAnalysis(apiSettings.find((s) => s.setting_key === "notify_analysis")?.setting_value !== "false");
+      setNotifyInsights(apiSettings.find((s) => s.setting_key === "notify_insights")?.setting_value !== "false");
+      setNotifyErrors(apiSettings.find((s) => s.setting_key === "notify_errors")?.setting_value !== "false");
+      setNotifyUpdates(apiSettings.find((s) => s.setting_key === "notify_updates")?.setting_value === "true");
+
       // AI Provider settings
-      setGeminiApiKey(apiSettings.find(s => s.setting_key === 'gemini_api_key')?.setting_value || '');
-      setGeminiModel(apiSettings.find(s => s.setting_key === 'gemini_model')?.setting_value || 'gemini-2.5-flash');
-      setGeminiEnabled(apiSettings.find(s => s.setting_key === 'gemini_enabled')?.setting_value !== 'false');
-      
-      setOpenaiApiKey(apiSettings.find(s => s.setting_key === 'openai_api_key')?.setting_value || '');
-      setOpenaiModel(apiSettings.find(s => s.setting_key === 'openai_model')?.setting_value || 'gpt-4o-mini');
-      setOpenaiEnabled(apiSettings.find(s => s.setting_key === 'openai_enabled')?.setting_value === 'true');
-      
+      setGeminiApiKey(apiSettings.find((s) => s.setting_key === "gemini_api_key")?.setting_value || "");
+      setGeminiModel(apiSettings.find((s) => s.setting_key === "gemini_model")?.setting_value || "gemini-2.5-flash");
+      setGeminiEnabled(apiSettings.find((s) => s.setting_key === "gemini_enabled")?.setting_value !== "false");
+
+      setOpenaiApiKey(apiSettings.find((s) => s.setting_key === "openai_api_key")?.setting_value || "");
+      setOpenaiModel(apiSettings.find((s) => s.setting_key === "openai_model")?.setting_value || "gpt-4o-mini");
+      setOpenaiEnabled(apiSettings.find((s) => s.setting_key === "openai_enabled")?.setting_value === "true");
+
       // ElevenLabs settings
-      setElevenlabsApiKey(apiSettings.find(s => s.setting_key === 'elevenlabs_api_key')?.setting_value || '');
-      setElevenlabsEnabled(apiSettings.find(s => s.setting_key === 'elevenlabs_enabled')?.setting_value !== 'false');
-      
+      setElevenlabsApiKey(apiSettings.find((s) => s.setting_key === "elevenlabs_api_key")?.setting_value || "");
+      setElevenlabsEnabled(apiSettings.find((s) => s.setting_key === "elevenlabs_enabled")?.setting_value !== "false");
+
       // Ollama settings
-      setOllamaUrl(apiSettings.find(s => s.setting_key === 'ollama_url')?.setting_value || 'http://localhost:11434');
-      setOllamaModel(apiSettings.find(s => s.setting_key === 'ollama_model')?.setting_value || 'washingtonlima/kakttus');
-      setOllamaEnabled(apiSettings.find(s => s.setting_key === 'ollama_enabled')?.setting_value === 'true');
-      
+      setOllamaUrl(apiSettings.find((s) => s.setting_key === "ollama_url")?.setting_value || "http://localhost:11434");
+      setOllamaModel(
+        apiSettings.find((s) => s.setting_key === "ollama_model")?.setting_value || "washingtonlima/kakttus",
+      );
+      setOllamaEnabled(apiSettings.find((s) => s.setting_key === "ollama_enabled")?.setting_value === "true");
+
       // Local Whisper settings
-      setLocalWhisperEnabled(apiSettings.find(s => s.setting_key === 'local_whisper_enabled')?.setting_value === 'true');
-      setLocalWhisperModel(apiSettings.find(s => s.setting_key === 'local_whisper_model')?.setting_value || 'base');
-      
+      setLocalWhisperEnabled(
+        apiSettings.find((s) => s.setting_key === "local_whisper_enabled")?.setting_value === "true",
+      );
+      setLocalWhisperModel(apiSettings.find((s) => s.setting_key === "local_whisper_model")?.setting_value || "base");
+
       // Ngrok URL - legacy (não mais usado)
-      const storedNgrokUrl = localStorage.getItem('ngrok_fallback_url') || '';
+      const storedNgrokUrl = localStorage.getItem("ngrok_fallback_url") || "";
       setNgrokUrl(storedNgrokUrl);
-      
+
       // Cloudflare Tunnel URL
-      const storedCloudflareUrl = getStoredCloudflareUrl() || '';
+      const storedCloudflareUrl = getStoredCloudflareUrl() || "";
       setCloudflareUrl(storedCloudflareUrl);
     }
   }, [apiSettings]);
@@ -165,74 +177,78 @@ export default function Settings() {
   const handleSaveAllSettings = async () => {
     try {
       await Promise.all([
-        upsertApiSetting.mutateAsync({ key: 'profile_name', value: profileName }),
-        upsertApiSetting.mutateAsync({ key: 'profile_email', value: profileEmail }),
-        upsertApiSetting.mutateAsync({ key: 'profile_org', value: profileOrg }),
-        upsertApiSetting.mutateAsync({ key: 'dark_mode', value: String(darkMode) }),
-        upsertApiSetting.mutateAsync({ key: 'animations', value: String(animations) }),
-        upsertApiSetting.mutateAsync({ key: 'notify_analysis', value: String(notifyAnalysis) }),
-        upsertApiSetting.mutateAsync({ key: 'notify_insights', value: String(notifyInsights) }),
-        upsertApiSetting.mutateAsync({ key: 'notify_errors', value: String(notifyErrors) }),
-        upsertApiSetting.mutateAsync({ key: 'notify_updates', value: String(notifyUpdates) }),
+        upsertApiSetting.mutateAsync({ key: "profile_name", value: profileName }),
+        upsertApiSetting.mutateAsync({ key: "profile_email", value: profileEmail }),
+        upsertApiSetting.mutateAsync({ key: "profile_org", value: profileOrg }),
+        upsertApiSetting.mutateAsync({ key: "dark_mode", value: String(darkMode) }),
+        upsertApiSetting.mutateAsync({ key: "animations", value: String(animations) }),
+        upsertApiSetting.mutateAsync({ key: "notify_analysis", value: String(notifyAnalysis) }),
+        upsertApiSetting.mutateAsync({ key: "notify_insights", value: String(notifyInsights) }),
+        upsertApiSetting.mutateAsync({ key: "notify_errors", value: String(notifyErrors) }),
+        upsertApiSetting.mutateAsync({ key: "notify_updates", value: String(notifyUpdates) }),
         // AI Provider settings - use correct key names for Python server
-        upsertApiSetting.mutateAsync({ key: 'gemini_api_key', value: geminiApiKey }),
-        upsertApiSetting.mutateAsync({ key: 'gemini_model', value: geminiModel }),
-        upsertApiSetting.mutateAsync({ key: 'gemini_enabled', value: String(geminiEnabled) }),
-        upsertApiSetting.mutateAsync({ key: 'openai_api_key', value: openaiApiKey }),
-        upsertApiSetting.mutateAsync({ key: 'openai_model', value: openaiModel }),
-        upsertApiSetting.mutateAsync({ key: 'openai_enabled', value: String(openaiEnabled) }),
+        upsertApiSetting.mutateAsync({ key: "gemini_api_key", value: geminiApiKey }),
+        upsertApiSetting.mutateAsync({ key: "gemini_model", value: geminiModel }),
+        upsertApiSetting.mutateAsync({ key: "gemini_enabled", value: String(geminiEnabled) }),
+        upsertApiSetting.mutateAsync({ key: "openai_api_key", value: openaiApiKey }),
+        upsertApiSetting.mutateAsync({ key: "openai_model", value: openaiModel }),
+        upsertApiSetting.mutateAsync({ key: "openai_enabled", value: String(openaiEnabled) }),
         // ElevenLabs settings
-        upsertApiSetting.mutateAsync({ key: 'elevenlabs_api_key', value: elevenlabsApiKey }),
-        upsertApiSetting.mutateAsync({ key: 'elevenlabs_enabled', value: String(elevenlabsEnabled) }),
+        upsertApiSetting.mutateAsync({ key: "elevenlabs_api_key", value: elevenlabsApiKey }),
+        upsertApiSetting.mutateAsync({ key: "elevenlabs_enabled", value: String(elevenlabsEnabled) }),
         // Ollama settings
-        upsertApiSetting.mutateAsync({ key: 'ollama_url', value: ollamaUrl }),
-        upsertApiSetting.mutateAsync({ key: 'ollama_model', value: ollamaModel }),
-        upsertApiSetting.mutateAsync({ key: 'ollama_enabled', value: String(ollamaEnabled) }),
+        upsertApiSetting.mutateAsync({ key: "ollama_url", value: ollamaUrl }),
+        upsertApiSetting.mutateAsync({ key: "ollama_model", value: ollamaModel }),
+        upsertApiSetting.mutateAsync({ key: "ollama_enabled", value: String(ollamaEnabled) }),
         // Local Whisper settings
-        upsertApiSetting.mutateAsync({ key: 'local_whisper_enabled', value: String(localWhisperEnabled) }),
-        upsertApiSetting.mutateAsync({ key: 'local_whisper_model', value: localWhisperModel }),
+        upsertApiSetting.mutateAsync({ key: "local_whisper_enabled", value: String(localWhisperEnabled) }),
+        upsertApiSetting.mutateAsync({ key: "local_whisper_model", value: localWhisperModel }),
         // Also save with standard env var names for Python server compatibility
-        ...(geminiApiKey ? [upsertApiSetting.mutateAsync({ key: 'GOOGLE_GENERATIVE_AI_API_KEY', value: geminiApiKey })] : []),
-        ...(openaiApiKey ? [upsertApiSetting.mutateAsync({ key: 'OPENAI_API_KEY', value: openaiApiKey })] : []),
-        ...(elevenlabsApiKey ? [upsertApiSetting.mutateAsync({ key: 'ELEVENLABS_API_KEY', value: elevenlabsApiKey })] : []),
-        upsertApiSetting.mutateAsync({ key: 'OLLAMA_URL', value: ollamaUrl }),
-        upsertApiSetting.mutateAsync({ key: 'OLLAMA_MODEL', value: ollamaModel }),
+        ...(geminiApiKey
+          ? [upsertApiSetting.mutateAsync({ key: "GOOGLE_GENERATIVE_AI_API_KEY", value: geminiApiKey })]
+          : []),
+        ...(openaiApiKey ? [upsertApiSetting.mutateAsync({ key: "OPENAI_API_KEY", value: openaiApiKey })] : []),
+        ...(elevenlabsApiKey
+          ? [upsertApiSetting.mutateAsync({ key: "ELEVENLABS_API_KEY", value: elevenlabsApiKey })]
+          : []),
+        upsertApiSetting.mutateAsync({ key: "OLLAMA_URL", value: ollamaUrl }),
+        upsertApiSetting.mutateAsync({ key: "OLLAMA_MODEL", value: ollamaModel }),
       ]);
-      
-      toast.success('Todas as configurações foram salvas!');
+
+      toast.success("Todas as configurações foram salvas!");
     } catch (error) {
-      toast.error('Erro ao salvar configurações');
+      toast.error("Erro ao salvar configurações");
     }
   };
 
   const handleCreateTeam = async (data: any) => {
     try {
       await createTeam.mutateAsync(data);
-      toast.success('Time criado com sucesso!');
+      toast.success("Time criado com sucesso!");
       setTeamDialogOpen(false);
     } catch (error) {
-      toast.error('Erro ao criar time');
+      toast.error("Erro ao criar time");
     }
   };
 
   const handleUpdateTeam = async (data: any) => {
     try {
       await updateTeam.mutateAsync(data);
-      toast.success('Time atualizado!');
+      toast.success("Time atualizado!");
       setTeamDialogOpen(false);
       setEditingTeam(null);
     } catch (error) {
-      toast.error('Erro ao atualizar time');
+      toast.error("Erro ao atualizar time");
     }
   };
 
   const handleDeleteTeam = async (team: Team) => {
     try {
       await deleteTeam.mutateAsync(team.id);
-      toast.success('Time removido!');
+      toast.success("Time removido!");
       setDeleteConfirmTeam(null);
     } catch (error) {
-      toast.error('Erro ao remover time');
+      toast.error("Erro ao remover time");
     }
   };
 
@@ -242,14 +258,14 @@ export default function Settings() {
     try {
       const baseUrl = getApiBase();
       const response = await fetch(`${baseUrl}/api/storage/temp-folders`, {
-        headers: { 'ngrok-skip-browser-warning': 'true' }
+        headers: { "ngrok-skip-browser-warning": "true" },
       });
       if (response.ok) {
         const data = await response.json();
         setTempFolders(data.folders || []);
       }
     } catch (error) {
-      console.error('Failed to fetch temp folders:', error);
+      console.error("Failed to fetch temp folders:", error);
     } finally {
       setLoadingTempFolders(false);
     }
@@ -260,18 +276,20 @@ export default function Settings() {
     try {
       const baseUrl = getApiBase();
       const response = await fetch(`${baseUrl}/api/storage/cleanup-temp`, {
-        method: 'DELETE',
-        headers: { 'ngrok-skip-browser-warning': 'true' }
+        method: "DELETE",
+        headers: { "ngrok-skip-browser-warning": "true" },
       });
       if (response.ok) {
         const data = await response.json();
-        toast.success(`Limpeza concluída! ${data.deleted_count || 0} pastas removidas, ${formatBytes(data.freed_bytes || 0)} liberados.`);
+        toast.success(
+          `Limpeza concluída! ${data.deleted_count || 0} pastas removidas, ${formatBytes(data.freed_bytes || 0)} liberados.`,
+        );
         setTempFolders([]);
       } else {
-        toast.error('Erro ao limpar storage');
+        toast.error("Erro ao limpar storage");
       }
     } catch (error) {
-      toast.error('Servidor não disponível');
+      toast.error("Servidor não disponível");
     } finally {
       setCleaningStorage(false);
     }
@@ -286,22 +304,22 @@ export default function Settings() {
         const totalDeleted = Object.values(deleted).reduce((sum: number, val: number) => sum + (val || 0), 0);
         toast.success(`Limpeza concluída! ${totalDeleted} registros órfãos removidos.`);
       } else {
-        toast.error('Erro ao limpar registros órfãos');
+        toast.error("Erro ao limpar registros órfãos");
       }
     } catch (error) {
-      console.error('Cleanup orphans error:', error);
-      toast.error('Servidor não disponível');
+      console.error("Cleanup orphans error:", error);
+      toast.error("Servidor não disponível");
     } finally {
       setCleaningOrphans(false);
     }
   };
 
   const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 B';
+    if (bytes === 0) return "0 B";
     const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const sizes = ["B", "KB", "MB", "GB"];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
   };
 
   const totalTempSize = tempFolders.reduce((sum, f) => sum + (f.size_bytes || 0), 0);
@@ -310,19 +328,19 @@ export default function Settings() {
   const testServerConnection = async () => {
     try {
       const urlToTest = getApiBase();
-      
+
       const response = await fetch(`${urlToTest}/health?light=true`, {
         signal: AbortSignal.timeout(5000),
       });
-      
+
       if (response.ok) {
         const data = await response.json();
-        toast.success(`Servidor conectado! Versão: ${data.version || 'N/A'}`);
+        toast.success(`Servidor conectado! Versão: ${data.version || "N/A"}`);
       } else {
-        toast.error('Servidor respondeu com erro');
+        toast.error("Servidor respondeu com erro");
       }
     } catch (error) {
-      toast.error('Não foi possível conectar ao servidor');
+      toast.error("Não foi possível conectar ao servidor");
     }
   };
 
@@ -334,15 +352,15 @@ export default function Settings() {
       if (data.connected && data.models.length > 0) {
         setOllamaModels(data.models);
         // Se modelo atual não está na lista, selecionar o primeiro
-        const modelNames = data.models.map(m => m.name);
-        if (!modelNames.includes(ollamaModel) && !modelNames.some(m => m.includes(ollamaModel))) {
+        const modelNames = data.models.map((m) => m.name);
+        if (!modelNames.includes(ollamaModel) && !modelNames.some((m) => m.includes(ollamaModel))) {
           // Manter o modelo atual se for customizado
         }
       } else if (data.error) {
-        console.warn('Ollama não disponível:', data.error);
+        console.warn("Ollama não disponível:", data.error);
       }
     } catch (error) {
-      console.error('Failed to fetch Ollama models:', error);
+      console.error("Failed to fetch Ollama models:", error);
     } finally {
       setLoadingOllamaModels(false);
     }
@@ -354,16 +372,16 @@ export default function Settings() {
     try {
       const result = await apiClient.testOllamaConnection(ollamaUrl, ollamaModel);
       if (result.success) {
-        toast.success(result.message || 'Ollama conectado!');
+        toast.success(result.message || "Ollama conectado!");
       } else {
-        toast.error(result.error || 'Falha ao conectar');
+        toast.error(result.error || "Falha ao conectar");
       }
     } catch (error: any) {
       // Tratamento específico para erro 405 (servidor desatualizado)
-      if (error.message?.includes('405') || error.message?.includes('Method Not Allowed')) {
-        toast.error('Servidor desatualizado. Execute: pm2 restart arena-backend');
+      if (error.message?.includes("405") || error.message?.includes("Method Not Allowed")) {
+        toast.error("Servidor desatualizado. Execute: pm2 restart arena-backend");
       } else {
-        toast.error('Erro ao testar conexão. Verifique se o servidor está rodando.');
+        toast.error("Erro ao testar conexão. Verifique se o servidor está rodando.");
       }
     } finally {
       setTestingOllama(false);
@@ -383,9 +401,7 @@ export default function Settings() {
         {/* Header */}
         <div>
           <h1 className="font-display text-3xl font-bold">Configurações</h1>
-          <p className="text-muted-foreground">
-            Gerencie times, preferências e configurações do sistema
-          </p>
+          <p className="text-muted-foreground">Gerencie times, preferências e configurações do sistema</p>
         </div>
 
         <Tabs defaultValue="teams" className="space-y-6">
@@ -418,12 +434,10 @@ export default function Settings() {
                       <Shield className="h-5 w-5 text-primary" />
                       Gerenciar Times
                     </CardTitle>
-                    <CardDescription>
-                      Cadastre e gerencie os times para análise
-                    </CardDescription>
+                    <CardDescription>Cadastre e gerencie os times para análise</CardDescription>
                   </div>
-                  <Button 
-                    variant="arena" 
+                  <Button
+                    variant="arena"
                     onClick={() => {
                       setEditingTeam(null);
                       setTeamDialogOpen(true);
@@ -456,13 +470,8 @@ export default function Settings() {
                 ) : (
                   <div className="text-center py-12">
                     <Shield className="h-12 w-12 mx-auto text-muted-foreground/50 mb-4" />
-                    <p className="text-muted-foreground mb-4">
-                      Nenhum time cadastrado ainda
-                    </p>
-                    <Button 
-                      variant="arena-outline" 
-                      onClick={() => setTeamDialogOpen(true)}
-                    >
+                    <p className="text-muted-foreground mb-4">Nenhum time cadastrado ainda</p>
+                    <Button variant="arena-outline" onClick={() => setTeamDialogOpen(true)}>
                       <Plus className="mr-2 h-4 w-4" />
                       Cadastrar Primeiro Time
                     </Button>
@@ -483,20 +492,16 @@ export default function Settings() {
                       </p>
                     </div>
                     <div className="flex gap-2">
-                      <Button 
-                        variant="outline" 
-                        size="sm"
-                        onClick={() => setDeleteConfirmTeam(null)}
-                      >
+                      <Button variant="outline" size="sm" onClick={() => setDeleteConfirmTeam(null)}>
                         Cancelar
                       </Button>
-                      <Button 
-                        variant="destructive" 
+                      <Button
+                        variant="destructive"
                         size="sm"
                         onClick={() => handleDeleteTeam(deleteConfirmTeam)}
                         disabled={deleteTeam.isPending}
                       >
-                        {deleteTeam.isPending ? 'Removendo...' : 'Confirmar'}
+                        {deleteTeam.isPending ? "Removendo..." : "Confirmar"}
                       </Button>
                     </div>
                   </div>
@@ -513,34 +518,32 @@ export default function Settings() {
                   <User className="h-5 w-5" />
                   Perfil
                 </CardTitle>
-                <CardDescription>
-                  Informações da sua conta
-                </CardDescription>
+                <CardDescription>Informações da sua conta</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Nome</Label>
-                    <Input 
-                      value={profileName} 
+                    <Input
+                      value={profileName}
                       onChange={(e) => setProfileName(e.target.value)}
                       placeholder="Seu nome"
                     />
                   </div>
                   <div className="space-y-2">
                     <Label>Email</Label>
-                    <Input 
-                      value={profileEmail} 
+                    <Input
+                      value={profileEmail}
                       onChange={(e) => setProfileEmail(e.target.value)}
-                      type="email" 
+                      type="email"
                       placeholder="seu@email.com"
                     />
                   </div>
                 </div>
                 <div className="space-y-2">
                   <Label>Organização</Label>
-                  <Input 
-                    value={profileOrg} 
+                  <Input
+                    value={profileOrg}
                     onChange={(e) => setProfileOrg(e.target.value)}
                     placeholder="Nome da organização"
                   />
@@ -554,9 +557,7 @@ export default function Settings() {
                   <Palette className="h-5 w-5" />
                   Aparência
                 </CardTitle>
-                <CardDescription>
-                  Personalize a interface do sistema
-                </CardDescription>
+                <CardDescription>Personalize a interface do sistema</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex items-center justify-between">
@@ -620,14 +621,9 @@ export default function Settings() {
                       <Sparkles className="h-5 w-5 text-blue-500" />
                       Google Gemini
                     </CardTitle>
-                    <CardDescription>
-                      Modelos avançados para análise de vídeo e texto
-                    </CardDescription>
+                    <CardDescription>Modelos avançados para análise de vídeo e texto</CardDescription>
                   </div>
-                  <Switch 
-                    checked={geminiEnabled} 
-                    onCheckedChange={setGeminiEnabled}
-                  />
+                  <Switch checked={geminiEnabled} onCheckedChange={setGeminiEnabled} />
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -635,8 +631,8 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label>Chave de API</Label>
                     <div className="relative">
-                      <Input 
-                        type={showGeminiKey ? 'text' : 'password'}
+                      <Input
+                        type={showGeminiKey ? "text" : "password"}
                         value={geminiApiKey}
                         onChange={(e) => setGeminiApiKey(e.target.value)}
                         placeholder="AIza..."
@@ -668,7 +664,9 @@ export default function Settings() {
                     </Select>
                   </div>
                 </div>
-                <div className={`rounded-lg border p-3 ${geminiEnabled && geminiApiKey ? 'border-green-500/30 bg-green-500/5' : 'border-muted bg-muted/30'}`}>
+                <div
+                  className={`rounded-lg border p-3 ${geminiEnabled && geminiApiKey ? "border-green-500/30 bg-green-500/5" : "border-muted bg-muted/30"}`}
+                >
                   <div className="flex items-center gap-2">
                     {geminiEnabled && geminiApiKey ? (
                       <>
@@ -679,7 +677,7 @@ export default function Settings() {
                       <>
                         <AlertCircle className="h-4 w-4 text-muted-foreground" />
                         <span className="text-sm text-muted-foreground">
-                          {!geminiEnabled ? 'Desativado' : 'Aguardando chave de API'}
+                          {!geminiEnabled ? "Desativado" : "Aguardando chave de API"}
                         </span>
                       </>
                     )}
@@ -697,14 +695,9 @@ export default function Settings() {
                       <Brain className="h-5 w-5 text-green-500" />
                       OpenAI GPT
                     </CardTitle>
-                    <CardDescription>
-                      Modelos de linguagem para análise e geração de texto
-                    </CardDescription>
+                    <CardDescription>Modelos de linguagem para análise e geração de texto</CardDescription>
                   </div>
-                  <Switch 
-                    checked={openaiEnabled} 
-                    onCheckedChange={setOpenaiEnabled}
-                  />
+                  <Switch checked={openaiEnabled} onCheckedChange={setOpenaiEnabled} />
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -712,8 +705,8 @@ export default function Settings() {
                   <div className="space-y-2">
                     <Label>Chave de API</Label>
                     <div className="relative">
-                      <Input 
-                        type={showOpenaiKey ? 'text' : 'password'}
+                      <Input
+                        type={showOpenaiKey ? "text" : "password"}
                         value={openaiApiKey}
                         onChange={(e) => setOpenaiApiKey(e.target.value)}
                         placeholder="sk-..."
@@ -748,7 +741,9 @@ export default function Settings() {
                     </Select>
                   </div>
                 </div>
-                <div className={`rounded-lg border p-3 ${openaiEnabled && openaiApiKey ? 'border-green-500/30 bg-green-500/5' : 'border-muted bg-muted/30'}`}>
+                <div
+                  className={`rounded-lg border p-3 ${openaiEnabled && openaiApiKey ? "border-green-500/30 bg-green-500/5" : "border-muted bg-muted/30"}`}
+                >
                   <div className="flex items-center gap-2">
                     {openaiEnabled && openaiApiKey ? (
                       <>
@@ -759,7 +754,7 @@ export default function Settings() {
                       <>
                         <AlertCircle className="h-4 w-4 text-muted-foreground" />
                         <span className="text-sm text-muted-foreground">
-                          {!openaiEnabled ? 'Desativado' : 'Aguardando chave de API'}
+                          {!openaiEnabled ? "Desativado" : "Aguardando chave de API"}
                         </span>
                       </>
                     )}
@@ -777,22 +772,17 @@ export default function Settings() {
                       <Mic className="h-5 w-5 text-purple-500" />
                       ElevenLabs
                     </CardTitle>
-                    <CardDescription>
-                      Transcrição de áudio e síntese de voz de alta qualidade
-                    </CardDescription>
+                    <CardDescription>Transcrição de áudio e síntese de voz de alta qualidade</CardDescription>
                   </div>
-                  <Switch 
-                    checked={elevenlabsEnabled} 
-                    onCheckedChange={setElevenlabsEnabled}
-                  />
+                  <Switch checked={elevenlabsEnabled} onCheckedChange={setElevenlabsEnabled} />
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Chave de API</Label>
                   <div className="relative">
-                    <Input 
-                      type={showElevenlabsKey ? 'text' : 'password'}
+                    <Input
+                      type={showElevenlabsKey ? "text" : "password"}
                       value={elevenlabsApiKey}
                       onChange={(e) => setElevenlabsApiKey(e.target.value)}
                       placeholder="sk_..."
@@ -812,7 +802,9 @@ export default function Settings() {
                     Usado para transcrição de vídeos grandes (até 100MB) via ElevenLabs Scribe
                   </p>
                 </div>
-                <div className={`rounded-lg border p-3 ${elevenlabsEnabled && elevenlabsApiKey ? 'border-green-500/30 bg-green-500/5' : 'border-muted bg-muted/30'}`}>
+                <div
+                  className={`rounded-lg border p-3 ${elevenlabsEnabled && elevenlabsApiKey ? "border-green-500/30 bg-green-500/5" : "border-muted bg-muted/30"}`}
+                >
                   <div className="flex items-center gap-2">
                     {elevenlabsEnabled && elevenlabsApiKey ? (
                       <>
@@ -823,7 +815,7 @@ export default function Settings() {
                       <>
                         <AlertCircle className="h-4 w-4 text-muted-foreground" />
                         <span className="text-sm text-muted-foreground">
-                          {!elevenlabsEnabled ? 'Desativado' : 'Aguardando chave de API'}
+                          {!elevenlabsEnabled ? "Desativado" : "Aguardando chave de API"}
                         </span>
                       </>
                     )}
@@ -844,23 +836,21 @@ export default function Settings() {
                         GRATUITO
                       </Badge>
                     </CardTitle>
-                    <CardDescription>
-                      Transcrição 100% local e offline usando Faster-Whisper
-                    </CardDescription>
+                    <CardDescription>Transcrição 100% local e offline usando Faster-Whisper</CardDescription>
                   </div>
-                  <Switch 
-                    checked={localWhisperEnabled} 
+                  <Switch
+                    checked={localWhisperEnabled}
                     onCheckedChange={async (checked) => {
                       setLocalWhisperEnabled(checked);
                       try {
-                        await upsertApiSetting.mutateAsync({ 
-                          key: 'local_whisper_enabled', 
-                          value: String(checked) 
+                        await upsertApiSetting.mutateAsync({
+                          key: "local_whisper_enabled",
+                          value: String(checked),
                         });
-                        toast.success(checked ? 'Whisper Local ativado!' : 'Whisper Local desativado');
+                        toast.success(checked ? "Whisper Local ativado!" : "Whisper Local desativado");
                       } catch (error) {
                         setLocalWhisperEnabled(!checked);
-                        toast.error('Erro ao salvar configuração');
+                        toast.error("Erro ao salvar configuração");
                       }
                     }}
                   />
@@ -869,18 +859,18 @@ export default function Settings() {
               <CardContent className="space-y-4">
                 <div className="space-y-2">
                   <Label>Modelo</Label>
-                  <Select 
-                    value={localWhisperModel} 
+                  <Select
+                    value={localWhisperModel}
                     onValueChange={async (value) => {
                       setLocalWhisperModel(value);
                       try {
-                        await upsertApiSetting.mutateAsync({ 
-                          key: 'local_whisper_model', 
-                          value 
+                        await upsertApiSetting.mutateAsync({
+                          key: "local_whisper_model",
+                          value,
                         });
                         toast.success(`Modelo alterado para ${value}`);
                       } catch (error) {
-                        toast.error('Erro ao salvar modelo');
+                        toast.error("Erro ao salvar modelo");
                       }
                     }}
                   >
@@ -899,7 +889,7 @@ export default function Settings() {
                     O modelo será baixado automaticamente na primeira transcrição
                   </p>
                 </div>
-                
+
                 <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/5 p-3">
                   <div className="flex items-start gap-3">
                     <CheckCircle2 className="h-5 w-5 text-emerald-500 mt-0.5" />
@@ -914,8 +904,10 @@ export default function Settings() {
                     </div>
                   </div>
                 </div>
-                
-                <div className={`rounded-lg border p-3 ${localWhisperEnabled ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-muted bg-muted/30'}`}>
+
+                <div
+                  className={`rounded-lg border p-3 ${localWhisperEnabled ? "border-emerald-500/30 bg-emerald-500/5" : "border-muted bg-muted/30"}`}
+                >
                   <div className="flex items-center gap-2">
                     {localWhisperEnabled ? (
                       <>
@@ -930,9 +922,10 @@ export default function Settings() {
                     )}
                   </div>
                 </div>
-                
+
                 <p className="text-xs text-muted-foreground">
-                  Requer instalação: <code className="bg-muted px-1 rounded">pip install faster-whisper</code> no servidor Python
+                  Requer instalação: <code className="bg-muted px-1 rounded">pip install faster-whisper</code> no
+                  servidor Python
                 </p>
               </CardContent>
             </Card>
@@ -946,21 +939,16 @@ export default function Settings() {
                       <Server className="h-5 w-5 text-orange-500" />
                       Ollama (Local)
                     </CardTitle>
-                    <CardDescription>
-                      Modelos de IA rodando localmente - gratuito e offline
-                    </CardDescription>
+                    <CardDescription>Modelos de IA rodando localmente - gratuito e offline</CardDescription>
                   </div>
-                  <Switch 
-                    checked={ollamaEnabled} 
-                    onCheckedChange={setOllamaEnabled}
-                  />
+                  <Switch checked={ollamaEnabled} onCheckedChange={setOllamaEnabled} />
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>URL do Servidor</Label>
-                    <Input 
+                    <Input
                       value={ollamaUrl}
                       onChange={(e) => setOllamaUrl(e.target.value)}
                       placeholder="http://localhost:11434"
@@ -977,17 +965,20 @@ export default function Settings() {
                         className="h-6 px-2"
                         title="Atualizar lista de modelos"
                       >
-                        <RefreshCw className={`h-3 w-3 ${loadingOllamaModels ? 'animate-spin' : ''}`} />
+                        <RefreshCw className={`h-3 w-3 ${loadingOllamaModels ? "animate-spin" : ""}`} />
                       </Button>
                     </div>
                     {/* Dropdown com modelos detectados */}
                     {ollamaModels.length > 0 && (
-                      <Select value={ollamaModels.find(m => m.name === ollamaModel) ? ollamaModel : ''} onValueChange={setOllamaModel}>
+                      <Select
+                        value={ollamaModels.find((m) => m.name === ollamaModel) ? ollamaModel : ""}
+                        onValueChange={setOllamaModel}
+                      >
                         <SelectTrigger>
                           <SelectValue placeholder="Selecione um modelo instalado" />
                         </SelectTrigger>
                         <SelectContent>
-                          {ollamaModels.map(model => (
+                          {ollamaModels.map((model) => (
                             <SelectItem key={model.name} value={model.name}>
                               {model.name} ({model.size})
                             </SelectItem>
@@ -997,22 +988,21 @@ export default function Settings() {
                     )}
                     {/* Input manual para modelo customizado */}
                     <div className="space-y-1">
-                      <Input 
+                      <Input
                         value={ollamaModel}
                         onChange={(e) => setOllamaModel(e.target.value)}
                         placeholder="Ex: washingtonlima/kakttus ou llama3.2"
                         className="font-mono text-sm"
                       />
                       <p className="text-xs text-muted-foreground">
-                        {ollamaModels.length > 0 
-                          ? 'Selecione acima ou digite o nome do modelo manualmente'
-                          : 'Digite o nome do modelo (clique em ↻ para buscar modelos instalados)'
-                        }
+                        {ollamaModels.length > 0
+                          ? "Selecione acima ou digite o nome do modelo manualmente"
+                          : "Digite o nome do modelo (clique em ↻ para buscar modelos instalados)"}
                       </p>
                     </div>
                   </div>
                 </div>
-                
+
                 {/* Botões de ação */}
                 <div className="flex flex-wrap items-center gap-2">
                   <Button
@@ -1028,7 +1018,7 @@ export default function Settings() {
                     )}
                     Testar Conexão
                   </Button>
-                  
+
                   <Button
                     variant="default"
                     size="sm"
@@ -1036,22 +1026,22 @@ export default function Settings() {
                       try {
                         const baseUrl = getApiBase();
                         const response = await fetch(`${baseUrl}/api/settings/force-ollama`, {
-                          method: 'POST',
-                          headers: { 'ngrok-skip-browser-warning': 'true' }
+                          method: "POST",
+                          headers: { "ngrok-skip-browser-warning": "true" },
                         });
                         const data = await response.json();
                         if (data.success) {
-                          toast.success('Ollama ativado como provedor primário!');
+                          toast.success("Ollama ativado como provedor primário!");
                           setOllamaEnabled(true);
-                          setOllamaUrl('http://10.0.0.20:11434');
-                          setOllamaModel('washingtonlima/kakttus');
+                          setOllamaUrl("http://localhost:11434");
+                          setOllamaModel("washingtonlima/kakttus");
                           setOpenaiEnabled(false);
                           setGeminiEnabled(false);
                         } else {
-                          toast.error(data.error || 'Erro ao configurar');
+                          toast.error(data.error || "Erro ao configurar");
                         }
                       } catch (error) {
-                        toast.error('Servidor não disponível');
+                        toast.error("Servidor não disponível");
                       }
                     }}
                     className="bg-orange-600 hover:bg-orange-700"
@@ -1059,16 +1049,20 @@ export default function Settings() {
                     <Zap className="h-4 w-4 mr-2" />
                     Ativar Ollama Local
                   </Button>
-                  
-                  <p className="text-xs text-muted-foreground">
-                    Força Ollama como provedor primário (10.0.0.20:11434)
-                  </p>
+
+                  <p className="text-xs text-muted-foreground">Força Ollama como provedor primário (localhost:11434)</p>
                 </div>
-                
+
                 <p className="text-xs text-muted-foreground">
-                  Instale o Ollama em <a href="https://ollama.com" target="_blank" className="text-primary hover:underline">ollama.com</a> e execute: <code className="bg-muted px-1 rounded">ollama pull {ollamaModel}</code>
+                  Instale o Ollama em{" "}
+                  <a href="https://ollama.com" target="_blank" className="text-primary hover:underline">
+                    ollama.com
+                  </a>{" "}
+                  e execute: <code className="bg-muted px-1 rounded">ollama pull {ollamaModel}</code>
                 </p>
-                <div className={`rounded-lg border p-3 ${ollamaEnabled ? 'border-orange-500/30 bg-orange-500/5' : 'border-muted bg-muted/30'}`}>
+                <div
+                  className={`rounded-lg border p-3 ${ollamaEnabled ? "border-orange-500/30 bg-orange-500/5" : "border-muted bg-muted/30"}`}
+                >
                   <div className="flex items-center gap-2">
                     {ollamaEnabled ? (
                       <>
@@ -1097,10 +1091,10 @@ export default function Settings() {
               <CardContent>
                 <div className="grid gap-3 md:grid-cols-2">
                   {[
-                    { name: 'Análise de Vídeo', desc: 'Detecção de jogadores, bola e jogadas', provider: 'Gemini' },
-                    { name: 'Transcrição de Áudio', desc: 'Conversão de narração em texto', provider: 'Whisper/GPT' },
-                    { name: 'Geração de Insights', desc: 'Análise tática automatizada', provider: 'Gemini/GPT' },
-                    { name: 'Extração de Eventos', desc: 'Identificação de gols, faltas, etc.', provider: 'Gemini' },
+                    { name: "Análise de Vídeo", desc: "Detecção de jogadores, bola e jogadas", provider: "Gemini" },
+                    { name: "Transcrição de Áudio", desc: "Conversão de narração em texto", provider: "Whisper/GPT" },
+                    { name: "Geração de Insights", desc: "Análise tática automatizada", provider: "Gemini/GPT" },
+                    { name: "Extração de Eventos", desc: "Identificação de gols, faltas, etc.", provider: "Gemini" },
                   ].map((feature) => (
                     <div key={feature.name} className="flex items-start gap-2 p-3 rounded-lg bg-muted/30">
                       <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 shrink-0" />
@@ -1122,9 +1116,7 @@ export default function Settings() {
                   <Server className="h-5 w-5 text-green-500" />
                   Servidor Python
                 </CardTitle>
-                <CardDescription>
-                  Servidor de processamento de vídeo
-                </CardDescription>
+                <CardDescription>Servidor de processamento de vídeo</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 {/* Indicador de modo atual */}
@@ -1134,7 +1126,7 @@ export default function Settings() {
                     <div>
                       <p className="font-medium text-green-600">Modo Local Ativo</p>
                       <p className="text-sm text-muted-foreground">
-                        IP Fixo: <code className="bg-muted px-1 rounded font-mono">10.0.0.20:5000</code>
+                        IP Fixo: <code className="bg-muted px-1 rounded font-mono">localhost:5000</code>
                       </p>
                     </div>
                   </div>
@@ -1150,31 +1142,27 @@ export default function Settings() {
                         <Globe className="h-4 w-4 text-orange-500" />
                         Cloudflare Tunnel (Opcional)
                       </Label>
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Use apenas para acesso fora da rede local
-                      </p>
+                      <p className="text-xs text-muted-foreground mt-1">Use apenas para acesso fora da rede local</p>
                     </div>
-                    {cloudflareUrl && (
-                      <Badge variant="outline">Configurado</Badge>
-                    )}
+                    {cloudflareUrl && <Badge variant="outline">Configurado</Badge>}
                   </div>
-                  
+
                   <div className="flex gap-2">
-                    <Input 
+                    <Input
                       value={cloudflareUrl}
                       onChange={(e) => setCloudflareUrl(e.target.value)}
                       placeholder="https://api.arenaplay.kakttus.com"
                       className="flex-1"
                     />
-                    <Button 
-                      variant="outline" 
+                    <Button
+                      variant="outline"
                       onClick={() => {
                         if (cloudflareUrl) {
                           saveCloudflareUrl(cloudflareUrl);
-                          toast.success('URL Cloudflare salva!');
+                          toast.success("URL Cloudflare salva!");
                         } else {
-                          saveCloudflareUrl('');
-                          toast.info('URL Cloudflare removida');
+                          saveCloudflareUrl("");
+                          toast.info("URL Cloudflare removida");
                         }
                       }}
                     >
@@ -1189,8 +1177,8 @@ export default function Settings() {
                         <div className="text-xs">
                           <p className="font-medium text-yellow-600">Acesso remoto</p>
                           <p className="text-muted-foreground">
-                            Se estiver acessando de fora da rede local, configure a URL do 
-                            Cloudflare Tunnel para conectar ao servidor.
+                            Se estiver acessando de fora da rede local, configure a URL do Cloudflare Tunnel para
+                            conectar ao servidor.
                           </p>
                         </div>
                       </div>
@@ -1202,16 +1190,16 @@ export default function Settings() {
 
                 {/* Botões de ação */}
                 <div className="flex gap-2">
-                  <Button 
-                    variant="outline" 
+                  <Button
+                    variant="outline"
                     onClick={async () => {
-                      toast.info('Buscando servidor...');
+                      toast.info("Buscando servidor...");
                       resetDiscoveryCache();
                       const discovered = await autoDiscoverServer();
                       if (discovered) {
-                        toast.success(`Servidor encontrado: ${discovered.replace('http://', '')}`);
+                        toast.success(`Servidor encontrado: ${discovered.replace("http://", "")}`);
                       } else {
-                        toast.error('Nenhum servidor encontrado na rede local');
+                        toast.error("Nenhum servidor encontrado na rede local");
                       }
                     }}
                     className="flex-1"
@@ -1219,11 +1207,7 @@ export default function Settings() {
                     <RefreshCw className="h-4 w-4 mr-2" />
                     Buscar Servidor
                   </Button>
-                  <Button 
-                    variant="outline" 
-                    onClick={testServerConnection}
-                    className="flex-1"
-                  >
+                  <Button variant="outline" onClick={testServerConnection} className="flex-1">
                     <Wifi className="h-4 w-4 mr-2" />
                     Testar Conexão
                   </Button>
@@ -1242,32 +1226,21 @@ export default function Settings() {
                   <HardDrive className="h-5 w-5 text-orange-500" />
                   Manutenção de Storage
                 </CardTitle>
-                <CardDescription>
-                  Limpe arquivos temporários para liberar espaço em disco
-                </CardDescription>
+                <CardDescription>Limpe arquivos temporários para liberar espaço em disco</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-medium">Pastas Temporárias (temp-*)</p>
                     <p className="text-sm text-muted-foreground">
-                      {tempFolders.length > 0 
+                      {tempFolders.length > 0
                         ? `${tempFolders.length} pastas ocupando ${formatBytes(totalTempSize)}`
-                        : 'Clique em verificar para escanear'}
+                        : "Clique em verificar para escanear"}
                     </p>
                   </div>
                   <div className="flex gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={fetchTempFolders}
-                      disabled={loadingTempFolders}
-                    >
-                      {loadingTempFolders ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        'Verificar'
-                      )}
+                    <Button variant="outline" size="sm" onClick={fetchTempFolders} disabled={loadingTempFolders}>
+                      {loadingTempFolders ? <Loader2 className="h-4 w-4 animate-spin" /> : "Verificar"}
                     </Button>
                     <Button
                       variant="destructive"
@@ -1314,16 +1287,9 @@ export default function Settings() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-medium">Registros Órfãos no Banco</p>
-                    <p className="text-sm text-muted-foreground">
-                      Remove eventos, vídeos e jobs sem partida associada
-                    </p>
+                    <p className="text-sm text-muted-foreground">Remove eventos, vídeos e jobs sem partida associada</p>
                   </div>
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={handleCleanupOrphans}
-                    disabled={cleaningOrphans}
-                  >
+                  <Button variant="destructive" size="sm" onClick={handleCleanupOrphans} disabled={cleaningOrphans}>
                     {cleaningOrphans ? (
                       <>
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -1365,7 +1331,9 @@ export default function Settings() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="font-medium">Novos Insights</p>
-                    <p className="text-sm text-muted-foreground">Quando insights táticos importantes forem detectados</p>
+                    <p className="text-sm text-muted-foreground">
+                      Quando insights táticos importantes forem detectados
+                    </p>
                   </div>
                   <Switch checked={notifyInsights} onCheckedChange={setNotifyInsights} />
                 </div>
@@ -1392,18 +1360,14 @@ export default function Settings() {
           <Button variant="outline" onClick={() => window.location.reload()}>
             Cancelar
           </Button>
-          <Button 
-            variant="arena" 
-            onClick={handleSaveAllSettings}
-            disabled={upsertApiSetting.isPending}
-          >
+          <Button variant="arena" onClick={handleSaveAllSettings} disabled={upsertApiSetting.isPending}>
             {upsertApiSetting.isPending ? (
               <>
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Salvando...
               </>
             ) : (
-              'Salvar Alterações'
+              "Salvar Alterações"
             )}
           </Button>
         </div>
