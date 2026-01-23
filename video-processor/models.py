@@ -1,6 +1,6 @@
 """
 SQLAlchemy models for Arena Play database.
-Mirrors the Supabase schema for local SQLite storage.
+100% Local SQLite storage - No cloud dependencies.
 """
 
 import uuid
@@ -13,6 +13,66 @@ Base = declarative_base()
 def generate_uuid():
     return str(uuid.uuid4())
 
+
+# ============================================================================
+# LOCAL AUTHENTICATION MODELS
+# ============================================================================
+
+class User(Base):
+    """Local user for authentication."""
+    __tablename__ = 'users'
+    
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    email = Column(String(255), unique=True, nullable=False)
+    password_hash = Column(String(255), nullable=False)
+    display_name = Column(String(255))
+    is_active = Column(Boolean, default=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    roles = relationship('UserRole', back_populates='user', cascade='all, delete-orphan')
+    sessions = relationship('UserSession', back_populates='user', cascade='all, delete-orphan')
+    profile = relationship('Profile', back_populates='user', uselist=False, cascade='all, delete-orphan')
+    
+    def to_dict(self, include_email=True):
+        result = {
+            'id': self.id,
+            'display_name': self.display_name,
+            'is_active': self.is_active,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
+        if include_email:
+            result['email'] = self.email
+        return result
+
+
+class UserSession(Base):
+    """User session for JWT token management."""
+    __tablename__ = 'user_sessions'
+    
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey('users.id'), nullable=False)
+    token = Column(String(500), unique=True, nullable=False)
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = relationship('User', back_populates='sessions')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'expires_at': self.expires_at.isoformat() if self.expires_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None
+        }
+
+
+# ============================================================================
+# CORE MODELS
+# ============================================================================
 
 class Team(Base):
     __tablename__ = 'teams'
@@ -221,12 +281,12 @@ class AnalysisJob(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Campos adicionais para processamento paralelo
-    stage = Column(String(50), default='queued')  # queued, preparing, splitting, transcribing, analyzing, clipping, complete, error
+    stage = Column(String(50), default='queued')
     progress_message = Column(Text)
     parts_completed = Column(Integer, default=0)
     total_parts = Column(Integer, default=0)
-    parts_status = Column(JSON, default=list)  # [{part: 1, status: 'done', progress: 100}, ...]
-    estimated_time_remaining = Column(Integer)  # seconds
+    parts_status = Column(JSON, default=list)
+    estimated_time_remaining = Column(Integer)
     
     # Relationships
     match = relationship('Match', back_populates='analysis_jobs')
@@ -264,7 +324,7 @@ class TranscriptionJob(Base):
     video_path = Column(Text)
     
     # Status tracking
-    status = Column(String(50), default='queued')  # queued, processing, completed, failed, partial
+    status = Column(String(50), default='queued')
     progress = Column(Integer, default=0)
     current_step = Column(String(255))
     error_message = Column(Text)
@@ -272,12 +332,12 @@ class TranscriptionJob(Base):
     # Chunk tracking for resilient processing
     total_chunks = Column(Integer, default=1)
     completed_chunks = Column(Integer, default=0)
-    chunk_results = Column(JSON, default=list)  # [{chunk: 1, status: 'done', text: '...'}]
+    chunk_results = Column(JSON, default=list)
     
     # Results
     srt_content = Column(Text)
     plain_text = Column(Text)
-    provider_used = Column(String(50))  # elevenlabs, whisper, gemini
+    provider_used = Column(String(50))
     
     # Timestamps
     started_at = Column(DateTime)
@@ -367,7 +427,7 @@ class Profile(Base):
     __tablename__ = 'profiles'
     
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    user_id = Column(String(36), unique=True, nullable=False)
+    user_id = Column(String(36), ForeignKey('users.id'), unique=True, nullable=False)
     email = Column(String(255))
     display_name = Column(String(255))
     phone = Column(String(20))
@@ -382,7 +442,7 @@ class Profile(Base):
     address_city = Column(String(100))
     address_state = Column(String(2))
     
-    # Credits
+    # Credits (kept for compatibility but not used in 100% local mode)
     credits_balance = Column(Integer, default=0)
     credits_monthly_quota = Column(Integer, default=10)
     
@@ -391,6 +451,9 @@ class Profile(Base):
     
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    user = relationship('User', back_populates='profile')
     
     def to_dict(self):
         return {
@@ -419,9 +482,12 @@ class UserRole(Base):
     __tablename__ = 'user_roles'
     
     id = Column(String(36), primary_key=True, default=generate_uuid)
-    user_id = Column(String(36), nullable=False)
+    user_id = Column(String(36), ForeignKey('users.id'), nullable=False)
     role = Column(String(20), default='user')
     created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationships
+    user = relationship('User', back_populates='roles')
     
     def to_dict(self):
         return {
@@ -646,7 +712,7 @@ class SmartEditSetting(Base):
             'cut_intensity': self.cut_intensity,
             'min_clip_duration': self.min_clip_duration,
             'max_clip_duration': self.max_clip_duration,
-        'max_clips': self.max_clips,
+            'max_clips': self.max_clips,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 

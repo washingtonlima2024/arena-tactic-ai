@@ -967,10 +967,14 @@ def get_ai_priority_order(settings: Dict[str, str] = None) -> List[str]:
     
     result = [p[0] for p in providers]
     
-    # Fallback if nothing configured - use Lovable then Gemini
+    # Fallback if nothing configured - use Ollama (100% local & free)
     if not result:
-        print("[AI] ⚠ No priority configured, using fallback: lovable → gemini")
-        result = ['lovable', 'gemini']
+        if OLLAMA_ENABLED:
+            print("[AI] ⚠ No priority configured, using fallback: ollama (100% local)")
+            result = ['ollama']
+        else:
+            print("[AI] ⚠ No priority configured and Ollama disabled - no AI available")
+            result = []
     
     return result
 
