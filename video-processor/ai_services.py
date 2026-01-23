@@ -2125,6 +2125,55 @@ def deduplicate_goal_events(events: List[Dict[str, Any]], min_interval_seconds: 
     return all_events_sorted
 
 
+def _parse_ollama_events_fallback(text: str) -> List[Dict[str, Any]]:
+    """
+    Fallback: Tenta extrair eventos JSON objeto por objeto quando o array completo falha.
+    """
+    import re
+    events = []
+    
+    # Encontrar todos os objetos JSON individuais {...}
+    # Regex mais robusto para objetos aninhados
+    pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+    matches = re.findall(pattern, text, re.DOTALL)
+    
+    print(f"[Ollama Fallback] Encontrados {len(matches)} possíveis objetos JSON")
+    
+    for i, match in enumerate(matches):
+        try:
+            # Corrigir aspas simples
+            clean = match.replace("'", '"')
+            # Remover trailing commas
+            clean = re.sub(r',\s*}', '}', clean)
+            
+            obj = json.loads(clean)
+            
+            # Validar campos mínimos (precisa ter pelo menos event_type OU minute)
+            if 'event_type' in obj or 'minute' in obj:
+                # Garantir campos obrigatórios
+                if 'event_type' not in obj:
+                    obj['event_type'] = 'unknown'
+                if 'minute' not in obj:
+                    obj['minute'] = 0
+                if 'second' not in obj:
+                    obj['second'] = 0
+                if 'team' not in obj:
+                    obj['team'] = 'home'
+                if 'confidence' not in obj:
+                    obj['confidence'] = 0.7
+                    
+                events.append(obj)
+                print(f"[Ollama Fallback] ✓ Objeto {i+1}: {obj.get('event_type')} aos {obj.get('minute')}'")
+        except json.JSONDecodeError as e:
+            print(f"[Ollama Fallback] ✗ Objeto {i+1} inválido: {str(e)[:50]}")
+            continue
+        except Exception as e:
+            continue
+    
+    print(f"[Ollama Fallback] Total extraído: {len(events)} eventos válidos")
+    return events
+
+
 def _analyze_events_with_ollama(
     transcription: str,
     home_team: str,
@@ -2216,53 +2265,10 @@ TRANSCRIÇÃO:
 □ Incluir source_text com o trecho exato da transcrição
 □ confidence: 0.9+ para gols, 0.7+ para outros eventos
 
-RETORNE APENAS um array JSON válido (sem explicações, sem markdown):
-[
-  {{
-    "minute": 24,
-    "second": 52,
-    "event_type": "goal",
-    "team": "home",
-    "description": "Gol após cruzamento da direita, cabeceio certeiro",
-    "confidence": 0.95,
-    "is_highlight": true,
-    "isOwnGoal": false,
-    "source_text": "GOOOOL! Gol do Brasil! Cabeceio certeiro!"
-  }},
-  {{
-    "minute": 12,
-    "second": 15,
-    "event_type": "foul",
-    "team": "away",
-    "description": "Falta dura no meio campo, jogador reclamou",
-    "confidence": 0.85,
-    "is_highlight": false,
-    "isOwnGoal": false,
-    "source_text": "Falta! Falta dura do jogador da Argentina"
-  }},
-  {{
-    "minute": 8,
-    "second": 33,
-    "event_type": "shot",
-    "team": "home",
-    "description": "Chute de fora da área, passou perto do gol",
-    "confidence": 0.80,
-    "is_highlight": false,
-    "isOwnGoal": false,
-    "source_text": "Arriscou de longe! Passou perto!"
-  }},
-  {{
-    "minute": 31,
-    "second": 5,
-    "event_type": "corner",
-    "team": "home",
-    "description": "Escanteio pela direita",
-    "confidence": 0.75,
-    "is_highlight": false,
-    "isOwnGoal": false,
-    "source_text": "Escanteio para o Brasil"
-  }}
-]"""
+RESPONDA APENAS COM O JSON. NENHUM TEXTO ANTES OU DEPOIS.
+COMECE COM [ E TERMINE COM ]. NÃO USE ```. NÃO EXPLIQUE NADA.
+
+[{{"minute":24,"second":52,"event_type":"goal","team":"home","description":"Gol de cabeça","confidence":0.95,"is_highlight":true,"isOwnGoal":false,"source_text":"GOOOL!"}}]"""
 
     try:
         print(f"[Ollama] Analisando transcrição com {OLLAMA_MODEL}...")
@@ -2278,38 +2284,64 @@ RETORNE APENAS um array JSON válido (sem explicações, sem markdown):
             print(f"[Ollama] Resposta vazia")
             return []
         
-        # Parse JSON from response
+        # LOG: Mostrar resposta bruta para debug
+        print(f"[Ollama] === RESPOSTA BRUTA (primeiros 800 chars) ===")
+        print(result[:800])
+        print(f"[Ollama] === FIM (total: {len(result)} chars) ===")
+        
+        # Parse JSON from response com múltiplas estratégias
         result = result.strip()
+        events = []
         
-        # Handle markdown code blocks
-        if result.startswith('```'):
-            parts = result.split('```')
-            if len(parts) >= 2:
-                result = parts[1].replace('json', '', 1).strip()
+        # Estratégia 1: Remover blocos de código markdown
+        if '```' in result:
+            import re
+            json_match = re.search(r'```(?:json)?\s*([\s\S]*?)```', result)
+            if json_match:
+                result = json_match.group(1).strip()
+                print(f"[Ollama] Estratégia 1: Removido markdown, agora: {len(result)} chars")
         
-        # Find JSON array
+        # Estratégia 2: Encontrar array JSON [...]
         start = result.find('[')
         end = result.rfind(']') + 1
         
         if start >= 0 and end > start:
-            events = json.loads(result[start:end])
-            print(f"[Ollama] ✓ Extraídos {len(events)} eventos")
+            json_str = result[start:end]
             
+            # Estratégia 3: Corrigir aspas simples para duplas
+            json_str = json_str.replace("'", '"')
+            
+            # Estratégia 4: Remover trailing commas
+            import re
+            json_str = re.sub(r',\s*}', '}', json_str)
+            json_str = re.sub(r',\s*]', ']', json_str)
+            
+            try:
+                events = json.loads(json_str)
+                print(f"[Ollama] ✓ Estratégia 2-4: Extraídos {len(events)} eventos")
+            except json.JSONDecodeError as e:
+                print(f"[Ollama] Erro JSON (tentando fallback): {e}")
+                # Estratégia 5: Tentar parsear objeto por objeto
+                events = _parse_ollama_events_fallback(result)
+        else:
+            print(f"[Ollama] Não encontrou array JSON, tentando fallback...")
+            events = _parse_ollama_events_fallback(result)
+        
+        if events:
             # Log goals found
             goals = [e for e in events if e.get('event_type') == 'goal']
+            print(f"[Ollama] Total: {len(events)} eventos, {len(goals)} gols")
             for g in goals:
-                print(f"[Ollama] ⚽ GOL: {g.get('minute', 0)}' - {g.get('team', 'unknown')} - {g.get('description', '')[:40]}")
-            
-            return events
+                print(f"[Ollama] ⚽ GOL: {g.get('minute', 0)}' - {g.get('team', 'unknown')}")
         else:
-            print(f"[Ollama] Não encontrou JSON válido na resposta")
-            return []
+            print(f"[Ollama] ⚠️ Nenhum evento extraído!")
+        
+        return events
             
-    except json.JSONDecodeError as e:
-        print(f"[Ollama] Erro ao parsear JSON: {e}")
-        return []
     except Exception as e:
-        print(f"[Ollama] Erro: {e}")
+        print(f"[Ollama] Erro geral: {e}")
+        import traceback
+        traceback.print_exc()
         return []
 
 
