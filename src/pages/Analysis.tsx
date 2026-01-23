@@ -6,7 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { FootballField } from '@/components/tactical/FootballField';
 import { AnimatedTacticalPlay } from '@/components/tactical/AnimatedTacticalPlay';
-import { Heatmap3D } from '@/components/tactical/Heatmap3D';
+import { Heatmap2D } from '@/components/tactical/Heatmap2D';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
 import { 
@@ -499,13 +499,13 @@ export default function Analysis() {
           </div>
         ) : (
           <>
-            {/* 3D Heatmap with Player Formations */}
+            {/* 2D Heatmap with Player Formations */}
             <Card variant="glow">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <CardTitle className="flex items-center gap-2">
                     <BarChart3 className="h-5 w-5 text-primary" />
-                    Mapa de Calor 3D - Formação dos Jogadores
+                    Mapa de Calor - Formação dos Jogadores
                   </CardTitle>
                   <div className="flex items-center gap-2">
                     <Badge variant="arena">{tacticalAnalysis?.formation?.home || '4-3-3'}</Badge>
@@ -515,13 +515,13 @@ export default function Analysis() {
                 </div>
               </CardHeader>
               <CardContent>
-                <Heatmap3D
-                  homeTeam={selectedMatch?.home_team?.name || 'Time Casa'}
-                  awayTeam={selectedMatch?.away_team?.name || 'Time Visitante'}
-                  homeColor={selectedMatch?.home_team?.primary_color || '#10b981'}
-                  awayColor={selectedMatch?.away_team?.primary_color || '#3b82f6'}
-                  height={900}
-                  eventHeatZones={eventHeatZones}
+                <Heatmap2D
+                  homeTeamName={selectedMatch?.home_team?.name || 'Time Casa'}
+                  awayTeamName={selectedMatch?.away_team?.name || 'Time Visitante'}
+                  homeTeamColor={selectedMatch?.home_team?.primary_color || '#10b981'}
+                  awayTeamColor={selectedMatch?.away_team?.primary_color || '#3b82f6'}
+                  height={500}
+                  heatZones={eventHeatZones}
                   homePlayers={eventHomePlayers}
                   awayPlayers={eventAwayPlayers}
                 />
