@@ -2121,6 +2121,173 @@ def deduplicate_goal_events(events: List[Dict[str, Any]], min_interval_seconds: 
     return all_events_sorted
 
 
+def _analyze_events_with_ollama(
+    transcription: str,
+    home_team: str,
+    away_team: str,
+    game_start_minute: int,
+    game_end_minute: int,
+    match_half: str,
+    match_id: str = None
+) -> List[Dict[str, Any]]:
+    """
+    Analyze match events using local Ollama (FREE).
+    
+    Args:
+        transcription: Match transcription text
+        home_team: Home team name
+        away_team: Away team name
+        game_start_minute: Start minute
+        game_end_minute: End minute
+        match_half: 'first' or 'second'
+        match_id: Optional match ID
+    
+    Returns:
+        List of detected events
+    """
+    half_desc = "1º Tempo (0-45 min)" if match_half == 'first' else "2º Tempo (45-90 min)"
+    
+    prompt = f"""Você é um analista de futebol brasileiro experiente.
+Sua tarefa é extrair TODOS os eventos importantes da transcrição de uma partida.
+
+⚽ PRIORIDADE MÁXIMA: NUNCA perca um GOL!
+
+PARTIDA: {home_team} (casa) vs {away_team} (visitante)
+PERÍODO: {half_desc} (minutos {game_start_minute}' a {game_end_minute}')
+
+PALAVRAS-CHAVE PARA GOLS:
+- GOOOL, GOOOOL, GOL, GOLAÇO
+- É GOL, PRA DENTRO, ENTROU
+- BOLA NA REDE, ESTUFOU A REDE
+- ABRE O PLACAR, AMPLIA, EMPATA
+
+TIPOS DE EVENTOS VÁLIDOS:
+goal, shot, save, foul, yellow_card, red_card, corner, offside, substitution, chance, penalty
+
+TRANSCRIÇÃO:
+{transcription}
+
+RETORNE APENAS um array JSON válido (sem texto adicional):
+[
+  {{
+    "minute": 12,
+    "second": 34,
+    "event_type": "goal",
+    "team": "home",
+    "description": "Gol após cruzamento",
+    "confidence": 0.95,
+    "is_highlight": true,
+    "isOwnGoal": false
+  }}
+]"""
+
+    try:
+        print(f"[Ollama] Analisando transcrição com {OLLAMA_MODEL}...")
+        
+        result = call_ollama(
+            messages=[{'role': 'user', 'content': prompt}],
+            model=OLLAMA_MODEL,
+            temperature=0.3,
+            max_tokens=8192
+        )
+        
+        if not result:
+            print(f"[Ollama] Resposta vazia")
+            return []
+        
+        # Parse JSON from response
+        result = result.strip()
+        
+        # Handle markdown code blocks
+        if result.startswith('```'):
+            parts = result.split('```')
+            if len(parts) >= 2:
+                result = parts[1].replace('json', '', 1).strip()
+        
+        # Find JSON array
+        start = result.find('[')
+        end = result.rfind(']') + 1
+        
+        if start >= 0 and end > start:
+            events = json.loads(result[start:end])
+            print(f"[Ollama] ✓ Extraídos {len(events)} eventos")
+            
+            # Log goals found
+            goals = [e for e in events if e.get('event_type') == 'goal']
+            for g in goals:
+                print(f"[Ollama] ⚽ GOL: {g.get('minute', 0)}' - {g.get('team', 'unknown')} - {g.get('description', '')[:40]}")
+            
+            return events
+        else:
+            print(f"[Ollama] Não encontrou JSON válido na resposta")
+            return []
+            
+    except json.JSONDecodeError as e:
+        print(f"[Ollama] Erro ao parsear JSON: {e}")
+        return []
+    except Exception as e:
+        print(f"[Ollama] Erro: {e}")
+        return []
+
+
+def _enrich_events(
+    events: List[Dict[str, Any]],
+    game_start_minute: int,
+    game_end_minute: int
+) -> List[Dict[str, Any]]:
+    """
+    Enrich events with required fields for database insertion.
+    
+    Args:
+        events: Raw events from AI
+        game_start_minute: Start minute
+        game_end_minute: End minute
+    
+    Returns:
+        Enriched events with all required fields
+    """
+    VALID_EVENT_TYPES = [
+        'goal', 'shot', 'save', 'foul', 'yellow_card', 'red_card',
+        'corner', 'offside', 'substitution', 'chance', 'penalty',
+        'free_kick', 'throw_in', 'kick_off', 'half_time', 'full_time',
+        'var', 'injury', 'assist', 'cross', 'tackle', 'interception',
+        'clearance', 'duel_won', 'duel_lost', 'ball_recovery', 'ball_loss',
+        'high_press', 'transition', 'buildup', 'shot_on_target', 'unknown'
+    ]
+    
+    enriched = []
+    for event in events:
+        event_type = event.get('event_type', 'unknown')
+        if event_type not in VALID_EVENT_TYPES:
+            event_type = 'unknown'
+        
+        event['event_type'] = event_type
+        event['minute'] = max(game_start_minute, min(game_end_minute, event.get('minute', game_start_minute)))
+        event['second'] = event.get('second', 0)
+        event['team'] = event.get('team', 'home')
+        event['description'] = (event.get('description') or '')[:200]
+        event['confidence'] = event.get('confidence', 0.8)
+        event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'yellow_card', 'red_card', 'penalty'])
+        event['isOwnGoal'] = event.get('isOwnGoal', False)
+        event['validated'] = True
+        event['validation_reason'] = 'Approved by Ollama local'
+        
+        # Own goal auto-fix
+        if event_type == 'goal':
+            description = (event.get('description') or '').lower()
+            own_goal_keywords = ['gol contra', 'próprio gol', 'mandou contra', 'own goal', 'autogol']
+            if any(term in description for term in own_goal_keywords) and not event.get('isOwnGoal'):
+                event['isOwnGoal'] = True
+                event['_autoFixed'] = True
+        
+        if event_type == 'unknown' and len(event['description']) < 5:
+            continue
+        
+        enriched.append(event)
+    
+    return enriched
+
+
 def analyze_match_events(
     transcription: str,
     home_team: str,
@@ -2194,11 +2361,33 @@ def analyze_match_events(
     match_half = 'first' if game_start_minute < 45 else 'second'
     
     # ═══════════════════════════════════════════════════════════════
-    # SISTEMA DE DUPLA VERIFICAÇÃO (GPT-5 + Gemini)
+    # SISTEMA DE PRIORIDADE DINÂMICA
     # ═══════════════════════════════════════════════════════════════
-    can_use_dual = use_dual_verification and match_id and OPENAI_API_KEY and OPENAI_ENABLED
+    priority_order = get_ai_priority_order(settings)
+    primary_provider = priority_order[0] if priority_order else 'gemini'
+    print(f"[AI] Prioridade: {' → '.join(priority_order)}")
+    print(f"[AI] Provedor primário: {primary_provider}")
     
-    if not can_use_dual:
+    # Verificar se pode usar GPT-4o (modo legado com verificação)
+    can_use_gpt = use_dual_verification and match_id and OPENAI_API_KEY and OPENAI_ENABLED
+    
+    # Se Ollama é primário e está ativo, usar fluxo Ollama
+    use_ollama_flow = primary_provider == 'ollama' and OLLAMA_ENABLED
+    
+    if use_ollama_flow:
+        print(f"\n[AI] ═══════════════════════════════════════════════════════════")
+        print(f"[AI] 🦙 MODO OLLAMA LOCAL (GRATUITO)")
+        print(f"[AI]    Modelo: {OLLAMA_MODEL}")
+        print(f"[AI]    URL: {OLLAMA_URL}")
+        print(f"[AI] ═══════════════════════════════════════════════════════════\n")
+    elif can_use_gpt:
+        print(f"\n[AI] ═══════════════════════════════════════════════════════════")
+        print(f"[AI] 🔄 SISTEMA SINGLE AI (GPT-4o apenas)")
+        print(f"[AI]    Fase 1: GPT-4o (detecção)")
+        print(f"[AI]    Fase 2: Filtro por Confidence")
+        print(f"[AI]    Fase 3: Deduplicação")
+        print(f"[AI] ═══════════════════════════════════════════════════════════\n")
+    else:
         reasons = []
         if not use_dual_verification:
             reasons.append("dual_verification desabilitado")
@@ -2208,15 +2397,42 @@ def analyze_match_events(
             reasons.append("OPENAI_API_KEY não configurada")
         if OPENAI_API_KEY and not OPENAI_ENABLED:
             reasons.append("OpenAI desabilitado nas configurações")
-        print(f"[AI] ℹ️ Modo legado: {', '.join(reasons) if reasons else 'condições não atendidas'}")
+        print(f"[AI] ℹ️ Modo legado (call_ai com prioridade): {', '.join(reasons) if reasons else 'usando prioridade dinâmica'}")
     
-    if can_use_dual:
-        print(f"\n[AI] ═══════════════════════════════════════════════════════════")
-        print(f"[AI] 🔄 SISTEMA SINGLE AI (GPT-4o apenas)")
-        print(f"[AI]    Fase 1: GPT-4o (detecção)")
-        print(f"[AI]    Fase 2: Filtro por Confidence (sem Gemini)")
-        print(f"[AI]    Fase 3: Deduplicação")
-        print(f"[AI] ═══════════════════════════════════════════════════════════\n")
+    # ═══════════════════════════════════════════════════════════════
+    # FLUXO OLLAMA LOCAL (GRATUITO)
+    # ═══════════════════════════════════════════════════════════════
+    if use_ollama_flow:
+        try:
+            events = _analyze_events_with_ollama(
+                transcription=transcription,
+                home_team=home_team,
+                away_team=away_team,
+                game_start_minute=game_start_minute,
+                game_end_minute=game_end_minute,
+                match_half=match_half,
+                match_id=match_id
+            )
+            
+            if events:
+                # Enrich and deduplicate
+                enriched_events = _enrich_events(events, game_start_minute, game_end_minute)
+                final_events = deduplicate_goal_events(enriched_events)
+                
+                goals_count = len([e for e in final_events if e.get('event_type') == 'goal'])
+                print(f"[AI] ✓ ANÁLISE COMPLETA (Ollama Local)")
+                print(f"[AI]   Detectados: {len(events)} eventos")
+                print(f"[AI]   Gols: {goals_count}")
+                return final_events
+                
+        except Exception as e:
+            print(f"[AI] ⚠ Ollama falhou: {e}")
+            print(f"[AI] Tentando fallback...")
+    
+    # ═══════════════════════════════════════════════════════════════
+    # FLUXO GPT-4o (quando OpenAI é o provedor primário)
+    # ═══════════════════════════════════════════════════════════════
+    if can_use_gpt:
         
         try:
             # ═══ FASE 1: GPT-4o detecta eventos ═══

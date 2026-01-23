@@ -3519,17 +3519,32 @@ def debug_ai_settings():
 
 @app.route('/api/settings/force-ollama', methods=['POST', 'OPTIONS'])
 def force_ollama_config():
-    """Força Ollama como provedor primário com configurações corretas."""
+    """
+    Força IA 100% Local (Gratuito):
+    - Ollama (análise de eventos) como provedor primário
+    - Whisper Local (faster-whisper) para transcrição gratuita
+    - OpenAI/Gemini desativados (fallback = Lovable)
+    """
     if request.method == 'OPTIONS':
         return '', 204
+    
     settings_to_update = [
+        # === Ollama (Análise de Eventos - GRATUITO) ===
         ('ollama_enabled', 'true'),
         ('ollama_url', 'http://localhost:11434'),
         ('ollama_model', 'washingtonlima/kakttus'),
-        ('ai_provider_ollama_priority', '1'),
-        ('ai_provider_openai_priority', '0'),
-        ('ai_provider_gemini_priority', '0'),
-        ('ai_provider_lovable_priority', '2'),
+        
+        # === Whisper Local (Transcrição - GRATUITO) ===
+        ('local_whisper_enabled', 'true'),
+        ('local_whisper_model', 'base'),  # base é mais rápido, small para melhor qualidade
+        
+        # === Prioridades de IA ===
+        ('ai_provider_ollama_priority', '1'),   # Primário: Ollama (local)
+        ('ai_provider_lovable_priority', '2'),  # Fallback: Lovable
+        ('ai_provider_gemini_priority', '0'),   # Desativado
+        ('ai_provider_openai_priority', '0'),   # Desativado
+        
+        # === Desativar provedores pagos ===
         ('openai_enabled', 'false'),
         ('gemini_enabled', 'false'),
     ]
@@ -3551,13 +3566,21 @@ def force_ollama_config():
         # Recarregar configurações em memória
         load_api_keys_from_db()
         
-        print(f"[Settings] ✓ Ollama forçado como provedor primário")
+        print(f"[Settings] ✓ IA LOCAL 100% GRATUITA ATIVADA!")
+        print(f"[Settings]   - Transcrição: Whisper Local (faster-whisper)")
+        print(f"[Settings]   - Análise: Ollama ({settings_to_update[2][1]})")
+        print(f"[Settings]   - Fallback: Lovable AI")
         print(f"[Settings] Configurações atualizadas: {len(results)}")
         
         return jsonify({
             'success': True, 
-            'message': 'Ollama configurado como provedor primário!',
-            'updated': results
+            'message': 'IA Local ativada! Whisper + Ollama (100% gratuito)',
+            'updated': results,
+            'config': {
+                'transcription': 'local_whisper',
+                'analysis': 'ollama',
+                'fallback': 'lovable'
+            }
         })
     except Exception as e:
         session.rollback()
