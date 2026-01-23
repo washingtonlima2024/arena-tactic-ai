@@ -112,51 +112,8 @@ export default function VideoUpload() {
     retry: false // Don't retry on 406/404 errors
   });
 
-  // Auto-sync match to Supabase when page loads with match ID
-  useEffect(() => {
-    if (!existingMatchId) return;
-    
-    const syncMatchToCloud = async () => {
-      try {
-        // First, try sync via Python server
-        await apiClient.post(`/api/sync-to-supabase/${existingMatchId}`);
-        console.log('[Upload] ✓ Match sincronizado com Cloud via Python');
-      } catch (pythonError) {
-        console.warn('[Upload] Python sync failed, trying Edge Function...', pythonError);
-        
-        // Fallback: try Edge Function directly with match data from Python
-        try {
-          const matchData = await apiClient.getMatch(existingMatchId);
-          if (matchData) {
-            const { supabase } = await import('@/integrations/supabase/client');
-            const { error } = await supabase.functions.invoke('sync-match', {
-              body: {
-                id: matchData.id,
-                home_team: matchData.home_team,
-                away_team: matchData.away_team,
-                home_score: matchData.home_score,
-                away_score: matchData.away_score,
-                match_date: matchData.match_date,
-                competition: matchData.competition,
-                venue: matchData.venue,
-                status: matchData.status || 'pending',
-              }
-            });
-            
-            if (error) {
-              console.warn('[Upload] Edge Function sync failed:', error);
-            } else {
-              console.log('[Upload] ✓ Match sincronizado com Cloud via Edge Function');
-            }
-          }
-        } catch (edgeError) {
-          console.warn('[Upload] Edge sync also failed (local mode only):', edgeError);
-        }
-      }
-    };
-    
-    syncMatchToCloud();
-  }, [existingMatchId]);
+  // NOTE: Cloud sync removed - sistema opera em modo 100% local
+  // Os dados são armazenados apenas no SQLite local
   
   // Wizard state - driven by URL for reimport, otherwise by user actions
   const [currentStep, setCurrentStep] = useState<WizardStep>(() => {
