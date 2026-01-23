@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -7,9 +7,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Ruler, Box, Grid3X3, Eye, RotateCcw, Play, Target, AlertCircle, Camera, Loader2, Upload } from 'lucide-react';
+import { Ruler, Grid3X3, Play, Target, AlertCircle, Camera, Loader2, Upload } from 'lucide-react';
 import { OfficialFootballField } from '@/components/tactical/OfficialFootballField';
-import { OfficialField3D } from '@/components/tactical/OfficialField3D';
 import { FieldMeasurementsOverlay } from '@/components/tactical/FieldMeasurementsOverlay';
 import { GoalPlayAnimation, generateMockGoalPlay } from '@/components/tactical/GoalPlayAnimation';
 import { FIFA_FIELD, metersToSvg } from '@/constants/fieldDimensions';
@@ -33,14 +32,11 @@ interface GoalEvent {
 }
 
 const Field = () => {
-  // Use centralized match selection hook for auto-sync with header filter
   const { currentMatchId, selectedMatch } = useMatchSelection();
   
   const [showMeasurements, setShowMeasurements] = useState(true);
   const [showGrid, setShowGrid] = useState(false);
   const [theme2D, setTheme2D] = useState<'grass' | 'tactical' | 'minimal'>('grass');
-  const [cameraPreset, setCameraPreset] = useState<'tv' | 'tactical' | 'corner' | 'goal'>('tv');
-  const [autoRotate, setAutoRotate] = useState(false);
   const [selectedGoal, setSelectedGoal] = useState<GoalEvent | null>(null);
   
   // YOLO detection state
@@ -94,7 +90,6 @@ const Field = () => {
       const dataUrl = event.target?.result as string;
       setUploadedImage(dataUrl);
       
-      // Extract base64 without prefix
       const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '');
       await detectFromImage(base64, 0);
     };
@@ -107,7 +102,6 @@ const Field = () => {
 
     return (
       <g>
-        {/* Detected players */}
         {lastResult.players.map((player) => {
           const px = metersToSvg(player.x);
           const py = metersToSvg(player.y);
@@ -138,21 +132,17 @@ const Field = () => {
           );
         })}
 
-        {/* Detected ball */}
         {lastResult.ball && (
-          <g>
-            <circle
-              cx={metersToSvg(lastResult.ball.x)}
-              cy={metersToSvg(lastResult.ball.y)}
-              r={8}
-              fill="#ffffff"
-              stroke="#000000"
-              strokeWidth={1}
-            />
-          </g>
+          <circle
+            cx={metersToSvg(lastResult.ball.x)}
+            cy={metersToSvg(lastResult.ball.y)}
+            r={8}
+            fill="#ffffff"
+            stroke="#000000"
+            strokeWidth={1}
+          />
         )}
 
-        {/* Referee */}
         {lastResult.referee && (
           <circle
             cx={metersToSvg(lastResult.referee.x)}
@@ -184,432 +174,362 @@ const Field = () => {
     <AppLayout key={currentMatchId}>
       <div className="p-6">
         <div className="max-w-7xl mx-auto space-y-6">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-foreground">Campo Oficial FIFA</h1>
-            <p className="text-muted-foreground">Visualização com medidas oficiais FIFA 2023/24</p>
+          {/* Header */}
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold text-foreground">Campo Oficial FIFA</h1>
+              <p className="text-muted-foreground">Visualização com medidas oficiais FIFA 2023/24</p>
+            </div>
+            <Badge variant="outline" className="text-primary border-primary">
+              <Ruler className="mr-1 h-3 w-3" />
+              {FIFA_FIELD.length}m × {FIFA_FIELD.width}m
+            </Badge>
           </div>
-          <Badge variant="outline" className="text-primary border-primary">
-            <Ruler className="mr-1 h-3 w-3" />
-            {FIFA_FIELD.length}m × {FIFA_FIELD.width}m
-          </Badge>
-        </div>
 
-        <Tabs defaultValue="2d" className="space-y-4">
-          <TabsList className="grid w-full max-w-3xl grid-cols-5">
-            <TabsTrigger value="2d" className="flex items-center gap-2">
-              <Grid3X3 className="h-4 w-4" />
-              Campo 2D
-            </TabsTrigger>
-            <TabsTrigger value="3d" className="flex items-center gap-2">
-              <Box className="h-4 w-4" />
-              Campo 3D
-            </TabsTrigger>
-            <TabsTrigger value="detection" className="flex items-center gap-2">
-              <Camera className="h-4 w-4" />
-              Detecção YOLO
-            </TabsTrigger>
-            <TabsTrigger value="animation" className="flex items-center gap-2">
-              <Play className="h-4 w-4" />
-              Animação Gol
-            </TabsTrigger>
-            <TabsTrigger value="measures" className="flex items-center gap-2">
-              <Ruler className="h-4 w-4" />
-              Medidas
-            </TabsTrigger>
-          </TabsList>
+          <Tabs defaultValue="2d" className="space-y-4">
+            <TabsList className="grid w-full max-w-2xl grid-cols-4">
+              <TabsTrigger value="2d" className="flex items-center gap-2">
+                <Grid3X3 className="h-4 w-4" />
+                Campo 2D
+              </TabsTrigger>
+              <TabsTrigger value="detection" className="flex items-center gap-2">
+                <Camera className="h-4 w-4" />
+                Detecção YOLO
+              </TabsTrigger>
+              <TabsTrigger value="animation" className="flex items-center gap-2">
+                <Play className="h-4 w-4" />
+                Animação Gol
+              </TabsTrigger>
+              <TabsTrigger value="measures" className="flex items-center gap-2">
+                <Ruler className="h-4 w-4" />
+                Medidas
+              </TabsTrigger>
+            </TabsList>
 
-          {/* 2D Field Tab */}
-          <TabsContent value="2d" className="space-y-4">
-            <Card className="bg-card/50 backdrop-blur border-border/50">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg">Controles 2D</CardTitle>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="measurements-2d"
-                        checked={showMeasurements}
-                        onCheckedChange={setShowMeasurements}
-                      />
-                      <Label htmlFor="measurements-2d" className="text-sm">Medidas</Label>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="grid-2d"
-                        checked={showGrid}
-                        onCheckedChange={setShowGrid}
-                      />
-                      <Label htmlFor="grid-2d" className="text-sm">Grade</Label>
-                    </div>
-                    <Select value={theme2D} onValueChange={(v) => setTheme2D(v as typeof theme2D)}>
-                      <SelectTrigger className="w-32">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="grass">Grama</SelectItem>
-                        <SelectItem value="tactical">Tático</SelectItem>
-                        <SelectItem value="minimal">Minimalista</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="rounded-lg overflow-hidden border border-border/50">
-                  <OfficialFootballField
-                    showMeasurements={showMeasurements}
-                    showGrid={showGrid}
-                    theme={theme2D}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* 3D Field Tab */}
-          <TabsContent value="3d" className="space-y-4">
-            <Card className="bg-card/50 backdrop-blur border-border/50">
-              <CardHeader className="pb-2">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-lg">Controles 3D</CardTitle>
-                  <div className="flex items-center gap-4">
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="measurements-3d"
-                        checked={showMeasurements}
-                        onCheckedChange={setShowMeasurements}
-                      />
-                      <Label htmlFor="measurements-3d" className="text-sm">Medidas</Label>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="grid-3d"
-                        checked={showGrid}
-                        onCheckedChange={setShowGrid}
-                      />
-                      <Label htmlFor="grid-3d" className="text-sm">Grade</Label>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Switch
-                        id="rotate-3d"
-                        checked={autoRotate}
-                        onCheckedChange={setAutoRotate}
-                      />
-                      <Label htmlFor="rotate-3d" className="text-sm flex items-center gap-1">
-                        <RotateCcw className="h-3 w-3" />
-                        Rotação
-                      </Label>
-                    </div>
-                    <Select value={cameraPreset} onValueChange={(v) => setCameraPreset(v as typeof cameraPreset)}>
-                      <SelectTrigger className="w-36">
-                        <Eye className="mr-2 h-4 w-4" />
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="tv">Transmissão</SelectItem>
-                        <SelectItem value="tactical">Tático</SelectItem>
-                        <SelectItem value="corner">Escanteio</SelectItem>
-                        <SelectItem value="goal">Gol</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="h-[600px] rounded-lg overflow-hidden border border-border/50">
-                  <OfficialField3D
-                    showMeasurements={showMeasurements}
-                    showGrid={showGrid}
-                    cameraPreset={cameraPreset}
-                    autoRotate={autoRotate}
-                  />
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          {/* YOLO Detection Tab */}
-          <TabsContent value="detection" className="space-y-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Image Upload & Preview */}
+            {/* 2D Field Tab */}
+            <TabsContent value="2d" className="space-y-4">
               <Card className="bg-card/50 backdrop-blur border-border/50">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Camera className="h-5 w-5 text-primary" />
-                    Imagem de Entrada
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div className="flex gap-2">
-                    <Input
-                      ref={fileInputRef}
-                      type="file"
-                      accept="image/*"
-                      onChange={handleImageUpload}
-                      className="hidden"
-                    />
-                    <Button
-                      onClick={() => fileInputRef.current?.click()}
-                      disabled={isDetecting}
-                      className="flex-1"
-                    >
-                      {isDetecting ? (
-                        <>
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                          Detectando...
-                        </>
-                      ) : (
-                        <>
-                          <Upload className="mr-2 h-4 w-4" />
-                          Enviar Imagem
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                  
-                  {uploadedImage ? (
-                    <div className="relative rounded-lg overflow-hidden border border-border">
-                      <img 
-                        src={uploadedImage} 
-                        alt="Frame de vídeo" 
-                        className="w-full h-auto"
-                      />
-                      {isDetecting && (
-                        <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
-                          <div className="text-center space-y-2">
-                            <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
-                            <p className="text-sm text-muted-foreground">Processando com YOLO...</p>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
-                    <div className="border-2 border-dashed border-border rounded-lg p-12 text-center">
-                      <Camera className="h-12 w-12 mx-auto text-muted-foreground/30 mb-4" />
-                      <p className="text-muted-foreground">
-                        Envie uma imagem de partida de futebol para detectar jogadores
-                      </p>
-                    </div>
-                  )}
-
-                  {/* Detection Stats */}
-                  {lastResult && (
-                    <div className="grid grid-cols-3 gap-2">
-                      <div className="bg-primary/10 rounded-lg p-3 text-center">
-                        <p className="text-2xl font-bold text-primary">{lastResult.players.length}</p>
-                        <p className="text-xs text-muted-foreground">Jogadores</p>
-                      </div>
-                      <div className="bg-secondary/50 rounded-lg p-3 text-center">
-                        <p className="text-2xl font-bold">{lastResult.ball ? '1' : '0'}</p>
-                        <p className="text-xs text-muted-foreground">Bola</p>
-                      </div>
-                      <div className="bg-muted rounded-lg p-3 text-center">
-                        <p className="text-2xl font-bold">{lastResult.processingTimeMs}ms</p>
-                        <p className="text-xs text-muted-foreground">Tempo</p>
-                      </div>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-
-              {/* Field Visualization */}
-              <Card className="bg-card/50 backdrop-blur border-border/50">
-                <CardHeader>
+                <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
-                    <CardTitle className="flex items-center gap-2 text-lg">
-                      <Target className="h-5 w-5 text-primary" />
-                      Posições Detectadas
-                    </CardTitle>
-                    <Badge variant="outline" className="font-mono">
-                      Roboflow API
-                    </Badge>
+                    <CardTitle className="text-lg">Controles 2D</CardTitle>
+                    <div className="flex items-center gap-4">
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id="measurements-2d"
+                          checked={showMeasurements}
+                          onCheckedChange={setShowMeasurements}
+                        />
+                        <Label htmlFor="measurements-2d" className="text-sm">Medidas</Label>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          id="grid-2d"
+                          checked={showGrid}
+                          onCheckedChange={setShowGrid}
+                        />
+                        <Label htmlFor="grid-2d" className="text-sm">Grade</Label>
+                      </div>
+                      <Select value={theme2D} onValueChange={(v) => setTheme2D(v as typeof theme2D)}>
+                        <SelectTrigger className="w-32">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="grass">Grama</SelectItem>
+                          <SelectItem value="tactical">Tático</SelectItem>
+                          <SelectItem value="minimal">Minimalista</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   </div>
                 </CardHeader>
                 <CardContent>
                   <div className="rounded-lg overflow-hidden border border-border/50">
                     <OfficialFootballField
-                      theme="tactical"
-                      showMeasurements={false}
-                      showGrid={true}
-                    >
-                      {renderDetectionOverlay()}
-                    </OfficialFootballField>
+                      showMeasurements={showMeasurements}
+                      showGrid={showGrid}
+                      theme={theme2D}
+                    />
                   </div>
-                  
-                  {lastResult && (
-                    <div className="mt-4 flex gap-4 justify-center text-sm">
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-primary" />
-                        <span className="text-muted-foreground">Time Casa ({lastResult.players.filter(p => p.team === 'home').length})</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-destructive" />
-                        <span className="text-muted-foreground">Time Fora ({lastResult.players.filter(p => p.team === 'away').length})</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <div className="w-3 h-3 rounded-full bg-yellow-500" />
-                        <span className="text-muted-foreground">Árbitro</span>
-                      </div>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
-            </div>
-          </TabsContent>
+            </TabsContent>
 
-          {/* Goal Animation Tab */}
-          <TabsContent value="animation" className="space-y-4">
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-              {/* Goal Selector */}
-              <Card className="bg-card/50 backdrop-blur border-border/50">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    <Target className="h-5 w-5 text-primary" />
-                    Gols Detectados
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  {isLoading ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                      Carregando gols...
-                    </div>
-                  ) : goalEvents.length === 0 ? (
-                    <div className="text-center py-8 space-y-3">
-                      <AlertCircle className="h-12 w-12 mx-auto text-muted-foreground/50" />
-                      <p className="text-muted-foreground text-sm">
-                        Nenhum gol detectado ainda
-                      </p>
+            {/* YOLO Detection Tab */}
+            <TabsContent value="detection" className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Image Upload & Preview */}
+                <Card className="bg-card/50 backdrop-blur border-border/50">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Camera className="h-5 w-5 text-primary" />
+                      Imagem de Entrada
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="flex gap-2">
+                      <Input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        onChange={handleImageUpload}
+                        className="hidden"
+                      />
                       <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setSelectedGoal({
-                          id: 'demo',
-                          minute: 45,
-                          second: 0,
-                          description: 'Gol de demonstração',
-                          team: 'home',
-                          matchId: 'demo',
-                          homeTeam: 'Time Casa',
-                          awayTeam: 'Time Visitante',
-                          homeColor: '#10b981',
-                          awayColor: '#ef4444'
-                        })}
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isDetecting}
+                        className="flex-1"
                       >
-                        <Play className="mr-2 h-4 w-4" />
-                        Ver Demo
+                        {isDetecting ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Detectando...
+                          </>
+                        ) : (
+                          <>
+                            <Upload className="mr-2 h-4 w-4" />
+                            Enviar Imagem
+                          </>
+                        )}
                       </Button>
                     </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {goalEvents.map((goal) => (
-                        <Button
-                          key={goal.id}
-                          variant={selectedGoal?.id === goal.id ? "default" : "outline"}
-                          className="w-full justify-start text-left h-auto py-3"
-                          onClick={() => setSelectedGoal(goal)}
-                        >
-                          <div className="flex items-center gap-3 w-full">
-                            <Badge 
-                              variant="secondary"
-                              style={{ 
-                                backgroundColor: goal.team === 'home' ? goal.homeColor : goal.awayColor,
-                                color: '#fff'
-                              }}
-                            >
-                              {goal.minute}'
-                            </Badge>
-                            <div className="flex-1 min-w-0">
-                              <p className="font-medium truncate text-sm">
-                                {goal.team === 'home' ? goal.homeTeam : goal.awayTeam}
-                              </p>
-                              <p className="text-xs text-muted-foreground truncate">
-                                vs {goal.team === 'home' ? goal.awayTeam : goal.homeTeam}
-                              </p>
+                    
+                    {uploadedImage ? (
+                      <div className="relative rounded-lg overflow-hidden border border-border">
+                        <img 
+                          src={uploadedImage} 
+                          alt="Frame de vídeo" 
+                          className="w-full h-auto"
+                        />
+                        {isDetecting && (
+                          <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
+                            <div className="text-center space-y-2">
+                              <Loader2 className="h-8 w-8 animate-spin mx-auto text-primary" />
+                              <p className="text-sm text-muted-foreground">Processando com YOLO...</p>
                             </div>
                           </div>
-                        </Button>
-                      ))}
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
+                        )}
+                      </div>
+                    ) : (
+                      <div className="border-2 border-dashed border-border rounded-lg p-12 text-center">
+                        <Camera className="h-12 w-12 mx-auto text-muted-foreground/30 mb-4" />
+                        <p className="text-muted-foreground">
+                          Envie uma imagem de partida de futebol para detectar jogadores
+                        </p>
+                      </div>
+                    )}
 
-              {/* Animation Player */}
-              <div className="lg:col-span-3">
+                    {lastResult && (
+                      <div className="grid grid-cols-3 gap-2">
+                        <div className="bg-primary/10 rounded-lg p-3 text-center">
+                          <p className="text-2xl font-bold text-primary">{lastResult.players.length}</p>
+                          <p className="text-xs text-muted-foreground">Jogadores</p>
+                        </div>
+                        <div className="bg-secondary/50 rounded-lg p-3 text-center">
+                          <p className="text-2xl font-bold">{lastResult.ball ? '1' : '0'}</p>
+                          <p className="text-xs text-muted-foreground">Bola</p>
+                        </div>
+                        <div className="bg-muted rounded-lg p-3 text-center">
+                          <p className="text-2xl font-bold">{lastResult.processingTimeMs}ms</p>
+                          <p className="text-xs text-muted-foreground">Tempo</p>
+                        </div>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Field Visualization */}
                 <Card className="bg-card/50 backdrop-blur border-border/50">
-                  <CardHeader className="pb-2">
+                  <CardHeader>
                     <div className="flex items-center justify-between">
-                      <CardTitle className="text-lg flex items-center gap-2">
-                        <Play className="h-5 w-5 text-primary" />
-                        Animação da Jogada
+                      <CardTitle className="flex items-center gap-2 text-lg">
+                        <Target className="h-5 w-5 text-primary" />
+                        Posições Detectadas
                       </CardTitle>
                       <Badge variant="outline" className="font-mono">
-                        YOLOv8 + OpenCV
+                        Roboflow API
                       </Badge>
                     </div>
                   </CardHeader>
                   <CardContent>
-                    {selectedGoal ? (
-                      <GoalPlayAnimation
-                        frames={animationFrames}
-                        homeTeamColor={selectedGoal.homeColor}
-                        awayTeamColor={selectedGoal.awayColor}
-                        goalMinute={selectedGoal.minute}
-                        goalTeam={selectedGoal.team}
-                        description={`${selectedGoal.team === 'home' ? selectedGoal.homeTeam : selectedGoal.awayTeam} - ${selectedGoal.description}`}
-                      />
-                    ) : (
-                      <div className="flex flex-col items-center justify-center py-20 text-center">
-                        <Play className="h-16 w-16 text-muted-foreground/30 mb-4" />
-                        <p className="text-muted-foreground">
-                          Selecione um gol para visualizar a animação da jogada
-                        </p>
-                        <p className="text-xs text-muted-foreground/70 mt-2">
-                          A animação simula dados de detecção YOLO para posições de jogadores e bola
-                        </p>
+                    <div className="rounded-lg overflow-hidden border border-border/50">
+                      <OfficialFootballField
+                        theme="tactical"
+                        showMeasurements={false}
+                        showGrid={true}
+                      >
+                        {renderDetectionOverlay()}
+                      </OfficialFootballField>
+                    </div>
+                    
+                    {lastResult && (
+                      <div className="mt-4 flex gap-4 justify-center text-sm">
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-primary" />
+                          <span className="text-muted-foreground">Time Casa ({lastResult.players.filter(p => p.team === 'home').length})</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-destructive" />
+                          <span className="text-muted-foreground">Time Fora ({lastResult.players.filter(p => p.team === 'away').length})</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-yellow-500" />
+                          <span className="text-muted-foreground">Árbitro</span>
+                        </div>
                       </div>
                     )}
                   </CardContent>
                 </Card>
               </div>
-            </div>
-          </TabsContent>
+            </TabsContent>
 
-          {/* Measurements Tab */}
-          <TabsContent value="measures" className="space-y-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              <Card className="bg-card/50 backdrop-blur border-border/50">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <Ruler className="h-5 w-5 text-primary" />
-                    Medidas Oficiais FIFA 2023/24
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {measurements.map((m, i) => (
-                      <div key={i} className="flex items-center justify-between py-2 border-b border-border/30 last:border-0">
-                        <div>
-                          <p className="font-medium text-foreground">{m.label}</p>
-                          <p className="text-xs text-muted-foreground">{m.desc}</p>
-                        </div>
-                        <Badge variant="secondary" className="font-mono">
-                          {m.value}
+            {/* Goal Animation Tab */}
+            <TabsContent value="animation" className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+                {/* Goal Selector */}
+                <Card className="bg-card/50 backdrop-blur border-border/50">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-lg">
+                      <Target className="h-5 w-5 text-primary" />
+                      Gols Detectados
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    {isLoading ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        Carregando gols...
+                      </div>
+                    ) : goalEvents.length === 0 ? (
+                      <div className="text-center py-8 space-y-3">
+                        <AlertCircle className="h-12 w-12 mx-auto text-muted-foreground/50" />
+                        <p className="text-muted-foreground text-sm">
+                          Nenhum gol detectado ainda
+                        </p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setSelectedGoal({
+                            id: 'demo',
+                            minute: 45,
+                            second: 0,
+                            description: 'Gol de demonstração',
+                            team: 'home',
+                            matchId: 'demo',
+                            homeTeam: 'Time Casa',
+                            awayTeam: 'Time Visitante',
+                            homeColor: '#10b981',
+                            awayColor: '#ef4444'
+                          })}
+                        >
+                          <Play className="mr-2 h-4 w-4" />
+                          Ver Demo
+                        </Button>
+                      </div>
+                    ) : (
+                      <div className="space-y-2">
+                        {goalEvents.map((goal) => (
+                          <Button
+                            key={goal.id}
+                            variant={selectedGoal?.id === goal.id ? "default" : "outline"}
+                            className="w-full justify-start text-left h-auto py-3"
+                            onClick={() => setSelectedGoal(goal)}
+                          >
+                            <div className="flex items-center gap-3 w-full">
+                              <Badge 
+                                variant="secondary"
+                                style={{ 
+                                  backgroundColor: goal.team === 'home' ? goal.homeColor : goal.awayColor,
+                                  color: '#fff'
+                                }}
+                              >
+                                {goal.minute}'
+                              </Badge>
+                              <div className="flex-1 min-w-0">
+                                <p className="font-medium truncate text-sm">
+                                  {goal.team === 'home' ? goal.homeTeam : goal.awayTeam}
+                                </p>
+                                <p className="text-xs text-muted-foreground truncate">
+                                  vs {goal.team === 'home' ? goal.awayTeam : goal.homeTeam}
+                                </p>
+                              </div>
+                            </div>
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                {/* Animation Player */}
+                <div className="lg:col-span-3">
+                  <Card className="bg-card/50 backdrop-blur border-border/50">
+                    <CardHeader className="pb-2">
+                      <div className="flex items-center justify-between">
+                        <CardTitle className="text-lg flex items-center gap-2">
+                          <Play className="h-5 w-5 text-primary" />
+                          Animação da Jogada
+                        </CardTitle>
+                        <Badge variant="outline" className="font-mono">
+                          SVG Animado
                         </Badge>
                       </div>
-                    ))}
-                  </div>
-                </CardContent>
-              </Card>
-
-              <div className="space-y-6">
-                <FieldMeasurementsOverlay variant="detailed" />
+                    </CardHeader>
+                    <CardContent>
+                      {selectedGoal ? (
+                        <GoalPlayAnimation
+                          frames={animationFrames}
+                          homeTeamColor={selectedGoal.homeColor}
+                          awayTeamColor={selectedGoal.awayColor}
+                          goalMinute={selectedGoal.minute}
+                          goalTeam={selectedGoal.team}
+                          description={`${selectedGoal.team === 'home' ? selectedGoal.homeTeam : selectedGoal.awayTeam} - ${selectedGoal.description}`}
+                        />
+                      ) : (
+                        <div className="flex flex-col items-center justify-center py-20 text-center">
+                          <Play className="h-16 w-16 text-muted-foreground/30 mb-4" />
+                          <p className="text-muted-foreground">
+                            Selecione um gol para visualizar a animação da jogada
+                          </p>
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                </div>
               </div>
-            </div>
-          </TabsContent>
-        </Tabs>
+            </TabsContent>
+
+            {/* Measurements Tab */}
+            <TabsContent value="measures" className="space-y-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <Card className="bg-card/50 backdrop-blur border-border/50">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <Ruler className="h-5 w-5 text-primary" />
+                      Medidas Oficiais FIFA 2023/24
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="space-y-3">
+                      {measurements.map((m, i) => (
+                        <div key={i} className="flex items-center justify-between py-2 border-b border-border/30 last:border-0">
+                          <div>
+                            <p className="font-medium text-foreground">{m.label}</p>
+                            <p className="text-xs text-muted-foreground">{m.desc}</p>
+                          </div>
+                          <Badge variant="secondary" className="font-mono">
+                            {m.value}
+                          </Badge>
+                        </div>
+                      ))}
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <div className="space-y-6">
+                  <FieldMeasurementsOverlay variant="detailed" />
+                </div>
+              </div>
+            </TabsContent>
+          </Tabs>
         </div>
       </div>
     </AppLayout>
