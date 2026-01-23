@@ -77,7 +77,7 @@ export default function Settings() {
   const [elevenlabsEnabled, setElevenlabsEnabled] = useState(true);
 
   // Ollama settings
-  const [ollamaUrl, setOllamaUrl] = useState('http://10.0.0.20:11434');
+  const [ollamaUrl, setOllamaUrl] = useState('http://localhost:11434');
   const [ollamaModel, setOllamaModel] = useState('washingtonlima/kakttus');
   const [ollamaEnabled, setOllamaEnabled] = useState(false);
   const [ollamaModels, setOllamaModels] = useState<Array<{name: string; size: string; family: string}>>([]);
@@ -144,7 +144,7 @@ export default function Settings() {
       setElevenlabsEnabled(apiSettings.find(s => s.setting_key === 'elevenlabs_enabled')?.setting_value !== 'false');
       
       // Ollama settings
-      setOllamaUrl(apiSettings.find(s => s.setting_key === 'ollama_url')?.setting_value || 'http://10.0.0.20:11434');
+      setOllamaUrl(apiSettings.find(s => s.setting_key === 'ollama_url')?.setting_value || 'http://localhost:11434');
       setOllamaModel(apiSettings.find(s => s.setting_key === 'ollama_model')?.setting_value || 'washingtonlima/kakttus');
       setOllamaEnabled(apiSettings.find(s => s.setting_key === 'ollama_enabled')?.setting_value === 'true');
       

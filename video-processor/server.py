@@ -3524,7 +3524,7 @@ def force_ollama_config():
         return '', 204
     settings_to_update = [
         ('ollama_enabled', 'true'),
-        ('ollama_url', 'http://10.0.0.20:11434'),
+        ('ollama_url', 'http://localhost:11434'),
         ('ollama_model', 'washingtonlima/kakttus'),
         ('ai_provider_ollama_priority', '1'),
         ('ai_provider_openai_priority', '0'),
