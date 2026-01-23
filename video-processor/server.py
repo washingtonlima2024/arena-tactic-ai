@@ -369,14 +369,11 @@ def load_api_keys_from_db():
             k = _normalize_setting_key(s.setting_key)
             local_values[k] = s.setting_value
         
-        # Load from Supabase Cloud (priority settings)
-        cloud_values = get_cloud_settings()
-        
-        # Merge: Cloud > Local for priority settings
+        # MODO 100% LOCAL: SQLite é a fonte de verdade
+        # Não sobrescrever com configurações do Cloud
         values = {**local_values}
-        for key in cloud_values:
-            if key.startswith('ai_provider_') or key.endswith('_enabled'):
-                values[key] = cloud_values[key]
+        # cloud_values = get_cloud_settings()  # Desabilitado - sistema local
+        # NOTA: Se quiser reativar Cloud como fallback, descomente acima
 
         keys_loaded = []
         # Provider enabled flags (default True for backward compatibility)
@@ -3462,6 +3459,107 @@ def upsert_api_setting():
     except Exception as e:
         session.rollback()
         return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+@app.route('/api/settings/debug', methods=['GET'])
+def debug_ai_settings():
+    """Retorna estado atual das variáveis globais de IA em memória para debug."""
+    try:
+        session = get_session()
+        settings = session.query(ApiSetting).all()
+        db_values = {s.setting_key: s.setting_value for s in settings}
+        session.close()
+        
+        # Pegar ordem de prioridade diretamente do ai_services
+        priority_order = ai_services.get_ai_priority_order(db_values)
+        
+        return jsonify({
+            'memory_state': {
+                'ollama': {
+                    'enabled': ai_services.OLLAMA_ENABLED,
+                    'url': ai_services.OLLAMA_URL,
+                    'model': ai_services.OLLAMA_MODEL
+                },
+                'openai': {
+                    'enabled': ai_services.OPENAI_ENABLED,
+                    'keySet': bool(ai_services.OPENAI_API_KEY)
+                },
+                'gemini': {
+                    'enabled': ai_services.GEMINI_ENABLED,
+                    'keySet': bool(ai_services.GOOGLE_API_KEY)
+                },
+                'lovable': {
+                    'keySet': bool(ai_services.LOVABLE_API_KEY)
+                },
+                'local_whisper': {
+                    'enabled': ai_services.LOCAL_WHISPER_ENABLED,
+                    'model': ai_services.LOCAL_WHISPER_MODEL
+                }
+            },
+            'db_values': {
+                'ollama_enabled': db_values.get('ollama_enabled'),
+                'ollama_url': db_values.get('ollama_url'),
+                'ollama_model': db_values.get('ollama_model'),
+                'openai_enabled': db_values.get('openai_enabled'),
+                'gemini_enabled': db_values.get('gemini_enabled'),
+                'ai_provider_ollama_priority': db_values.get('ai_provider_ollama_priority'),
+                'ai_provider_openai_priority': db_values.get('ai_provider_openai_priority'),
+                'ai_provider_gemini_priority': db_values.get('ai_provider_gemini_priority'),
+                'ai_provider_lovable_priority': db_values.get('ai_provider_lovable_priority'),
+            },
+            'priority_order': priority_order,
+            'source': 'SQLite local (prioridade)',
+            'server_version': SERVER_VERSION
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/force-ollama', methods=['POST'])
+def force_ollama_config():
+    """Força Ollama como provedor primário com configurações corretas."""
+    settings_to_update = [
+        ('ollama_enabled', 'true'),
+        ('ollama_url', 'http://10.0.0.20:11434'),
+        ('ollama_model', 'washingtonlima/kakttus'),
+        ('ai_provider_ollama_priority', '1'),
+        ('ai_provider_openai_priority', '0'),
+        ('ai_provider_gemini_priority', '0'),
+        ('ai_provider_lovable_priority', '2'),
+        ('openai_enabled', 'false'),
+        ('gemini_enabled', 'false'),
+    ]
+    
+    session = get_session()
+    results = []
+    
+    try:
+        for key, value in settings_to_update:
+            existing = session.query(ApiSetting).filter_by(setting_key=key).first()
+            if existing:
+                existing.setting_value = value
+            else:
+                session.add(ApiSetting(setting_key=key, setting_value=value))
+            results.append({key: value})
+        
+        session.commit()
+        
+        # Recarregar configurações em memória
+        load_api_keys_from_db()
+        
+        print(f"[Settings] ✓ Ollama forçado como provedor primário")
+        print(f"[Settings] Configurações atualizadas: {len(results)}")
+        
+        return jsonify({
+            'success': True, 
+            'message': 'Ollama configurado como provedor primário!',
+            'updated': results
+        })
+    except Exception as e:
+        session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
     finally:
         session.close()
 

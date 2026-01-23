@@ -1015,8 +1015,8 @@ export default function Settings() {
                   </div>
                 </div>
                 
-                {/* Botão de teste */}
-                <div className="flex items-center gap-2">
+                {/* Botões de ação */}
+                <div className="flex flex-wrap items-center gap-2">
                   <Button
                     variant="outline"
                     size="sm"
@@ -1030,8 +1030,41 @@ export default function Settings() {
                     )}
                     Testar Conexão
                   </Button>
+                  
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={async () => {
+                      try {
+                        const baseUrl = localStorage.getItem('arenaApiUrl') || 
+                          (window.location.hostname === 'localhost' ? 'http://localhost:5000' : 'http://10.0.0.20:5000');
+                        const response = await fetch(`${baseUrl}/api/settings/force-ollama`, {
+                          method: 'POST',
+                          headers: { 'ngrok-skip-browser-warning': 'true' }
+                        });
+                        const data = await response.json();
+                        if (data.success) {
+                          toast.success('Ollama ativado como provedor primário!');
+                          setOllamaEnabled(true);
+                          setOllamaUrl('http://10.0.0.20:11434');
+                          setOllamaModel('washingtonlima/kakttus');
+                          setOpenaiEnabled(false);
+                          setGeminiEnabled(false);
+                        } else {
+                          toast.error(data.error || 'Erro ao configurar');
+                        }
+                      } catch (error) {
+                        toast.error('Servidor não disponível');
+                      }
+                    }}
+                    className="bg-orange-600 hover:bg-orange-700"
+                  >
+                    <Zap className="h-4 w-4 mr-2" />
+                    Ativar Ollama Local
+                  </Button>
+                  
                   <p className="text-xs text-muted-foreground">
-                    Verifica se o Ollama está rodando e o modelo responde
+                    Força Ollama como provedor primário (10.0.0.20:11434)
                   </p>
                 </div>
                 
