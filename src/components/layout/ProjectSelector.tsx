@@ -62,7 +62,7 @@ export function ProjectSelector() {
       <Button 
         variant="outline" 
         size="sm"
-        onClick={() => navigate('/upload')}
+        onClick={() => navigate('/upload?mode=new')}
         className="gap-2"
       >
         <Trophy className="h-4 w-4" />
@@ -218,7 +218,7 @@ export function ProjectSelector() {
         
         <DropdownMenuSeparator />
         <DropdownMenuItem 
-          onClick={() => navigate('/upload')}
+          onClick={() => navigate('/upload?mode=new')}
           className="text-primary"
         >
           <Trophy className="mr-2 h-4 w-4" />

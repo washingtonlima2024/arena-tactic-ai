@@ -302,7 +302,7 @@ export default function Dashboard() {
             </p>
             <div className="mt-4 md:mt-6 flex flex-col sm:flex-row gap-2 md:gap-3">
               <Button variant="arena" size="default" className="w-full sm:w-auto" asChild>
-                <Link to="/upload">
+                <Link to="/upload?mode=new">
                   <Video className="mr-2 h-4 w-4 md:h-5 md:w-5" />
                   Importar Partida
                 </Link>
@@ -403,7 +403,7 @@ export default function Dashboard() {
                     Importe seu primeiro vídeo para começar a análise
                   </p>
                   <Button variant="arena" asChild>
-                    <Link to="/upload">
+                    <Link to="/upload?mode=new">
                       <Video className="mr-2 h-4 w-4" />
                       Importar Partida
                     </Link>

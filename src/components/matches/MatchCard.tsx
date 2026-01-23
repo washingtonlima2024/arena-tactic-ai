@@ -373,7 +373,7 @@ export function MatchCard({ match }: MatchCardProps) {
             )}
             {match.status === 'scheduled' && (
               <Button variant="arena-outline" size="sm" className="flex-1" asChild>
-                <Link to="/upload">
+                <Link to={`/upload?match=${match.id}&mode=new`}>
                   Importar Vídeo
                 </Link>
               </Button>

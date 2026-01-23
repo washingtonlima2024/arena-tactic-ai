@@ -72,7 +72,7 @@ export function ReimportMatchDialog({
       
       setTimeout(() => {
         onClose();
-        navigate(`/upload?match=${matchId}`);
+        navigate(`/upload?match=${matchId}&mode=new`);
       }, 1000);
 
     } catch (error) {
