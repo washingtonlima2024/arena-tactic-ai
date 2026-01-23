@@ -3517,9 +3517,11 @@ def debug_ai_settings():
         return jsonify({'error': str(e)}), 500
 
 
-@app.route('/api/settings/force-ollama', methods=['POST'])
+@app.route('/api/settings/force-ollama', methods=['POST', 'OPTIONS'])
 def force_ollama_config():
     """Força Ollama como provedor primário com configurações corretas."""
+    if request.method == 'OPTIONS':
+        return '', 204
     settings_to_update = [
         ('ollama_enabled', 'true'),
         ('ollama_url', 'http://10.0.0.20:11434'),

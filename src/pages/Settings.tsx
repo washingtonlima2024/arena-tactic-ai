@@ -240,8 +240,7 @@ export default function Settings() {
   const fetchTempFolders = async () => {
     setLoadingTempFolders(true);
     try {
-      const baseUrl = localStorage.getItem('arenaApiUrl') || 
-        (window.location.hostname === 'localhost' ? 'http://localhost:5000' : 'https://75c7a7f57d85.ngrok-free.app');
+      const baseUrl = getApiBase();
       const response = await fetch(`${baseUrl}/api/storage/temp-folders`, {
         headers: { 'ngrok-skip-browser-warning': 'true' }
       });
@@ -259,8 +258,7 @@ export default function Settings() {
   const handleCleanupStorage = async () => {
     setCleaningStorage(true);
     try {
-      const baseUrl = localStorage.getItem('arenaApiUrl') || 
-        (window.location.hostname === 'localhost' ? 'http://localhost:5000' : 'https://75c7a7f57d85.ngrok-free.app');
+      const baseUrl = getApiBase();
       const response = await fetch(`${baseUrl}/api/storage/cleanup-temp`, {
         method: 'DELETE',
         headers: { 'ngrok-skip-browser-warning': 'true' }
@@ -1036,8 +1034,7 @@ export default function Settings() {
                     size="sm"
                     onClick={async () => {
                       try {
-                        const baseUrl = localStorage.getItem('arenaApiUrl') || 
-                          (window.location.hostname === 'localhost' ? 'http://localhost:5000' : 'http://10.0.0.20:5000');
+                        const baseUrl = getApiBase();
                         const response = await fetch(`${baseUrl}/api/settings/force-ollama`, {
                           method: 'POST',
                           headers: { 'ngrok-skip-browser-warning': 'true' }
