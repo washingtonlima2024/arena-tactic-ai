@@ -32,7 +32,7 @@ const MATCH_CONTEXT_PAGES = ['/events', '/analysis', '/media', '/audio', '/field
 const navItems = [
   { icon: LayoutDashboard, label: 'Início', path: '/home' },
   { icon: Video, label: 'Partidas', path: '/matches' },
-  { icon: Upload, label: 'Importar Vídeo', path: '/upload' },
+  { icon: Upload, label: 'Importar Vídeo', path: '/upload?mode=new' },
   { icon: Radio, label: 'Ao Vivo', path: '/live' },
   { icon: BarChart3, label: 'Análise Tática', path: '/analysis' },
   { icon: Layers, label: 'Dashboard Análise', path: '/dashboard' },

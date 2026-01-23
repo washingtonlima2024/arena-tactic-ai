@@ -361,7 +361,7 @@ export default function Analysis() {
                 Importe e analise um vídeo para ver os resultados
               </p>
               <Button variant="arena" asChild>
-                <Link to="/upload">Importar Partida</Link>
+                <Link to="/upload?mode=new">Importar Partida</Link>
               </Button>
             </CardContent>
           </Card>
