@@ -2151,37 +2151,116 @@ def _analyze_events_with_ollama(
     """
     half_desc = "1º Tempo (0-45 min)" if match_half == 'first' else "2º Tempo (45-90 min)"
     
-    prompt = f"""Você é um analista de futebol brasileiro experiente.
-Sua tarefa é extrair TODOS os eventos importantes da transcrição de uma partida.
+    prompt = f"""Você é um analista de futebol ESPECIALISTA em extrair eventos de narrações esportivas.
 
-⚽ PRIORIDADE MÁXIMA: NUNCA perca um GOL!
+⚽⚽⚽ REGRA NÚMERO 1 - NUNCA PERCA UM GOL! ⚽⚽⚽
+
+════════════════════════════════════════════════════════════════
+PALAVRAS-CHAVE PARA GOLS (EXTRAIA TODOS - PRIORIDADE MÁXIMA):
+════════════════════════════════════════════════════════════════
+- "GOOOL", "GOOOOL", "GOLAÇO", "É GOL" → goal
+- "PRA DENTRO", "ENTROU", "MANDOU PRA REDE" → goal
+- "BOLA NO FUNDO DA REDE", "ESTUFOU A REDE" → goal
+- "ABRE O PLACAR", "AMPLIA", "EMPATA", "VIRA O JOGO" → goal
+- "CONTRA", "GOL CONTRA", "CONTRA O PRÓPRIO" → goal (isOwnGoal: true)
+
+════════════════════════════════════════════════════════════════
+OUTROS EVENTOS IMPORTANTES (EXTRAIA TODOS):
+════════════════════════════════════════════════════════════════
+CARTÕES:
+- "CARTÃO AMARELO", "RECEBE O AMARELO", "AMARELOU" → yellow_card
+- "CARTÃO VERMELHO", "EXPULSO", "PRA FORA" → red_card
+
+FALTAS E INFRAÇÕES:
+- "FALTA DE", "FALTA PERIGOSA", "DERRUBOU" → foul
+- "IMPEDIDO", "IMPEDIMENTO", "POSIÇÃO IRREGULAR" → offside
+- "PÊNALTI", "PENALIDADE MÁXIMA", "NA MARCA DA CAL" → penalty
+
+JOGADAS:
+- "ESCANTEIO", "CÓRNER", "PELA LINHA DE FUNDO" → corner
+- "GRANDE DEFESA", "SALVOU", "ESPALMOU" → save
+- "QUASE GOL", "NA TRAVE", "PASSOU PERTO", "POR POUCO" → chance
+- "CHUTE", "FINALIZOU", "BATEU", "ARRISCOU" → shot
+- "SUBSTITUIÇÃO", "ENTROU", "SAIU" → substitution
 
 PARTIDA: {home_team} (casa) vs {away_team} (visitante)
 PERÍODO: {half_desc} (minutos {game_start_minute}' a {game_end_minute}')
 
-PALAVRAS-CHAVE PARA GOLS:
-- GOOOL, GOOOOL, GOL, GOLAÇO
-- É GOL, PRA DENTRO, ENTROU
-- BOLA NA REDE, ESTUFOU A REDE
-- ABRE O PLACAR, AMPLIA, EMPATA
-
-TIPOS DE EVENTOS VÁLIDOS:
-goal, shot, save, foul, yellow_card, red_card, corner, offside, substitution, chance, penalty
+╔══════════════════════════════════════════════════════════════╗
+║  🚨 REGRA CRÍTICA DE TIMESTAMP - LEIA COM ATENÇÃO! 🚨       ║
+╠══════════════════════════════════════════════════════════════╣
+║  A transcrição está no formato SRT com timestamps assim:     ║
+║                                                              ║
+║  368                                                         ║
+║  00:24:52,253 --> 00:24:56,308                               ║
+║  GOOOOL! Gol do Brasil!                                      ║
+║                                                              ║
+║  → Use o TIMESTAMP DO BLOCO SRT: 00:24:52                    ║
+║  → minute = 24, second = 52                                  ║
+║                                                              ║
+║  ⚠️ NÃO use o "minuto de jogo" falado pelo narrador!        ║
+║  ⚠️ USE APENAS o timestamp técnico do arquivo SRT!          ║
+╚══════════════════════════════════════════════════════════════╝
 
 TRANSCRIÇÃO:
 {transcription}
 
-RETORNE APENAS um array JSON válido (sem texto adicional):
+═══════════════════════════════════════════════════════════════
+📋 CHECKLIST OBRIGATÓRIO (siga rigorosamente):
+═══════════════════════════════════════════════════════════════
+□ Extrair minute/second do TIMESTAMP SRT (00:MM:SS), NÃO do narrador
+□ Retornar NO MÍNIMO 10-20 eventos para cada tempo de jogo
+□ Para CADA menção de "GOL", "GOOOL", "GOLAÇO" = criar evento goal
+□ Incluir TODOS: chutes, faltas, escanteios, cartões, defesas
+□ team: "home" para {home_team}, "away" para {away_team}
+□ Incluir source_text com o trecho exato da transcrição
+□ confidence: 0.9+ para gols, 0.7+ para outros eventos
+
+RETORNE APENAS um array JSON válido (sem explicações, sem markdown):
 [
   {{
-    "minute": 12,
-    "second": 34,
+    "minute": 24,
+    "second": 52,
     "event_type": "goal",
     "team": "home",
-    "description": "Gol após cruzamento",
+    "description": "Gol após cruzamento da direita, cabeceio certeiro",
     "confidence": 0.95,
     "is_highlight": true,
-    "isOwnGoal": false
+    "isOwnGoal": false,
+    "source_text": "GOOOOL! Gol do Brasil! Cabeceio certeiro!"
+  }},
+  {{
+    "minute": 12,
+    "second": 15,
+    "event_type": "foul",
+    "team": "away",
+    "description": "Falta dura no meio campo, jogador reclamou",
+    "confidence": 0.85,
+    "is_highlight": false,
+    "isOwnGoal": false,
+    "source_text": "Falta! Falta dura do jogador da Argentina"
+  }},
+  {{
+    "minute": 8,
+    "second": 33,
+    "event_type": "shot",
+    "team": "home",
+    "description": "Chute de fora da área, passou perto do gol",
+    "confidence": 0.80,
+    "is_highlight": false,
+    "isOwnGoal": false,
+    "source_text": "Arriscou de longe! Passou perto!"
+  }},
+  {{
+    "minute": 31,
+    "second": 5,
+    "event_type": "corner",
+    "team": "home",
+    "description": "Escanteio pela direita",
+    "confidence": 0.75,
+    "is_highlight": false,
+    "isOwnGoal": false,
+    "source_text": "Escanteio para o Brasil"
   }}
 ]"""
 
