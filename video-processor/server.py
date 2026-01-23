@@ -28,6 +28,56 @@ from typing import Optional, Dict, Any
 SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
 SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
 
+# Padrões de chaves que devem sincronizar automaticamente com Supabase Cloud
+# Adicione novos padrões conforme necessário (case-insensitive)
+CLOUD_SYNC_PATTERNS = (
+    '_api_key',       # Chaves de API (openai_api_key, gemini_api_key, etc.)
+    '_enabled',       # Flags de ativação (openai_enabled, ollama_enabled, etc.)
+    'ai_provider_',   # Prioridades de IA (ai_provider_openai_priority, etc.)
+    'ollama_',        # Configurações do Ollama
+    'whisper_',       # Configurações do Whisper local
+    'local_whisper_', # Whisper local
+)
+
+
+def sync_setting_to_cloud(setting_key: str, setting_value: str) -> bool:
+    """Sincroniza uma configuração com Supabase Cloud se aplicável aos padrões."""
+    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
+        return False
+    
+    key_lower = setting_key.lower()
+    
+    # Verificar se deve sincronizar baseado nos padrões parametrizados
+    if not any(pattern in key_lower for pattern in CLOUD_SYNC_PATTERNS):
+        return False
+    
+    try:
+        response = requests.post(
+            f"{SUPABASE_URL}/rest/v1/api_settings",
+            headers={
+                "apikey": SUPABASE_SERVICE_KEY,
+                "Authorization": f"Bearer {SUPABASE_SERVICE_KEY}",
+                "Content-Type": "application/json",
+                "Prefer": "resolution=merge-duplicates"
+            },
+            json={
+                "setting_key": setting_key,
+                "setting_value": setting_value or '',
+                "is_encrypted": '_api_key' in key_lower
+            },
+            timeout=10
+        )
+        
+        if response.ok:
+            print(f"[Settings] ☁️ Sincronizado com Cloud: {setting_key}")
+            return True
+        else:
+            print(f"[Settings] ⚠️ Falha ao sincronizar {setting_key}: {response.status_code}")
+            return False
+    except Exception as e:
+        print(f"[Settings] ❌ Erro ao sincronizar {setting_key}: {e}")
+        return False
+
 # Log de verificação de configuração na inicialização
 print(f"[STARTUP] Arena Play Server v{SERVER_VERSION} ({SERVER_BUILD_DATE})")
 print(f"[STARTUP] Arquivo .env existe: {'✓' if os.path.exists('.env') else '✗'}")
@@ -3404,6 +3454,10 @@ def upsert_api_setting():
             print(f"[Settings] 🆓 Local Whisper model: {value}")
         
         session.commit()
+        
+        # Sincronizar automaticamente com Cloud (baseado em padrões parametrizados)
+        sync_setting_to_cloud(data['setting_key'], data.get('setting_value'))
+        
         return jsonify(setting.to_dict())
     except Exception as e:
         session.rollback()
