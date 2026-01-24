@@ -812,7 +812,7 @@ export default function Media() {
                       </p>
                     </div>
                     <Button variant="arena" size="sm" asChild>
-                      <Link to="/upload">
+                      <Link to="/upload?mode=new">
                         <Video className="mr-2 h-4 w-4" />
                         Fazer Upload
                       </Link>

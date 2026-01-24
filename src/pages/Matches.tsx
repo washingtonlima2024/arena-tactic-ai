@@ -584,7 +584,7 @@ export default function Matches() {
               </Link>
             </Button>
             <Button variant="arena" size="sm" className="flex-1 sm:flex-none" asChild>
-              <Link to="/upload">
+              <Link to="/upload?mode=new">
                 <Plus className="mr-1.5 h-4 w-4" />
                 <span className="hidden sm:inline">Importar</span>
                 <span className="sm:hidden">Novo</span>
@@ -665,7 +665,7 @@ export default function Matches() {
                 Importe um vídeo para começar a análise tática
               </p>
               <Button variant="arena" asChild>
-                <Link to="/upload">
+                <Link to="/upload?mode=new">
                   <Plus className="mr-2 h-4 w-4" />
                   Importar Partida
                 </Link>

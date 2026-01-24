@@ -872,7 +872,7 @@ export default function Events() {
                 Importe e analise um vídeo para ver os eventos detectados
               </p>
               <Button variant="arena" asChild>
-                <Link to="/upload">
+                <Link to="/upload?mode=new">
                   <Plus className="mr-2 h-4 w-4" />
                   Importar Partida
                 </Link>

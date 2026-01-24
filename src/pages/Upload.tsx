@@ -277,16 +277,17 @@ export default function VideoUpload() {
   // Reset the flag when match actually changes (not just re-renders)
   // Também limpa quando importMode === 'new'
   useEffect(() => {
-    // SEMPRE limpar quando modo é 'new' (nova análise)
-    if (importMode === 'new') {
-      console.log('[Upload] Modo NOVA ANÁLISE - limpando segmentos');
+    // PADRÃO: Lista sempre começa vazia, EXCETO quando mode=reimport
+    if (importMode !== 'reimport') {
+      console.log('[Upload] Modo padrão - iniciando com lista vazia');
       setSegments([]);
       hasLoadedExistingVideos.current = true; // Impede carregamento futuro
       return;
     }
     
+    // Só entra aqui quando mode=reimport
     if (activeMatchId !== prevMatchIdRef.current) {
-      console.log('[Upload] Match ID mudou de', prevMatchIdRef.current, 'para', activeMatchId);
+      console.log('[Upload] Match ID mudou de', prevMatchIdRef.current, 'para', activeMatchId, '(modo reimport)');
       
       // Limpar segmentos ao mudar de partida (mas não na primeira carga)
       if (prevMatchIdRef.current !== null) {
@@ -299,11 +300,10 @@ export default function VideoUpload() {
   }, [activeMatchId, importMode]);
 
   // Auto-load existing videos as segments when page loads with a match ID
-  // Skip loading if mode=new (fresh analysis starts empty)
+  // ONLY load when mode=reimport (explicit reimport action)
   useEffect(() => {
-    // Skip loading existing videos when mode=new (fresh analysis) 
-    // - já tratado no useEffect anterior
-    if (importMode === 'new') {
+    // SÓ carregar vídeos existentes quando explicitamente mode=reimport
+    if (importMode !== 'reimport') {
       return;
     }
     
