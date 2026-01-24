@@ -84,10 +84,10 @@ export default function Settings() {
   const [elevenlabsApiKey, setElevenlabsApiKey] = useState("");
   const [elevenlabsEnabled, setElevenlabsEnabled] = useState(true);
 
-  // Ollama settings
+  // Ollama settings - ENABLED BY DEFAULT (FREE local AI)
   const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
   const [ollamaModel, setOllamaModel] = useState("washingtonlima/kakttus");
-  const [ollamaEnabled, setOllamaEnabled] = useState(false);
+  const [ollamaEnabled, setOllamaEnabled] = useState(true); // ALWAYS ON BY DEFAULT
   const [ollamaModels, setOllamaModels] = useState<Array<{ name: string; size: string; family: string }>>([]);
   const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
   const [testingOllama, setTestingOllama] = useState(false);
@@ -151,12 +151,14 @@ export default function Settings() {
       setElevenlabsApiKey(apiSettings.find((s) => s.setting_key === "elevenlabs_api_key")?.setting_value || "");
       setElevenlabsEnabled(apiSettings.find((s) => s.setting_key === "elevenlabs_enabled")?.setting_value !== "false");
 
-      // Ollama settings
+      // Ollama settings - DEFAULT TO TRUE (FREE!)
       setOllamaUrl(apiSettings.find((s) => s.setting_key === "ollama_url")?.setting_value || "http://localhost:11434");
       setOllamaModel(
         apiSettings.find((s) => s.setting_key === "ollama_model")?.setting_value || "washingtonlima/kakttus",
       );
-      setOllamaEnabled(apiSettings.find((s) => s.setting_key === "ollama_enabled")?.setting_value === "true");
+      // Se não houver configuração salva, usar true como padrão (gratuito!)
+      const ollamaSetting = apiSettings.find((s) => s.setting_key === "ollama_enabled")?.setting_value;
+      setOllamaEnabled(ollamaSetting !== "false");
 
       // Local Whisper settings - DEFAULT TO TRUE (FREE!)
       const whisperSetting = apiSettings.find((s) => s.setting_key === "local_whisper_enabled")?.setting_value;
