@@ -5,6 +5,7 @@ Uses BASE_DIR environment variable for predictable paths.
 
 import os
 from pathlib import Path
+from contextlib import contextmanager
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, scoped_session
 from models import Base
@@ -43,8 +44,6 @@ def close_session(session):
     """Close a database session."""
     session.close()
 
-
-from contextlib import contextmanager
 
 @contextmanager
 def get_db_session():
