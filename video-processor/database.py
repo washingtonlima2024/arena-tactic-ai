@@ -44,6 +44,22 @@ def close_session(session):
     session.close()
 
 
+from contextlib import contextmanager
+
+@contextmanager
+def get_db_session():
+    """Context manager for database sessions with automatic cleanup."""
+    session = Session()
+    try:
+        yield session
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
+
+
 def reset_db():
     """Drop all tables and recreate them. WARNING: This deletes all data!"""
     Base.metadata.drop_all(engine)

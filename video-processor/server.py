@@ -35,7 +35,7 @@ print(f"[STARTUP] 🏠 Modo 100% LOCAL ativado - Sem dependências de nuvem")
 print(f"[STARTUP] Arquivo .env existe: {'✓' if os.path.exists('.env') else '✗'}")
 
 # Import local modules
-from database import init_db, get_session, Session
+from database import init_db, get_session, get_db_session, Session
 from models import (
     Team, Match, Player, MatchEvent, Video, AnalysisJob,
     GeneratedAudio, Thumbnail, Profile, UserRole, ApiSetting,
