@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Clock, Loader2, Mic, Wifi, WifiOff, Save, CheckCircle, Zap, Video, Globe, RefreshCw } from "lucide-react";
-import { useElevenLabsScribe } from "@/hooks/useElevenLabsScribe";
+import { FileText, Clock, Loader2, Wifi, WifiOff, Save, CheckCircle, Zap, Video, Globe } from "lucide-react";
 import { useVideoAudioTranscription } from "@/hooks/useVideoAudioTranscription";
 import { TranscriptChunk } from "@/hooks/useLiveBroadcast";
 import { supabase } from "@/integrations/supabase/client";
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { VolumeIndicator } from "./VolumeIndicator";
 import { useToast } from "@/hooks/use-toast";
 import { generateUUID } from "@/lib/utils";
 
@@ -50,8 +47,6 @@ export const LiveTranscriptRealtime = ({
   onEventDetected,
 }: LiveTranscriptRealtimeProps) => {
   const { toast } = useToast();
-  // Audio source: "mic" for microphone (ElevenLabs), "video" for video audio (Whisper)
-  const [audioSource, setAudioSource] = useState<"mic" | "video">("video");
   const [transcriptionLanguage, setTranscriptionLanguage] = useState<string>("pt");
   
   // Use useState instead of useRef for re-rendering
@@ -191,7 +186,7 @@ export const LiveTranscriptRealtime = ({
             match_id: matchId,
             audio_type: "live_transcript",
             script: fullTranscript,
-            voice: "elevenlabs-scribe",
+            voice: "whisper-local",
           });
       }
 
@@ -233,62 +228,9 @@ export const LiveTranscriptRealtime = ({
     extractEvents(text);
   }, [onTranscriptUpdate, extractEvents, saveTranscriptToDatabase]);
 
-  // Track if we've attempted fallback
-  const [hasFallenBack, setHasFallenBack] = useState(false);
-  const connectionAttemptRef = useRef(0);
-
-  // ElevenLabs Scribe for microphone with enhanced error handling
-  const scribe = useElevenLabsScribe({
-    onTranscript: (text) => {
-      if (audioSource !== "mic") return;
-      handleVideoTranscript(text);
-    },
-    onPartialTranscript: (text) => {
-      // Partial transcript is handled by the hook
-    },
-    onConnectionChange: (connected) => {
-      console.log('Scribe connection changed:', connected);
-      if (connected) {
-        connectionAttemptRef.current = 0;
-      }
-    },
-    onConnectionError: (errorMsg) => {
-      console.error('Scribe connection error callback:', errorMsg);
-      
-      // Check for quota exceeded errors
-      const isQuotaError = errorMsg?.toLowerCase?.()?.includes('quota') || 
-                           errorMsg?.toLowerCase?.()?.includes('exceeded') ||
-                           errorMsg?.toLowerCase?.()?.includes('limit');
-      
-      if (isQuotaError) {
-        console.warn('ElevenLabs quota exceeded - switching to video audio');
-        toast({
-          title: "Quota ElevenLabs excedida",
-          description: "Alternando para transcrição via áudio do vídeo...",
-          variant: "destructive"
-        });
-        setHasFallenBack(true);
-        setAudioSource("video");
-        return;
-      }
-      
-      // If connection failed after retries and we're recording, fallback to video mode
-      if (isRecording && audioSource === "mic" && !hasFallenBack && videoElement) {
-        console.log('Falling back to video audio transcription');
-        setHasFallenBack(true);
-        setAudioSource("video");
-        toast({
-          title: "Modo alternativo ativado",
-          description: "Usando áudio do vídeo para transcrição",
-        });
-      }
-    },
-  });
-
-  // Video audio transcription hook
+  // Video audio transcription hook (Whisper Local)
   const videoTranscription = useVideoAudioTranscription({
     onTranscript: (text) => {
-      if (audioSource !== "video") return;
       handleVideoTranscript(text);
     },
     onPartialTranscript: (text) => {
@@ -298,60 +240,29 @@ export const LiveTranscriptRealtime = ({
     language: transcriptionLanguage,
   });
 
-  // Connect/disconnect based on recording state and audio source
+  // Connect/disconnect based on recording state
   useEffect(() => {
     let isMounted = true;
     
     const connectWithDelay = async () => {
-      if (isRecording) {
+      if (isRecording && videoElement) {
         // Reset state when starting
         setChunks([]);
         setTranscriptBuffer("");
         setEventsExtracted(0);
-        setHasFallenBack(false);
         
-        if (audioSource === "mic") {
-          // Disconnect video if connected
-          if (videoTranscription.isConnected) {
-            videoTranscription.disconnect();
-          }
-          
-          // Add small delay to prevent race conditions
-          await new Promise(resolve => setTimeout(resolve, 300));
-          
-          // Check if still mounted before connecting
-          if (!isMounted) return;
-          
-          // Connect microphone
-          if (!scribe.isConnected && !scribe.isConnecting) {
-            console.log('Initiating Scribe connection...');
-            const success = await scribe.connect();
-            if (!success) {
-              console.warn('Initial Scribe connection failed, will retry');
-            }
-          }
-        } else if (audioSource === "video" && videoElement) {
-          // Disconnect microphone if connected
-          if (scribe.isConnected) {
-            scribe.disconnect();
-          }
-          
-          // Add small delay to prevent race conditions
-          await new Promise(resolve => setTimeout(resolve, 300));
-          
-          // Check if still mounted before connecting
-          if (!isMounted) return;
-          
-          // Connect to video audio
-          if (!videoTranscription.isConnected && !videoTranscription.isConnecting) {
-            videoTranscription.connect(videoElement);
-          }
+        // Add small delay to prevent race conditions
+        await new Promise(resolve => setTimeout(resolve, 300));
+        
+        // Check if still mounted before connecting
+        if (!isMounted) return;
+        
+        // Connect to video audio
+        if (!videoTranscription.isConnected && !videoTranscription.isConnecting) {
+          videoTranscription.connect(videoElement);
         }
       } else {
-        // Disconnect both when not recording
-        if (scribe.isConnected) {
-          scribe.disconnect();
-        }
+        // Disconnect when not recording
         if (videoTranscription.isConnected) {
           videoTranscription.disconnect();
         }
@@ -360,17 +271,10 @@ export const LiveTranscriptRealtime = ({
     
     connectWithDelay();
     
-    // Cleanup on unmount - disconnect all transcription services
+    // Cleanup on unmount
     return () => {
       isMounted = false;
       console.log('[LiveTranscriptRealtime] Cleanup on unmount');
-      
-      // Force disconnect both services to prevent orphaned connections
-      try {
-        scribe.disconnect();
-      } catch (e) {
-        console.warn('[LiveTranscriptRealtime] Error disconnecting scribe:', e);
-      }
       
       try {
         videoTranscription.disconnect();
@@ -378,16 +282,14 @@ export const LiveTranscriptRealtime = ({
         console.warn('[LiveTranscriptRealtime] Error disconnecting video transcription:', e);
       }
     };
-  }, [isRecording, audioSource, videoElement]);
+  }, [isRecording, videoElement]);
 
   // Get active transcription state
-  const activeTranscription = audioSource === "mic" ? scribe : videoTranscription;
-  const isConnected = activeTranscription.isConnected;
-  const isConnecting = audioSource === "mic" ? scribe.isConnecting : videoTranscription.isConnecting;
-  const isReconnecting = audioSource === "mic" && scribe.connectionStatus === 'reconnecting';
-  const partialTranscript = activeTranscription.partialTranscript;
-  const committedTranscripts = activeTranscription.committedTranscripts;
-  const transcriptionError = activeTranscription.error;
+  const isConnected = videoTranscription.isConnected;
+  const isConnecting = videoTranscription.isConnecting;
+  const partialTranscript = videoTranscription.partialTranscript;
+  const committedTranscripts = videoTranscription.committedTranscripts;
+  const transcriptionError = videoTranscription.error;
 
   const wordCount = transcriptBuffer.trim().split(/\s+/).filter(Boolean).length + 
     (partialTranscript ? partialTranscript.split(/\s+/).filter(Boolean).length : 0);
@@ -401,49 +303,31 @@ export const LiveTranscriptRealtime = ({
         </h3>
         
         <div className="flex items-center gap-2">
-          {/* Language Selector (only for video/Whisper mode) */}
-          {audioSource === "video" && (
-            <Select
-              value={transcriptionLanguage}
-              onValueChange={setTranscriptionLanguage}
-              disabled={isRecording}
-            >
-              <SelectTrigger className="w-[110px] h-7 text-xs">
-                <Globe className="h-3 w-3 mr-1" />
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {LANGUAGES.map((lang) => (
-                  <SelectItem key={lang.code} value={lang.code} className="text-xs">
-                    <span className="mr-1">{lang.flag}</span>
-                    {lang.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          )}
-
-          {/* Audio Source Toggle */}
-          <ToggleGroup
-            type="single"
-            value={audioSource}
-            onValueChange={(value) => value && setAudioSource(value as "mic" | "video")}
+          {/* Language Selector */}
+          <Select
+            value={transcriptionLanguage}
+            onValueChange={setTranscriptionLanguage}
             disabled={isRecording}
-            className="h-8"
           >
-            <ToggleGroupItem value="mic" className="text-xs px-2 h-7 gap-1">
-              <Mic className="h-3 w-3" />
-              Microfone
-            </ToggleGroupItem>
-            <ToggleGroupItem 
-              value="video" 
-              className="text-xs px-2 h-7 gap-1"
-              disabled={!videoElement}
-            >
-              <Video className="h-3 w-3" />
-              Áudio do Vídeo
-            </ToggleGroupItem>
-          </ToggleGroup>
+            <SelectTrigger className="w-[110px] h-7 text-xs">
+              <Globe className="h-3 w-3 mr-1" />
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {LANGUAGES.map((lang) => (
+                <SelectItem key={lang.code} value={lang.code} className="text-xs">
+                  <span className="mr-1">{lang.flag}</span>
+                  {lang.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {/* Source indicator */}
+          <Badge variant="outline" className="text-xs gap-1">
+            <Video className="h-3 w-3" />
+            Whisper Local
+          </Badge>
         </div>
       </div>
 
@@ -461,13 +345,7 @@ export const LiveTranscriptRealtime = ({
             Salvo
           </Badge>
         )}
-        {isReconnecting && (
-          <Badge variant="outline" className="text-orange-500 border-orange-500/50">
-            <RefreshCw className="h-3 w-3 mr-1 animate-spin" />
-            Reconectando... ({scribe.retryCount + 1}/3)
-          </Badge>
-        )}
-        {isConnecting && !isReconnecting && (
+        {isConnecting && (
           <Badge variant="outline" className="text-blue-500 border-blue-500/50">
             <Loader2 className="h-3 w-3 mr-1 animate-spin" />
             Conectando...
@@ -478,7 +356,7 @@ export const LiveTranscriptRealtime = ({
             <Wifi className="h-3 w-3 mr-1" />
             Kakttus AI
           </Badge>
-        ) : !isRecording ? null : !isConnecting && !isReconnecting ? (
+        ) : !isRecording ? null : !isConnecting ? (
           <Badge variant="outline" className="text-muted-foreground border-muted-foreground/50">
             <WifiOff className="h-3 w-3 mr-1" />
             Desconectado
@@ -496,142 +374,74 @@ export const LiveTranscriptRealtime = ({
         {isExtracting && (
           <Badge variant="outline" className="text-purple-500 border-purple-500/50">
             <Loader2 className="h-3 w-3 mr-1 animate-spin" />
-            Analisando...
+            Extraindo...
           </Badge>
-        )}
-        
-        {/* Error Badge */}
-        {transcriptionError && !isConnecting && !isReconnecting && (
-          <Badge variant="outline" className="text-red-500 border-red-500/50 max-w-[200px] truncate" title={transcriptionError}>
-            Erro: {transcriptionError.slice(0, 30)}{transcriptionError.length > 30 ? '...' : ''}
-          </Badge>
-        )}
-        
-        {/* Volume Indicator */}
-        {isRecording && isConnected && audioSource === "video" && (
-          <VolumeIndicator 
-            analyser={videoTranscription.getAnalyser()} 
-            isActive={isConnected}
-          />
         )}
       </div>
 
-      <ScrollArea className="flex-1 max-h-[350px]">
-        <div ref={scrollRef} className="space-y-3 pr-2">
-          {chunks.length === 0 && committedTranscripts.length === 0 && !partialTranscript ? (
-            <div className="text-center text-muted-foreground py-8">
-              {isRecording ? (
-                <div className="space-y-2">
-                  {isConnecting ? (
-                    <>
-                      <Loader2 className="h-8 w-8 mx-auto animate-spin text-primary" />
-                      <p>Conectando ao Kakttus AI...</p>
-                    </>
-                  ) : isConnected ? (
-                    <>
-                      {audioSource === "mic" ? (
-                        <Mic className="h-8 w-8 mx-auto text-green-500 animate-pulse" />
-                      ) : (
-                        <Video className="h-8 w-8 mx-auto text-green-500 animate-pulse" />
-                      )}
-                      <p>Ouvindo {audioSource === "mic" ? "microfone" : "áudio do vídeo"}...</p>
-                      <p className="text-xs">
-                        {audioSource === "mic" ? "Transcrição em tempo real" : "Transcrição a cada 10s"}
-                      </p>
-                    </>
-                  ) : audioSource === "video" && !videoElement ? (
-                    <>
-                      <Video className="h-8 w-8 mx-auto text-yellow-500" />
-                      <p>Carregue um vídeo primeiro</p>
-                      <p className="text-xs">O vídeo precisa estar em reprodução</p>
-                    </>
-                  ) : (
-                    <>
-                      <Mic className="h-8 w-8 mx-auto text-red-500 animate-pulse" />
-                      <p>Aguardando conexão...</p>
-                    </>
-                  )}
-                </div>
-              ) : (
-                <div className="space-y-2">
-                  <p>Inicie a gravação para ver a transcrição</p>
-                  <p className="text-xs">
-                    {audioSource === "mic" 
-                      ? "Usando microfone (tempo real)" 
-                      : "Usando áudio do vídeo (a cada 10s)"}
-                  </p>
-                </div>
-              )}
+      {/* Transcript Content */}
+      <ScrollArea className="flex-1 pr-2" ref={scrollRef}>
+        <div className="space-y-2">
+          {/* Current partial transcript */}
+          {partialTranscript && (
+            <div className="p-2 bg-primary/10 rounded-lg border border-primary/20">
+              <div className="flex items-center gap-2 mb-1">
+                <Badge variant="outline" className="text-xs bg-primary/20">
+                  <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                  Ao vivo
+                </Badge>
+              </div>
+              <p className="text-sm text-foreground/80 italic">{partialTranscript}</p>
             </div>
-          ) : (
-            <div className="flex flex-col">
-              {/* Partial transcript (live) - sempre no topo */}
-              {partialTranscript && (
-                <div className="border-l-4 border-yellow-500 pl-3 py-2 bg-yellow-500/10 rounded-r-lg animate-pulse mb-3 sticky top-0 z-10">
-                  <div className="flex items-center gap-2 text-xs text-yellow-500 mb-1">
-                    {audioSource === "mic" ? <Mic className="h-3 w-3" /> : <Video className="h-3 w-3" />}
-                    <span className="font-semibold">Ao vivo</span>
-                  </div>
-                  <p className="text-sm text-foreground italic">{partialTranscript}</p>
-                </div>
-              )}
+          )}
 
-              {/* Committed transcripts - mais recente primeiro, com animação de entrada */}
-              {[...committedTranscripts].reverse().map((transcript, index) => {
-                const isLatest = index === 0;
-                
-                return (
-                  <div 
-                    key={transcript.id} 
-                    className={`
-                      pl-3 py-2 mb-2 rounded-r-lg transition-all duration-500 animate-fade-in
-                      ${isLatest 
-                        ? "border-l-4 border-primary bg-primary/10 shadow-lg transform scale-[1.02]" 
-                        : "border-l-2 border-muted-foreground/30 opacity-60 hover:opacity-100"
-                      }
-                    `}
-                  >
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground mb-1">
-                      <Clock className="h-3 w-3" />
-                      <span className={isLatest ? "font-semibold text-foreground" : ""}>
-                        {new Date(transcript.timestamp).toLocaleTimeString()}
-                      </span>
-                      {isLatest && (
-                        <Badge variant="default" className="text-[10px] px-1.5 py-0 h-4 bg-primary">
-                          Mais recente
-                        </Badge>
-                      )}
-                      {audioSource === "video" && (
-                        <Badge variant="outline" className="text-[10px] px-1 py-0 h-4">Kakttus</Badge>
-                      )}
-                    </div>
-                    <p className={`text-sm ${isLatest ? "text-foreground font-medium" : "text-foreground/80"}`}>
-                      {transcript.text}
-                    </p>
-                  </div>
-                );
-              })}
+          {/* Committed transcripts - newest first */}
+          {[...chunks].reverse().map((chunk) => (
+            <div key={chunk.id} className="p-2 bg-muted/30 rounded-lg">
+              <div className="flex items-center gap-2 mb-1">
+                <Badge variant="secondary" className="text-xs">
+                  <Clock className="h-3 w-3 mr-1" />
+                  {chunk.minute}:{String(chunk.second).padStart(2, "0")}
+                </Badge>
+              </div>
+              <p className="text-sm text-foreground">{chunk.text}</p>
+            </div>
+          ))}
+
+          {/* Empty state */}
+          {!isRecording && chunks.length === 0 && !partialTranscript && (
+            <div className="text-center py-8 text-muted-foreground">
+              <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
+              <p className="text-sm">Inicie a gravação para ver a transcrição ao vivo</p>
+              <p className="text-xs mt-1">Usando Whisper Local (GPU)</p>
+            </div>
+          )}
+
+          {/* Recording but no transcripts yet */}
+          {isRecording && chunks.length === 0 && !partialTranscript && (
+            <div className="text-center py-8 text-muted-foreground">
+              <Loader2 className="h-8 w-8 mx-auto mb-2 animate-spin" />
+              <p className="text-sm">Aguardando áudio...</p>
+              {!videoElement && (
+                <p className="text-xs mt-1 text-yellow-500">
+                  Nenhum vídeo disponível para captura de áudio
+                </p>
+              )}
             </div>
           )}
         </div>
       </ScrollArea>
 
-      {/* Status indicator */}
-      {isRecording && isConnected && (
-        <div className="mt-3 pt-3 border-t border-border">
-          <p className="text-xs text-muted-foreground flex items-center gap-2">
-            <span className="relative flex h-2 w-2">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>
-            </span>
-            Transcrição em tempo real via Kakttus AI
-          </p>
+      {/* Error Display */}
+      {transcriptionError && (
+        <div className="mt-2 p-2 bg-destructive/10 border border-destructive/20 rounded-lg">
+          <p className="text-xs text-destructive">{transcriptionError}</p>
         </div>
       )}
 
-      {transcriptionError && (
-        <div className="mt-2 p-2 bg-destructive/10 rounded text-xs text-destructive">
-          {transcriptionError}
+      {saveError && (
+        <div className="mt-2 p-2 bg-destructive/10 border border-destructive/20 rounded-lg">
+          <p className="text-xs text-destructive">Erro ao salvar: {saveError}</p>
         </div>
       )}
     </div>
