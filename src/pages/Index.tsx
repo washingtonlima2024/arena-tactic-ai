@@ -87,8 +87,7 @@ export default function Dashboard() {
     const totalGoals = matchEvents.filter(e => e.event_type === 'goal').length;
     const totalShots = matchEvents.filter(e => 
       e.event_type === 'shot' || 
-      e.event_type === 'shot_on_target' || 
-      e.event_type === 'Finalização'
+      e.event_type === 'shot_on_target'
     ).length;
     const totalFouls = matchEvents.filter(e => e.event_type === 'foul').length;
     const totalCards = matchEvents.filter(e => 
