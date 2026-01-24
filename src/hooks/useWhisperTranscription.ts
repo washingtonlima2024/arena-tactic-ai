@@ -43,7 +43,10 @@ export function useWhisperTranscription() {
     matchId: string,
     videoId: string,
     videoSizeMB?: number,
-    halfType?: 'first' | 'second'
+    halfType?: 'first' | 'second',
+    autoAnalyze?: boolean,
+    homeTeam?: string,
+    awayTeam?: string
   ): Promise<TranscriptionResult | null> => {
     console.log('[Server Transcription] ========================================');
     console.log('[Server Transcription] Usando transcrição server-side (Whisper Local)...');
@@ -86,7 +89,10 @@ export function useWhisperTranscription() {
           matchId, 
           numParts,
           halfType: halfType || 'first',
-          halfDuration: 45
+          halfDuration: 45,
+          autoAnalyze,
+          homeTeam,
+          awayTeam
         });
         
         clearInterval(progressInterval);
@@ -121,7 +127,15 @@ export function useWhisperTranscription() {
       message: 'Transcrevendo no servidor (Whisper Local)...' 
     });
 
-    const data = await apiClient.transcribeLargeVideo({ videoUrl, matchId, language: 'pt', halfType }) as any;
+    const data = await apiClient.transcribeLargeVideo({ 
+      videoUrl, 
+      matchId, 
+      language: 'pt', 
+      halfType,
+      autoAnalyze,
+      homeTeam,
+      awayTeam
+    }) as any;
 
     if (!data?.success) {
       if (data?.requiresLocalServer) {
@@ -150,7 +164,10 @@ export function useWhisperTranscription() {
     matchId: string,
     videoId: string,
     videoSizeMB?: number,
-    halfType?: 'first' | 'second'
+    halfType?: 'first' | 'second',
+    autoAnalyze?: boolean,
+    homeTeam?: string,
+    awayTeam?: string
   ): Promise<TranscriptionResult | null> => {
     console.log('[Transcrição] ========================================');
     console.log('[Transcrição] Iniciando transcrição para:', videoUrl);
@@ -172,7 +189,7 @@ export function useWhisperTranscription() {
           : 'Transcrevendo áudio (Whisper Local)...' 
       });
       
-      const serverResult = await transcribeWithServer(videoUrl, matchId, videoId, videoSizeMB, halfType);
+      const serverResult = await transcribeWithServer(videoUrl, matchId, videoId, videoSizeMB, halfType, autoAnalyze, homeTeam, awayTeam);
       if (serverResult && serverResult.text && serverResult.text.trim().length > 0) {
         console.log('[Transcrição] ✓ Transcrição completa:', serverResult.text.length, 'caracteres');
         setTranscriptionProgress({ stage: 'complete', progress: 100, message: 'Transcrição completa!' });
