@@ -7761,7 +7761,8 @@ def _process_match_pipeline(job_id: str, data: dict):
                 for event in all_events:
                     if event.event_type == 'goal':
                         # Verificar time do gol nos metadados
-                        metadata = event.metadata or {}
+                        # CORRIGIDO: usar event_metadata, não metadata
+                        metadata = event.event_metadata or {}
                         team = metadata.get('team', '')
                         description = (event.description or '').lower()
                         
@@ -8806,7 +8807,8 @@ def finalize_live_clips():
                 continue
             
             # Prepare event data for extraction
-            metadata = event.metadata or {}
+            # CORRIGIDO: usar event_metadata (nome do atributo SQLAlchemy), não metadata
+            metadata = event.event_metadata or {}
             event_data = {
                 'id': event.id,
                 'minute': event.minute or 0,
@@ -9077,7 +9079,8 @@ def analyze_live_match():
         preserved_count = 0
         deleted_count = 0
         for ev in existing_events:
-            metadata = ev.metadata or {}
+            # CORRIGIDO: usar event_metadata, não metadata
+            metadata = ev.event_metadata or {}
             source = metadata.get('source', '') if isinstance(metadata, dict) else ''
             # Preserve manual events, delete only auto-detected
             if source in manual_sources:
@@ -9820,7 +9823,7 @@ def regenerate_match_clips(match_id):
                             'second': e.second or 0,
                             'event_type': e.event_type,
                             'description': e.description,
-                            'metadata': e.metadata or {}
+                            'metadata': e.event_metadata or {}
                         }
                         events_dicts.append(evt)
                         
@@ -9863,7 +9866,7 @@ def regenerate_match_clips(match_id):
                             'second': e.second or 0,
                             'event_type': e.event_type,
                             'description': e.description,
-                            'metadata': e.metadata or {}
+                            'metadata': e.event_metadata or {}
                         }
                         events_dicts.append(evt)
                         
@@ -10298,6 +10301,9 @@ def recalculate_event_timestamps(match_id: str):
                 new_timestamps.append(new_ts)
         
         # 6. Atualizar eventos
+        # IMPORTANTE: Usar flag_modified para forçar SQLAlchemy detectar mudanças no JSON
+        from sqlalchemy.orm.attributes import flag_modified
+        
         updated = 0
         for i, ed in enumerate(event_data):
             event = ed['event']
@@ -10309,7 +10315,10 @@ def recalculate_event_timestamps(match_id: str):
             metadata['videoSecond'] = int(new_vs)
             metadata['recalculated'] = True
             metadata['recalculatedAt'] = datetime.utcnow().isoformat()
+            
+            # CRÍTICO: Atribuir o dict modificado e marcar como alterado
             event.event_metadata = metadata
+            flag_modified(event, 'event_metadata')
             
             # Atualizar minuto/segundo para exibição
             new_minute = int(new_vs // 60)
@@ -10328,6 +10337,8 @@ def recalculate_event_timestamps(match_id: str):
             updated += 1
             print(f"[RECALC] Evento {event.event_type}: {ed['original_videoSecond']:.0f}s → {new_vs:.0f}s ({new_minute}:{new_second:02d})")
         
+        # Flush e commit para garantir persistência
+        session.flush()
         session.commit()
         
         print(f"[RECALC] ✓ {updated} eventos recalculados para vídeo de {video_duration_sec:.0f}s")
