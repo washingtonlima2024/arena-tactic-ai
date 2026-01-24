@@ -109,7 +109,34 @@ export const autoDiscoverServer = async (): Promise<string | null> => {
   discoveryPromise = (async () => {
     console.log('[ApiMode] Iniciando auto-descoberta do servidor...');
     
-    // Primeiro, tentar o servidor já descoberto anteriormente
+    // Se estiver no Lovable Cloud, pular descoberta local (não tem acesso à rede do usuário)
+    if (isLovableEnvironment()) {
+      console.log('[ApiMode] Lovable Cloud detectado, pulando descoberta local');
+      
+      // Verificar apenas Cloudflare Tunnel
+      const cloudflare = getCloudflareUrl();
+      if (cloudflare) {
+        try {
+          const response = await fetch(`${cloudflare}/health?light=true`, {
+            signal: AbortSignal.timeout(10000), // Timeout maior para túneis
+          });
+          if (response.ok) {
+            console.log(`[ApiMode] Conectado via Cloudflare Tunnel: ${cloudflare}`);
+            setDiscoveredServer(cloudflare);
+            discoveryInProgress = false;
+            return cloudflare;
+          }
+        } catch (e) {
+          console.warn('[ApiMode] Cloudflare Tunnel não respondeu:', e);
+        }
+      }
+      
+      console.warn('[ApiMode] Nenhum túnel configurado ou disponível');
+      discoveryInProgress = false;
+      return null;
+    }
+    
+    // Primeiro, tentar o servidor já descoberto anteriormente (apenas fora do Lovable Cloud)
     const cached = getDiscoveredServer();
     if (cached) {
       try {
@@ -128,7 +155,7 @@ export const autoDiscoverServer = async (): Promise<string | null> => {
       }
     }
     
-    // Tentar cada endpoint em paralelo para máxima velocidade
+    // Tentar cada endpoint local em paralelo para máxima velocidade
     const results = await Promise.allSettled(
       LOCAL_ENDPOINTS.map(async (endpoint) => {
         try {
