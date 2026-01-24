@@ -1106,9 +1106,16 @@ export default function VideoUpload() {
             // Upload part
             const uploadResult = await apiClient.uploadFile(matchId, 'temp', partFile, partFileName);
             
-            // Transcribe part
+            // Transcribe part - include matchId and autoAnalyze
+            const homeTeamName = teams.find(t => t.id === matchData.homeTeamId)?.name || existingMatch?.home_team?.name || 'Time A';
+            const awayTeamName = teams.find(t => t.id === matchData.awayTeamId)?.name || existingMatch?.away_team?.name || 'Time B';
             const transcriptionResult = await apiClient.transcribeLargeVideo({
-              videoUrl: uploadResult.url
+              videoUrl: uploadResult.url,
+              matchId,
+              halfType: 'first',
+              autoAnalyze: true,
+              homeTeam: homeTeamName,
+              awayTeam: awayTeamName
             });
             
             if (transcriptionResult?.text) {
@@ -1160,10 +1167,14 @@ export default function VideoUpload() {
           
           // Generate a unique videoId for the audio file
           const videoId = segment.id || generateUUID();
+          const sizeMB = (segment.size || 0) / (1024 * 1024);
+          const halfType = segment.half || (segment.videoType === 'second_half' ? 'second' : 'first');
+          const homeTeamName = teams.find(t => t.id === matchData.homeTeamId)?.name || existingMatch?.home_team?.name || 'Time A';
+          const awayTeamName = teams.find(t => t.id === matchData.awayTeamId)?.name || existingMatch?.away_team?.name || 'Time B';
           
           try {
             // Use FFmpeg to extract audio, upload, and transcribe
-            const result = await transcribeVideo(segment.url, matchId, videoId);
+            const result = await transcribeVideo(segment.url, matchId, videoId, sizeMB, halfType, true, homeTeamName, awayTeamName);
             
             if (result?.text) {
               console.log('[FFmpeg] ✓ Transcrição FFmpeg completa:', result.text.length, 'caracteres');
@@ -1199,10 +1210,17 @@ export default function VideoUpload() {
         }
         
         console.log('[Fallback] Invocando transcribe-large-video via apiClient...');
+        const homeTeamName = teams.find(t => t.id === matchData.homeTeamId)?.name || existingMatch?.home_team?.name || 'Time A';
+        const awayTeamName = teams.find(t => t.id === matchData.awayTeamId)?.name || existingMatch?.away_team?.name || 'Time B';
         let data: { success?: boolean; text?: string; srtContent?: string; requiresSrt?: boolean; requiresLocalServer?: boolean; suggestion?: string; error?: string };
         try {
           data = await apiClient.transcribeLargeVideo({ 
-            videoUrl: requestBody.videoUrl || requestBody.embedUrl 
+            videoUrl: requestBody.videoUrl || requestBody.embedUrl,
+            matchId,
+            halfType: segment.half || (segment.videoType === 'second_half' ? 'second' : 'first'),
+            autoAnalyze: true,
+            homeTeam: homeTeamName,
+            awayTeam: awayTeamName
           });
         } catch (error: any) {
           console.error(`[Tentativa ${attempt}] Erro na transcrição Whisper:`, error);

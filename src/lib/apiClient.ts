@@ -928,6 +928,9 @@ export const apiClient = {
     numParts?: number; 
     halfType?: 'first' | 'second';
     halfDuration?: number;
+    autoAnalyze?: boolean;
+    homeTeam?: string;
+    awayTeam?: string;
   }): Promise<{ 
     success: boolean; 
     text: string; 
@@ -935,6 +938,9 @@ export const apiClient = {
     partsTranscribed?: number;
     totalParts?: number;
     parts?: Array<{ part: number; text: string; startMinute: number }>;
+    autoAnalyzed?: boolean;
+    eventsDetected?: number;
+    autoAnalyzeError?: string;
   }> => {
     await ensureServerAvailable();
     
@@ -946,7 +952,10 @@ export const apiClient = {
         matchId: data.matchId,
         numParts: data.numParts || 2,
         halfType: data.halfType || 'first',
-        halfDuration: data.halfDuration || 45
+        halfDuration: data.halfDuration || 45,
+        autoAnalyze: data.autoAnalyze,
+        homeTeam: data.homeTeam,
+        awayTeam: data.awayTeam
       })
     }, 1800000); // 30 minutos
   },
