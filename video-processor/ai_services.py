@@ -3024,6 +3024,56 @@ RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL."""
                 # Deduplication
                 deduplicated_events = deduplicate_goal_events(validated_events)
                 
+                # NOVO: Salvar JSONs no fluxo legado também (paridade com Ollama/GPT-4o)
+                if match_id:
+                    try:
+                        from datetime import datetime
+                        from storage import get_subfolder_path
+                        json_path = get_subfolder_path(match_id, 'json')
+                        
+                        # validated_events_{half}.json - eventos finais validados
+                        validated_result = {
+                            "match_id": match_id,
+                            "validated_at": datetime.utcnow().isoformat() + "Z",
+                            "validator": "gemini_legacy",
+                            "half": match_half,
+                            "home_team": home_team,
+                            "away_team": away_team,
+                            "events": deduplicated_events,
+                            "summary": {
+                                "total_detected": len(events),
+                                "validated": len(validated_events),
+                                "confirmed": len(deduplicated_events),
+                                "rejected": len(validated_events) - len(deduplicated_events)
+                            }
+                        }
+                        validated_filename = f"validated_events_{match_half}.json"
+                        with open(json_path / validated_filename, 'w', encoding='utf-8') as f:
+                            json.dump(validated_result, f, ensure_ascii=False, indent=2)
+                        print(f"[AI] ✓ Validados salvos: json/{validated_filename}")
+                        
+                        # detected_events_{half}.json - eventos brutos antes da validação
+                        detected_result = {
+                            "match_id": match_id,
+                            "detected_at": datetime.utcnow().isoformat() + "Z",
+                            "detector": "gemini_legacy",
+                            "half": match_half,
+                            "home_team": home_team,
+                            "away_team": away_team,
+                            "events": events,
+                            "summary": {
+                                "raw_detected": len(events),
+                                "goals": len([e for e in events if e.get('event_type') == 'goal'])
+                            }
+                        }
+                        detected_filename = f"detected_events_{match_half}.json"
+                        with open(json_path / detected_filename, 'w', encoding='utf-8') as f:
+                            json.dump(detected_result, f, ensure_ascii=False, indent=2)
+                        print(f"[AI] ✓ Detectados salvos: json/{detected_filename}")
+                        
+                    except Exception as e:
+                        print(f"[AI] ⚠ Erro ao salvar JSONs Gemini: {e}")
+                
                 return deduplicated_events
             else:
                 last_error = f"No JSON array found in response: {response[:200]}"
