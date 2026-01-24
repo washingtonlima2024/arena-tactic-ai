@@ -290,7 +290,7 @@ def load_api_keys_from_db():
         elevenlabs_enabled = _bool_from_setting(values.get('elevenlabs_enabled'), True)
         
         # Local Whisper settings (FREE transcription)
-        local_whisper_enabled = _bool_from_setting(values.get('local_whisper_enabled'), False)
+        local_whisper_enabled = _bool_from_setting(values.get('local_whisper_enabled'), True)  # FREE by default!
         local_whisper_model = values.get('local_whisper_model') or 'base'
 
         # Prefer DB values, fallback to environment variables if DB is missing
@@ -327,7 +327,7 @@ def load_api_keys_from_db():
         # Ollama optional settings
         ollama_url = values.get('ollama_url')
         ollama_model = values.get('ollama_model')
-        ollama_enabled = _bool_from_setting(values.get('ollama_enabled'), False)
+        ollama_enabled = _bool_from_setting(values.get('ollama_enabled'), True)  # FREE by default!
 
         if ollama_url or ollama_model or ollama_enabled:
             ai_services.set_api_keys(
@@ -3045,8 +3045,7 @@ def upsert_api_setting():
         
         session.commit()
         
-        # Sincronizar automaticamente com Cloud (baseado em padrões parametrizados)
-        sync_setting_to_cloud(data['setting_key'], data.get('setting_value'))
+        # NOTA: Sistema 100% local - Cloud sync removido
         
         return jsonify(setting.to_dict())
     except Exception as e:
