@@ -76,19 +76,15 @@ export function MatchEditDialog({
       const goals = events.filter(e => e.event_type === 'goal').length;
       const shots = events.filter(e => 
         e.event_type === 'shot' || 
-        e.event_type === 'shot_on_target' ||
-        e.event_type === 'Finalização'
+        e.event_type === 'shot_on_target'
       ).length;
       const fouls = events.filter(e => 
-        e.event_type === 'foul' || 
-        e.event_type === 'Falta' ||
-        e.event_type === 'fault'
+        e.event_type === 'foul'
       ).length;
       const yellowCards = events.filter(e => e.event_type === 'yellow_card').length;
       const redCards = events.filter(e => e.event_type === 'red_card').length;
       const corners = events.filter(e => 
-        e.event_type === 'corner' || 
-        e.event_type === 'Escanteio'
+        e.event_type === 'corner'
       ).length;
       
       return {

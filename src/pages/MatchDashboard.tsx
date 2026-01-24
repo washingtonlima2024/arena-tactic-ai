@@ -383,7 +383,7 @@ function HighlightsTop({
     const corners = events.filter(e => e.event_type === 'corner');
     const offsides = events.filter(e => e.event_type === 'offside');
     const substitutions = events.filter(e => e.event_type === 'substitution');
-    const shots = events.filter(e => ['shot', 'shot_on_target', 'chance'].includes(e.event_type));
+    const shots = events.filter(e => ['shot', 'shot_on_target'].includes(e.event_type));
     const shotsOnTarget = events.filter(e => e.event_type === 'shot_on_target');
 
     // Count by team (using metadata.team or description analysis)
