@@ -44,7 +44,8 @@ import {
   Cloud,
   CloudUpload,
   Server,
-  Stethoscope
+  Stethoscope,
+  Brain
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
@@ -260,6 +261,7 @@ export default function Events() {
   const [isDiagnosingClips, setIsDiagnosingClips] = useState(false);
   const [clipDiagnosis, setClipDiagnosis] = useState<any>(null);
   const [showDiagnosisDialog, setShowDiagnosisDialog] = useState(false);
+  const [isAnalyzingTranscription, setIsAnalyzingTranscription] = useState(false);
   
   const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useMatchEvents(currentMatchId);
 
@@ -277,6 +279,93 @@ export default function Events() {
 
     return () => clearInterval(interval);
   }, [currentMatchId, refetchEvents, isRecording, liveMatchId]);
+
+  // Check if match has transcription available (SRT files in storage)
+  const { data: availableTranscription } = useQuery({
+    queryKey: ['match-transcription', currentMatchId],
+    queryFn: async () => {
+      if (!currentMatchId) return null;
+      try {
+        // Check for existing SRT files via local server
+        const result = await apiClient.listMatchFiles(currentMatchId);
+        const srtFiles = result?.files?.srt || [];
+        
+        if (srtFiles.length > 0) {
+          // Fetch the first SRT file content via storage endpoint
+          const srtFile = srtFiles[0];
+          // Use apiClient.get to ensure correct base URL
+          try {
+            const srtContent = await apiClient.get<string>(`/api/storage/${currentMatchId}/srt/${srtFile.name}`);
+          
+            return {
+              hasTranscription: !!srtContent,
+              files: srtFiles,
+              content: typeof srtContent === 'string' ? srtContent : null,
+              fileName: srtFile.name
+            };
+          } catch {
+            return { hasTranscription: false, files: srtFiles, content: null, fileName: srtFile.name };
+          }
+        }
+        return { hasTranscription: false, files: [], content: null, fileName: null };
+      } catch {
+        return { hasTranscription: false, files: [], content: null, fileName: null };
+      }
+    },
+    enabled: !!currentMatchId && events.length === 0, // Only check when no events
+    staleTime: 60000, // 1 minute
+  });
+
+  // Handle analyzing existing transcription
+  const handleAnalyzeExistingTranscription = async () => {
+    if (!currentMatchId || !selectedMatch || !availableTranscription?.content) {
+      toast.error('Nenhuma transcrição disponível para analisar');
+      return;
+    }
+
+    setIsAnalyzingTranscription(true);
+    try {
+      const homeTeam = selectedMatch.home_team?.name || 'Casa';
+      const awayTeam = selectedMatch.away_team?.name || 'Visitante';
+      
+      // Determine half type from file name
+      const fileName = availableTranscription.fileName || '';
+      const halfType = fileName.includes('second') ? 'second' : 'first';
+      const startMinute = halfType === 'second' ? 45 : 0;
+      const endMinute = halfType === 'second' ? 90 : 45;
+      
+      console.log('[Events] Analisando transcrição existente:', {
+        matchId: currentMatchId,
+        halfType,
+        contentLength: availableTranscription.content.length
+      });
+      
+      const result = await apiClient.analyzeMatch({
+        matchId: currentMatchId,
+        transcription: availableTranscription.content,
+        homeTeam,
+        awayTeam,
+        gameStartMinute: startMinute,
+        gameEndMinute: endMinute,
+        halfType,
+        autoClip: true,
+        includeSubtitles: true
+      });
+      
+      if (result?.success) {
+        toast.success(`Análise concluída! ${result.events?.length || 0} eventos detectados.`);
+        refetchEvents();
+        queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
+      } else {
+        toast.error('Análise não retornou eventos');
+      }
+    } catch (error: any) {
+      console.error('[Events] Erro ao analisar transcrição:', error);
+      toast.error(`Erro na análise: ${error.message || 'Erro desconhecido'}`);
+    } finally {
+      setIsAnalyzingTranscription(false);
+    }
+  };
 
   // Handle refine events - simplified
   const handleRefineEvents = async () => {
@@ -1197,6 +1286,42 @@ export default function Events() {
               </Button>
             )}
           </div>
+        )}
+
+        {/* Alert: Transcription available but no events detected */}
+        {events.length === 0 && availableTranscription?.hasTranscription && currentMatchId && (
+          <Card className="border-yellow-500/30 bg-yellow-500/5">
+            <CardContent className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 py-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-full bg-yellow-500/10">
+                  <FileText className="h-5 w-5 text-yellow-500" />
+                </div>
+                <div>
+                  <p className="font-medium text-yellow-600">Transcrição disponível</p>
+                  <p className="text-sm text-muted-foreground">
+                    {availableTranscription.files?.length || 1} arquivo(s) SRT encontrado(s). Clique para analisar e detectar eventos automaticamente.
+                  </p>
+                </div>
+              </div>
+              <Button 
+                onClick={handleAnalyzeExistingTranscription}
+                disabled={isAnalyzingTranscription}
+                className="shrink-0"
+              >
+                {isAnalyzingTranscription ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Analisando...
+                  </>
+                ) : (
+                  <>
+                    <Brain className="mr-2 h-4 w-4" />
+                    Analisar com IA
+                  </>
+                )}
+              </Button>
+            </CardContent>
+          </Card>
         )}
 
         {/* Clip Generation Progress */}
