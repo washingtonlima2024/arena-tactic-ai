@@ -2174,6 +2174,116 @@ def _parse_ollama_events_fallback(text: str) -> List[Dict[str, Any]]:
     return events
 
 
+def detect_events_by_keywords(
+    transcription: str,
+    home_team: str,
+    away_team: str,
+    game_start_minute: int = 0
+) -> List[Dict[str, Any]]:
+    """
+    Fallback: Detecta eventos por palavras-chave quando IA falha.
+    Útil para garantir detecção mínima de gols e cartões.
+    """
+    import re
+    events = []
+    
+    # Padrões de detecção por keywords
+    patterns = {
+        'goal': [
+            r'(go+l|goo+l|golaço|golaaaaço|gooool)',
+            r'(é gol|foi gol|é golaço)',
+            r'(balança a rede|rede balança|bola na rede)',
+            r'(abriu o placar|empata|vira)',
+            r'(marcou|anotou|fez o gol)',
+        ],
+        'yellow_card': [
+            r'(cartão amarelo|amarelou|amarelo para)',
+            r'(recebeu amarelo|tomou amarelo)',
+            r'(advertido|advertência)',
+        ],
+        'red_card': [
+            r'(cartão vermelho|vermelho direto|expulso)',
+            r'(expulsão|foi expulso)',
+        ],
+        'penalty': [
+            r'(pênalti|penalti|penalty)',
+            r'(marca a penalidade|penalidade máxima)',
+        ],
+        'foul': [
+            r'(falta|faltou|fez falta)',
+            r'(derrubou|derruba)',
+        ],
+        'save': [
+            r'(defesa|defendeu|grande defesa)',
+            r'(para o goleiro|goleiro pegou)',
+        ],
+        'corner': [
+            r'(escanteio|corner)',
+        ],
+        'offside': [
+            r'(impedido|impedimento)',
+            r'(offside)',
+        ],
+    }
+    
+    # Procurar por timestamps no formato SRT (00:MM:SS)
+    timestamp_pattern = r'(\d{2}):(\d{2}):(\d{2})'
+    lines = transcription.split('\n')
+    
+    current_minute = game_start_minute
+    current_second = 0
+    
+    for i, line in enumerate(lines):
+        # Atualizar timestamp se encontrar
+        ts_match = re.search(timestamp_pattern, line)
+        if ts_match:
+            # Extrair minuto e segundo do timestamp SRT
+            _, mins, secs = ts_match.groups()
+            current_minute = game_start_minute + int(mins)
+            current_second = int(secs)
+            continue
+        
+        line_lower = line.lower()
+        
+        # Procurar cada tipo de evento
+        for event_type, keyword_patterns in patterns.items():
+            for pattern in keyword_patterns:
+                if re.search(pattern, line_lower, re.IGNORECASE):
+                    # Detectar time (home ou away)
+                    team = 'home'
+                    if away_team.lower() in line_lower:
+                        team = 'away'
+                    elif home_team.lower() in line_lower:
+                        team = 'home'
+                    
+                    # Evitar duplicatas no mesmo minuto
+                    already_exists = any(
+                        e.get('minute') == current_minute and 
+                        e.get('event_type') == event_type and
+                        abs(e.get('second', 0) - current_second) < 10
+                        for e in events
+                    )
+                    
+                    if not already_exists:
+                        event = {
+                            'minute': current_minute,
+                            'second': current_second,
+                            'event_type': event_type,
+                            'team': team,
+                            'description': line[:150],
+                            'confidence': 0.6,  # Menor confiança por ser keyword
+                            'is_highlight': event_type in ['goal', 'yellow_card', 'red_card', 'penalty'],
+                            'isOwnGoal': False,
+                            'source': 'keyword_fallback'
+                        }
+                        events.append(event)
+                        print(f"[Keyword Fallback] ✓ {event_type} aos {current_minute}'{current_second}\" ({team})")
+                    break  # Evitar múltiplos matches na mesma linha
+    
+    print(f"[Keyword Fallback] Total: {len(events)} eventos detectados por keywords")
+    return events
+
+
 def _analyze_events_with_ollama(
     transcription: str,
     home_team: str,
@@ -2335,6 +2445,26 @@ COMECE COM [ E TERMINE COM ]. NÃO USE ```. NÃO EXPLIQUE NADA.
                 print(f"[Ollama] ⚽ GOL: {g.get('minute', 0)}' - {g.get('team', 'unknown')}")
         else:
             print(f"[Ollama] ⚠️ Nenhum evento extraído!")
+        
+        # FALLBACK: Se Ollama retornou poucos eventos, usar keywords
+        if len(events) < 3:
+            print(f"[Ollama] ⚠️ Poucos eventos ({len(events)}), usando fallback por keywords...")
+            keyword_events = detect_events_by_keywords(
+                transcription=transcription,
+                home_team=home_team,
+                away_team=away_team,
+                game_start_minute=game_start_minute
+            )
+            # Adicionar eventos de keywords que não existam
+            for ke in keyword_events:
+                already_exists = any(
+                    abs(e.get('minute', 0) - ke.get('minute', 0)) < 2 and 
+                    e.get('event_type') == ke.get('event_type')
+                    for e in events
+                )
+                if not already_exists:
+                    events.append(ke)
+            print(f"[Ollama] Total após keywords: {len(events)} eventos")
         
         return events
             

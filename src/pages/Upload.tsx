@@ -33,7 +33,8 @@ import {
   Server,
   Cloud,
   Loader2,
-  Terminal
+  Terminal,
+  Trash2
 } from 'lucide-react';
 import { useTeams } from '@/hooks/useTeams';
 import { useCreateMatch } from '@/hooks/useMatches';
@@ -274,7 +275,16 @@ export default function VideoUpload() {
   const prevMatchIdRef = useRef<string | null>(null);
   
   // Reset the flag when match actually changes (not just re-renders)
+  // Também limpa quando importMode === 'new'
   useEffect(() => {
+    // SEMPRE limpar quando modo é 'new' (nova análise)
+    if (importMode === 'new') {
+      console.log('[Upload] Modo NOVA ANÁLISE - limpando segmentos');
+      setSegments([]);
+      hasLoadedExistingVideos.current = true; // Impede carregamento futuro
+      return;
+    }
+    
     if (activeMatchId !== prevMatchIdRef.current) {
       console.log('[Upload] Match ID mudou de', prevMatchIdRef.current, 'para', activeMatchId);
       
@@ -286,35 +296,40 @@ export default function VideoUpload() {
       prevMatchIdRef.current = activeMatchId;
       hasLoadedExistingVideos.current = false;
     }
-  }, [activeMatchId]);
+  }, [activeMatchId, importMode]);
 
   // Auto-load existing videos as segments when page loads with a match ID
-  // 🆕 Skip loading if mode=new (fresh analysis starts empty)
+  // Skip loading if mode=new (fresh analysis starts empty)
   useEffect(() => {
-    // Skip loading existing videos when mode=new (fresh analysis)
+    // Skip loading existing videos when mode=new (fresh analysis) 
+    // - já tratado no useEffect anterior
     if (importMode === 'new') {
-      console.log('[Upload] Modo NOVA ANÁLISE - não carregando vídeos anteriores');
-      hasLoadedExistingVideos.current = true; // Prevent future loads
       return;
     }
     
     // Only load ONCE for reimport mode
     if (existingVideos && 
         existingVideos.length > 0 && 
-        !hasLoadedExistingVideos.current) {
+        !hasLoadedExistingVideos.current &&
+        activeMatchId) {
       
       console.log('[Upload] Modo REIMPORTAR - carregando vídeos existentes:', existingVideos.length);
       hasLoadedExistingVideos.current = true;
       
       // Mesclar com segmentos existentes, removendo duplicatas
+      // CRITICAL: Filtrar por match_id para evitar mostrar vídeos de outras partidas
       setSegments(prev => {
         // IDs dos segmentos que já existem
         const existingIds = new Set(prev.map(s => s.id));
         const existingUrls = new Set(prev.map(s => s.url).filter(Boolean));
         
-        // Filtrar apenas vídeos novos do banco
+        // Filtrar apenas vídeos novos do banco que pertencem ao match atual
         const newFromDb: VideoSegment[] = existingVideos
-          .filter((video: any) => !existingIds.has(video.id) && !existingUrls.has(video.file_url))
+          .filter((video: any) => 
+            video.match_id === activeMatchId && // CRITICAL: Só vídeos desta partida
+            !existingIds.has(video.id) && 
+            !existingUrls.has(video.file_url)
+          )
           .map((video: any): VideoSegment => ({
             id: video.id,  // Use database ID to avoid duplicates
             name: video.file_name || 'Vídeo',
@@ -328,7 +343,6 @@ export default function VideoUpload() {
             progress: 100,
             status: 'complete' as const,
             isLink: false,
-            // 🆕 Incluir 'full' como primeiro tempo para associação de SRT
             half: video.video_type === 'second_half' ? 'second' as const : 
                   (video.video_type === 'first_half' || video.video_type === 'full') ? 'first' as const : undefined,
           }));
@@ -344,7 +358,7 @@ export default function VideoUpload() {
         return [...prev, ...newFromDb];
       });
     }
-  }, [existingVideos, importMode]);
+  }, [existingVideos, importMode, activeMatchId]);
 
   // Detect video duration using HTML5 video element
   const detectVideoDuration = (file: File): Promise<number> => {
@@ -2761,10 +2775,28 @@ export default function VideoUpload() {
               {/* Video Segments List */}
               {segments.length > 0 && (
                 <div className="space-y-4">
-                  <h3 className="font-medium flex items-center gap-2">
-                    <FileVideo className="h-5 w-5 text-emerald-400" />
-                    Vídeos Adicionados ({segments.length})
-                  </h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-medium flex items-center gap-2">
+                      <FileVideo className="h-5 w-5 text-emerald-400" />
+                      Vídeos Adicionados ({segments.length})
+                    </h3>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setSegments([]);
+                        hasLoadedExistingVideos.current = false;
+                        toast({
+                          title: "Lista limpa",
+                          description: "Todos os vídeos foram removidos da lista."
+                        });
+                      }}
+                      className="gap-2 text-muted-foreground hover:text-destructive"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                      Limpar Lista
+                    </Button>
+                  </div>
                   
                   {segments.map((segment, index) => (
                     <VideoSegmentCard
