@@ -2668,6 +2668,71 @@ def analyze_match_events(
                 print(f"[AI] ✓ ANÁLISE COMPLETA (Ollama Local)")
                 print(f"[AI]   Detectados: {len(events)} eventos")
                 print(f"[AI]   Gols: {goals_count}")
+                
+                # NOVO: Salvar JSONs como o pipeline GPT faz
+                if match_id:
+                    try:
+                        from datetime import datetime
+                        from storage import get_subfolder_path
+                        json_path = get_subfolder_path(match_id, 'json')
+                        
+                        # 1. detected_events_{half}.json - eventos brutos
+                        detected_result = {
+                            "match_id": match_id,
+                            "detected_at": datetime.utcnow().isoformat() + "Z",
+                            "detector": "ollama_local",
+                            "model": OLLAMA_MODEL,
+                            "half": match_half,
+                            "home_team": home_team,
+                            "away_team": away_team,
+                            "events": events,
+                            "summary": {
+                                "raw_detected": len(events),
+                                "goals": len([e for e in events if e.get('event_type') == 'goal'])
+                            }
+                        }
+                        detected_filename = f"detected_events_{match_half}.json"
+                        with open(json_path / detected_filename, 'w', encoding='utf-8') as f:
+                            json.dump(detected_result, f, ensure_ascii=False, indent=2)
+                        print(f"[AI] ✓ Detectados salvos: json/{detected_filename}")
+                        
+                        # 2. validated_events_{half}.json - eventos finais
+                        validated_result = {
+                            "match_id": match_id,
+                            "validated_at": datetime.utcnow().isoformat() + "Z",
+                            "validator": "ollama_local",
+                            "half": match_half,
+                            "home_team": home_team,
+                            "away_team": away_team,
+                            "events": final_events,
+                            "summary": {
+                                "total_detected": len(events),
+                                "confirmed": len(final_events),
+                                "rejected": len(events) - len(final_events)
+                            }
+                        }
+                        validated_filename = f"validated_events_{match_half}.json"
+                        with open(json_path / validated_filename, 'w', encoding='utf-8') as f:
+                            json.dump(validated_result, f, ensure_ascii=False, indent=2)
+                        print(f"[AI] ✓ Validados salvos: json/{validated_filename}")
+                        
+                        # 3. rejected_events_{half}.json - eventos descartados na dedup
+                        rejected_events = [e for e in enriched_events if e not in final_events]
+                        rejected_result = {
+                            "match_id": match_id,
+                            "rejected_at": datetime.utcnow().isoformat() + "Z",
+                            "half": match_half,
+                            "reason": "deduplication",
+                            "events": rejected_events
+                        }
+                        rejected_filename = f"rejected_events_{match_half}.json"
+                        with open(json_path / rejected_filename, 'w', encoding='utf-8') as f:
+                            json.dump(rejected_result, f, ensure_ascii=False, indent=2)
+                        print(f"[AI] ✓ Rejeitados salvos: json/{rejected_filename}")
+                        
+                    except Exception as e:
+                        print(f"[AI] ⚠ Erro ao salvar JSONs do Ollama: {e}")
+                
                 return final_events
                 
         except Exception as e:
