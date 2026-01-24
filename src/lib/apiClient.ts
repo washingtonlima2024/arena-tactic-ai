@@ -872,11 +872,46 @@ export const apiClient = {
   transcribeAudio: (data: { audio: string; language?: string }) =>
     apiRequest<{ text: string }>('/api/transcribe-audio', { method: 'POST', body: JSON.stringify(data) }),
 
-  transcribeLargeVideo: async (data: { videoUrl: string; matchId?: string; language?: string; sizeBytes?: number; halfType?: 'first' | 'second' }): Promise<{ success: boolean; text: string; srtContent?: string; audioPath?: string; srtPath?: string; txtPath?: string; requiresLocalServer?: boolean; suggestion?: string }> => {
+  transcribeLargeVideo: async (data: { 
+    videoUrl: string; 
+    matchId?: string; 
+    language?: string; 
+    sizeBytes?: number; 
+    halfType?: 'first' | 'second';
+    // NOVO: Parâmetros para análise automática após transcrição
+    autoAnalyze?: boolean;
+    homeTeam?: string;
+    awayTeam?: string;
+  }): Promise<{ 
+    success: boolean; 
+    text: string; 
+    srtContent?: string; 
+    audioPath?: string; 
+    srtPath?: string; 
+    txtPath?: string; 
+    requiresLocalServer?: boolean; 
+    suggestion?: string;
+    // NOVO: Campos de resposta para análise automática
+    autoAnalyzed?: boolean;
+    eventsDetected?: number;
+    autoAnalyzeError?: string;
+  }> => {
     await ensureServerAvailable();
     
     // Usar timeout longo (30 minutos) para transcrição via servidor local
-    return apiRequestLongRunning<{ success: boolean; text: string; srtContent?: string; audioPath?: string; srtPath?: string; txtPath?: string; requiresLocalServer?: boolean; suggestion?: string }>(
+    return apiRequestLongRunning<{ 
+      success: boolean; 
+      text: string; 
+      srtContent?: string; 
+      audioPath?: string; 
+      srtPath?: string; 
+      txtPath?: string; 
+      requiresLocalServer?: boolean; 
+      suggestion?: string;
+      autoAnalyzed?: boolean;
+      eventsDetected?: number;
+      autoAnalyzeError?: string;
+    }>(
       '/api/transcribe-large-video',
       { method: 'POST', body: JSON.stringify(data) },
       1800000 // 30 minutos

@@ -6088,17 +6088,28 @@ def transcribe_audio_endpoint():
 
 @app.route('/api/transcribe-large-video', methods=['POST'])
 def transcribe_large_video_endpoint():
-    """Transcribe a large video file. Saves audio and SRT to match folder."""
+    """Transcribe a large video file. Saves audio and SRT to match folder.
+    
+    Optional: autoAnalyze=True will automatically run event analysis after transcription.
+    """
     data = request.json
     video_url = data.get('videoUrl')
     match_id = data.get('matchId')
     half_type = data.get('halfType')  # 'first', 'second', or None
+    
+    # NOVO: Parâmetros para análise automática
+    auto_analyze = data.get('autoAnalyze', False)
+    home_team = data.get('homeTeam', 'Time Casa')
+    away_team = data.get('awayTeam', 'Time Visitante')
     
     print(f"\n{'='*60}")
     print(f"[TRANSCRIBE] Nova requisição de transcrição")
     print(f"[TRANSCRIBE] Match ID: {match_id}")
     print(f"[TRANSCRIBE] Half Type: {half_type}")
     print(f"[TRANSCRIBE] Video URL: {video_url}")
+    print(f"[TRANSCRIBE] Auto Analyze: {auto_analyze}")
+    if auto_analyze:
+        print(f"[TRANSCRIBE] Times: {home_team} vs {away_team}")
     print(f"{'='*60}")
     
     if not video_url:
@@ -6117,6 +6128,72 @@ def transcribe_large_video_endpoint():
                 print(f"[TRANSCRIBE] Áudio salvo: {result.get('audioPath')}")
             if result.get('srtPath'):
                 print(f"[TRANSCRIBE] SRT salvo: {result.get('srtPath')}")
+            
+            # ═══════════════════════════════════════════════════════════════
+            # NOVO: Análise automática após transcrição bem-sucedida
+            # ═══════════════════════════════════════════════════════════════
+            if auto_analyze and match_id and result.get('text'):
+                print(f"\n[TRANSCRIBE] 🤖 Iniciando análise automática...")
+                try:
+                    transcription_text = result.get('srtContent') or result.get('text')
+                    
+                    # Determinar minutos baseado no tipo do half
+                    game_start_minute = 0 if half_type != 'second' else 45
+                    game_end_minute = 45 if half_type == 'first' else 90
+                    analysis_half = half_type or 'first'
+                    
+                    # Executar análise de eventos
+                    events = ai_services.analyze_match_events(
+                        transcription_text,
+                        home_team,
+                        away_team,
+                        game_start_minute=game_start_minute,
+                        game_end_minute=game_end_minute,
+                        match_id=match_id,
+                        match_half=analysis_half,
+                        settings=get_local_settings()
+                    )
+                    
+                    # Salvar eventos no banco de dados
+                    if events:
+                        events_saved = 0
+                        with get_db_session() as db:
+                            for event in events:
+                                try:
+                                    db_event = MatchEvent(
+                                        match_id=match_id,
+                                        event_type=event.get('event_type', 'unknown'),
+                                        minute=event.get('minute', 0),
+                                        second=event.get('second', 0),
+                                        description=event.get('description'),
+                                        match_half=analysis_half,
+                                        metadata={
+                                            'team': event.get('team'),
+                                            'player': event.get('player'),
+                                            'confidence': event.get('confidence'),
+                                            'videoSecond': event.get('videoSecond'),
+                                            'autoAnalyzed': True
+                                        }
+                                    )
+                                    db.add(db_event)
+                                    events_saved += 1
+                                except Exception as evt_err:
+                                    print(f"[TRANSCRIBE] ⚠ Erro ao salvar evento: {evt_err}")
+                            db.commit()
+                        
+                        print(f"[TRANSCRIBE] ✓ Análise automática completa: {events_saved} eventos salvos")
+                        result['autoAnalyzed'] = True
+                        result['eventsDetected'] = events_saved
+                    else:
+                        print(f"[TRANSCRIBE] ⚠ Análise não detectou eventos")
+                        result['autoAnalyzed'] = True
+                        result['eventsDetected'] = 0
+                        
+                except Exception as analyze_error:
+                    print(f"[TRANSCRIBE] ⚠ Erro na análise automática: {analyze_error}")
+                    import traceback
+                    traceback.print_exc()
+                    result['autoAnalyzeError'] = str(analyze_error)
         else:
             print(f"[TRANSCRIBE] Falha: {result.get('error')}")
         
