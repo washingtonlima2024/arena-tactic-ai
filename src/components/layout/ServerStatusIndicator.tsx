@@ -5,7 +5,8 @@ import {
   getActiveConnectionMethod,
   autoDiscoverServer,
   resetDiscoveryCache,
-  getCloudflareUrl
+  getCloudflareUrl,
+  isLovableEnvironment
 } from '@/lib/apiMode';
 import { resetServerAvailability } from '@/lib/apiClient';
 import {
@@ -164,7 +165,9 @@ export function ServerStatusIndicator({ collapsed }: ServerStatusIndicatorProps)
         return {
           color: 'bg-red-500',
           textColor: 'text-red-500',
-          tooltip: 'Servidor não encontrado - clique para buscar',
+          tooltip: isLovableEnvironment() 
+            ? 'Configure o Cloudflare Tunnel em Settings → Servidor Local'
+            : 'Servidor não encontrado - clique para buscar',
           animate: true,
           clickable: true
         };
