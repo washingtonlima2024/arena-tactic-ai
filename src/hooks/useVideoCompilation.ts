@@ -1,9 +1,8 @@
-// Video compilation hook - combines clips with vignettes and subtitles
-// Uses FFmpeg.wasm for all video processing
+// Video compilation hook - delegates all processing to backend Python server
+// No longer uses FFmpeg.wasm - all video processing is done server-side
 
-import { useState, useCallback, useRef } from 'react';
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
+import { useState, useCallback } from 'react';
+import { apiClient } from '@/lib/apiClient';
 import { useVignetteGenerator } from './useVignetteGenerator';
 
 export interface CompilationClip {
@@ -36,22 +35,6 @@ export interface CompilationProgress {
   totalSteps?: number;
 }
 
-// Format dimensions
-const FORMAT_DIMENSIONS = {
-  '9:16': { width: 1080, height: 1920 },
-  '16:9': { width: 1920, height: 1080 },
-  '1:1': { width: 1080, height: 1080 },
-  '4:5': { width: 1080, height: 1350 }
-};
-
-// Vignette durations in seconds
-const VIGNETTE_DURATIONS = {
-  opening: 3,
-  clip: 2,
-  transition: 1.5,
-  closing: 2
-};
-
 export function useVideoCompilation() {
   const [isCompiling, setIsCompiling] = useState(false);
   const [progress, setProgress] = useState<CompilationProgress>({
@@ -61,122 +44,9 @@ export function useVideoCompilation() {
   });
   const [isCancelled, setIsCancelled] = useState(false);
 
-  const ffmpegRef = useRef<FFmpeg | null>(null);
-  const cancelRef = useRef(false);
-
   const vignetteGenerator = useVignetteGenerator();
 
-  // Load FFmpeg
-  const loadFFmpeg = async () => {
-    if (ffmpegRef.current?.loaded) return ffmpegRef.current;
-
-    setProgress({ stage: 'loading', progress: 5, message: 'Carregando processador de vídeo...' });
-
-    const ffmpeg = new FFmpeg();
-    ffmpegRef.current = ffmpeg;
-
-    // Use UMD version for better browser compatibility
-    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd';
-    await ffmpeg.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-    });
-
-    return ffmpeg;
-  };
-
-  // Convert image to video segment
-  const imageToVideo = async (
-    ffmpeg: FFmpeg, 
-    imageBlob: Blob, 
-    outputName: string, 
-    durationSeconds: number,
-    dimensions: { width: number; height: number }
-  ): Promise<void> => {
-    const imageData = new Uint8Array(await imageBlob.arrayBuffer());
-    await ffmpeg.writeFile('temp_image.png', imageData);
-
-    await ffmpeg.exec([
-      '-loop', '1',
-      '-i', 'temp_image.png',
-      '-t', durationSeconds.toString(),
-      '-vf', `scale=${dimensions.width}:${dimensions.height}:force_original_aspect_ratio=decrease,pad=${dimensions.width}:${dimensions.height}:(ow-iw)/2:(oh-ih)/2:black`,
-      '-c:v', 'libx264',
-      '-pix_fmt', 'yuv420p',
-      '-r', '30',
-      outputName
-    ]);
-
-    await ffmpeg.deleteFile('temp_image.png');
-  };
-
-  // Add subtitle to clip
-  const addSubtitleToClip = async (
-    ffmpeg: FFmpeg,
-    inputName: string,
-    outputName: string,
-    subtitle: string,
-    dimensions: { width: number; height: number }
-  ): Promise<void> => {
-    // Escape special characters for FFmpeg drawtext
-    const escapedSubtitle = subtitle
-      .replace(/'/g, "\\'")
-      .replace(/:/g, "\\:")
-      .replace(/\\/g, '\\\\');
-
-    const fontSize = Math.round(dimensions.width / 30);
-    const boxPadding = Math.round(fontSize / 2);
-    const yPosition = dimensions.height - fontSize * 3;
-
-    await ffmpeg.exec([
-      '-i', inputName,
-      '-vf', `drawtext=text='${escapedSubtitle}':fontsize=${fontSize}:fontcolor=white:x=(w-text_w)/2:y=${yPosition}:box=1:boxcolor=black@0.7:boxborderw=${boxPadding}`,
-      '-c:v', 'libx264',
-      '-c:a', 'copy',
-      '-pix_fmt', 'yuv420p',
-      outputName
-    ]);
-  };
-
-  // Process single clip (format and optionally add subtitle)
-  const processClip = async (
-    ffmpeg: FFmpeg,
-    clipBlob: Blob,
-    outputName: string,
-    dimensions: { width: number; height: number },
-    subtitle?: string
-  ): Promise<void> => {
-    const clipData = new Uint8Array(await clipBlob.arrayBuffer());
-    await ffmpeg.writeFile('temp_clip.mp4', clipData);
-
-    if (subtitle) {
-      // First scale, then add subtitle
-      await ffmpeg.exec([
-        '-i', 'temp_clip.mp4',
-        '-vf', `scale=${dimensions.width}:${dimensions.height}:force_original_aspect_ratio=decrease,pad=${dimensions.width}:${dimensions.height}:(ow-iw)/2:(oh-ih)/2:black`,
-        '-c:v', 'libx264',
-        '-c:a', 'aac',
-        '-pix_fmt', 'yuv420p',
-        'temp_scaled.mp4'
-      ]);
-
-      await addSubtitleToClip(ffmpeg, 'temp_scaled.mp4', outputName, subtitle, dimensions);
-      await ffmpeg.deleteFile('temp_scaled.mp4');
-    } else {
-      await ffmpeg.exec([
-        '-i', 'temp_clip.mp4',
-        '-vf', `scale=${dimensions.width}:${dimensions.height}:force_original_aspect_ratio=decrease,pad=${dimensions.width}:${dimensions.height}:(ow-iw)/2:(oh-ih)/2:black`,
-        '-c:v', 'libx264',
-        '-c:a', 'aac',
-        '-pix_fmt', 'yuv420p',
-        outputName
-      ]);
-    }
-
-    await ffmpeg.deleteFile('temp_clip.mp4');
-  };
-
-  // Download single clip
+  // Download single clip directly
   const downloadSingleClip = useCallback(async (
     clipUrl: string,
     filename: string
@@ -207,182 +77,63 @@ export function useVideoCompilation() {
     }
   }, []);
 
-  // Compile multiple clips with vignettes and subtitles
+  // Compile playlist via backend server
   const compilePlaylist = useCallback(async (config: CompilationConfig): Promise<Blob | null> => {
     if (config.clips.length === 0) return null;
 
     setIsCompiling(true);
-    cancelRef.current = false;
     setIsCancelled(false);
 
-    const dimensions = FORMAT_DIMENSIONS[config.format];
-    const vignetteConfig = { ...dimensions, format: config.format };
-
     try {
-      const ffmpeg = await loadFFmpeg();
-      if (cancelRef.current) return null;
+      setProgress({
+        stage: 'processing',
+        progress: 10,
+        message: 'Enviando para compilação no servidor...'
+      });
 
-      const segments: string[] = [];
-      let currentStep = 0;
-      const totalSteps = config.clips.length + (config.includeVignettes ? 2 : 0);
+      // Send compilation request to backend via generic post
+      const result = await apiClient.post<{ videoUrl?: string; success?: boolean }>('/api/compile-playlist', {
+        clipIds: config.clips.map(c => c.id),
+        format: config.format,
+        includeVignettes: config.includeVignettes,
+        includeSubtitles: config.includeSubtitles,
+        matchInfo: config.matchInfo
+      });
 
-      // Generate opening vignette
-      if (config.includeVignettes) {
+      if (result?.videoUrl) {
         setProgress({
-          stage: 'generating-vignettes',
-          progress: 10,
-          message: 'Gerando vinheta de abertura...',
-          currentStep: ++currentStep,
-          totalSteps
-        });
-
-        const openingBlob = await vignetteGenerator.generateOpeningVignette({
-          homeTeam: config.matchInfo.homeTeam,
-          awayTeam: config.matchInfo.awayTeam,
-          homeScore: config.matchInfo.homeScore,
-          awayScore: config.matchInfo.awayScore
-        }, vignetteConfig);
-
-        await imageToVideo(ffmpeg, openingBlob, 'opening.mp4', VIGNETTE_DURATIONS.opening, dimensions);
-        segments.push('opening.mp4');
-      }
-
-      // Process each clip
-      for (let i = 0; i < config.clips.length; i++) {
-        if (cancelRef.current) {
-          setProgress({ stage: 'idle', progress: 0, message: 'Compilação cancelada' });
-          return null;
-        }
-
-        const clip = config.clips[i];
-        currentStep++;
-
-        setProgress({
-          stage: 'processing',
-          progress: 15 + (i / config.clips.length) * 60,
-          message: `Processando clip ${i + 1}/${config.clips.length} (${clip.minute}')`,
-          currentStep,
-          totalSteps
-        });
-
-        // Generate clip intro vignette
-        if (config.includeVignettes) {
-          const clipVignetteBlob = await vignetteGenerator.generateClipVignette({
-            eventType: clip.eventType,
-            minute: clip.minute,
-            title: clip.description || clip.eventType.replace(/_/g, ' '),
-            thumbnailUrl: clip.thumbnailUrl
-          }, vignetteConfig);
-
-          await imageToVideo(ffmpeg, clipVignetteBlob, `clip_intro_${i}.mp4`, VIGNETTE_DURATIONS.clip, dimensions);
-          segments.push(`clip_intro_${i}.mp4`);
-        }
-
-        // Download and process clip
-        setProgress(prev => ({ ...prev, message: `Baixando clip ${i + 1}...` }));
-        const clipResponse = await fetch(clip.clipUrl);
-        const clipBlob = await clipResponse.blob();
-
-        await processClip(
-          ffmpeg,
-          clipBlob,
-          `clip_${i}.mp4`,
-          dimensions,
-          config.includeSubtitles ? clip.description : undefined
-        );
-        segments.push(`clip_${i}.mp4`);
-
-        // Generate transition vignette (if not last clip)
-        if (config.includeVignettes && i < config.clips.length - 1) {
-          const nextClip = config.clips[i + 1];
-          const transitionBlob = await vignetteGenerator.generateTransitionVignette({
-            nextMinute: nextClip.minute,
-            nextEventType: nextClip.eventType
-          }, vignetteConfig);
-
-          await imageToVideo(ffmpeg, transitionBlob, `transition_${i}.mp4`, VIGNETTE_DURATIONS.transition, dimensions);
-          segments.push(`transition_${i}.mp4`);
-        }
-      }
-
-      // Generate closing vignette
-      if (config.includeVignettes) {
-        setProgress({
-          stage: 'generating-vignettes',
+          stage: 'downloading',
           progress: 80,
-          message: 'Gerando vinheta de encerramento...',
-          currentStep: ++currentStep,
-          totalSteps
+          message: 'Baixando vídeo compilado...'
         });
 
-        const closingBlob = await vignetteGenerator.generateClosingVignette({
-          clipCount: config.clips.length
-        }, vignetteConfig);
+        // Download the compiled video
+        const response = await fetch(result.videoUrl);
+        const blob = await response.blob();
 
-        await imageToVideo(ffmpeg, closingBlob, 'closing.mp4', VIGNETTE_DURATIONS.closing, dimensions);
-        segments.push('closing.mp4');
-      }
+        setProgress({
+          stage: 'complete',
+          progress: 100,
+          message: 'Vídeo compilado com sucesso!'
+        });
 
-      // Create concat file
-      setProgress({
-        stage: 'concatenating',
-        progress: 85,
-        message: 'Concatenando segmentos...'
-      });
-
-      const concatContent = segments.map(s => `file '${s}'`).join('\n');
-      await ffmpeg.writeFile('concat.txt', concatContent);
-
-      // Concatenate all segments
-      await ffmpeg.exec([
-        '-f', 'concat',
-        '-safe', '0',
-        '-i', 'concat.txt',
-        '-c', 'copy',
-        'output.mp4'
-      ]);
-
-      // Read final output
-      const outputData = await ffmpeg.readFile('output.mp4');
-      let outputBlob: Blob;
-      if (outputData instanceof Uint8Array) {
-        const buffer = new ArrayBuffer(outputData.length);
-        const view = new Uint8Array(buffer);
-        view.set(outputData);
-        outputBlob = new Blob([buffer], { type: 'video/mp4' });
+        return blob;
       } else {
-        outputBlob = new Blob([outputData], { type: 'video/mp4' });
+        throw new Error('Servidor não retornou URL do vídeo. Use o download individual de clips.');
       }
-
-      // Cleanup
-      for (const segment of segments) {
-        try {
-          await ffmpeg.deleteFile(segment);
-        } catch { /* ignore */ }
-      }
-      await ffmpeg.deleteFile('concat.txt');
-      await ffmpeg.deleteFile('output.mp4');
-
-      setProgress({
-        stage: 'complete',
-        progress: 100,
-        message: 'Vídeo compilado com sucesso!'
-      });
-
-      return outputBlob;
 
     } catch (error) {
       console.error('Erro na compilação:', error);
       setProgress({
         stage: 'error',
         progress: 0,
-        message: error instanceof Error ? error.message : 'Erro na compilação'
+        message: 'Compilação não disponível. Use o download individual de clips.'
       });
       return null;
     } finally {
       setIsCompiling(false);
     }
-  }, [vignetteGenerator]);
+  }, []);
 
   // Download compiled video
   const downloadCompilation = useCallback(async (config: CompilationConfig): Promise<void> => {
@@ -401,7 +152,6 @@ export function useVideoCompilation() {
 
   // Cancel compilation
   const cancel = useCallback(() => {
-    cancelRef.current = true;
     setIsCancelled(true);
   }, []);
 
@@ -410,7 +160,6 @@ export function useVideoCompilation() {
     setProgress({ stage: 'idle', progress: 0, message: '' });
     setIsCompiling(false);
     setIsCancelled(false);
-    cancelRef.current = false;
   }, []);
 
   return {

@@ -1,8 +1,6 @@
 import { createContext, useContext, useState, useRef, useCallback, useEffect, ReactNode } from "react";
 import { apiClient } from "@/lib/apiClient";
 import { useToast } from "@/hooks/use-toast";
-import { FFmpeg } from '@ffmpeg/ffmpeg';
-import { fetchFile, toBlobURL } from '@ffmpeg/util';
 import { VideoSegmentBuffer, VideoSegment, calculateClipWindow } from '@/utils/videoSegmentBuffer';
 import { generateUUID } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
@@ -223,7 +221,6 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
   const audioStreamRef = useRef<MediaStream | null>(null);
   const chunkSaveIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const segmentSaveIntervalRef = useRef<NodeJS.Timeout | null>(null);
-  const ffmpegRef = useRef<FFmpeg | null>(null);
   const isGeneratingClipRef = useRef(false);
   
   const recordingTimeRef = useRef(0);
@@ -966,29 +963,13 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
   }, [currentMatchId, transcriptBuffer, matchInfo]);
 
-  // Load FFmpeg for clip generation
-  const loadFFmpeg = useCallback(async () => {
-    if (ffmpegRef.current?.loaded) return ffmpegRef.current;
-
-    const ffmpeg = new FFmpeg();
-    ffmpegRef.current = ffmpeg;
-
-    const baseURL = 'https://unpkg.com/@ffmpeg/core@0.12.6/dist/esm';
-    await ffmpeg.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, 'text/javascript'),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, 'application/wasm'),
-    });
-
-    return ffmpeg;
-  }, []);
-
   interface ClipGenerationResult {
     success: boolean;
     clipUrl?: string;
     error?: string;
   }
 
-  // Generate clip for event with progress tracking
+  // Generate clip for event via backend server (no FFmpeg WASM)
   const generateClipForEvent = useCallback(async (event: LiveEvent, videoUrl?: string): Promise<ClipGenerationResult> => {
     const matchId = tempMatchIdRef.current;
     if (!matchId) {
@@ -1012,7 +993,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     }
     
     isGeneratingClipRef.current = true;
-    console.log(`[ClipGen] Generating clip for event ${event.id} at ${event.recordingTimestamp}s...`);
+    console.log(`[ClipGen] Generating clip for event ${event.id} via backend...`);
     
     // Add to queue with preparing status
     setClipGenerationQueue(prev => {
@@ -1029,162 +1010,54 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     });
     
     try {
-      // Update progress: Loading FFmpeg
+      // Update progress: Sending to server
       setClipGenerationQueue(prev => prev.map(c => 
-        c.eventId === event.id ? { ...c, status: 'preparing', progress: 20 } : c
+        c.eventId === event.id ? { ...c, status: 'generating', progress: 30 } : c
       ));
       
-      const ffmpeg = await loadFFmpeg();
+      // Save any pending video chunks first
+      if (videoChunksRef.current.length > 0) {
+        await saveVideoChunk();
+      }
       
-      const eventSeconds = event.recordingTimestamp || (event.minute * 60 + event.second);
-      const { start: startTimeSeconds, duration: durationSeconds } = calculateClipWindow(eventSeconds, 5, 5);
+      // Update progress: Processing on server
+      setClipGenerationQueue(prev => prev.map(c => 
+        c.eventId === event.id ? { ...c, status: 'generating', progress: 50 } : c
+      ));
       
-      let videoData: Uint8Array | null = null;
-      let relativeStartSeconds = 0;
+      // Call backend to regenerate clip for this event
+      const result = await apiClient.regenerateClips(matchId, { eventIds: [event.id] });
       
-      // PRIORITY 1: Use clipVideoChunksRef
-      if (clipVideoChunksRef.current.length > 0) {
-        const relevantChunks = clipVideoChunksRef.current.filter(chunk => {
-          const chunkEnd = chunk.timestamp + 5;
-          return chunk.timestamp <= (startTimeSeconds + durationSeconds) && chunkEnd >= startTimeSeconds;
-        });
+      if (result.regenerated > 0) {
+        // Fetch updated event to get clip URL
+        const events = await apiClient.getMatchEvents(matchId);
+        const updatedEvent = events.find((e: any) => e.id === event.id);
+        const clipUrl = updatedEvent?.clip_url;
         
-        if (relevantChunks.length > 0) {
-          console.log(`[ClipGen] Using clipVideoChunksRef: ${relevantChunks.length} relevant chunks`);
-          const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
-          const rawBlob = new Blob(relevantChunks.map(c => c.blob), { type: mimeType });
-          
-          if (rawBlob.size > 1000) {
-            const arrayBuffer = await rawBlob.arrayBuffer();
-            videoData = new Uint8Array(arrayBuffer);
-            const firstChunkTime = Math.min(...relevantChunks.map(c => c.timestamp));
-            relativeStartSeconds = Math.max(0, startTimeSeconds - firstChunkTime);
-          }
+        // Update local state
+        if (clipUrl) {
+          setApprovedEvents(prev => prev.map(e => 
+            e.id === event.id ? { ...e, clipUrl } : e
+          ));
         }
-      }
-      
-      // PRIORITY 2: Use all video chunks
-      if (!videoData && videoChunksRef.current.length > 0) {
-        console.log(`[ClipGen] Falling back to videoChunksRef: ${videoChunksRef.current.length} chunks`);
-        const mimeType = videoRecorderRef.current?.mimeType || 'video/webm';
-        const rawBlob = new Blob(videoChunksRef.current, { type: mimeType });
         
-        if (rawBlob.size > 1000) {
-          const arrayBuffer = await rawBlob.arrayBuffer();
-          videoData = new Uint8Array(arrayBuffer);
-          relativeStartSeconds = startTimeSeconds;
-        }
-      }
-      
-      // PRIORITY 3: Use segment buffer
-      if (!videoData && segmentBufferRef.current) {
-        const segment = segmentBufferRef.current.getSegmentForTime(eventSeconds);
-        const videoBlob = segmentBufferRef.current.getBlobForTimeRange(startTimeSeconds, startTimeSeconds + durationSeconds);
-        
-        if (videoBlob && videoBlob.size > 1000) {
-          console.log(`[ClipGen] Using segment buffer`);
-          const arrayBuffer = await videoBlob.arrayBuffer();
-          videoData = new Uint8Array(arrayBuffer);
-          
-          if (segment) {
-            relativeStartSeconds = Math.max(0, startTimeSeconds - segment.startTime);
-          }
-        }
-      }
-      
-      // PRIORITY 4: Download from URL
-      if (!videoData && videoUrl) {
-        console.log(`[ClipGen] Falling back to video URL: ${videoUrl}`);
-        videoData = await fetchFile(videoUrl);
-        relativeStartSeconds = startTimeSeconds;
-      }
-      
-      if (!videoData) {
-        console.warn('[ClipGen] No video data available from any source');
+        // Update progress: Complete
         setClipGenerationQueue(prev => prev.map(c => 
-          c.eventId === event.id ? { ...c, status: 'error', error: 'No video data' } : c
+          c.eventId === event.id ? { ...c, status: 'complete', progress: 100 } : c
         ));
+        
+        // Remove from queue after delay to allow UI to show "complete" state
+        setTimeout(() => {
+          setClipGenerationQueue(prev => prev.filter(c => c.eventId !== event.id));
+        }, 3000);
+        
         isGeneratingClipRef.current = false;
-        return { success: false, error: 'No video data available' };
+        console.log(`[ClipGen] ✅ Clip generated via backend: ${clipUrl}`);
+        
+        return { success: true, clipUrl };
+      } else {
+        throw new Error('Backend failed to generate clip');
       }
-      
-      // Validate input size
-      const inputSizeKB = videoData.length / 1024;
-      if (inputSizeKB < 100) {
-        console.warn(`[ClipGen] Input video too small: ${inputSizeKB.toFixed(1)}KB`);
-        setClipGenerationQueue(prev => prev.map(c => 
-          c.eventId === event.id ? { ...c, status: 'error', error: 'Video too small' } : c
-        ));
-        isGeneratingClipRef.current = false;
-        return { success: false, error: 'Input video too small' };
-      }
-      
-      // Update progress: Generating
-      setClipGenerationQueue(prev => prev.map(c => 
-        c.eventId === event.id ? { ...c, status: 'generating', progress: 40 } : c
-      ));
-      
-      // Process with FFmpeg
-      await ffmpeg.writeFile('input.webm', videoData);
-      
-      const extension = 'webm';
-      const outputFile = `clip_${event.id}.${extension}`;
-      
-      // Update progress: Processing
-      setClipGenerationQueue(prev => prev.map(c => 
-        c.eventId === event.id ? { ...c, status: 'generating', progress: 60 } : c
-      ));
-      
-      await ffmpeg.exec([
-        '-i', 'input.webm',
-        '-ss', relativeStartSeconds.toString(),
-        '-t', durationSeconds.toString(),
-        '-c:v', 'libvpx',
-        '-c:a', 'libvorbis',
-        '-crf', '23',
-        '-preset', 'ultrafast',
-        outputFile
-      ]);
-      
-      // Update progress: Uploading
-      setClipGenerationQueue(prev => prev.map(c => 
-        c.eventId === event.id ? { ...c, status: 'uploading', progress: 80 } : c
-      ));
-      
-      const clipData = await ffmpeg.readFile(outputFile);
-      const clipBlob = new Blob([clipData instanceof Uint8Array ? new Uint8Array(clipData).buffer as ArrayBuffer : clipData], { type: 'video/webm' });
-      
-      // Upload clip
-      const result = await apiClient.uploadBlob(matchId, 'clips', clipBlob, `clip-${event.id}.webm`);
-      
-      // Update event with clip URL
-      await apiClient.updateEvent(event.id, { clip_url: result.url });
-      
-      // Update local state
-      setApprovedEvents(prev => prev.map(e => 
-        e.id === event.id ? { ...e, clipUrl: result.url } : e
-      ));
-      
-      // Cleanup FFmpeg files
-      try {
-        await ffmpeg.deleteFile('input.webm');
-        await ffmpeg.deleteFile(outputFile);
-      } catch {}
-      
-      // Update progress: Complete
-      setClipGenerationQueue(prev => prev.map(c => 
-        c.eventId === event.id ? { ...c, status: 'complete', progress: 100 } : c
-      ));
-      
-      // Remove from queue after delay to allow UI to show "complete" state
-      setTimeout(() => {
-        setClipGenerationQueue(prev => prev.filter(c => c.eventId !== event.id));
-      }, 3000);
-      
-      isGeneratingClipRef.current = false;
-      console.log(`[ClipGen] ✅ Clip generated: ${result.url}`);
-      
-      return { success: true, clipUrl: result.url };
     } catch (error) {
       console.error('[ClipGen] Error:', error);
       setClipGenerationQueue(prev => prev.map(c => 
@@ -1193,7 +1066,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       isGeneratingClipRef.current = false;
       return { success: false, error: String(error) };
     }
-  }, [loadFFmpeg]);
+  }, [saveVideoChunk]);
 
   // Add detected event with automatic clip generation using AI-defined window
   const addDetectedEvent = useCallback(async (eventData: {
