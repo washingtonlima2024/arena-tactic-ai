@@ -92,8 +92,8 @@ export default function Settings() {
   const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
   const [testingOllama, setTestingOllama] = useState(false);
 
-  // Local Whisper settings (FREE transcription)
-  const [localWhisperEnabled, setLocalWhisperEnabled] = useState(false);
+  // Local Whisper settings (FREE transcription) - ENABLED BY DEFAULT
+  const [localWhisperEnabled, setLocalWhisperEnabled] = useState(true);
   const [localWhisperModel, setLocalWhisperModel] = useState("base");
 
   // Ngrok URL setting (legacy - mantido para compatibilidade)
@@ -158,10 +158,10 @@ export default function Settings() {
       );
       setOllamaEnabled(apiSettings.find((s) => s.setting_key === "ollama_enabled")?.setting_value === "true");
 
-      // Local Whisper settings
-      setLocalWhisperEnabled(
-        apiSettings.find((s) => s.setting_key === "local_whisper_enabled")?.setting_value === "true",
-      );
+      // Local Whisper settings - DEFAULT TO TRUE (FREE!)
+      const whisperSetting = apiSettings.find((s) => s.setting_key === "local_whisper_enabled")?.setting_value;
+      // Se não houver configuração salva, usar true como padrão
+      setLocalWhisperEnabled(whisperSetting !== "false");
       setLocalWhisperModel(apiSettings.find((s) => s.setting_key === "local_whisper_model")?.setting_value || "base");
 
       // Ngrok URL - legacy (não mais usado)
