@@ -20,6 +20,7 @@ import {
   type ParseResult,
   type DetectedEvent 
 } from '@/lib/transcriptionParser';
+import { getEventLabelUpper } from '@/lib/eventLabels';
 
 interface TranscriptionImportProps {
   value: string;
@@ -291,11 +292,7 @@ Ou formato SRT/JSON`}
                       </span>
                       <span className="truncate">{event.text}</span>
                       <Badge variant="outline" className="ml-auto text-xs shrink-0">
-                        {event.type === 'goal' ? 'GOL' : 
-                         event.type === 'card' ? 'CARTÃO' :
-                         event.type === 'foul' ? 'FALTA' :
-                         event.type === 'penalty' ? 'PÊNALTI' :
-                         event.type === 'substitution' ? 'SUBST.' : 'EVENTO'}
+                        {getEventLabelUpper(event.type)}
                       </Badge>
                     </div>
                   );

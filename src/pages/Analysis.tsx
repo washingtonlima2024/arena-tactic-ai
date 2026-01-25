@@ -64,6 +64,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
 import { ReimportMatchDialog } from '@/components/events/ReimportMatchDialog';
 import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
+import { getEventLabel } from '@/lib/eventLabels';
 
 export default function Analysis() {
   const queryClient = useQueryClient();
@@ -599,23 +600,6 @@ export default function Analysis() {
                   {/* Event selector */}
                   <div className="flex flex-wrap gap-2">
                     {importantEvents.map((event) => {
-                      const eventLabels: Record<string, string> = {
-                        goal: 'GOL',
-                        shot: 'Finalização',
-                        shot_on_target: 'Chute no Gol',
-                        corner: 'Escanteio',
-                        penalty: 'Pênalti',
-                        foul: 'Falta',
-                        free_kick: 'Falta Direta',
-                        cross: 'Cruzamento',
-                        save: 'Defesa',
-                        offside: 'Impedimento',
-                        yellow_card: 'Amarelo',
-                        red_card: 'Vermelho',
-                        high_press: 'Pressão Alta',
-                        transition: 'Transição',
-                        ball_recovery: 'Recuperação',
-                      };
                       const isSelected = selectedEventForPlay === event.id;
                       return (
                         <Button
@@ -628,7 +612,7 @@ export default function Analysis() {
                           <Badge variant={event.event_type === 'goal' ? 'success' : 'secondary'} className="h-5 font-mono">
                             {formatTimestamp(getEventTime(event.id).totalSeconds)}
                           </Badge>
-                          {eventLabels[event.event_type] || event.event_type}
+                          {getEventLabel(event.event_type)}
                           {getThumbnail(event.id) && <Image className="h-3 w-3" />}
                           {matchVideo && <Video className="h-3 w-3" />}
                         </Button>
@@ -819,30 +803,13 @@ export default function Analysis() {
                   <ScrollArea className="h-[500px] pr-4">
                     <div className="space-y-3">
                       {eventAnalysis.keyMoments.map((moment, index) => {
-                        const typeLabels: Record<string, string> = {
-                          goal: 'Gol',
-                          assist: 'Assistência',
-                          shot: 'Finalização',
-                          save: 'Defesa',
-                          yellowCard: 'Cartão Amarelo',
-                          redCard: 'Cartão Vermelho',
-                          substitution: 'Substituição',
-                          foul: 'Falta',
-                          dribble: 'Drible',
-                          woodwork: 'Na Trave',
-                          offside: 'Impedimento',
-                          freeKick: 'Falta Direta',
-                          corner: 'Escanteio',
-                          penalty: 'Pênalti',
-                          transition: 'Transição',
-                          emotionalMoment: 'Momento Especial'
-                        };
-                        
                         const typeColors: Record<string, string> = {
                           goal: 'bg-green-500/20 text-green-400 border-green-500/30',
                           assist: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
                           yellowCard: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
+                          yellow_card: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
                           redCard: 'bg-red-500/20 text-red-400 border-red-500/30',
+                          red_card: 'bg-red-500/20 text-red-400 border-red-500/30',
                           save: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
                           penalty: 'bg-orange-500/20 text-orange-400 border-orange-500/30'
                         };
@@ -867,7 +834,7 @@ export default function Analysis() {
                                       variant="secondary" 
                                       className={`text-xs ${typeColors[moment.type] || ''}`}
                                     >
-                                      {typeLabels[moment.type] || moment.type}
+                                      {getEventLabel(moment.type)}
                                     </Badge>
                                   </div>
                                   <p className="text-sm text-muted-foreground leading-relaxed">
