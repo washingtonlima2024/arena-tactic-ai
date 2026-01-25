@@ -4,6 +4,7 @@ import { useToast } from "@/hooks/use-toast";
 import { VideoSegmentBuffer, VideoSegment, calculateClipWindow } from '@/utils/videoSegmentBuffer';
 import { generateUUID } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { getEventLabel } from "@/lib/eventLabels";
 
 export interface MatchInfo {
   homeTeam: string;
@@ -855,20 +856,13 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
     const currentMinute = Math.floor(currentRecordingTime / 60);
     const currentSecond = currentRecordingTime % 60;
 
-    const eventLabels: Record<string, string> = {
-      goal: 'Gol',
-      goal_home: `Gol - ${matchInfo.homeTeam || 'Casa'}`,
-      goal_away: `Gol - ${matchInfo.awayTeam || 'Fora'}`,
-      yellow_card: 'Cartão Amarelo',
-      red_card: 'Cartão Vermelho',
-      foul: 'Falta',
-      corner: 'Escanteio',
-      offside: 'Impedimento',
-      substitution: 'Substituição',
-      penalty: 'Pênalti',
-      shot: 'Finalização',
-      save: 'Defesa',
-    };
+    // Build description dynamically using centralized labels
+    let description = getEventLabel(type);
+    if (type === 'goal_home' && matchInfo.homeTeam) {
+      description = `Gol - ${matchInfo.homeTeam}`;
+    } else if (type === 'goal_away' && matchInfo.awayTeam) {
+      description = `Gol - ${matchInfo.awayTeam}`;
+    }
 
     const eventId = generateUUID();
     const newEvent: LiveEvent = {
@@ -876,7 +870,7 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       type,
       minute: currentMinute,
       second: currentSecond,
-      description: eventLabels[type] || type,
+      description,
       status: "approved",
       recordingTimestamp: currentRecordingTime,
     };

@@ -8,6 +8,7 @@ import { Star, Pencil, Play, Volume2, VolumeX, Loader2 } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { getEventTeam, getEventTimeMs, formatEventTime } from '@/lib/eventHelpers';
 import { apiClient } from '@/lib/apiClient';
+import { getEventLabel, getEventIcon } from '@/lib/eventLabels';
 
 interface EventTimelineProps {
   events: MatchEvent[];
@@ -19,54 +20,6 @@ interface EventTimelineProps {
   homeTeam?: Team | { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string };
   awayTeam?: Team | { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string };
 }
-
-const eventIcons: Record<string, string> = {
-  goal: '⚽',
-  goal_home: '⚽',
-  goal_away: '⚽',
-  assist: '👟',
-  shot: '🎯',
-  shot_on_target: '🎯',
-  save: '🧤',
-  foul: '⚠️',
-  yellow_card: '🟨',
-  red_card: '🟥',
-  offside: '🚩',
-  corner: '📐',
-  free_kick: '🦵',
-  penalty: '⭕',
-  substitution: '🔄',
-  high_press: '⚡',
-  transition: '💨',
-  ball_recovery: '🔃',
-  halftime: '⏸️',
-  kickoff: '▶️',
-  fulltime: '🏁',
-};
-
-const eventLabels: Record<string, string> = {
-  goal: 'Gol',
-  goal_home: 'Gol Casa',
-  goal_away: 'Gol Fora',
-  assist: 'Assistência',
-  shot: 'Finalização',
-  shot_on_target: 'Finalização no Gol',
-  save: 'Defesa',
-  foul: 'Falta',
-  yellow_card: 'Cartão Amarelo',
-  red_card: 'Cartão Vermelho',
-  offside: 'Impedimento',
-  corner: 'Escanteio',
-  free_kick: 'Falta',
-  penalty: 'Pênalti',
-  substitution: 'Substituição',
-  high_press: 'Pressão Alta',
-  transition: 'Transição',
-  ball_recovery: 'Recuperação',
-  halftime: 'Intervalo',
-  kickoff: 'Início',
-  fulltime: 'Fim de Jogo',
-};
 
 const eventBadgeVariants: Record<string, any> = {
   goal: 'goal',
@@ -81,6 +34,7 @@ const eventBadgeVariants: Record<string, any> = {
   red_card: 'card-red',
   offside: 'offside',
 };
+
 
 // Events that should be highlighted
 const highlightEventTypes = ['goal', 'penalty'];
@@ -242,7 +196,7 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
                   ? "bg-yellow-500/20 ring-2 ring-yellow-500/50" 
                   : "bg-muted group-hover:bg-primary/20"
               )}>
-                {eventIcons[event.type] || '•'}
+                {getEventIcon(event.type)}
               </div>
               {index < events.length - 1 && (
                 <div className="h-full w-px flex-1 bg-border" />
@@ -257,7 +211,7 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
                     <Star className="h-4 w-4 fill-yellow-500 text-yellow-500" />
                   )}
                   <Badge variant={isHighlight ? 'highlight' : (eventBadgeVariants[event.type] || 'secondary')}>
-                    {eventLabels[event.type] || event.type}
+                    {getEventLabel(event.type)}
                   </Badge>
                   {team && (
                     <div className="flex items-center gap-1.5">

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient, normalizeStorageUrl } from '@/lib/apiClient';
 import { toast } from 'sonner';
+import { getEventLabelUpper } from '@/lib/eventLabels';
 
 interface ThumbnailData {
   eventId: string;
@@ -120,23 +121,7 @@ export function useThumbnailGeneration(matchId?: string) {
             ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
             
             // === OVERLAY: Event Badge and Minute ===
-            const eventLabels: Record<string, string> = {
-              goal: 'GOL',
-              shot: 'FINALIZAÇÃO',
-              shot_on_target: 'CHUTE',
-              save: 'DEFESA',
-              foul: 'FALTA',
-              yellow_card: 'AMARELO',
-              red_card: 'VERMELHO',
-              corner: 'ESCANTEIO',
-              penalty: 'PÊNALTI',
-              offside: 'IMPEDIMENTO',
-              substitution: 'SUBST',
-              high_press: 'PRESSÃO',
-              transition: 'TRANSIÇÃO',
-              ball_recovery: 'RECUPERAÇÃO',
-            };
-            const eventLabel = eventLabels[eventType] || eventType.toUpperCase().replace(/_/g, ' ');
+            const eventLabel = getEventLabelUpper(eventType);
             const minute = Math.floor(timestamp / 60);
             
             // Badge colors based on event type
@@ -310,20 +295,7 @@ export function useThumbnailGeneration(matchId?: string) {
     setGeneratingIds(prev => new Set(prev).add(eventId));
 
     try {
-      const eventLabels: Record<string, string> = {
-        goal: 'GOL',
-        shot: 'FINALIZAÇÃO',
-        shot_on_target: 'CHUTE NO GOL',
-        save: 'DEFESA',
-        foul: 'FALTA',
-        yellow_card: 'CARTÃO AMARELO',
-        red_card: 'CARTÃO VERMELHO',
-        corner: 'ESCANTEIO',
-        penalty: 'PÊNALTI',
-        offside: 'IMPEDIMENTO',
-      };
-
-      const eventLabel = eventLabels[eventType] || eventType.toUpperCase();
+      const eventLabel = getEventLabelUpper(eventType);
 
       const prompt = `Create a dynamic sports action thumbnail for a soccer match moment:
 Event: ${eventLabel} at minute ${minute}

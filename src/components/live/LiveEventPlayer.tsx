@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { LiveEvent, VideoChunk } from '@/contexts/LiveBroadcastContext';
 import { LiveEventReplayModal } from './LiveEventReplayModal';
+import { getEventLabel, getEventIcon } from '@/lib/eventLabels';
 
 interface LiveEventPlayerProps {
   events: LiveEvent[];
@@ -18,55 +19,7 @@ interface LiveEventPlayerProps {
   getClipChunks: (startTime: number, endTime: number) => VideoChunk[];
 }
 
-const getEventIcon = (type: string) => {
-  switch (type) {
-    case "goal":
-    case "goal_home":
-    case "goal_away":
-      return "⚽";
-    case "yellow_card":
-      return "🟨";
-    case "red_card":
-      return "🟥";
-    case "shot":
-      return "🎯";
-    case "foul":
-      return "⚠️";
-    case "substitution":
-      return "🔄";
-    case "halftime":
-      return "⏱️";
-    default:
-      return "📌";
-  }
-};
-
-const getEventLabel = (type: string) => {
-  switch (type) {
-    case "goal":
-      return "Gol";
-    case "goal_home":
-      return "Gol Casa";
-    case "goal_away":
-      return "Gol Fora";
-    case "yellow_card":
-      return "Cartão Amarelo";
-    case "red_card":
-      return "Cartão Vermelho";
-    case "shot":
-      return "Finalização";
-    case "foul":
-      return "Falta";
-    case "substitution":
-      return "Substituição";
-    case "halftime":
-      return "Intervalo";
-    default:
-      return type;
-  }
-};
-
-export function LiveEventPlayer({ 
+export function LiveEventPlayer({
   events, 
   recordingTime,
   getClipChunks 

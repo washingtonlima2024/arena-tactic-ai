@@ -29,6 +29,58 @@ export const EVENT_TYPE_LABELS_PT: Record<string, string> = {
   'halftime': 'Intervalo',
   'kickoff': 'Início',
   'fulltime': 'Fim de Jogo',
+  // Variações adicionais
+  'chance': 'Chance',
+  'var': 'VAR',
+  'injury': 'Lesão',
+  'throw_in': 'Lateral',
+  'kick_off': 'Início',
+  'half_time': 'Intervalo',
+  'full_time': 'Fim de Jogo',
+  'woodwork': 'Na Trave',
+  'emotionalMoment': 'Momento Especial',
+  // Tipos do parser de transcrição
+  'card': 'Cartão',
+  'other': 'Evento',
+  // Variantes em camelCase (compatibilidade legada)
+  'yellowCard': 'Cartão Amarelo',
+  'redCard': 'Cartão Vermelho',
+  'freeKick': 'Tiro Livre',
+};
+
+// Ícones de eventos para uso em componentes
+export const EVENT_ICONS: Record<string, string> = {
+  goal: '⚽',
+  goal_home: '⚽',
+  goal_away: '⚽',
+  assist: '👟',
+  shot: '🎯',
+  shot_on_target: '🎯',
+  save: '🧤',
+  foul: '⚠️',
+  yellow_card: '🟨',
+  red_card: '🟥',
+  offside: '🚩',
+  corner: '📐',
+  free_kick: '🦵',
+  penalty: '⭕',
+  substitution: '🔄',
+  high_press: '⚡',
+  transition: '💨',
+  ball_recovery: '🔃',
+  halftime: '⏸️',
+  kickoff: '▶️',
+  fulltime: '🏁',
+  cross: '↗️',
+  dribble: '👣',
+  tackle: '🦶',
+  header: '🗣️',
+  block: '🛡️',
+  clearance: '🧹',
+  interception: '✋',
+  var: '📺',
+  injury: '🏥',
+  chance: '💫',
 };
 
 // Versão em maiúsculas para badges e vinhetas
@@ -45,4 +97,9 @@ export function getEventLabel(eventType: string, uppercase = false): string {
 // Função helper para obter o label traduzido em maiúsculas
 export function getEventLabelUpper(eventType: string): string {
   return getEventLabel(eventType, true);
+}
+
+// Função helper para obter o ícone do evento
+export function getEventIcon(eventType: string): string {
+  return EVENT_ICONS[eventType] || '📌';
 }
