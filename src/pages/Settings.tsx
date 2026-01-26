@@ -138,18 +138,21 @@ export default function Settings() {
       setNotifyErrors(apiSettings.find((s) => s.setting_key === "notify_errors")?.setting_value !== "false");
       setNotifyUpdates(apiSettings.find((s) => s.setting_key === "notify_updates")?.setting_value === "true");
 
-      // AI Provider settings
+      // AI Provider settings - usar === "true" para consistência (precisam estar explicitamente ativados)
       setGeminiApiKey(apiSettings.find((s) => s.setting_key === "gemini_api_key")?.setting_value || "");
       setGeminiModel(apiSettings.find((s) => s.setting_key === "gemini_model")?.setting_value || "gemini-2.5-flash");
-      setGeminiEnabled(apiSettings.find((s) => s.setting_key === "gemini_enabled")?.setting_value !== "false");
+      const geminiSetting = apiSettings.find((s) => s.setting_key === "gemini_enabled")?.setting_value;
+      setGeminiEnabled(geminiSetting === "true");
 
       setOpenaiApiKey(apiSettings.find((s) => s.setting_key === "openai_api_key")?.setting_value || "");
       setOpenaiModel(apiSettings.find((s) => s.setting_key === "openai_model")?.setting_value || "gpt-4o-mini");
-      setOpenaiEnabled(apiSettings.find((s) => s.setting_key === "openai_enabled")?.setting_value === "true");
+      const openaiSetting = apiSettings.find((s) => s.setting_key === "openai_enabled")?.setting_value;
+      setOpenaiEnabled(openaiSetting === "true");
 
       // ElevenLabs settings
       setElevenlabsApiKey(apiSettings.find((s) => s.setting_key === "elevenlabs_api_key")?.setting_value || "");
-      setElevenlabsEnabled(apiSettings.find((s) => s.setting_key === "elevenlabs_enabled")?.setting_value !== "false");
+      const elevenlabsSetting = apiSettings.find((s) => s.setting_key === "elevenlabs_enabled")?.setting_value;
+      setElevenlabsEnabled(elevenlabsSetting === "true");
 
       // Ollama settings - DEFAULT TO TRUE (FREE!)
       setOllamaUrl(apiSettings.find((s) => s.setting_key === "ollama_url")?.setting_value || "http://localhost:11434");
