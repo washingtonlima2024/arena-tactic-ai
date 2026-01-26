@@ -625,7 +625,22 @@ export default function Settings() {
                     </CardTitle>
                     <CardDescription>Modelos avançados para análise de vídeo e texto</CardDescription>
                   </div>
-                  <Switch checked={geminiEnabled} onCheckedChange={setGeminiEnabled} />
+                  <Switch
+                    checked={geminiEnabled}
+                    onCheckedChange={async (checked) => {
+                      setGeminiEnabled(checked);
+                      try {
+                        await upsertApiSetting.mutateAsync({
+                          key: "gemini_enabled",
+                          value: String(checked),
+                        });
+                        toast.success(checked ? "Gemini ativado!" : "Gemini desativado");
+                      } catch (error) {
+                        setGeminiEnabled(!checked);
+                        toast.error("Erro ao salvar configuração");
+                      }
+                    }}
+                  />
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -699,7 +714,22 @@ export default function Settings() {
                     </CardTitle>
                     <CardDescription>Modelos de linguagem para análise e geração de texto</CardDescription>
                   </div>
-                  <Switch checked={openaiEnabled} onCheckedChange={setOpenaiEnabled} />
+                  <Switch
+                    checked={openaiEnabled}
+                    onCheckedChange={async (checked) => {
+                      setOpenaiEnabled(checked);
+                      try {
+                        await upsertApiSetting.mutateAsync({
+                          key: "openai_enabled",
+                          value: String(checked),
+                        });
+                        toast.success(checked ? "OpenAI ativado!" : "OpenAI desativado");
+                      } catch (error) {
+                        setOpenaiEnabled(!checked);
+                        toast.error("Erro ao salvar configuração");
+                      }
+                    }}
+                  />
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -776,7 +806,22 @@ export default function Settings() {
                     </CardTitle>
                     <CardDescription>Transcrição de áudio e síntese de voz de alta qualidade</CardDescription>
                   </div>
-                  <Switch checked={elevenlabsEnabled} onCheckedChange={setElevenlabsEnabled} />
+                  <Switch
+                    checked={elevenlabsEnabled}
+                    onCheckedChange={async (checked) => {
+                      setElevenlabsEnabled(checked);
+                      try {
+                        await upsertApiSetting.mutateAsync({
+                          key: "elevenlabs_enabled",
+                          value: String(checked),
+                        });
+                        toast.success(checked ? "ElevenLabs ativado!" : "ElevenLabs desativado");
+                      } catch (error) {
+                        setElevenlabsEnabled(!checked);
+                        toast.error("Erro ao salvar configuração");
+                      }
+                    }}
+                  />
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -943,7 +988,22 @@ export default function Settings() {
                     </CardTitle>
                     <CardDescription>Modelos de IA rodando localmente - gratuito e offline</CardDescription>
                   </div>
-                  <Switch checked={ollamaEnabled} onCheckedChange={setOllamaEnabled} />
+                  <Switch
+                    checked={ollamaEnabled}
+                    onCheckedChange={async (checked) => {
+                      setOllamaEnabled(checked);
+                      try {
+                        await upsertApiSetting.mutateAsync({
+                          key: "ollama_enabled",
+                          value: String(checked),
+                        });
+                        toast.success(checked ? "Ollama ativado!" : "Ollama desativado");
+                      } catch (error) {
+                        setOllamaEnabled(!checked);
+                        toast.error("Erro ao salvar configuração");
+                      }
+                    }}
+                  />
                 </div>
               </CardHeader>
               <CardContent className="space-y-4">
