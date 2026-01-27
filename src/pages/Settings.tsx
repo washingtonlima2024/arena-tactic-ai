@@ -651,7 +651,7 @@ export default function Settings() {
                       } finally {
                         setTimeout(() => {
                           isMutatingRef.current = false;
-                        }, 500);
+                        }, 1500);
                       }
                     }}
                   />
@@ -745,7 +745,7 @@ export default function Settings() {
                       } finally {
                         setTimeout(() => {
                           isMutatingRef.current = false;
-                        }, 500);
+                        }, 1500);
                       }
                     }}
                   />
@@ -842,7 +842,7 @@ export default function Settings() {
                       } finally {
                         setTimeout(() => {
                           isMutatingRef.current = false;
-                        }, 500);
+                        }, 1500);
                       }
                     }}
                   />
@@ -1029,7 +1029,7 @@ export default function Settings() {
                       } finally {
                         setTimeout(() => {
                           isMutatingRef.current = false;
-                        }, 500);
+                        }, 1500);
                       }
                     }}
                   />
