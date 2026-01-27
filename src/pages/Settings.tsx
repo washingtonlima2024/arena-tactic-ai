@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -125,8 +125,14 @@ export default function Settings() {
   const { data: apiSettings, isLoading: settingsLoading } = useApiSettings();
   const upsertApiSetting = useUpsertApiSetting();
 
+  // Flag para ignorar re-sync durante mutações (evita race condition)
+  const isMutatingRef = useRef(false);
+
   // Load settings from database
   useEffect(() => {
+    // Ignorar sincronização se estamos no meio de uma mutação
+    if (isMutatingRef.current) return;
+    
     if (apiSettings) {
       setProfileName(apiSettings.find((s) => s.setting_key === "profile_name")?.setting_value || "");
       setProfileEmail(apiSettings.find((s) => s.setting_key === "profile_email")?.setting_value || "");
@@ -631,6 +637,7 @@ export default function Settings() {
                   <Switch
                     checked={geminiEnabled}
                     onCheckedChange={async (checked) => {
+                      isMutatingRef.current = true;
                       setGeminiEnabled(checked);
                       try {
                         await upsertApiSetting.mutateAsync({
@@ -641,6 +648,10 @@ export default function Settings() {
                       } catch (error) {
                         setGeminiEnabled(!checked);
                         toast.error("Erro ao salvar configuração");
+                      } finally {
+                        setTimeout(() => {
+                          isMutatingRef.current = false;
+                        }, 500);
                       }
                     }}
                   />
@@ -720,6 +731,7 @@ export default function Settings() {
                   <Switch
                     checked={openaiEnabled}
                     onCheckedChange={async (checked) => {
+                      isMutatingRef.current = true;
                       setOpenaiEnabled(checked);
                       try {
                         await upsertApiSetting.mutateAsync({
@@ -730,6 +742,10 @@ export default function Settings() {
                       } catch (error) {
                         setOpenaiEnabled(!checked);
                         toast.error("Erro ao salvar configuração");
+                      } finally {
+                        setTimeout(() => {
+                          isMutatingRef.current = false;
+                        }, 500);
                       }
                     }}
                   />
@@ -812,6 +828,7 @@ export default function Settings() {
                   <Switch
                     checked={elevenlabsEnabled}
                     onCheckedChange={async (checked) => {
+                      isMutatingRef.current = true;
                       setElevenlabsEnabled(checked);
                       try {
                         await upsertApiSetting.mutateAsync({
@@ -822,6 +839,10 @@ export default function Settings() {
                       } catch (error) {
                         setElevenlabsEnabled(!checked);
                         toast.error("Erro ao salvar configuração");
+                      } finally {
+                        setTimeout(() => {
+                          isMutatingRef.current = false;
+                        }, 500);
                       }
                     }}
                   />
@@ -994,6 +1015,7 @@ export default function Settings() {
                   <Switch
                     checked={ollamaEnabled}
                     onCheckedChange={async (checked) => {
+                      isMutatingRef.current = true;
                       setOllamaEnabled(checked);
                       try {
                         await upsertApiSetting.mutateAsync({
@@ -1004,6 +1026,10 @@ export default function Settings() {
                       } catch (error) {
                         setOllamaEnabled(!checked);
                         toast.error("Erro ao salvar configuração");
+                      } finally {
+                        setTimeout(() => {
+                          isMutatingRef.current = false;
+                        }, 500);
                       }
                     }}
                   />
