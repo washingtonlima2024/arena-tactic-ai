@@ -24,27 +24,18 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
 
-# Supabase client for cloud sync
-SUPABASE_URL = os.environ.get('SUPABASE_URL', '')
-SUPABASE_SERVICE_KEY = os.environ.get('SUPABASE_SERVICE_KEY', '')
+# ============================================================================
+# 100% LOCAL MODE - No Supabase/Cloud dependencies
+# ============================================================================
+# All data is stored in SQLite, all AI is local (Whisper + Ollama)
 
 # Log de verificação de configuração na inicialização
 print(f"[STARTUP] Arena Play Server v{SERVER_VERSION} ({SERVER_BUILD_DATE})")
+print(f"[STARTUP] 🏠 Modo 100% LOCAL ativado - Sem dependências de nuvem")
 print(f"[STARTUP] Arquivo .env existe: {'✓' if os.path.exists('.env') else '✗'}")
-print(f"[STARTUP] LOVABLE_API_KEY: {'✓ configurada' if os.environ.get('LOVABLE_API_KEY') else '✗ não configurada'}")
-print(f"[STARTUP] Supabase configurado: {bool(SUPABASE_URL and SUPABASE_SERVICE_KEY)}")
-if SUPABASE_URL and SUPABASE_SERVICE_KEY:
-    print(f"[STARTUP] ✓ SUPABASE_URL: {SUPABASE_URL[:50]}...")
-    print(f"[STARTUP] ✓ SUPABASE_SERVICE_KEY: {'*' * 20}... (configurado)")
-else:
-    if not SUPABASE_URL:
-        print(f"[STARTUP] ⚠ SUPABASE_URL não configurado")
-    if not SUPABASE_SERVICE_KEY:
-        print(f"[STARTUP] ⚠ SUPABASE_SERVICE_KEY não configurado")
-    print(f"[STARTUP] ⚠ Sincronização com Cloud desabilitada - configure as variáveis no .env")
 
 # Import local modules
-from database import init_db, get_session, Session
+from database import init_db, get_session, get_db_session, Session
 from models import (
     Team, Match, Player, MatchEvent, Video, AnalysisJob,
     GeneratedAudio, Thumbnail, Profile, UserRole, ApiSetting,
@@ -152,7 +143,63 @@ def health_check():
     return jsonify(response_data)
 
 
-# ============================================================================
+@app.route('/api/ai/priorities', methods=['GET', 'OPTIONS'])
+def get_ai_priorities():
+    """Return configured AI provider priorities for debugging."""
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        return response
+    
+    # 100% LOCAL: Load settings from SQLite
+    local_settings = get_local_settings()
+    priority_order = ai_services.get_ai_priority_order(local_settings)
+    
+    # Get individual priority values
+    priorities = {}
+    for provider in ['ollama', 'lovable', 'gemini', 'openai']:
+        key = f'ai_provider_{provider}_priority'
+        value = local_settings.get(key, '0')
+        priorities[provider] = {
+            'priority': int(value) if value and value.isdigit() else 0,
+            'enabled': int(value) > 0 if value and value.isdigit() else False
+        }
+    
+    return jsonify({
+        'success': True,
+        'priority_order': priority_order,
+        'priorities': priorities,
+        'source': 'sqlite_local',
+        'settings_count': len(local_settings),
+        'providers': {
+            'lovable': bool(ai_services.LOVABLE_API_KEY),
+            'gemini': bool(ai_services.GOOGLE_API_KEY) and ai_services.GEMINI_ENABLED,
+            'openai': bool(ai_services.OPENAI_API_KEY) and ai_services.OPENAI_ENABLED,
+            'ollama': ai_services.OLLAMA_ENABLED
+        }
+    })
+
+
+@app.route('/api/ai/reload-settings', methods=['POST', 'OPTIONS'])
+def reload_ai_settings():
+    """Reload AI settings from local SQLite database."""
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        return response
+    
+    # Re-load API keys from local database
+    load_api_keys_from_db()
+    
+    local_settings = get_local_settings()
+    priority_order = ai_services.get_ai_priority_order(local_settings)
+    
+    return jsonify({
+        'success': True,
+        'message': 'AI settings reloaded from local SQLite',
+        'priority_order': priority_order,
+        'settings_count': len(local_settings)
+    })
+
+
 # GLOBAL OPTIONS HANDLER - Após rotas específicas para não interferir
 # ============================================================================
 
@@ -206,16 +253,35 @@ def _bool_from_setting(value: str, default: bool = False) -> bool:
     return default
 
 
+def get_local_settings() -> Dict[str, str]:
+    """Get settings from local SQLite database (100% local mode)."""
+    session = get_session()
+    try:
+        settings = session.query(ApiSetting).all()
+        return {s.setting_key: s.setting_value for s in settings if s.setting_value}
+    except Exception as e:
+        print(f"[Settings] Error loading local settings: {e}")
+        return {}
+    finally:
+        session.close()
+
+
 def load_api_keys_from_db():
     """Load API keys and provider flags from database on server startup."""
     session = get_session()
     try:
+        # Load from local SQLite
         settings = session.query(ApiSetting).all()
-
-        values = {}
+        local_values = {}
         for s in settings:
             k = _normalize_setting_key(s.setting_key)
-            values[k] = s.setting_value
+            local_values[k] = s.setting_value
+        
+        # MODO 100% LOCAL: SQLite é a fonte de verdade
+        # Não sobrescrever com configurações do Cloud
+        values = {**local_values}
+        # cloud_values = get_cloud_settings()  # Desabilitado - sistema local
+        # NOTA: Se quiser reativar Cloud como fallback, descomente acima
 
         keys_loaded = []
         # Provider enabled flags (default True for backward compatibility)
@@ -224,14 +290,26 @@ def load_api_keys_from_db():
         elevenlabs_enabled = _bool_from_setting(values.get('elevenlabs_enabled'), True)
         
         # Local Whisper settings (FREE transcription)
-        local_whisper_enabled = _bool_from_setting(values.get('local_whisper_enabled'), False)
+        local_whisper_enabled = _bool_from_setting(values.get('local_whisper_enabled'), True)  # FREE by default!
         local_whisper_model = values.get('local_whisper_model') or 'base'
 
         # Prefer DB values, fallback to environment variables if DB is missing
-        openai_key = values.get('openai_api_key') or os.environ.get('OPENAI_API_KEY', '')
-        gemini_key = values.get('gemini_api_key') or os.environ.get('GOOGLE_GENERATIVE_AI_API_KEY', '') or os.environ.get('GOOGLE_API_KEY', '')
-        elevenlabs_key = values.get('elevenlabs_api_key') or os.environ.get('ELEVENLABS_API_KEY', '')
-        lovable_key = values.get('lovable_api_key') or os.environ.get('LOVABLE_API_KEY', '')
+        # CRITICAL: Treat empty strings as None to ensure proper fallback
+        openai_key = values.get('openai_api_key')
+        if not openai_key:  # None, '', or False
+            openai_key = os.environ.get('OPENAI_API_KEY', '')
+        
+        gemini_key = values.get('gemini_api_key')
+        if not gemini_key:
+            gemini_key = os.environ.get('GOOGLE_GENERATIVE_AI_API_KEY', '') or os.environ.get('GOOGLE_API_KEY', '')
+        
+        elevenlabs_key = values.get('elevenlabs_api_key')
+        if not elevenlabs_key:
+            elevenlabs_key = os.environ.get('ELEVENLABS_API_KEY', '')
+        
+        lovable_key = values.get('lovable_api_key')
+        if not lovable_key:
+            lovable_key = os.environ.get('LOVABLE_API_KEY', '')
 
         if openai_key:
             ai_services.set_api_keys(openai_key=openai_key)
@@ -249,7 +327,7 @@ def load_api_keys_from_db():
         # Ollama optional settings
         ollama_url = values.get('ollama_url')
         ollama_model = values.get('ollama_model')
-        ollama_enabled = _bool_from_setting(values.get('ollama_enabled'), False)
+        ollama_enabled = _bool_from_setting(values.get('ollama_enabled'), True)  # FREE by default!
 
         if ollama_url or ollama_model or ollama_enabled:
             ai_services.set_api_keys(
@@ -272,6 +350,10 @@ def load_api_keys_from_db():
         # Log Local Whisper status
         if local_whisper_enabled:
             keys_loaded.append(f'LOCAL_WHISPER ({local_whisper_model})')
+        
+        # Log AI priority order
+        priority_order = ai_services.get_ai_priority_order(values)
+        print(f"[Settings] AI Priority: {' → '.join(priority_order)}")
 
         if keys_loaded:
             status_parts = []
@@ -300,329 +382,17 @@ load_api_keys_from_db()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# SUPABASE CLOUD SYNC FUNCTIONS
+# 100% LOCAL MODE - Supabase Cloud Sync Functions REMOVED
 # ═══════════════════════════════════════════════════════════════════════════
-
-def get_supabase_headers() -> Dict[str, str]:
-    """Get headers for Supabase API requests."""
-    return {
-        'apikey': SUPABASE_SERVICE_KEY,
-        'Authorization': f'Bearer {SUPABASE_SERVICE_KEY}',
-        'Content-Type': 'application/json',
-        'Prefer': 'return=representation'
-    }
-
-
-def sync_match_to_supabase(match_id: str) -> Dict[str, Any]:
-    """
-    Sync a match and its events from local SQLite to Supabase Cloud.
-    This ensures data is visible in the frontend.
-    
-    Args:
-        match_id: The match ID to sync
-    
-    Returns:
-        Dict with sync results
-    """
-    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-        print(f"[SUPABASE-SYNC] ⚠ Supabase not configured, skipping sync")
-        return {'success': False, 'error': 'Supabase not configured'}
-    
-    session = get_session()
-    result = {
-        'success': False,
-        'match_synced': False,
-        'events_synced': 0,
-        'videos_synced': 0,
-        'errors': []
-    }
-    
-    try:
-        # Get match from local database
-        match = session.query(Match).filter_by(id=match_id).first()
-        if not match:
-            result['error'] = f'Match {match_id} not found in local database'
-            return result
-        
-        print(f"[SUPABASE-SYNC] Syncing match {match_id}...")
-        
-        # Prepare match data for Supabase
-        match_data = {
-            'id': match.id,
-            'home_team_id': match.home_team_id,
-            'away_team_id': match.away_team_id,
-            'home_score': match.home_score,
-            'away_score': match.away_score,
-            'match_date': match.match_date.isoformat() if match.match_date else None,
-            'competition': match.competition,
-            'venue': match.venue,
-            'status': match.status or 'analyzed',
-        }
-        
-        # Upsert match to Supabase
-        headers = get_supabase_headers()
-        headers['Prefer'] = 'resolution=merge-duplicates,return=representation'
-        
-        response = requests.post(
-            f'{SUPABASE_URL}/rest/v1/matches',
-            json=match_data,
-            headers=headers,
-            timeout=30
-        )
-        
-        if response.status_code in [200, 201]:
-            result['match_synced'] = True
-            print(f"[SUPABASE-SYNC] ✓ Match synced to Supabase")
-        else:
-            error_msg = f"Failed to sync match: {response.status_code} - {response.text[:200]}"
-            result['errors'].append(error_msg)
-            print(f"[SUPABASE-SYNC] ✗ {error_msg}")
-        
-        # Sync events
-        events = session.query(MatchEvent).filter_by(match_id=match_id).all()
-        if events:
-            events_data = []
-            for event in events:
-                event_dict = {
-                    'id': event.id,
-                    'match_id': event.match_id,
-                    'event_type': event.event_type,
-                    'minute': event.minute,
-                    'second': event.second,
-                    'description': event.description,
-                    'match_half': event.match_half,
-                    'is_highlight': event.is_highlight,
-                    'clip_url': event.clip_url,
-                    'clip_pending': event.clip_pending,
-                    'metadata': event.event_metadata
-                }
-                events_data.append(event_dict)
-            
-            # Upsert events to Supabase
-            response = requests.post(
-                f'{SUPABASE_URL}/rest/v1/match_events',
-                json=events_data,
-                headers=headers,
-                timeout=60
-            )
-            
-            if response.status_code in [200, 201]:
-                result['events_synced'] = len(events_data)
-                print(f"[SUPABASE-SYNC] ✓ {len(events_data)} events synced to Supabase")
-            else:
-                error_msg = f"Failed to sync events: {response.status_code} - {response.text[:200]}"
-                result['errors'].append(error_msg)
-                print(f"[SUPABASE-SYNC] ✗ {error_msg}")
-        
-        # Sync videos
-        videos = session.query(Video).filter_by(match_id=match_id).all()
-        if videos:
-            videos_data = []
-            for video in videos:
-                video_dict = {
-                    'id': video.id,
-                    'match_id': video.match_id,
-                    'file_url': video.file_url,
-                    'file_name': video.file_name,
-                    'video_type': video.video_type,
-                    'duration_seconds': video.duration_seconds,
-                    'start_minute': video.start_minute,
-                    'end_minute': video.end_minute,
-                    'status': video.status
-                }
-                videos_data.append(video_dict)
-            
-            response = requests.post(
-                f'{SUPABASE_URL}/rest/v1/videos',
-                json=videos_data,
-                headers=headers,
-                timeout=30
-            )
-            
-            if response.status_code in [200, 201]:
-                result['videos_synced'] = len(videos_data)
-                print(f"[SUPABASE-SYNC] ✓ {len(videos_data)} videos synced to Supabase")
-            else:
-                error_msg = f"Failed to sync videos: {response.status_code} - {response.text[:200]}"
-                result['errors'].append(error_msg)
-                print(f"[SUPABASE-SYNC] ✗ {error_msg}")
-        
-        result['success'] = result['match_synced']
-        return result
-        
-    except Exception as e:
-        error_msg = f"Sync error: {str(e)}"
-        result['errors'].append(error_msg)
-        print(f"[SUPABASE-SYNC] ✗ {error_msg}")
-        return result
-    finally:
-        session.close()
-
-
-def verify_match_exists_in_supabase(match_id: str) -> bool:
-    """Check if a match exists in Supabase Cloud."""
-    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-        return False
-    
-    try:
-        response = requests.get(
-            f'{SUPABASE_URL}/rest/v1/matches?id=eq.{match_id}&select=id',
-            headers=get_supabase_headers(),
-            timeout=10
-        )
-        
-        if response.status_code == 200:
-            data = response.json()
-            return len(data) > 0
-        return False
-    except Exception as e:
-        print(f"[SUPABASE-CHECK] Error checking match: {e}")
-        return False
-
-
-@app.route('/api/sync-to-supabase/<match_id>', methods=['POST'])
-def sync_to_supabase_endpoint(match_id: str):
-    """Manually sync a match to Supabase Cloud."""
-    result = sync_match_to_supabase(match_id)
-    if result.get('success'):
-        return jsonify(result)
-    else:
-        return jsonify(result), 400
-
-
-def ensure_teams_in_supabase(home_team_id: Optional[str], away_team_id: Optional[str], session) -> bool:
-    """
-    Ensure both teams exist in Supabase before creating a match.
-    This prevents foreign key errors when syncing matches.
-    """
-    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-        print(f"[TEAM-SYNC] ⚠ Supabase not configured")
-        return False
-    
-    headers = get_supabase_headers()
-    headers['Prefer'] = 'resolution=merge-duplicates,return=representation'
-    
-    synced = 0
-    for team_id in [home_team_id, away_team_id]:
-        if not team_id:
-            continue
-            
-        # Get team from local DB
-        team = session.query(Team).filter_by(id=team_id).first()
-        if not team:
-            print(f"[TEAM-SYNC] ⚠ Team {team_id} not found locally")
-            continue
-        
-        team_data = {
-            'id': team.id,
-            'name': team.name,
-            'short_name': team.short_name,
-            'primary_color': team.primary_color,
-            'secondary_color': team.secondary_color,
-            'logo_url': team.logo_url
-        }
-        
-        try:
-            response = requests.post(
-                f'{SUPABASE_URL}/rest/v1/teams',
-                json=team_data,
-                headers=headers,
-                timeout=15
-            )
-            if response.status_code in [200, 201, 409]:  # 409 = already exists (conflict)
-                synced += 1
-                print(f"[TEAM-SYNC] ✓ Team '{team.name}' synced to Supabase")
-            else:
-                print(f"[TEAM-SYNC] ⚠ Failed to sync team '{team.name}': {response.status_code} - {response.text[:100]}")
-        except Exception as e:
-            print(f"[TEAM-SYNC] ⚠ Error syncing team: {e}")
-    
-    return synced > 0
-
-
-def sync_new_match_to_supabase(match_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Sync a newly created match to Supabase Cloud immediately.
-    This is a lightweight sync that only syncs the match record (no events/videos).
-    
-    Args:
-        match_data: Dictionary with match data from to_dict()
-    
-    Returns:
-        Dict with success status
-    """
-    if not SUPABASE_URL or not SUPABASE_SERVICE_KEY:
-        print(f"[SUPABASE-SYNC] ⚠ Supabase not configured")
-        return {'success': False, 'error': 'Supabase not configured'}
-    
-    try:
-        headers = get_supabase_headers()
-        headers['Prefer'] = 'resolution=merge-duplicates,return=representation'
-        
-        # Prepare match data - only include fields that exist in Supabase schema
-        supabase_match = {
-            'id': match_data['id'],
-            'home_team_id': match_data.get('home_team_id'),
-            'away_team_id': match_data.get('away_team_id'),
-            'home_score': match_data.get('home_score', 0),
-            'away_score': match_data.get('away_score', 0),
-            'match_date': match_data.get('match_date'),
-            'competition': match_data.get('competition'),
-            'venue': match_data.get('venue'),
-            'status': match_data.get('status', 'pending'),
-        }
-        
-        print(f"[SUPABASE-SYNC] Creating match in Supabase: {match_data['id']}")
-        
-        response = requests.post(
-            f'{SUPABASE_URL}/rest/v1/matches',
-            json=supabase_match,
-            headers=headers,
-            timeout=30
-        )
-        
-        if response.status_code in [200, 201]:
-            print(f"[SUPABASE-SYNC] ✓ Match created in Supabase")
-            return {'success': True}
-        elif response.status_code == 409:
-            print(f"[SUPABASE-SYNC] ✓ Match already exists in Supabase")
-            return {'success': True, 'already_exists': True}
-        else:
-            error_msg = f"Failed to create match: {response.status_code} - {response.text[:200]}"
-            print(f"[SUPABASE-SYNC] ✗ {error_msg}")
-            return {'success': False, 'error': error_msg}
-            
-    except Exception as e:
-        error_msg = f"Sync error: {str(e)}"
-        print(f"[SUPABASE-SYNC] ✗ {error_msg}")
-        return {'success': False, 'error': error_msg}
-
-
-@app.route('/api/matches/<match_id>/ensure-supabase', methods=['POST'])
-def ensure_match_in_supabase(match_id: str):
-    """
-    Ensure a match exists in Supabase Cloud.
-    Syncs teams, match, events and videos.
-    """
-    session = get_session()
-    try:
-        match = session.query(Match).filter_by(id=match_id).first()
-        if not match:
-            return jsonify({'error': 'Match not found locally'}), 404
-        
-        # Sync teams first to avoid FK errors
-        teams_synced = ensure_teams_in_supabase(match.home_team_id, match.away_team_id, session)
-        
-        # Full sync of match with events and videos
-        result = sync_match_to_supabase(match_id)
-        result['teams_synced'] = teams_synced
-        
-        if result.get('success'):
-            return jsonify(result)
-        else:
-            return jsonify(result), 400
-    finally:
-        session.close()
+# As funções de sincronização com Supabase Cloud foram removidas.
+# O sistema opera 100% localmente com SQLite.
+# Funções removidas:
+#   - get_supabase_headers()
+#   - sync_match_to_supabase()
+#   - verify_match_exists_in_supabase()
+#   - ensure_teams_in_supabase()
+#   - sync_new_match_to_supabase()
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 # Diretório para vinhetas locais
@@ -1951,16 +1721,13 @@ def get_matches():
 
 @app.route('/api/matches', methods=['POST'])
 def create_match():
-    """Cria uma nova partida e sincroniza automaticamente com Supabase Cloud."""
+    """Cria uma nova partida no SQLite local (100% local mode)."""
     data = request.json
     session = get_session()
     try:
-        # First ensure teams exist in Supabase (to avoid FK errors)
+        # 100% LOCAL: Times validados apenas no SQLite
         home_team_id = data.get('home_team_id')
         away_team_id = data.get('away_team_id')
-        
-        if home_team_id or away_team_id:
-            ensure_teams_in_supabase(home_team_id, away_team_id, session)
         
         # Create match locally
         match = Match(
@@ -3277,10 +3044,138 @@ def upsert_api_setting():
             print(f"[Settings] 🆓 Local Whisper model: {value}")
         
         session.commit()
+        
+        # NOTA: Sistema 100% local - Cloud sync removido
+        
         return jsonify(setting.to_dict())
     except Exception as e:
         session.rollback()
         return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+@app.route('/api/settings/debug', methods=['GET'])
+def debug_ai_settings():
+    """Retorna estado atual das variáveis globais de IA em memória para debug."""
+    try:
+        session = get_session()
+        settings = session.query(ApiSetting).all()
+        db_values = {s.setting_key: s.setting_value for s in settings}
+        session.close()
+        
+        # Pegar ordem de prioridade diretamente do ai_services
+        priority_order = ai_services.get_ai_priority_order(db_values)
+        
+        return jsonify({
+            'memory_state': {
+                'ollama': {
+                    'enabled': ai_services.OLLAMA_ENABLED,
+                    'url': ai_services.OLLAMA_URL,
+                    'model': ai_services.OLLAMA_MODEL
+                },
+                'openai': {
+                    'enabled': ai_services.OPENAI_ENABLED,
+                    'keySet': bool(ai_services.OPENAI_API_KEY)
+                },
+                'gemini': {
+                    'enabled': ai_services.GEMINI_ENABLED,
+                    'keySet': bool(ai_services.GOOGLE_API_KEY)
+                },
+                'lovable': {
+                    'keySet': bool(ai_services.LOVABLE_API_KEY)
+                },
+                'local_whisper': {
+                    'enabled': ai_services.LOCAL_WHISPER_ENABLED,
+                    'model': ai_services.LOCAL_WHISPER_MODEL
+                }
+            },
+            'db_values': {
+                'ollama_enabled': db_values.get('ollama_enabled'),
+                'ollama_url': db_values.get('ollama_url'),
+                'ollama_model': db_values.get('ollama_model'),
+                'openai_enabled': db_values.get('openai_enabled'),
+                'gemini_enabled': db_values.get('gemini_enabled'),
+                'ai_provider_ollama_priority': db_values.get('ai_provider_ollama_priority'),
+                'ai_provider_openai_priority': db_values.get('ai_provider_openai_priority'),
+                'ai_provider_gemini_priority': db_values.get('ai_provider_gemini_priority'),
+                'ai_provider_lovable_priority': db_values.get('ai_provider_lovable_priority'),
+            },
+            'priority_order': priority_order,
+            'source': 'SQLite local (prioridade)',
+            'server_version': SERVER_VERSION
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/settings/force-ollama', methods=['POST', 'OPTIONS'])
+def force_ollama_config():
+    """
+    Força IA 100% Local (Gratuito):
+    - Ollama (análise de eventos) como provedor primário
+    - Whisper Local (faster-whisper) para transcrição gratuita
+    - NENHUM fallback cloud - 100% offline
+    """
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    settings_to_update = [
+        # === Ollama (Análise de Eventos - GRATUITO) ===
+        ('ollama_enabled', 'true'),
+        ('ollama_url', 'http://localhost:11434'),
+        ('ollama_model', 'washingtonlima/kakttus'),
+        
+        # === Whisper Local (Transcrição - GRATUITO) ===
+        ('local_whisper_enabled', 'true'),
+        ('local_whisper_model', 'base'),
+        
+        # === Prioridades de IA - 100% LOCAL ===
+        ('ai_provider_ollama_priority', '1'),   # Único provedor ativo
+        ('ai_provider_lovable_priority', '0'),  # Desativado
+        ('ai_provider_gemini_priority', '0'),   # Desativado
+        ('ai_provider_openai_priority', '0'),   # Desativado
+        
+        # === Desativar provedores cloud ===
+        ('openai_enabled', 'false'),
+        ('gemini_enabled', 'false'),
+    ]
+    
+    session = get_session()
+    results = []
+    
+    try:
+        for key, value in settings_to_update:
+            existing = session.query(ApiSetting).filter_by(setting_key=key).first()
+            if existing:
+                existing.setting_value = value
+            else:
+                session.add(ApiSetting(setting_key=key, setting_value=value))
+            results.append({key: value})
+        
+        session.commit()
+        
+        # Recarregar configurações em memória
+        load_api_keys_from_db()
+        
+        print(f"[Settings] ✓ IA 100% LOCAL ATIVADA!")
+        print(f"[Settings]   - Transcrição: Whisper Local (faster-whisper)")
+        print(f"[Settings]   - Análise: Ollama ({settings_to_update[2][1]})")
+        print(f"[Settings]   - Cloud: DESATIVADO")
+        
+        return jsonify({
+            'success': True, 
+            'message': 'IA 100% Local ativada! Whisper + Ollama (gratuito, offline)',
+            'updated': results,
+            'config': {
+                'transcription': 'local_whisper',
+                'analysis': 'ollama',
+                'fallback': 'none'
+            }
+        })
+    except Exception as e:
+        session.rollback()
+        return jsonify({'success': False, 'error': str(e)}), 500
     finally:
         session.close()
 
@@ -3605,10 +3500,12 @@ def analyze_match():
             # PRIORIDADE ÚNICA: Análise por IA (mais confiável, menos duplicatas)
             # ═══════════════════════════════════════════════════════════════
             print(f"[ANALYZE-MATCH] 🤖 Usando análise de IA (modo: {analysis_mode})...")
+            local_settings = get_local_settings()
             ai_events = ai_services.analyze_match_events(
                 transcription, home_team, away_team, game_start_minute, game_end_minute,
                 match_id=match_id,
-                use_dual_verification=(analysis_mode == 'text')
+                use_dual_verification=(analysis_mode == 'text'),
+                settings=local_settings
             )
             
             events = ai_events
@@ -5161,11 +5058,13 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
                 finally:
                     session.close()
                 
-                # Analyze transcription
+                # Analyze transcription (100% LOCAL)
+                local_settings = get_local_settings()
                 events = ai_services.analyze_match_events(
                     transcription, home_team, away_team, start_minute, end_minute,
                     match_id=match_id,
-                    use_dual_verification=True
+                    use_dual_verification=True,
+                    settings=local_settings
                 )
                 
                 if not events:
@@ -6189,17 +6088,28 @@ def transcribe_audio_endpoint():
 
 @app.route('/api/transcribe-large-video', methods=['POST'])
 def transcribe_large_video_endpoint():
-    """Transcribe a large video file. Saves audio and SRT to match folder."""
+    """Transcribe a large video file. Saves audio and SRT to match folder.
+    
+    Optional: autoAnalyze=True will automatically run event analysis after transcription.
+    """
     data = request.json
     video_url = data.get('videoUrl')
     match_id = data.get('matchId')
     half_type = data.get('halfType')  # 'first', 'second', or None
+    
+    # NOVO: Parâmetros para análise automática
+    auto_analyze = data.get('autoAnalyze', False)
+    home_team = data.get('homeTeam', 'Time Casa')
+    away_team = data.get('awayTeam', 'Time Visitante')
     
     print(f"\n{'='*60}")
     print(f"[TRANSCRIBE] Nova requisição de transcrição")
     print(f"[TRANSCRIBE] Match ID: {match_id}")
     print(f"[TRANSCRIBE] Half Type: {half_type}")
     print(f"[TRANSCRIBE] Video URL: {video_url}")
+    print(f"[TRANSCRIBE] Auto Analyze: {auto_analyze}")
+    if auto_analyze:
+        print(f"[TRANSCRIBE] Times: {home_team} vs {away_team}")
     print(f"{'='*60}")
     
     if not video_url:
@@ -6218,6 +6128,72 @@ def transcribe_large_video_endpoint():
                 print(f"[TRANSCRIBE] Áudio salvo: {result.get('audioPath')}")
             if result.get('srtPath'):
                 print(f"[TRANSCRIBE] SRT salvo: {result.get('srtPath')}")
+            
+            # ═══════════════════════════════════════════════════════════════
+            # NOVO: Análise automática após transcrição bem-sucedida
+            # ═══════════════════════════════════════════════════════════════
+            if auto_analyze and match_id and result.get('text'):
+                print(f"\n[TRANSCRIBE] 🤖 Iniciando análise automática...")
+                try:
+                    transcription_text = result.get('srtContent') or result.get('text')
+                    
+                    # Determinar minutos baseado no tipo do half
+                    game_start_minute = 0 if half_type != 'second' else 45
+                    game_end_minute = 45 if half_type == 'first' else 90
+                    analysis_half = half_type or 'first'
+                    
+                    # Executar análise de eventos
+                    events = ai_services.analyze_match_events(
+                        transcription_text,
+                        home_team,
+                        away_team,
+                        game_start_minute=game_start_minute,
+                        game_end_minute=game_end_minute,
+                        match_id=match_id,
+                        match_half=analysis_half,
+                        settings=get_local_settings()
+                    )
+                    
+                    # Salvar eventos no banco de dados
+                    if events:
+                        events_saved = 0
+                        with get_db_session() as db:
+                            for event in events:
+                                try:
+                                    db_event = MatchEvent(
+                                        match_id=match_id,
+                                        event_type=event.get('event_type', 'unknown'),
+                                        minute=event.get('minute', 0),
+                                        second=event.get('second', 0),
+                                        description=event.get('description'),
+                                        match_half=analysis_half,
+                                        metadata={
+                                            'team': event.get('team'),
+                                            'player': event.get('player'),
+                                            'confidence': event.get('confidence'),
+                                            'videoSecond': event.get('videoSecond'),
+                                            'autoAnalyzed': True
+                                        }
+                                    )
+                                    db.add(db_event)
+                                    events_saved += 1
+                                except Exception as evt_err:
+                                    print(f"[TRANSCRIBE] ⚠ Erro ao salvar evento: {evt_err}")
+                            db.commit()
+                        
+                        print(f"[TRANSCRIBE] ✓ Análise automática completa: {events_saved} eventos salvos")
+                        result['autoAnalyzed'] = True
+                        result['eventsDetected'] = events_saved
+                    else:
+                        print(f"[TRANSCRIBE] ⚠ Análise não detectou eventos")
+                        result['autoAnalyzed'] = True
+                        result['eventsDetected'] = 0
+                        
+                except Exception as analyze_error:
+                    print(f"[TRANSCRIBE] ⚠ Erro na análise automática: {analyze_error}")
+                    import traceback
+                    traceback.print_exc()
+                    result['autoAnalyzeError'] = str(analyze_error)
         else:
             print(f"[TRANSCRIBE] Falha: {result.get('error')}")
         
@@ -7634,10 +7610,12 @@ def _process_match_pipeline(job_id: str, data: dict):
                 finally:
                     session.close()
                 
+                local_settings = get_local_settings()
                 events = ai_services.analyze_match_events(
                     first_half_text, home_team, away_team, 0, 45,
                     match_id=match_id,
-                    use_dual_verification=True
+                    use_dual_verification=True,
+                    settings=local_settings
                 )
                 if events:
                     # Save events
@@ -7677,10 +7655,12 @@ def _process_match_pipeline(job_id: str, data: dict):
                 finally:
                     session.close()
                 
+                local_settings = get_local_settings()
                 events = ai_services.analyze_match_events(
                     second_half_text, home_team, away_team, 45, 90,
                     match_id=match_id,
-                    use_dual_verification=True
+                    use_dual_verification=True,
+                    settings=local_settings
                 )
                 if events:
                     session = get_session()
@@ -7781,7 +7761,8 @@ def _process_match_pipeline(job_id: str, data: dict):
                 for event in all_events:
                     if event.event_type == 'goal':
                         # Verificar time do gol nos metadados
-                        metadata = event.metadata or {}
+                        # CORRIGIDO: usar event_metadata, não metadata
+                        metadata = event.event_metadata or {}
                         team = metadata.get('team', '')
                         description = (event.description or '').lower()
                         
@@ -8421,6 +8402,144 @@ def get_all_settings():
 
 
 # ============================================================================
+# OLLAMA ENDPOINTS
+# ============================================================================
+
+@app.route('/api/ollama/models', methods=['GET'])
+def get_ollama_models():
+    """Lista modelos instalados no Ollama local."""
+    try:
+        ollama_url = ai_services.OLLAMA_URL or 'http://localhost:11434'
+        response = requests.get(f"{ollama_url}/api/tags", timeout=5)
+        
+        if response.ok:
+            data = response.json()
+            models = []
+            for model in data.get('models', []):
+                name = model.get('name', '')
+                size = model.get('size', 0)
+                # Formatar tamanho em GB
+                size_gb = round(size / (1024**3), 1) if size > 0 else 0
+                details = model.get('details', {})
+                models.append({
+                    'name': name,
+                    'size': f"{size_gb}GB",
+                    'size_bytes': size,
+                    'family': details.get('family', 'unknown'),
+                    'parameter_size': details.get('parameter_size', ''),
+                    'quantization': details.get('quantization_level', '')
+                })
+            return jsonify({
+                'models': models, 
+                'connected': True,
+                'url': ollama_url
+            })
+        else:
+            return jsonify({
+                'models': [], 
+                'connected': False, 
+                'error': f'Ollama returned {response.status_code}'
+            })
+    except requests.exceptions.ConnectionError:
+        return jsonify({
+            'models': [], 
+            'connected': False, 
+            'error': 'Ollama not running'
+        })
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'models': [], 
+            'connected': False, 
+            'error': 'Ollama timeout'
+        })
+    except Exception as e:
+        return jsonify({
+            'models': [], 
+            'connected': False, 
+            'error': str(e)
+        })
+
+
+@app.route('/api/ollama/test', methods=['POST'])
+def test_ollama_connection():
+    """Testa conexão com Ollama e verifica se modelo responde."""
+    try:
+        data = request.json or {}
+        ollama_url = data.get('url') or ai_services.OLLAMA_URL or 'http://localhost:11434'
+        model = data.get('model') or ai_services.OLLAMA_MODEL or 'llama3.2'
+        
+        # Primeiro verificar se Ollama está rodando
+        try:
+            tags_response = requests.get(f"{ollama_url}/api/tags", timeout=5)
+            if not tags_response.ok:
+                return jsonify({
+                    'success': False,
+                    'error': f'Ollama não está respondendo em {ollama_url}'
+                })
+            
+            # Verificar se o modelo está instalado
+            tags_data = tags_response.json()
+            installed_models = [m.get('name', '') for m in tags_data.get('models', [])]
+            model_found = any(model in m or m in model for m in installed_models)
+            
+            if not model_found:
+                return jsonify({
+                    'success': False,
+                    'error': f'Modelo "{model}" não encontrado. Modelos instalados: {", ".join(installed_models) or "nenhum"}',
+                    'installed_models': installed_models
+                })
+            
+        except requests.exceptions.ConnectionError:
+            return jsonify({
+                'success': False,
+                'error': f'Não foi possível conectar ao Ollama em {ollama_url}. Verifique se o serviço está rodando.'
+            })
+        
+        # Testar geração simples
+        test_payload = {
+            'model': model,
+            'prompt': 'Responda apenas com "OK" sem explicações.',
+            'stream': False,
+            'options': {
+                'num_predict': 10,
+                'temperature': 0.1
+            }
+        }
+        
+        gen_response = requests.post(
+            f"{ollama_url}/api/generate",
+            json=test_payload,
+            timeout=30
+        )
+        
+        if gen_response.ok:
+            result = gen_response.json()
+            return jsonify({
+                'success': True,
+                'message': f'Ollama conectado! Modelo {model} respondeu.',
+                'model': model,
+                'url': ollama_url,
+                'response_preview': result.get('response', '')[:100]
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': f'Erro ao gerar resposta: {gen_response.status_code}'
+            })
+            
+    except requests.exceptions.Timeout:
+        return jsonify({
+            'success': False,
+            'error': 'Timeout ao testar Ollama. O modelo pode estar carregando.'
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        })
+
+
+# ============================================================================
 # TRANSCRIPTION JOBS ENDPOINTS  
 # ============================================================================
 
@@ -8688,7 +8807,8 @@ def finalize_live_clips():
                 continue
             
             # Prepare event data for extraction
-            metadata = event.metadata or {}
+            # CORRIGIDO: usar event_metadata (nome do atributo SQLAlchemy), não metadata
+            metadata = event.event_metadata or {}
             event_data = {
                 'id': event.id,
                 'minute': event.minute or 0,
@@ -8959,7 +9079,8 @@ def analyze_live_match():
         preserved_count = 0
         deleted_count = 0
         for ev in existing_events:
-            metadata = ev.metadata or {}
+            # CORRIGIDO: usar event_metadata, não metadata
+            metadata = ev.event_metadata or {}
             source = metadata.get('source', '') if isinstance(metadata, dict) else ''
             # Preserve manual events, delete only auto-detected
             if source in manual_sources:
@@ -9702,7 +9823,7 @@ def regenerate_match_clips(match_id):
                             'second': e.second or 0,
                             'event_type': e.event_type,
                             'description': e.description,
-                            'metadata': e.metadata or {}
+                            'metadata': e.event_metadata or {}
                         }
                         events_dicts.append(evt)
                         
@@ -9745,7 +9866,7 @@ def regenerate_match_clips(match_id):
                             'second': e.second or 0,
                             'event_type': e.event_type,
                             'description': e.description,
-                            'metadata': e.metadata or {}
+                            'metadata': e.event_metadata or {}
                         }
                         events_dicts.append(evt)
                         
@@ -10180,6 +10301,9 @@ def recalculate_event_timestamps(match_id: str):
                 new_timestamps.append(new_ts)
         
         # 6. Atualizar eventos
+        # IMPORTANTE: Usar flag_modified para forçar SQLAlchemy detectar mudanças no JSON
+        from sqlalchemy.orm.attributes import flag_modified
+        
         updated = 0
         for i, ed in enumerate(event_data):
             event = ed['event']
@@ -10191,7 +10315,10 @@ def recalculate_event_timestamps(match_id: str):
             metadata['videoSecond'] = int(new_vs)
             metadata['recalculated'] = True
             metadata['recalculatedAt'] = datetime.utcnow().isoformat()
+            
+            # CRÍTICO: Atribuir o dict modificado e marcar como alterado
             event.event_metadata = metadata
+            flag_modified(event, 'event_metadata')
             
             # Atualizar minuto/segundo para exibição
             new_minute = int(new_vs // 60)
@@ -10210,6 +10337,8 @@ def recalculate_event_timestamps(match_id: str):
             updated += 1
             print(f"[RECALC] Evento {event.event_type}: {ed['original_videoSecond']:.0f}s → {new_vs:.0f}s ({new_minute}:{new_second:02d})")
         
+        # Flush e commit para garantir persistência
+        session.flush()
         session.commit()
         
         print(f"[RECALC] ✓ {updated} eventos recalculados para vídeo de {video_duration_sec:.0f}s")
