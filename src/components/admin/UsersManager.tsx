@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Users, Search, MoreHorizontal, Edit, Shield, Building2, Phone, MapPin, CreditCard, User } from 'lucide-react';
+import { Users, Search, MoreHorizontal, Edit, Shield, Building2, Phone, MapPin, CreditCard, User, Check, Eye, Upload, Pencil, Settings, Globe } from 'lucide-react';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useOrganizations } from '@/hooks/useOrganizations';
 import { toast } from '@/hooks/use-toast';
@@ -27,12 +27,52 @@ const ROLE_LABELS: Record<string, string> = {
   user: 'Usuário',
 };
 
+const ROLE_DESCRIPTIONS: Record<string, string> = {
+  viewer: 'Acesso somente leitura. Pode visualizar partidas, estatísticas e times.',
+  uploader: 'Operador do sistema. Pode importar jogos, fazer upload de vídeos e iniciar análises.',
+  manager: 'Gerente com permissões de edição. Pode editar partidas, gerenciar times e ver relatórios.',
+  org_admin: 'Administrador da empresa. Gerencia usuários, créditos e configurações da organização.',
+  superadmin: 'Acesso total ao sistema. Controle de todas as empresas e configurações globais.',
+};
+
+const ROLE_PERMISSIONS: Record<string, { icon: React.ElementType; label: string }[]> = {
+  viewer: [
+    { icon: Eye, label: 'Ver partidas e estatísticas' },
+    { icon: Eye, label: 'Ver times e jogadores' },
+    { icon: Eye, label: 'Ver eventos e análises' },
+  ],
+  uploader: [
+    { icon: Eye, label: 'Todas as permissões de Visualizador' },
+    { icon: Upload, label: 'Importar jogos' },
+    { icon: Upload, label: 'Fazer upload de vídeos' },
+    { icon: Upload, label: 'Iniciar análises de IA' },
+  ],
+  manager: [
+    { icon: Eye, label: 'Todas as permissões de Operador' },
+    { icon: Pencil, label: 'Editar partidas e eventos' },
+    { icon: Pencil, label: 'Gerenciar times e jogadores' },
+    { icon: Eye, label: 'Ver relatórios avançados' },
+  ],
+  org_admin: [
+    { icon: Eye, label: 'Todas as permissões de Gerente' },
+    { icon: Users, label: 'Gerenciar usuários da empresa' },
+    { icon: CreditCard, label: 'Ver e gerenciar créditos' },
+    { icon: Settings, label: 'Configurações da empresa' },
+  ],
+  superadmin: [
+    { icon: Globe, label: 'Acesso total ao sistema' },
+    { icon: Building2, label: 'Gerenciar todas as empresas' },
+    { icon: Users, label: 'Gerenciar todos os usuários' },
+    { icon: Settings, label: 'Configurações globais' },
+  ],
+};
+
 const ROLE_OPTIONS = [
-  { value: 'viewer', label: 'Visualizador' },
-  { value: 'uploader', label: 'Operador' },
-  { value: 'manager', label: 'Gerente' },
-  { value: 'org_admin', label: 'Admin Empresa' },
-  { value: 'superadmin', label: 'Super Admin' },
+  { value: 'viewer', label: 'Visualizador', description: 'Apenas visualização' },
+  { value: 'uploader', label: 'Operador', description: 'Upload e importação' },
+  { value: 'manager', label: 'Gerente', description: 'Edição e gerenciamento' },
+  { value: 'org_admin', label: 'Admin Empresa', description: 'Administração da empresa' },
+  { value: 'superadmin', label: 'Super Admin', description: 'Acesso total' },
 ];
 
 interface UserFormData {
@@ -419,7 +459,7 @@ export default function UsersManager() {
 
             {/* Permissões */}
             <TabsContent value="permissions" className="space-y-4 py-4">
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <Label>Papel no Sistema</Label>
                 <Select value={formData.role} onValueChange={(value) => setFormData({ ...formData, role: value })}>
                   <SelectTrigger>
@@ -427,19 +467,46 @@ export default function UsersManager() {
                   </SelectTrigger>
                   <SelectContent>
                     {ROLE_OPTIONS.map(opt => (
-                      <SelectItem key={opt.value} value={opt.value}>{opt.label}</SelectItem>
+                      <SelectItem key={opt.value} value={opt.value}>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{opt.label}</span>
+                          <span className="text-xs text-muted-foreground">{opt.description}</span>
+                        </div>
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">
-                  {formData.role === 'superadmin' && 'Acesso total ao sistema, incluindo todas as empresas.'}
-                  {formData.role === 'org_admin' && 'Gerencia usuários e configurações da própria empresa.'}
-                  {formData.role === 'manager' && 'Gerencia partidas, times e relatórios.'}
-                  {formData.role === 'uploader' && 'Pode fazer upload de vídeos e iniciar análises.'}
-                  {formData.role === 'viewer' && 'Apenas visualização de dados.'}
-                </p>
+                
+                {/* Descrição do papel */}
+                {formData.role && (
+                  <p className="text-sm text-muted-foreground bg-muted/50 p-3 rounded-lg">
+                    {ROLE_DESCRIPTIONS[formData.role]}
+                  </p>
+                )}
               </div>
-              <div className="space-y-2">
+
+              {/* Checklist de permissões */}
+              {formData.role && ROLE_PERMISSIONS[formData.role] && (
+                <div className="space-y-2">
+                  <Label>Permissões do Papel</Label>
+                  <div className="rounded-lg border p-4 bg-muted/30 space-y-2">
+                    {ROLE_PERMISSIONS[formData.role].map((perm, idx) => {
+                      const IconComponent = perm.icon;
+                      return (
+                        <div key={idx} className="flex items-center gap-3">
+                          <div className="flex items-center justify-center w-6 h-6 rounded-full bg-green-500/20">
+                            <Check className="h-3.5 w-3.5 text-green-600" />
+                          </div>
+                          <IconComponent className="h-4 w-4 text-muted-foreground" />
+                          <span className="text-sm">{perm.label}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="space-y-2 pt-2">
                 <Label>Empresa</Label>
                 <Select 
                   value={formData.organization_id || 'none'} 
@@ -455,6 +522,9 @@ export default function UsersManager() {
                     ))}
                   </SelectContent>
                 </Select>
+                <p className="text-xs text-muted-foreground">
+                  Vincule o usuário a uma empresa para controle de acesso por organização.
+                </p>
               </div>
             </TabsContent>
 
