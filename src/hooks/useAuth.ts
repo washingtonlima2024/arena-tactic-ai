@@ -23,6 +23,10 @@ interface AuthState {
   isAdmin: boolean; // org_admin ou superadmin
   canUpload: boolean; // uploader, manager, org_admin, superadmin
   canManage: boolean; // manager, org_admin, superadmin
+  // Permissões granulares
+  canImport: boolean; // uploader+ - pode importar jogos e fazer upload
+  canEdit: boolean; // manager+ - pode editar partidas e times
+  canViewCredits: boolean; // org_admin+ - pode ver saldos de créditos
 }
 
 const ROLE_HIERARCHY: Record<AppRole, number> = {
@@ -47,6 +51,10 @@ function getPermissionsFromRole(role: AppRole | null): Omit<AuthState, 'user' | 
     isAdmin: roleLevel >= ROLE_HIERARCHY.org_admin,
     canUpload: roleLevel >= ROLE_HIERARCHY.uploader,
     canManage: roleLevel >= ROLE_HIERARCHY.manager,
+    // Permissões granulares
+    canImport: roleLevel >= ROLE_HIERARCHY.uploader,
+    canEdit: roleLevel >= ROLE_HIERARCHY.manager,
+    canViewCredits: roleLevel >= ROLE_HIERARCHY.org_admin,
   };
 }
 
