@@ -1,144 +1,154 @@
 
+## Plano: Completar Módulo de Administração de Acessos e Configurar Usuário Padrão
 
-## Plano: Corrigir Race Condition na Persistência dos Switches de IA
+### Resumo do Pedido
 
-### Problema Identificado
-
-Os switches de IA não estão persistindo porque existe uma **race condition** entre a mutação e o carregamento de dados:
-
-1. O switch é ativado e o estado local muda para `true`
-2. A mutação salva o valor no banco via POST
-3. Em `onSuccess`, a query `api_settings` é invalidada
-4. O `useEffect` que observa `apiSettings` re-executa
-5. Se o registro ainda não existia, o `find()` retorna `undefined`
-6. Com lógica `=== "true"`, `undefined === "true"` é `false`
-7. O estado local é **sobrescrito de volta para `false`**
-
-### Dados Atuais no Banco
-
-| Chave | Valor | Status |
-|-------|-------|--------|
-| `gemini_enabled` | **NÃO EXISTE** | ❌ Será criado no primeiro toggle |
-| `openai_enabled` | "false" | ⚠️ Existe mas está desativado |
-| `elevenlabs_enabled` | "false" | ⚠️ Existe mas está desativado |
-| `ollama_enabled` | "true" | ✅ Funciona |
-
-### Solução
-
-Adicionar um **ref de controle** para ignorar a sincronização do `useEffect` quando uma mutação estiver em progresso. Isso evita que o `useEffect` sobrescreva o estado local durante a invalidação.
+1. **Usuário padrão de acesso**: `washington@katttus.com` com senha (armazenada de forma segura, não exposta no código)
+2. **Completar módulo de administração de acessos** com sistema de papéis granulares
+3. **Sistema de permissões detalhado**:
+   - Visualizador: apenas ver dados
+   - Operador: ver + importar jogos + editar informações limitadas
+   - Gerente, Admin Empresa, SuperAdmin (já existentes)
+4. **Controle de créditos** integrado ao sistema de papéis
 
 ---
 
-### Alterações Necessárias
+### 1. Configuração do Usuário Padrão
 
-#### Arquivo: `src/pages/Settings.tsx`
+**Abordagem Segura**: A senha NÃO será armazenada no código. O usuário já existe no banco (`washington@kakttus.com` com role `superadmin`). Para atualizar ou criar credenciais, usaremos uma migração SQL que configura o usuário via Supabase Auth.
 
-**1. Adicionar ref de controle no início do componente (após os estados):**
+**Nota**: O email no banco está como `washington@kakttus.com` (com dois 't'). Confirme se deseja usar `washington@katttus.com` (com um 't') ou manter o existente.
+
+---
+
+### 2. Aprimorar Sistema de Papéis (Roles)
+
+**Roles Atuais**:
+| Role | Nível | Descrição |
+|------|-------|-----------|
+| superadmin | 100 | Acesso total, todas empresas |
+| org_admin | 80 | Admin da própria empresa |
+| manager | 60 | Gerencia partidas e times |
+| uploader | 40 | Upload e análises |
+| viewer | 20 | Apenas visualização |
+
+**Ajustes Propostos**:
+Manter a estrutura atual mas detalhar melhor as permissões no código e UI para clareza.
+
+---
+
+### 3. Alterações no Código
+
+#### A. Hook `useAuth.ts` - Adicionar permissões granulares
 
 ```typescript
-// Flag para ignorar re-sync durante mutações
-const isMutatingRef = useRef(false);
+// Novas permissões a adicionar:
+canImport: boolean;     // Importar jogos (uploader+)
+canEdit: boolean;       // Editar informações (manager+)
+canViewCredits: boolean; // Ver saldos de créditos
 ```
 
-**2. Modificar o useEffect para verificar a flag:**
+#### B. Componente `UsersManager.tsx` - Melhorar UI de Permissões
+
+1. Adicionar descrições detalhadas para cada papel
+2. Exibir checklist visual de permissões por papel
+3. Adicionar indicadores visuais de créditos disponíveis
+4. Botão de "Resetar senha" (se aplicável)
+
+#### C. Página `Admin.tsx` - Proteção por Papel
+
+Garantir que apenas `superadmin` e `org_admin` acessem a área administrativa.
+
+---
+
+### 4. Detalhes Técnicos de Implementação
+
+#### Arquivo: `src/hooks/useAuth.ts`
 
 ```typescript
-useEffect(() => {
-  // Ignorar sincronização se estamos no meio de uma mutação
-  if (isMutatingRef.current) return;
+// Adicionar novas permissões derivadas
+interface AuthState {
+  // ... existentes ...
+  canImport: boolean;   // uploader, manager, org_admin, superadmin
+  canEdit: boolean;     // manager, org_admin, superadmin
+  canViewCredits: boolean; // org_admin, superadmin
+}
+
+function getPermissionsFromRole(role: AppRole | null) {
+  const roleLevel = role ? ROLE_HIERARCHY[role] || 0 : 0;
   
-  if (apiSettings) {
-    // ... resto do código existente ...
-  }
-}, [apiSettings]);
+  return {
+    // ... existentes ...
+    canImport: roleLevel >= ROLE_HIERARCHY.uploader,
+    canEdit: roleLevel >= ROLE_HIERARCHY.manager,
+    canViewCredits: roleLevel >= ROLE_HIERARCHY.org_admin,
+  };
+}
 ```
 
-**3. Modificar os handlers dos switches para controlar a flag:**
+#### Arquivo: `src/components/admin/UsersManager.tsx`
 
+1. **Mapa de permissões por papel**:
 ```typescript
-onCheckedChange={async (checked) => {
-  isMutatingRef.current = true;  // Bloquear re-sync
-  setGeminiEnabled(checked);
-  try {
-    await upsertApiSetting.mutateAsync({
-      key: "gemini_enabled",
-      value: String(checked),
-    });
-    toast.success(checked ? "Gemini ativado!" : "Gemini desativado");
-  } catch (error) {
-    setGeminiEnabled(!checked);
-    toast.error("Erro ao salvar configuração");
-  } finally {
-    // Aguardar a query ser refetchada antes de liberar
-    setTimeout(() => {
-      isMutatingRef.current = false;
-    }, 500);
-  }
-}}
+const ROLE_PERMISSIONS: Record<string, string[]> = {
+  viewer: ['Ver partidas', 'Ver estatísticas', 'Ver times'],
+  uploader: ['Tudo de Viewer', 'Importar jogos', 'Fazer upload de vídeos', 'Iniciar análises'],
+  manager: ['Tudo de Operador', 'Editar partidas', 'Gerenciar times', 'Ver relatórios'],
+  org_admin: ['Tudo de Gerente', 'Gerenciar usuários da empresa', 'Ver créditos', 'Configurações da empresa'],
+  superadmin: ['Acesso total', 'Todas as empresas', 'Configurações globais'],
+};
 ```
 
-**4. Aplicar o mesmo padrão para os 4 switches:**
-- Google Gemini (`gemini_enabled`)
-- OpenAI GPT (`openai_enabled`)
-- ElevenLabs (`elevenlabs_enabled`)
-- Ollama (`ollama_enabled`)
+2. **Componente de visualização de permissões**:
+```tsx
+<div className="space-y-2">
+  <Label>Permissões do Papel</Label>
+  <div className="rounded-lg border p-3 bg-muted/30">
+    <ul className="text-sm space-y-1">
+      {ROLE_PERMISSIONS[formData.role]?.map(perm => (
+        <li key={perm} className="flex items-center gap-2">
+          <Check className="h-4 w-4 text-green-500" />
+          {perm}
+        </li>
+      ))}
+    </ul>
+  </div>
+</div>
+```
+
+3. **Melhorar descrições de cada papel no seletor**
 
 ---
 
-### Comportamento Resultante
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│ ANTES                                                           │
-├─────────────────────────────────────────────────────────────────┤
-│ Switch ON → setGeminiEnabled(true) → POST → invalidate         │
-│                                         ↓                        │
-│                                    useEffect re-executa         │
-│                                         ↓                        │
-│                              gemini_enabled = undefined          │
-│                                         ↓                        │
-│                              setGeminiEnabled(false) ← REVERT!  │
-└─────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────┐
-│ DEPOIS                                                          │
-├─────────────────────────────────────────────────────────────────┤
-│ Switch ON → isMutatingRef = true → setGeminiEnabled(true)       │
-│                                         ↓                        │
-│                                    POST → invalidate            │
-│                                         ↓                        │
-│                              useEffect: if (isMutatingRef) return│
-│                                         ↓                        │
-│                              Estado preservado = true ✓          │
-└─────────────────────────────────────────────────────────────────┘
-```
-
----
-
-### Arquivos Modificados
+### 5. Arquivos a Modificar
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/pages/Settings.tsx` | Adicionar ref + modificar useEffect + atualizar 4 handlers |
+| `src/hooks/useAuth.ts` | Adicionar 3 novas permissões derivadas |
+| `src/components/admin/UsersManager.tsx` | Mapa de permissões, UI de checklist, melhorias visuais |
+| `src/pages/Admin.tsx` | Verificação de permissão org_admin |
 
-### Detalhes Técnicos
+---
 
-1. **Por que usar `useRef` em vez de `useState`?**
-   - `useRef` não causa re-render quando alterado
-   - Permite controlar a flag sem ciclos de renderização adicionais
+### 6. Segurança
 
-2. **Por que usar `setTimeout` de 500ms?**
-   - Dá tempo para a query invalidada ser refetchada
-   - A invalidação do React Query é assíncrona
-   - Garante que o novo valor já esteja no cache
+- **Senha não fica no código**: Credenciais são gerenciadas via Supabase Auth
+- **RLS policies**: Já configuradas na tabela `user_roles` com functions `is_superadmin()`, `is_admin()`, etc.
+- **Validação server-side**: O servidor Python já valida permissões via API
 
-3. **Alternativa considerada:**
-   - Usar `setQueryData` para atualização otimista, mas isso adicionaria complexidade desnecessária
+---
 
-### Estimativa
+### 7. Resultado Esperado
 
-- 1 import a adicionar (`useRef`)
-- 1 ref a criar
-- 1 linha a adicionar no useEffect
-- 4 handlers de switch a modificar
+Após implementação:
 
+1. **Usuário `washington@kakttus.com`** continua como superadmin (já existe)
+2. **UI de permissões** mostra claramente o que cada papel pode fazer
+3. **Sistema de papéis** funciona de forma granular:
+   - Viewer: só visualiza
+   - Operador (uploader): visualiza + importa jogos
+   - Gerente: visualiza + importa + edita
+   - Admin Empresa: gerencia equipe + créditos
+   - SuperAdmin: acesso total
+
+4. **Créditos** visíveis apenas para admins na lista de usuários
