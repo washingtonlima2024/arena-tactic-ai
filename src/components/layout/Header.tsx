@@ -5,7 +5,7 @@ import { GlobalSearch } from './GlobalSearch';
 import { ProjectSelector } from './ProjectSelector';
 import { useAuth } from '@/hooks/useAuth';
 import { Badge } from '@/components/ui/badge';
-import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
+import { useLiveBroadcastContextSafe } from '@/contexts/LiveBroadcastContext';
 import { useIsMobile } from '@/hooks/use-mobile';
 import {
   DropdownMenu,
@@ -31,7 +31,10 @@ interface HeaderProps {
 export function Header({ onMenuClick }: HeaderProps) {
   const navigate = useNavigate();
   const { user, isAdmin, role, signOut } = useAuth();
-  const { isRecording, recordingTime, matchInfo } = useLiveBroadcastContext();
+  const liveBroadcast = useLiveBroadcastContextSafe();
+  const isRecording = liveBroadcast?.isRecording ?? false;
+  const recordingTime = liveBroadcast?.recordingTime ?? 0;
+  const matchInfo = liveBroadcast?.matchInfo ?? { homeTeam: '', awayTeam: '', competition: '', matchDate: '' };
   const isMobile = useIsMobile();
   const [searchOpen, setSearchOpen] = useState(false);
 
