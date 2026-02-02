@@ -1252,17 +1252,38 @@ export default function Settings() {
                     />
                     <Button
                       variant="outline"
-                      onClick={() => {
+                      onClick={async () => {
                         if (cloudflareUrl) {
+                          // Salvar URL
                           saveCloudflareUrl(cloudflareUrl);
-                          toast.success("URL Cloudflare salva!");
+                          
+                          // Resetar cache e tentar conectar
+                          resetDiscoveryCache();
+                          toast.info("Conectando ao túnel...");
+                          
+                          try {
+                            const response = await fetch(`${cloudflareUrl}/health?light=true`, {
+                              signal: AbortSignal.timeout(10000),
+                            });
+                            if (response.ok) {
+                              // Forçar uso do túnel
+                              localStorage.setItem('arena_discovered_server', cloudflareUrl);
+                              toast.success("Conectado via Cloudflare Tunnel!");
+                              window.dispatchEvent(new Event('server-reconnected'));
+                            } else {
+                              toast.error("Túnel não respondeu corretamente");
+                            }
+                          } catch (e) {
+                            toast.error("Falha ao conectar ao túnel. Verifique se está ativo.");
+                          }
                         } else {
                           saveCloudflareUrl("");
+                          resetDiscoveryCache();
                           toast.info("URL Cloudflare removida");
                         }
                       }}
                     >
-                      Salvar
+                      Salvar e Conectar
                     </Button>
                   </div>
 
