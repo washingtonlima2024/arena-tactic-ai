@@ -116,18 +116,28 @@ export const autoDiscoverServer = async (): Promise<string | null> => {
       // Verificar apenas Cloudflare Tunnel
       const cloudflare = getCloudflareUrl();
       if (cloudflare) {
-        try {
-          const response = await fetch(`${cloudflare}/health?light=true`, {
-            signal: AbortSignal.timeout(10000), // Timeout maior para túneis
-          });
-          if (response.ok) {
-            console.log(`[ApiMode] Conectado via Cloudflare Tunnel: ${cloudflare}`);
-            setDiscoveredServer(cloudflare);
-            discoveryInProgress = false;
-            return cloudflare;
+        // Tentar múltiplos endpoints de health (diferentes configurações de túnel)
+        const healthEndpoints = [
+          `${cloudflare}/api/health`,    // Túnel com prefixo /api
+          `${cloudflare}/health`,         // Túnel direto
+        ];
+        
+        for (const endpoint of healthEndpoints) {
+          try {
+            console.log(`[ApiMode] Tentando: ${endpoint}`);
+            const response = await fetch(endpoint, {
+              signal: AbortSignal.timeout(10000),
+              headers: { 'Accept': 'application/json' },
+            });
+            if (response.ok) {
+              console.log(`[ApiMode] ✅ Conectado via Cloudflare Tunnel: ${cloudflare}`);
+              setDiscoveredServer(cloudflare);
+              discoveryInProgress = false;
+              return cloudflare;
+            }
+          } catch (e) {
+            console.warn(`[ApiMode] Endpoint não respondeu: ${endpoint}`, e);
           }
-        } catch (e) {
-          console.warn('[ApiMode] Cloudflare Tunnel não respondeu:', e);
         }
       }
       
@@ -342,9 +352,16 @@ export const getActiveConnectionMethod = (): ActiveConnection => {
  * Verifica se o servidor está disponível
  */
 export const checkLocalServerAvailable = async (): Promise<boolean> => {
+  const base = getApiBase();
+  // Se base vazia (produção) ou contém cloudflare, usar /api/health
+  const healthPath = base === '' ? '/api/health' : 
+                     base.includes('trycloudflare.com') ? `${base}/api/health` : 
+                     `${base}/health`;
+  
   try {
-    const response = await fetch(`${getApiBase()}/health?light=true`, {
+    const response = await fetch(`${healthPath}?light=true`, {
       signal: AbortSignal.timeout(5000),
+      headers: { 'Accept': 'application/json' },
     });
     return response.ok;
   } catch {
