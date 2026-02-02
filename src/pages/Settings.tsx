@@ -1261,19 +1261,34 @@ export default function Settings() {
                           resetDiscoveryCache();
                           toast.info("Conectando ao túnel...");
                           
-                          try {
-                            const response = await fetch(`${cloudflareUrl}/health?light=true`, {
-                              signal: AbortSignal.timeout(10000),
-                            });
-                            if (response.ok) {
-                              // Forçar uso do túnel
-                              localStorage.setItem('arena_discovered_server', cloudflareUrl);
-                              toast.success("Conectado via Cloudflare Tunnel!");
-                              window.dispatchEvent(new Event('server-reconnected'));
-                            } else {
-                              toast.error("Túnel não respondeu corretamente");
+                          // Tentar múltiplos endpoints (diferentes configs de túnel)
+                          const endpoints = [
+                            `${cloudflareUrl}/api/health`,
+                            `${cloudflareUrl}/health`,
+                          ];
+                          
+                          let connected = false;
+                          for (const endpoint of endpoints) {
+                            try {
+                              console.log(`[Settings] Tentando: ${endpoint}`);
+                              const response = await fetch(endpoint, {
+                                signal: AbortSignal.timeout(10000),
+                                headers: { 'Accept': 'application/json' },
+                              });
+                              if (response.ok) {
+                                // Forçar uso do túnel
+                                localStorage.setItem('arena_discovered_server', cloudflareUrl);
+                                toast.success("Conectado via Cloudflare Tunnel!");
+                                window.dispatchEvent(new Event('server-reconnected'));
+                                connected = true;
+                                break;
+                              }
+                            } catch (e) {
+                              console.warn(`[Settings] Endpoint falhou: ${endpoint}`, e);
                             }
-                          } catch (e) {
+                          }
+                          
+                          if (!connected) {
                             toast.error("Falha ao conectar ao túnel. Verifique se está ativo.");
                           }
                         } else {
