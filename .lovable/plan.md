@@ -1,36 +1,78 @@
-# Arena Play - Planos Concluídos
 
-## ✅ Sistema de Qualidade Dupla para Vídeos (Implementado)
 
-**Status**: Implementado em 2026-02-03
+## Plano: Corrigir Parsing de Data ISO no Backend
 
-### Resumo
+### Problema
 
-Sistema automático de qualidade dupla onde cada vídeo tem duas versões:
-- **Original**: Alta qualidade para renderização/export de clips
-- **Proxy (480p)**: Versão otimizada para transcrição e análise
+O erro `Invalid isoformat string: '2016-12-11T23:45:00.000Z'` ocorre porque a função `datetime.fromisoformat()` do Python não reconhece o formato JavaScript com sufixo `.000Z`.
 
-### Arquivos Modificados
+### Causa Raiz
 
-1. **`video-processor/models.py`**: Adicionados campos `proxy_url`, `proxy_status`, `proxy_progress`, `original_size_bytes`, `proxy_size_bytes`, `proxy_resolution`, `original_resolution`
+O frontend envia datas no formato ISO padrão do JavaScript:
+```
+2016-12-11T23:45:00.000Z
+```
 
-2. **`video-processor/media_chunker.py`**: Adicionadas funções `create_video_proxy()`, `get_or_create_proxy()`, `get_video_info()` com presets de qualidade (480p, 360p, 720p_lite)
+Mas o `datetime.fromisoformat()` do Python espera:
+```
+2016-12-11T23:45:00
+```
 
-3. **`video-processor/server.py`**: Integrado proxy no fluxo de transcrição (`_process_transcription_job`), novos endpoints `/api/videos/<id>/proxy` e `/api/settings/video-quality`
+O sufixo `.000Z` (milissegundos + indicador UTC) causa a falha.
 
-4. **`video-processor/migrate_db.py`**: Migrações para os novos campos na tabela `videos`
+### Solução
 
-5. **`src/components/upload/VideoQualityIndicator.tsx`**: Componente visual mostrando status original/proxy
+Criar uma função auxiliar `parse_iso_datetime()` que limpa o formato antes de parsear:
 
-### Economia Esperada
+```python
+def parse_iso_datetime(date_string: str) -> datetime:
+    """
+    Parse ISO datetime string from JavaScript format.
+    Handles: '2016-12-11T23:45:00.000Z' -> datetime
+    """
+    if not date_string:
+        return None
+    
+    # Remove 'Z' suffix and milliseconds
+    cleaned = date_string.replace('Z', '').replace('+00:00', '')
+    
+    # Remove milliseconds if present (.000)
+    if '.' in cleaned:
+        cleaned = cleaned.split('.')[0]
+    
+    return datetime.fromisoformat(cleaned)
+```
 
-| Original | Proxy 480p | Economia |
-|----------|------------|----------|
-| 4 GB (1080p) | ~700 MB | 82% |
-| 14 GB (4K) | ~700 MB | 95% |
+### Arquivos a Modificar
 
-### Próximos Passos (Opcionais)
+| Arquivo | Alteração |
+|---------|-----------|
+| `video-processor/server.py` | Adicionar função `parse_iso_datetime()` e substituir chamadas de `datetime.fromisoformat()` nas linhas 1739 e 1795 |
 
-- Configuração na interface para escolher resolução do proxy
-- Geração automática de proxy em background após upload
-- Limpeza automática de proxies antigos
+### Alterações Específicas
+
+**Linha 1739** (criar partida):
+```python
+# Antes
+match_date=datetime.fromisoformat(data['match_date']) if data.get('match_date') else None,
+
+# Depois
+match_date=parse_iso_datetime(data['match_date']) if data.get('match_date') else None,
+```
+
+**Linha 1795** (atualizar partida):
+```python
+# Antes
+match.match_date = datetime.fromisoformat(data['match_date'])
+
+# Depois
+match.match_date = parse_iso_datetime(data['match_date'])
+```
+
+### Critérios de Aceite
+
+1. Criar partida com data/hora funciona sem erros
+2. Atualizar partida com nova data funciona
+3. Datas vazias ou nulas são tratadas corretamente
+4. Formato com ou sem milissegundos é aceito
+
