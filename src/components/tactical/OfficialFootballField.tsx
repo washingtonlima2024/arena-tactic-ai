@@ -122,17 +122,17 @@ export function OfficialFootballField({
               <line
                 key={`v-${i}`}
                 x1={m(i * gridSize)}
-                y1="0"
+                y1={m(0)}
                 x2={m(i * gridSize)}
-                y2={VIEW_HEIGHT}
+                y2={m(FIFA_FIELD.width)}
               />
             ))}
             {Array.from({ length: Math.floor(FIFA_FIELD.width / gridSize) + 1 }).map((_, i) => (
               <line
                 key={`h-${i}`}
-                x1="0"
+                x1={m(0)}
                 y1={m(i * gridSize)}
-                x2={VIEW_WIDTH}
+                x2={m(FIFA_FIELD.length)}
                 y2={m(i * gridSize)}
               />
             ))}
@@ -145,8 +145,8 @@ export function OfficialFootballField({
           <rect
             x={m(0)}
             y={m(0)}
-            width={VIEW_WIDTH}
-            height={VIEW_HEIGHT}
+            width={m(FIFA_FIELD.length)}
+            height={m(FIFA_FIELD.width)}
             rx="4"
           />
 
@@ -155,7 +155,7 @@ export function OfficialFootballField({
             x1={m(FIELD_CALCULATIONS.halfLength)}
             y1={m(0)}
             x2={m(FIELD_CALCULATIONS.halfLength)}
-            y2={VIEW_HEIGHT}
+            y2={m(FIFA_FIELD.width)}
           />
 
           {/* Center circle */}
