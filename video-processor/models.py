@@ -245,12 +245,27 @@ class Video(Base):
     end_minute = Column(Integer)
     created_at = Column(DateTime, default=datetime.utcnow)
     
+    # Dual-quality system: original + proxy
+    original_url = Column(Text)                          # URL/path to original high-quality video
+    proxy_url = Column(Text)                             # URL/path to proxy (480p/360p) for processing
+    proxy_status = Column(String(50), default='pending') # pending | converting | ready | error
+    proxy_progress = Column(Integer, default=0)          # 0-100 conversion progress
+    original_size_bytes = Column(Integer)                # Size of original file in bytes
+    proxy_size_bytes = Column(Integer)                   # Size of proxy file in bytes
+    proxy_resolution = Column(String(20), default='480p') # 480p | 360p | 720p_lite
+    original_resolution = Column(String(20))             # e.g., 1080p, 4K
+    
     # Relationships
     match = relationship('Match', back_populates='videos')
     events = relationship('MatchEvent', back_populates='video')
     analysis_jobs = relationship('AnalysisJob', back_populates='video')
     
     def to_dict(self):
+        # Calculate savings percentage
+        savings_percent = 0
+        if self.original_size_bytes and self.proxy_size_bytes:
+            savings_percent = round((1 - self.proxy_size_bytes / self.original_size_bytes) * 100)
+        
         return {
             'id': self.id,
             'match_id': self.match_id,
@@ -261,7 +276,17 @@ class Video(Base):
             'duration_seconds': self.duration_seconds,
             'start_minute': self.start_minute,
             'end_minute': self.end_minute,
-            'created_at': self.created_at.isoformat() if self.created_at else None
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            # Dual-quality fields
+            'original_url': self.original_url,
+            'proxy_url': self.proxy_url,
+            'proxy_status': self.proxy_status,
+            'proxy_progress': self.proxy_progress,
+            'original_size_bytes': self.original_size_bytes,
+            'proxy_size_bytes': self.proxy_size_bytes,
+            'proxy_resolution': self.proxy_resolution,
+            'original_resolution': self.original_resolution,
+            'savings_percent': savings_percent
         }
 
 

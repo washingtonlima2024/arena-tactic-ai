@@ -134,6 +134,55 @@ MIGRATIONS = [
         'type': 'TEXT',
         'default': 'NULL'
     },
+    # Video dual-quality system (proxy for processing, original for export)
+    {
+        'table': 'videos',
+        'column': 'original_url',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'videos',
+        'column': 'proxy_url',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'videos',
+        'column': 'proxy_status',
+        'type': 'TEXT',
+        'default': "'pending'"
+    },
+    {
+        'table': 'videos',
+        'column': 'proxy_progress',
+        'type': 'INTEGER',
+        'default': '0'
+    },
+    {
+        'table': 'videos',
+        'column': 'original_size_bytes',
+        'type': 'INTEGER',
+        'default': 'NULL'
+    },
+    {
+        'table': 'videos',
+        'column': 'proxy_size_bytes',
+        'type': 'INTEGER',
+        'default': 'NULL'
+    },
+    {
+        'table': 'videos',
+        'column': 'proxy_resolution',
+        'type': 'TEXT',
+        'default': "'480p'"
+    },
+    {
+        'table': 'videos',
+        'column': 'original_resolution',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
 ]
 
 

@@ -2258,15 +2258,36 @@ def create_video():
     data = request.json
     session = get_session()
     try:
+        # Get file size if path is local
+        file_url = data['file_url']
+        original_size = None
+        if file_url and not file_url.startswith('http'):
+            # Check various path resolutions
+            if os.path.exists(file_url):
+                original_size = os.path.getsize(file_url)
+            else:
+                # Try resolving from storage
+                match_id = data.get('match_id')
+                if match_id:
+                    local_path = os.path.join(STORAGE_DIR, match_id, 'videos', os.path.basename(file_url))
+                    if os.path.exists(local_path):
+                        original_size = os.path.getsize(local_path)
+        
         video = Video(
             match_id=data.get('match_id'),
-            file_url=data['file_url'],
+            file_url=file_url,
             file_name=data.get('file_name'),
             video_type=data.get('video_type', 'full'),
             status=data.get('status', 'pending'),
             duration_seconds=data.get('duration_seconds'),
             start_minute=data.get('start_minute', 0),
-            end_minute=data.get('end_minute')
+            end_minute=data.get('end_minute'),
+            # Dual-quality system fields
+            original_url=data.get('original_url') or file_url,
+            original_size_bytes=data.get('original_size_bytes') or original_size,
+            original_resolution=data.get('original_resolution'),
+            proxy_status='pending',
+            proxy_resolution=data.get('proxy_resolution', '480p')
         )
         session.add(video)
         session.commit()
@@ -2274,6 +2295,194 @@ def create_video():
     except Exception as e:
         session.rollback()
         return jsonify({'error': str(e)}), 400
+    finally:
+        session.close()
+
+
+@app.route('/api/videos/<video_id>/proxy', methods=['POST'])
+def create_video_proxy_endpoint(video_id: str):
+    """
+    Inicia ou verifica a criação de proxy para um vídeo.
+    
+    O proxy é uma versão otimizada (480p/360p) do vídeo para processamento
+    mais rápido de transcrição e análise. O original é mantido para export.
+    """
+    import media_chunker
+    
+    data = request.json or {}
+    preset = data.get('preset', '480p')
+    
+    session = get_session()
+    try:
+        video = session.query(Video).filter_by(id=video_id).first()
+        if not video:
+            return jsonify({'error': 'Vídeo não encontrado'}), 404
+        
+        # Resolve video path
+        video_path = None
+        if video.file_url:
+            if os.path.exists(video.file_url):
+                video_path = video.file_url
+            elif video.match_id:
+                # Try storage paths
+                possible_paths = [
+                    os.path.join(STORAGE_DIR, video.match_id, 'videos', os.path.basename(video.file_url)),
+                    os.path.join(STORAGE_DIR, video.match_id, 'original', os.path.basename(video.file_url)),
+                ]
+                for path in possible_paths:
+                    if os.path.exists(path):
+                        video_path = path
+                        break
+        
+        if not video_path:
+            return jsonify({'error': 'Arquivo de vídeo não encontrado'}), 404
+        
+        # Check if proxy already exists
+        if video.proxy_status == 'ready' and video.proxy_url and os.path.exists(video.proxy_url):
+            return jsonify({
+                'status': 'ready',
+                'proxy_url': video.proxy_url,
+                'proxy_size_bytes': video.proxy_size_bytes,
+                'savings_percent': video.to_dict().get('savings_percent', 0)
+            })
+        
+        # Update status to converting
+        video.proxy_status = 'converting'
+        video.proxy_progress = 0
+        video.proxy_resolution = preset
+        session.commit()
+        
+        # Start proxy generation (synchronous for now, could be async)
+        def on_progress(progress):
+            nonlocal video
+            session2 = get_session()
+            try:
+                v = session2.query(Video).filter_by(id=video_id).first()
+                if v:
+                    v.proxy_progress = progress
+                    session2.commit()
+            except:
+                session2.rollback()
+            finally:
+                session2.close()
+        
+        result = media_chunker.create_video_proxy(
+            original_path=video_path,
+            output_path=str(media_chunker.get_proxy_dir(video.match_id) / f"{Path(video_path).stem}_proxy.mp4"),
+            preset=preset,
+            on_progress=on_progress
+        )
+        
+        # Update video record with result
+        session2 = get_session()
+        try:
+            v = session2.query(Video).filter_by(id=video_id).first()
+            if v and result['status'] == 'ready':
+                v.proxy_status = 'ready'
+                v.proxy_url = result['proxy_path']
+                v.proxy_size_bytes = result['proxy_size_bytes']
+                v.original_size_bytes = result['original_size_bytes']
+                v.original_resolution = result['original_resolution']
+                v.proxy_progress = 100
+            elif v:
+                v.proxy_status = 'error'
+            session2.commit()
+        except:
+            session2.rollback()
+        finally:
+            session2.close()
+        
+        return jsonify({
+            'status': result['status'],
+            'proxy_url': result.get('proxy_path'),
+            'proxy_size_bytes': result.get('proxy_size_bytes'),
+            'original_size_bytes': result.get('original_size_bytes'),
+            'savings_percent': result.get('savings_percent', 0),
+            'error': result.get('error')
+        })
+        
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/videos/<video_id>/proxy', methods=['GET'])
+def get_video_proxy_status(video_id: str):
+    """Retorna o status do proxy de um vídeo."""
+    session = get_session()
+    try:
+        video = session.query(Video).filter_by(id=video_id).first()
+        if not video:
+            return jsonify({'error': 'Vídeo não encontrado'}), 404
+        
+        return jsonify({
+            'video_id': video.id,
+            'proxy_status': video.proxy_status,
+            'proxy_progress': video.proxy_progress,
+            'proxy_url': video.proxy_url,
+            'proxy_size_bytes': video.proxy_size_bytes,
+            'proxy_resolution': video.proxy_resolution,
+            'original_size_bytes': video.original_size_bytes,
+            'original_resolution': video.original_resolution,
+            'savings_percent': video.to_dict().get('savings_percent', 0)
+        })
+    finally:
+        session.close()
+
+
+@app.route('/api/settings/video-quality', methods=['GET', 'POST'])
+def video_quality_settings():
+    """Configurações de qualidade de vídeo para o sistema de proxy."""
+    session = get_session()
+    
+    SETTINGS_KEYS = [
+        'auto_create_proxy',
+        'proxy_resolution',
+        'use_proxy_for_transcription',
+        'use_proxy_for_analysis'
+    ]
+    
+    DEFAULTS = {
+        'auto_create_proxy': 'true',
+        'proxy_resolution': '480p',
+        'use_proxy_for_transcription': 'true',
+        'use_proxy_for_analysis': 'true'
+    }
+    
+    try:
+        if request.method == 'GET':
+            result = {}
+            for key in SETTINGS_KEYS:
+                full_key = f'video_quality_{key}'
+                setting = session.query(ApiSetting).filter_by(setting_key=full_key).first()
+                if setting:
+                    result[key] = setting.setting_value
+                else:
+                    result[key] = DEFAULTS.get(key, '')
+            return jsonify(result)
+        
+        else:  # POST
+            data = request.json or {}
+            for key in SETTINGS_KEYS:
+                if key in data:
+                    full_key = f'video_quality_{key}'
+                    setting = session.query(ApiSetting).filter_by(setting_key=full_key).first()
+                    if setting:
+                        setting.setting_value = str(data[key])
+                    else:
+                        setting = ApiSetting(
+                            setting_key=full_key,
+                            setting_value=str(data[key])
+                        )
+                        session.add(setting)
+            session.commit()
+            return jsonify({'status': 'ok'})
+            
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
     finally:
         session.close()
 
@@ -8771,6 +8980,33 @@ def _process_transcription_job(job_id: str, match_id: str, video_path: str):
             return
         
         # ========================================
+        # FASE 0: Verificar/Criar Proxy (Sistema de Qualidade Dupla)
+        # ========================================
+        working_path = video_path  # Default: use original
+        
+        # Try to use or create proxy for more efficient processing
+        update_job(progress=3, current_step='Verificando proxy de vídeo...', stage='proxy_check')
+        
+        proxy_path = media_chunker.get_or_create_proxy(
+            video_path=video_path,
+            match_id=match_id,
+            preset='480p',
+            on_progress=lambda p: update_job(
+                progress=3 + int(p * 0.02),  # 3-5% progress
+                current_step=f'Gerando proxy... {p}%',
+                stage='proxy_generation'
+            )
+        )
+        
+        if proxy_path and os.path.exists(proxy_path):
+            working_path = proxy_path
+            print(f"[TranscriptionJob] ✓ Usando proxy para processamento: {proxy_path}")
+            update_job(progress=5, current_step='Usando proxy otimizado')
+        else:
+            print(f"[TranscriptionJob] ⚠ Proxy não disponível, usando vídeo original")
+            update_job(progress=5, current_step='Usando vídeo original')
+        
+        # ========================================
         # FASE 1: Preparar mídia (split + audio)
         # ========================================
         update_job(progress=5, current_step='Preparando mídia...', stage='splitting')
@@ -8786,7 +9022,7 @@ def _process_transcription_job(job_id: str, match_id: str, video_path: str):
         
         manifest = media_chunker.prepare_media_for_job(
             job_id=job_id,
-            video_path=video_path,
+            video_path=working_path,  # Use proxy or original
             chunk_duration=10,  # 10 seconds per chunk
             on_progress=on_media_progress
         )
