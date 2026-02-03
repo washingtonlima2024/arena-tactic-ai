@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Users, Search, MoreHorizontal, Edit, Shield, Building2, Phone, MapPin, CreditCard, User, Check, Eye, Upload, Pencil, Settings, Globe, AlertCircle } from 'lucide-react';
+import { Users, Search, MoreHorizontal, Edit, Shield, Building2, Phone, MapPin, CreditCard, User, Check, Eye, Upload, Pencil, Settings, Globe, AlertCircle, UserPlus, Mail, Loader2 } from 'lucide-react';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useOrganizations } from '@/hooks/useOrganizations';
 import { toast } from '@/hooks/use-toast';
@@ -91,11 +91,25 @@ interface UserFormData {
   credits_balance: number;
 }
 
+interface InviteFormData {
+  email: string;
+  display_name: string;
+  role: string;
+  organization_id: string;
+}
+
 export default function UsersManager() {
-  const { users, isLoading, updateUserRole, updateUserOrganization, updateUserProfile } = useAdminUsers();
+  const { users, isLoading, updateUserRole, updateUserOrganization, updateUserProfile, inviteUser, isInviting } = useAdminUsers();
   const { organizations } = useOrganizations();
   const [searchTerm, setSearchTerm] = useState('');
   const [editingUser, setEditingUser] = useState<any>(null);
+  const [showInviteDialog, setShowInviteDialog] = useState(false);
+  const [inviteFormData, setInviteFormData] = useState<InviteFormData>({
+    email: '',
+    display_name: '',
+    role: 'viewer',
+    organization_id: '',
+  });
   const [formData, setFormData] = useState<UserFormData>({
     role: '',
     organization_id: '',
@@ -187,6 +201,36 @@ export default function UsersManager() {
     return 'outline';
   };
 
+  const handleInviteUser = async () => {
+    if (!inviteFormData.email || !inviteFormData.display_name) {
+      toast({ title: 'Preencha email e nome', variant: 'destructive' });
+      return;
+    }
+
+    try {
+      await inviteUser({
+        email: inviteFormData.email,
+        display_name: inviteFormData.display_name,
+        role: inviteFormData.role,
+        organization_id: inviteFormData.organization_id || null,
+      });
+      
+      toast({ 
+        title: 'Usuário convidado com sucesso', 
+        description: `Um email será enviado para ${inviteFormData.email} com instruções para definir a senha.` 
+      });
+      
+      setShowInviteDialog(false);
+      setInviteFormData({ email: '', display_name: '', role: 'viewer', organization_id: '' });
+    } catch (error: any) {
+      toast({ 
+        title: 'Erro ao convidar usuário', 
+        description: error.message, 
+        variant: 'destructive' 
+      });
+    }
+  };
+
   return (
     <>
       <Card>
@@ -199,6 +243,10 @@ export default function UsersManager() {
               </CardTitle>
               <CardDescription>Gerencie os usuários e suas permissões</CardDescription>
             </div>
+            <Button onClick={() => setShowInviteDialog(true)}>
+              <UserPlus className="h-4 w-4 mr-2" />
+              Novo Usuário
+            </Button>
           </div>
         </CardHeader>
         <CardContent>
@@ -565,6 +613,127 @@ export default function UsersManager() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditingUser(null)}>Cancelar</Button>
             <Button onClick={handleSave}>Salvar Alterações</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog de Convite de Novo Usuário */}
+      <Dialog open={showInviteDialog} onOpenChange={setShowInviteDialog}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="h-5 w-5" />
+              Convidar Novo Usuário
+            </DialogTitle>
+            <DialogDescription>
+              O usuário receberá um email para configurar sua senha e acessar o sistema.
+            </DialogDescription>
+          </DialogHeader>
+          
+          <div className="space-y-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="invite-email">
+                <Mail className="h-4 w-4 inline mr-1" />
+                Email *
+              </Label>
+              <Input 
+                id="invite-email"
+                type="email"
+                value={inviteFormData.email} 
+                onChange={(e) => setInviteFormData({ ...inviteFormData, email: e.target.value })}
+                placeholder="usuario@empresa.com"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="invite-name">
+                <User className="h-4 w-4 inline mr-1" />
+                Nome Completo *
+              </Label>
+              <Input 
+                id="invite-name"
+                value={inviteFormData.display_name} 
+                onChange={(e) => setInviteFormData({ ...inviteFormData, display_name: e.target.value })}
+                placeholder="João da Silva"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>
+                <Shield className="h-4 w-4 inline mr-1" />
+                Papel no Sistema
+              </Label>
+              <Select 
+                value={inviteFormData.role} 
+                onValueChange={(value) => setInviteFormData({ ...inviteFormData, role: value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione o papel" />
+                </SelectTrigger>
+                <SelectContent>
+                  {ROLE_OPTIONS.map(opt => (
+                    <SelectItem key={opt.value} value={opt.value}>
+                      <div className="flex flex-col">
+                        <span className="font-medium">{opt.label}</span>
+                        <span className="text-xs text-muted-foreground">{opt.description}</span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {inviteFormData.role && ROLE_DESCRIPTIONS[inviteFormData.role] && (
+                <p className="text-xs text-muted-foreground bg-muted/50 p-2 rounded">
+                  {ROLE_DESCRIPTIONS[inviteFormData.role]}
+                </p>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label>
+                <Building2 className="h-4 w-4 inline mr-1" />
+                Empresa (opcional)
+              </Label>
+              <Select 
+                value={inviteFormData.organization_id || 'none'} 
+                onValueChange={(value) => setInviteFormData({ ...inviteFormData, organization_id: value === 'none' ? '' : value })}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecione uma empresa" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Sem empresa</SelectItem>
+                  {organizations.map(org => (
+                    <SelectItem key={org.id} value={org.id}>{org.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button 
+              variant="outline" 
+              onClick={() => setShowInviteDialog(false)}
+              disabled={isInviting}
+            >
+              Cancelar
+            </Button>
+            <Button 
+              onClick={handleInviteUser}
+              disabled={isInviting || !inviteFormData.email || !inviteFormData.display_name}
+            >
+              {isInviting ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Convidando...
+                </>
+              ) : (
+                <>
+                  <UserPlus className="h-4 w-4 mr-2" />
+                  Convidar Usuário
+                </>
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
