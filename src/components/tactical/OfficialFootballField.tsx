@@ -16,9 +16,15 @@ interface OfficialFootballFieldProps {
 // Convert meters to SVG units (scale factor of 10)
 const m = metersToSvg;
 
-// SVG viewBox dimensions
-const VIEW_WIDTH = m(FIFA_FIELD.length);   // 1050
-const VIEW_HEIGHT = m(FIFA_FIELD.width);   // 680
+// Padding for goals and measurements (in meters)
+const PADDING_X = FIFA_FIELD.goalDepth + 4; // Goal depth + measurement labels
+const PADDING_Y = 4; // Top/bottom padding for measurement labels
+
+// SVG viewBox dimensions with padding
+const VIEW_WIDTH = m(FIFA_FIELD.length + PADDING_X * 2);   // 1050 + padding
+const VIEW_HEIGHT = m(FIFA_FIELD.width + PADDING_Y * 2);   // 680 + padding
+const VIEW_X = m(-PADDING_X);  // Start X offset for goals
+const VIEW_Y = m(-PADDING_Y);  // Start Y offset for measurements
 
 export function OfficialFootballField({
   className,
@@ -35,21 +41,23 @@ export function OfficialFootballField({
   const handleMouseMove = (e: React.MouseEvent<SVGSVGElement>) => {
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * VIEW_WIDTH;
-    const y = ((e.clientY - rect.top) / rect.height) * VIEW_HEIGHT;
-    setHoveredPosition({ x: x / 10, y: y / 10 });
+    // Calculate position accounting for viewBox offset
+    const svgX = ((e.clientX - rect.left) / rect.width) * VIEW_WIDTH + VIEW_X;
+    const svgY = ((e.clientY - rect.top) / rect.height) * VIEW_HEIGHT + VIEW_Y;
+    setHoveredPosition({ x: svgX / 10, y: svgY / 10 });
   };
 
   const handleClick = (e: React.MouseEvent<SVGSVGElement>) => {
     if (!onFieldClick) return;
     const svg = e.currentTarget;
     const rect = svg.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * VIEW_WIDTH;
-    const y = ((e.clientY - rect.top) / rect.height) * VIEW_HEIGHT;
+    // Calculate position accounting for viewBox offset
+    const svgX = ((e.clientX - rect.left) / rect.width) * VIEW_WIDTH + VIEW_X;
+    const svgY = ((e.clientY - rect.top) / rect.height) * VIEW_HEIGHT + VIEW_Y;
     onFieldClick({
-      x,
-      y,
-      meters: { x: x / 10, y: y / 10 }
+      x: svgX,
+      y: svgY,
+      meters: { x: svgX / 10, y: svgY / 10 }
     });
   };
 
@@ -83,7 +91,7 @@ export function OfficialFootballField({
   return (
     <div className={cn("relative w-full", className)}>
       <svg
-        viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
+        viewBox={`${VIEW_X} ${VIEW_Y} ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
         className="w-full h-auto"
         preserveAspectRatio="xMidYMid meet"
         onMouseMove={handleMouseMove}
@@ -104,8 +112,8 @@ export function OfficialFootballField({
           </pattern>
         </defs>
 
-        {/* Field background */}
-        <rect width={VIEW_WIDTH} height={VIEW_HEIGHT} fill="url(#field-stripes-official)" rx="8" />
+        {/* Field background - positioned at field coordinates (0,0) not viewBox origin */}
+        <rect x={m(0)} y={m(0)} width={m(FIFA_FIELD.length)} height={m(FIFA_FIELD.width)} fill="url(#field-stripes-official)" rx="8" />
 
         {/* Grid overlay */}
         {showGrid && (
