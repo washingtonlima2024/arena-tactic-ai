@@ -23,6 +23,13 @@ interface AdminUser {
   created_at: string;
 }
 
+interface InviteUserData {
+  email: string;
+  display_name: string;
+  role: string;
+  organization_id?: string | null;
+}
+
 // Fetch users from Supabase directly (fallback when local server unavailable)
 async function fetchUsersFromSupabase(): Promise<AdminUser[]> {
   console.log('[useAdminUsers] Fetching users from Supabase...');
@@ -179,6 +186,30 @@ export function useAdminUsers() {
     },
   });
 
+  const inviteUserMutation = useMutation({
+    mutationFn: async (data: InviteUserData) => {
+      console.log('[useAdminUsers] Inviting user:', data.email);
+      
+      const { data: result, error } = await supabase.functions.invoke('admin-invite-user', {
+        body: data,
+      });
+      
+      if (error) {
+        console.error('[useAdminUsers] Error inviting user:', error);
+        throw new Error(error.message || 'Erro ao convidar usuário');
+      }
+      
+      if (result?.error) {
+        throw new Error(result.error);
+      }
+      
+      return result;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['admin-users'] });
+    },
+  });
+
   return {
     users,
     isLoading,
@@ -187,5 +218,7 @@ export function useAdminUsers() {
       updateOrganizationMutation.mutateAsync({ userId, organizationId }),
     updateUserProfile: (userId: string, data: Partial<AdminUser>) =>
       updateProfileMutation.mutateAsync({ userId, data }),
+    inviteUser: (data: InviteUserData) => inviteUserMutation.mutateAsync(data),
+    isInviting: inviteUserMutation.isPending,
   };
 }
