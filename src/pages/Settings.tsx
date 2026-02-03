@@ -640,10 +640,16 @@ export default function Settings() {
                       isMutatingRef.current = true;
                       setGeminiEnabled(checked);
                       try {
-                        await upsertApiSetting.mutateAsync({
-                          key: "gemini_enabled",
-                          value: String(checked),
-                        });
+                        await Promise.all([
+                          upsertApiSetting.mutateAsync({
+                            key: "gemini_enabled",
+                            value: String(checked),
+                          }),
+                          apiClient.upsertSetting({
+                            setting_key: "gemini_enabled",
+                            setting_value: String(checked),
+                          }).catch(() => {}),
+                        ]);
                         toast.success(checked ? "Gemini ativado!" : "Gemini desativado");
                       } catch (error) {
                         setGeminiEnabled(!checked);
@@ -734,10 +740,16 @@ export default function Settings() {
                       isMutatingRef.current = true;
                       setOpenaiEnabled(checked);
                       try {
-                        await upsertApiSetting.mutateAsync({
-                          key: "openai_enabled",
-                          value: String(checked),
-                        });
+                        await Promise.all([
+                          upsertApiSetting.mutateAsync({
+                            key: "openai_enabled",
+                            value: String(checked),
+                          }),
+                          apiClient.upsertSetting({
+                            setting_key: "openai_enabled",
+                            setting_value: String(checked),
+                          }).catch(() => {}),
+                        ]);
                         toast.success(checked ? "OpenAI ativado!" : "OpenAI desativado");
                       } catch (error) {
                         setOpenaiEnabled(!checked);
@@ -831,10 +843,16 @@ export default function Settings() {
                       isMutatingRef.current = true;
                       setElevenlabsEnabled(checked);
                       try {
-                        await upsertApiSetting.mutateAsync({
-                          key: "elevenlabs_enabled",
-                          value: String(checked),
-                        });
+                        await Promise.all([
+                          upsertApiSetting.mutateAsync({
+                            key: "elevenlabs_enabled",
+                            value: String(checked),
+                          }),
+                          apiClient.upsertSetting({
+                            setting_key: "elevenlabs_enabled",
+                            setting_value: String(checked),
+                          }).catch(() => {}),
+                        ]);
                         toast.success(checked ? "ElevenLabs ativado!" : "ElevenLabs desativado");
                       } catch (error) {
                         setElevenlabsEnabled(!checked);
@@ -914,10 +932,16 @@ export default function Settings() {
                     onCheckedChange={async (checked) => {
                       setLocalWhisperEnabled(checked);
                       try {
-                        await upsertApiSetting.mutateAsync({
-                          key: "local_whisper_enabled",
-                          value: String(checked),
-                        });
+                        await Promise.all([
+                          upsertApiSetting.mutateAsync({
+                            key: "local_whisper_enabled",
+                            value: String(checked),
+                          }),
+                          apiClient.upsertSetting({
+                            setting_key: "local_whisper_enabled",
+                            setting_value: String(checked),
+                          }).catch(() => {}),
+                        ]);
                         toast.success(checked ? "Whisper Local ativado!" : "Whisper Local desativado");
                       } catch (error) {
                         setLocalWhisperEnabled(!checked);
@@ -1018,10 +1042,18 @@ export default function Settings() {
                       isMutatingRef.current = true;
                       setOllamaEnabled(checked);
                       try {
-                        await upsertApiSetting.mutateAsync({
-                          key: "ollama_enabled",
-                          value: String(checked),
-                        });
+                        // Salva no banco de dados E força atualização no servidor Python
+                        await Promise.all([
+                          upsertApiSetting.mutateAsync({
+                            key: "ollama_enabled",
+                            value: String(checked),
+                          }),
+                          // Força reload das configs no servidor Python
+                          apiClient.upsertSetting({
+                            setting_key: "ollama_enabled",
+                            setting_value: String(checked),
+                          }).catch(() => {}), // Ignora erro se servidor offline
+                        ]);
                         toast.success(checked ? "Ollama ativado!" : "Ollama desativado");
                       } catch (error) {
                         setOllamaEnabled(!checked);
