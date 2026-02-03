@@ -1253,9 +1253,13 @@ export default function Settings() {
                     <Button
                       variant="outline"
                       onClick={async () => {
-                        if (cloudflareUrl) {
-                          // Salvar URL
-                          saveCloudflareUrl(cloudflareUrl);
+                        // Sanitizar URL - remover espaços e barra final
+                        const sanitizedUrl = cloudflareUrl.trim().replace(/\/$/, '');
+                        
+                        if (sanitizedUrl) {
+                          // Salvar URL sanitizada
+                          saveCloudflareUrl(sanitizedUrl);
+                          setCloudflareUrl(sanitizedUrl);
                           
                           // Resetar cache e tentar conectar
                           resetDiscoveryCache();
@@ -1263,8 +1267,8 @@ export default function Settings() {
                           
                           // Tentar múltiplos endpoints (diferentes configs de túnel)
                           const endpoints = [
-                            `${cloudflareUrl}/api/health`,
-                            `${cloudflareUrl}/health`,
+                            `${sanitizedUrl}/api/health`,
+                            `${sanitizedUrl}/health`,
                           ];
                           
                           let connected = false;
