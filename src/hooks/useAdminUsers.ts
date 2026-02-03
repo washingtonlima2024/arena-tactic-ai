@@ -83,28 +83,25 @@ export function useAdminUsers() {
   const { data: users = [], isLoading } = useQuery({
     queryKey: ['admin-users'],
     queryFn: async (): Promise<AdminUser[]> => {
+      // SEMPRE usar Supabase para dados de usuários
+      // Usuários são gerenciados pelo Supabase Auth, não pelo servidor Python
       try {
-        // Check if local server is available
-        const serverAvailable = await isLocalServerAvailable();
-        
-        if (serverAvailable) {
-          // Use local server API
-          const data = await apiClient.admin.getUsers();
-          return data || [];
-        } else {
-          // Fallback to Supabase
-          console.log('[useAdminUsers] Local server unavailable, using Supabase fallback');
-          return await fetchUsersFromSupabase();
-        }
+        return await fetchUsersFromSupabase();
       } catch (error) {
-        console.error('[useAdminUsers] Error fetching users, trying Supabase fallback:', error);
-        // Try Supabase as fallback
+        console.error('[useAdminUsers] Error fetching users from Supabase:', error);
+        
+        // Fallback para servidor local apenas se Supabase falhar
         try {
-          return await fetchUsersFromSupabase();
-        } catch (supabaseError) {
-          console.error('[useAdminUsers] Supabase fallback also failed:', supabaseError);
-          return [];
+          const serverAvailable = await isLocalServerAvailable();
+          if (serverAvailable) {
+            const data = await apiClient.admin.getUsers();
+            return data || [];
+          }
+        } catch (localError) {
+          console.error('[useAdminUsers] Local server fallback also failed:', localError);
         }
+        
+        return [];
       }
     },
   });
