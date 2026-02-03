@@ -352,21 +352,25 @@ export const getActiveConnectionMethod = (): ActiveConnection => {
  * Verifica se o servidor está disponível
  */
 export const checkLocalServerAvailable = async (): Promise<boolean> => {
-  const base = getApiBase();
-  // Se base vazia (produção) ou contém cloudflare, usar /api/health
-  const healthPath = base === '' ? '/api/health' : 
-                     base.includes('trycloudflare.com') ? `${base}/api/health` : 
-                     `${base}/health`;
+  const base = getApiBase().replace(/\/$/, '');
   
-  try {
-    const response = await fetch(`${healthPath}?light=true`, {
-      signal: AbortSignal.timeout(5000),
-      headers: { 'Accept': 'application/json' },
-    });
-    return response.ok;
-  } catch {
-    return false;
+  // Endpoints a tentar em ordem
+  const endpoints = base === '' 
+    ? ['/api/health'] 
+    : [`${base}/api/health`, `${base}/health`];
+  
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(`${endpoint}?light=true`, {
+        signal: AbortSignal.timeout(5000),
+        headers: { 'Accept': 'application/json' },
+      });
+      if (response.ok) return true;
+    } catch {
+      // Tentar próximo endpoint
+    }
   }
+  return false;
 };
 
 /**
