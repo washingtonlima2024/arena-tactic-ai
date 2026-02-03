@@ -33,6 +33,7 @@ import { useToast } from '@/hooks/use-toast';
 import { useQueryClient } from '@tanstack/react-query';
 import { ReprocessOptionsDialog } from '@/components/matches/ReprocessOptionsDialog';
 import { supabase } from '@/integrations/supabase/client';
+import { MatchListCard } from '@/components/matches/MatchListCard';
 
 export default function Matches() {
   const navigate = useNavigate();
@@ -675,112 +676,12 @@ export default function Matches() {
         ) : (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             {matches.map(match => (
-              <Card key={match.id} variant="glass" className="overflow-hidden hover:border-primary/50 transition-colors">
-                <CardContent className="p-4">
-                  <div className="flex items-center justify-between mb-4">
-                    <Badge variant={
-                      match.status === 'completed' ? 'success' :
-                      match.status === 'analyzing' ? 'arena' : 'secondary'
-                    }>
-                      {match.status === 'completed' ? 'Analisada' :
-                       match.status === 'analyzing' ? 'Analisando' : 'Pendente'}
-                    </Badge>
-                    {match.competition && (
-                      <span className="text-xs text-muted-foreground">{match.competition}</span>
-                    )}
-                  </div>
-
-                  <div className="flex items-center justify-between gap-4 mb-4">
-                    {/* Home Team */}
-                    <div className="flex-1 text-center">
-                      <TeamBadge 
-                        team={{
-                          name: match.home_team?.name || 'Casa',
-                          logo_url: match.home_team?.logo_url || undefined,
-                          short_name: match.home_team?.short_name || match.home_team?.name?.slice(0, 3),
-                          primary_color: match.home_team?.primary_color || undefined
-                        }} 
-                        size="lg" 
-                        className="mx-auto mb-2"
-                      />
-                      <p className="text-sm font-medium truncate">{match.home_team?.name || 'Time Casa'}</p>
-                    </div>
-
-                    {/* Score */}
-                    <div className="text-center">
-                      <div className="text-2xl font-bold">
-                        {match.home_score ?? 0} - {match.away_score ?? 0}
-                      </div>
-                    </div>
-
-                    {/* Away Team */}
-                    <div className="flex-1 text-center">
-                      <TeamBadge 
-                        team={{
-                          name: match.away_team?.name || 'Visitante',
-                          logo_url: match.away_team?.logo_url || undefined,
-                          short_name: match.away_team?.short_name || match.away_team?.name?.slice(0, 3),
-                          primary_color: match.away_team?.primary_color || undefined
-                        }} 
-                        size="lg" 
-                        className="mx-auto mb-2"
-                      />
-                      <p className="text-sm font-medium truncate">{match.away_team?.name || 'Time Visitante'}</p>
-                    </div>
-                  </div>
-
-                  {match.match_date && (
-                    <p className="text-xs text-center text-muted-foreground">
-                      {format(new Date(match.match_date), "d 'de' MMMM 'de' yyyy", { locale: ptBR })}
-                    </p>
-                  )}
-
-                  <div className="flex gap-2 mt-4">
-                    {/* Live match buttons */}
-                    {match.status === 'live' && (
-                      <>
-                        <Button variant="arena" size="sm" className="flex-1 animate-pulse" asChild>
-                          <Link to="/live">
-                            <Radio className="mr-2 h-4 w-4" />
-                            Ver Ao Vivo
-                          </Link>
-                        </Button>
-                      </>
-                    )}
-                    {(match.status === 'completed' || match.status === 'analyzed') && (
-                      <Button variant="arena-outline" size="sm" className="flex-1" asChild>
-                        <Link to={`/events?match=${match.id}`}>Ver Análise</Link>
-                      </Button>
-                    )}
-                    {match.status === 'pending' && (
-                      <Button variant="arena-outline" size="sm" className="flex-1" asChild>
-                        <Link to={`/events?match=${match.id}`}>Ver Análise</Link>
-                      </Button>
-                    )}
-                    {match.status === 'analyzing' && (
-                      <Button 
-                        variant="arena-outline" 
-                        size="sm" 
-                        className="flex-1"
-                        onClick={() => handleOpenReprocessDialog(match)}
-                      >
-                        <RefreshCw className="mr-2 h-4 w-4" />
-                        Reprocessar
-                      </Button>
-                    )}
-                    {/* Delete button - always visible for all statuses */}
-                    <Button 
-                      variant="ghost" 
-                      size="sm" 
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                      onClick={() => setMatchToDelete(match)}
-                      title="Deletar partida"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
+              <MatchListCard
+                key={match.id}
+                match={match}
+                onDelete={(m) => setMatchToDelete(m)}
+                onReprocess={(m) => handleOpenReprocessDialog(m)}
+              />
             ))}
           </div>
         )}
