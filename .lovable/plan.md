@@ -1,120 +1,112 @@
 
-## Plano: Corrigir Módulo de Administração de Usuários
+## Plano: Adicionar Botão para Criar Novo Usuário no Painel Admin
 
-### Diagnóstico dos Problemas Encontrados
+### Problema Identificado
 
-Após análise detalhada do código e banco de dados, identifiquei as seguintes questões:
+O componente `UsersManager.tsx` permite apenas editar usuários existentes, mas não oferece uma funcionalidade para criar novos usuários diretamente no painel de administração.
 
-#### 1. Credenciais de Demo Hardcoded (Landing.tsx - linha 88-89)
-- **Problema**: O formulário de login vem pré-preenchido com `admin@arenaplay.com` / `arena2025`
-- **Solicitação**: Mudar para campos vazios (não exibir credenciais) ou usar `washington@katttus.com`
+### Abordagem
 
-#### 2. Nome Gerado Automaticamente (Trigger handle_new_user)
-- **Problema**: O trigger cria o `display_name` automaticamente usando:
-  ```sql
-  COALESCE(NEW.raw_user_meta_data ->> 'display_name', split_part(NEW.email, '@', 1))
-  ```
-  Isso faz com que novos usuários venham com nomes como "Washington Lima" ou "admin" baseado no email.
-- **Solicitação**: Remover o preenchimento automático para que o admin defina manualmente
+Existem duas opções para criar usuários:
 
-#### 3. O UsersManager já foi atualizado
-- As permissões granulares (`ROLE_PERMISSIONS`, checklist visual) já estão implementadas no código
-- O fallback para Supabase já funciona quando o servidor local não está disponível
+1. **Convite por Email (Recomendado)**: Enviar um convite para o email do usuário, onde ele clica no link e define sua senha
+2. **Criação Direta com Senha Temporária**: O admin define uma senha inicial que o usuário deve trocar
+
+Vou implementar a **opção 1** (convite por email) por ser mais segura e seguir boas práticas de autenticação.
 
 ---
 
 ### Alterações Propostas
 
-#### A. Remover Credenciais de Demo da Landing Page
-
-**Arquivo**: `src/pages/Landing.tsx` (linhas 88-89)
-
-```typescript
-// DE:
-const [email, setEmail] = useState('admin@arenaplay.com');
-const [password, setPassword] = useState('arena2025');
-
-// PARA:
-const [email, setEmail] = useState('');
-const [password, setPassword] = useState('');
-```
-
-Também remover a mensagem "Demonstração: credenciais já preenchidas" (linha 442-444).
-
-#### B. Atualizar Trigger para Não Gerar Nome Automaticamente
-
-**Migração SQL** para atualizar a função `handle_new_user`:
-
-```sql
-CREATE OR REPLACE FUNCTION public.handle_new_user()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = 'public'
-AS $$
-DECLARE
-  user_count INTEGER;
-  new_role text;
-BEGIN
-  SELECT COUNT(*) INTO user_count FROM public.user_roles;
-  
-  IF user_count = 0 THEN
-    new_role := 'superadmin';
-  ELSE
-    new_role := 'viewer';
-  END IF;
-  
-  -- NÃO preencher display_name automaticamente
-  INSERT INTO public.profiles (user_id, email, display_name, credits_balance, credits_monthly_quota)
-  VALUES (
-    NEW.id, 
-    NEW.email, 
-    NULL,  -- Admin define manualmente depois
-    10,
-    10
-  );
-  
-  INSERT INTO public.user_roles (user_id, role)
-  VALUES (NEW.id, new_role);
-  
-  RETURN NEW;
-END;
-$$;
-```
-
-#### C. Melhorar UI do UsersManager para Usuários Sem Nome
+#### A. Adicionar Botão "Novo Usuário" no Header
 
 **Arquivo**: `src/components/admin/UsersManager.tsx`
 
-Alterar a exibição de "Sem nome" para ficar mais visível e adicionar um indicador de "Cadastro pendente":
+Adicionar um botão ao lado do título:
 
 ```tsx
-// Linha 246 - Melhorar exibição
-<div className="font-medium">
-  {user.display_name || (
-    <span className="text-amber-500 flex items-center gap-1">
-      <AlertCircle className="h-3 w-3" />
-      Cadastro pendente
-    </span>
-  )}
-</div>
+<CardHeader>
+  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+    <div>
+      <CardTitle className="flex items-center gap-2">
+        <Users className="h-5 w-5" />
+        Usuários
+      </CardTitle>
+      <CardDescription>Gerencie os usuários e suas permissões</CardDescription>
+    </div>
+    <Button onClick={() => setShowInviteDialog(true)}>
+      <UserPlus className="h-4 w-4 mr-2" />
+      Novo Usuário
+    </Button>
+  </div>
+</CardHeader>
+```
+
+#### B. Criar Dialog de Convite de Usuário
+
+Novo dialog com campos para:
+- **Email** (obrigatório)
+- **Nome** (obrigatório)
+- **Papel/Role** (seleção)
+- **Empresa** (opcional)
+
+#### C. Criar Edge Function para Convite Admin
+
+**Arquivo**: `supabase/functions/admin-invite-user/index.ts`
+
+Uma edge function segura que:
+1. Verifica se o solicitante é admin ou superadmin
+2. Usa a API Admin do Supabase para criar o convite
+3. Cria o profile e role do usuário automaticamente
+
+#### D. Adicionar Hook para Convite
+
+**Arquivo**: `src/hooks/useAdminUsers.ts`
+
+Adicionar mutação `inviteUser` que chama a edge function.
+
+---
+
+### Fluxo de Criação de Usuário
+
+```text
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. Admin clica em "Novo Usuário"                                │
+│                      ↓                                          │
+│ 2. Preenche: Email, Nome, Papel, Empresa                        │
+│                      ↓                                          │
+│ 3. Edge function cria usuário via Supabase Admin API            │
+│                      ↓                                          │
+│ 4. Usuário recebe email com link para definir senha             │
+│                      ↓                                          │
+│ 5. Profile e role já criados pelo trigger handle_new_user       │
+│                      ↓                                          │
+│ 6. Usuário clica no link, define senha e está ativo             │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### Resumo das Alterações
+### Arquivos a Modificar/Criar
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/pages/Landing.tsx` | Remover credenciais pré-preenchidas e mensagem de demo |
-| Migração SQL | Atualizar `handle_new_user` para não gerar display_name |
-| `src/components/admin/UsersManager.tsx` | Indicador visual para usuários sem nome cadastrado |
+| Arquivo | Ação |
+|---------|------|
+| `src/components/admin/UsersManager.tsx` | Adicionar botão e dialog de convite |
+| `supabase/functions/admin-invite-user/index.ts` | Nova edge function para convite seguro |
+| `src/hooks/useAdminUsers.ts` | Adicionar função `inviteUser` |
 
 ---
 
+### Notas Técnicas
+
+1. A edge function precisará do `SUPABASE_SERVICE_ROLE_KEY` para usar a Admin API
+2. O trigger `handle_new_user` já cria automaticamente o profile e role
+3. Será necessário atualizar o profile com nome e empresa após criação (via edge function)
+4. O convite envia email automático com link de confirmação
+
 ### Resultado Esperado
 
-1. Formulário de login vazio (sem credenciais expostas)
-2. Novos usuários entram sem nome pré-definido
-3. Admin vê claramente quais usuários precisam ter o cadastro completado
-4. Sistema de permissões granulares já funcionando (implementado anteriormente)
+- Botão "Novo Usuário" visível no header da lista de usuários
+- Dialog com formulário simples para convidar usuários
+- Usuário recebe email e pode definir sua senha
+- Profile já vem com nome e empresa pré-configurados pelo admin
