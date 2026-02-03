@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Users, Search, MoreHorizontal, Edit, Shield, Building2, Phone, MapPin, CreditCard, User, Check, Eye, Upload, Pencil, Settings, Globe } from 'lucide-react';
+import { Users, Search, MoreHorizontal, Edit, Shield, Building2, Phone, MapPin, CreditCard, User, Check, Eye, Upload, Pencil, Settings, Globe, AlertCircle } from 'lucide-react';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useOrganizations } from '@/hooks/useOrganizations';
 import { toast } from '@/hooks/use-toast';
@@ -243,7 +243,14 @@ export default function UsersManager() {
                     <TableRow key={user.id}>
                       <TableCell>
                         <div>
-                          <div className="font-medium">{user.display_name || 'Sem nome'}</div>
+                          <div className="font-medium">
+                            {user.display_name || (
+                              <span className="text-amber-500 flex items-center gap-1">
+                                <AlertCircle className="h-3 w-3" />
+                                Cadastro pendente
+                              </span>
+                            )}
+                          </div>
                           <div className="text-sm text-muted-foreground">{user.email}</div>
                         </div>
                       </TableCell>
