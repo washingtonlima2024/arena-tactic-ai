@@ -24,6 +24,30 @@ from pathlib import Path
 from datetime import datetime
 from typing import Optional, Dict, Any
 
+
+def parse_iso_datetime(date_string: str) -> Optional[datetime]:
+    """
+    Parse ISO datetime string from JavaScript format.
+    Handles: '2016-12-11T23:45:00.000Z' -> datetime
+    
+    Args:
+        date_string: ISO format date string from JavaScript
+        
+    Returns:
+        datetime object or None if empty/invalid
+    """
+    if not date_string:
+        return None
+    
+    # Remove 'Z' suffix and timezone offset
+    cleaned = date_string.replace('Z', '').replace('+00:00', '')
+    
+    # Remove milliseconds if present (.000, .123456, etc.)
+    if '.' in cleaned:
+        cleaned = cleaned.split('.')[0]
+    
+    return datetime.fromisoformat(cleaned)
+
 # ============================================================================
 # 100% LOCAL MODE - No Supabase/Cloud dependencies
 # ============================================================================
@@ -1736,7 +1760,7 @@ def create_match():
             home_score=data.get('home_score', 0),
             away_score=data.get('away_score', 0),
             competition=data.get('competition'),
-            match_date=datetime.fromisoformat(data['match_date']) if data.get('match_date') else None,
+            match_date=parse_iso_datetime(data.get('match_date')),
             venue=data.get('venue'),
             status=data.get('status', 'pending')
         )
@@ -1791,8 +1815,8 @@ def update_match(match_id: str):
             if key in data:
                 setattr(match, key, data[key])
         
-        if 'match_date' in data and data['match_date']:
-            match.match_date = datetime.fromisoformat(data['match_date'])
+        if 'match_date' in data:
+            match.match_date = parse_iso_datetime(data['match_date'])
         
         session.commit()
         return jsonify(match.to_dict(include_teams=True))
