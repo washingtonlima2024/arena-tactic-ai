@@ -85,8 +85,8 @@ function FloatingParticle({ delay, size, left, duration }: {
 export default function Landing() {
   const navigate = useNavigate();
   const { user, isLoading: authLoading, signIn, signUp, resetPassword } = useAuth();
-  const [email, setEmail] = useState('admin@arenaplay.com');
-  const [password, setPassword] = useState('arena2025');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showStats, setShowStats] = useState(false);
 
@@ -438,10 +438,6 @@ export default function Landing() {
                 Criar Nova Conta
               </Button>
 
-              {/* Demo credentials hint */}
-              <p className="text-[10px] md:text-xs text-center text-muted-foreground mt-3 md:mt-4">
-                Demonstração: credenciais já preenchidas
-              </p>
             </div>
           </div>
         </div>
