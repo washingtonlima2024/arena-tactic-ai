@@ -37,6 +37,36 @@ MIGRATIONS = [
         'type': 'TEXT',
         'default': "'[]'"
     },
+    {
+        'table': 'transcription_jobs',
+        'column': 'stage',
+        'type': 'TEXT',
+        'default': "'queued'"
+    },
+    {
+        'table': 'transcription_jobs',
+        'column': 'chunk_duration_seconds',
+        'type': 'INTEGER',
+        'default': '10'
+    },
+    {
+        'table': 'transcription_jobs',
+        'column': 'manifest_path',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'transcription_jobs',
+        'column': 'chunks_dir',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'transcription_jobs',
+        'column': 'media_prepared',
+        'type': 'BOOLEAN',
+        'default': '0'
+    },
     # Profile - new fields for complete registration
     {
         'table': 'profiles',
@@ -166,9 +196,14 @@ def create_transcription_jobs_table():
                 progress INTEGER DEFAULT 0,
                 current_step TEXT,
                 error_message TEXT,
+                stage TEXT DEFAULT 'queued',
                 total_chunks INTEGER DEFAULT 1,
                 completed_chunks INTEGER DEFAULT 0,
                 chunk_results TEXT DEFAULT '[]',
+                chunk_duration_seconds INTEGER DEFAULT 10,
+                manifest_path TEXT,
+                chunks_dir TEXT,
+                media_prepared BOOLEAN DEFAULT 0,
                 srt_content TEXT,
                 plain_text TEXT,
                 provider_used TEXT,

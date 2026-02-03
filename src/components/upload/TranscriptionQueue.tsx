@@ -12,7 +12,11 @@ import {
   Clock,
   Trash2,
   Play,
-  Layers
+  Layers,
+  Scissors,
+  Music,
+  MessageSquare,
+  Combine
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -24,6 +28,32 @@ interface TranscriptionQueueProps {
   onRemove: (id: string) => void;
   onClear: () => void;
   overallProgress: { completed: number; total: number; overallProgress: number };
+}
+
+type ProcessingStage = 'pending' | 'splitting' | 'extracting_audio' | 'transcribing' | 'combining' | 'complete' | 'error';
+
+const STAGE_CONFIG: Record<ProcessingStage, { icon: React.ReactNode; label: string; color: string }> = {
+  pending: { icon: <Clock className="h-4 w-4" />, label: 'Aguardando', color: 'text-muted-foreground' },
+  splitting: { icon: <Scissors className="h-4 w-4" />, label: 'Dividindo', color: 'text-blue-500' },
+  extracting_audio: { icon: <Music className="h-4 w-4" />, label: 'Extraindo Áudio', color: 'text-purple-500' },
+  transcribing: { icon: <MessageSquare className="h-4 w-4" />, label: 'Transcrevendo', color: 'text-primary' },
+  combining: { icon: <Combine className="h-4 w-4" />, label: 'Combinando', color: 'text-orange-500' },
+  complete: { icon: <CheckCircle2 className="h-4 w-4" />, label: 'Concluído', color: 'text-green-500' },
+  error: { icon: <AlertCircle className="h-4 w-4" />, label: 'Erro', color: 'text-destructive' }
+};
+
+// Map queue item status to processing stage
+function getStageFromStatus(item: TranscriptionQueueItem): ProcessingStage {
+  if (item.status === 'pending') return 'pending';
+  if (item.status === 'complete') return 'complete';
+  if (item.status === 'error') return 'error';
+  
+  // For transcribing status, check message for more specific stage
+  const msg = item.message?.toLowerCase() || '';
+  if (msg.includes('dividindo') || msg.includes('split')) return 'splitting';
+  if (msg.includes('extraindo') || msg.includes('audio')) return 'extracting_audio';
+  if (msg.includes('combinando') || msg.includes('combining')) return 'combining';
+  return 'transcribing';
 }
 
 export function TranscriptionQueue({
@@ -38,28 +68,29 @@ export function TranscriptionQueue({
   if (queue.length === 0) return null;
 
   const getStatusIcon = (item: TranscriptionQueueItem) => {
-    switch (item.status) {
-      case 'pending':
-        return <Clock className="h-4 w-4 text-muted-foreground" />;
-      case 'transcribing':
-        return <Loader2 className="h-4 w-4 text-primary animate-spin" />;
-      case 'complete':
-        return <CheckCircle2 className="h-4 w-4 text-green-500" />;
-      case 'error':
-        return <AlertCircle className="h-4 w-4 text-destructive" />;
+    const stage = getStageFromStatus(item);
+    const config = STAGE_CONFIG[stage];
+    
+    if (item.status === 'transcribing') {
+      return <Loader2 className={cn("h-4 w-4 animate-spin", config.color)} />;
     }
+    
+    return <span className={config.color}>{config.icon}</span>;
   };
 
   const getStatusBadge = (item: TranscriptionQueueItem) => {
+    const stage = getStageFromStatus(item);
+    const config = STAGE_CONFIG[stage];
+    
     switch (item.status) {
       case 'pending':
-        return <Badge variant="secondary">Aguardando</Badge>;
+        return <Badge variant="secondary">{config.label}</Badge>;
       case 'transcribing':
-        return <Badge variant="default" className="bg-primary">Transcrevendo</Badge>;
+        return <Badge variant="default" className="bg-primary">{config.label}</Badge>;
       case 'complete':
-        return <Badge variant="default" className="bg-green-500">Concluído</Badge>;
+        return <Badge variant="default" className="bg-green-500">{config.label}</Badge>;
       case 'error':
-        return <Badge variant="destructive">Erro</Badge>;
+        return <Badge variant="destructive">{config.label}</Badge>;
     }
   };
 

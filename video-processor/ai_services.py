@@ -1569,6 +1569,111 @@ def _transcribe_with_elevenlabs(audio_path: str, match_id: str = None) -> Dict[s
         return {"error": f"ElevenLabs error: {str(e)}", "success": False}
 
 
+def transcribe_audio_file(audio_path: str, match_id: str = None, language: str = 'pt') -> Dict[str, Any]:
+    """
+    Transcribe a single audio file using the best available provider.
+    
+    Priority:
+    1. Local Whisper (FREE, offline)
+    2. OpenAI Whisper API (paid)
+    3. ElevenLabs (paid)
+    
+    This is the main entry point for chunk-based transcription.
+    
+    Args:
+        audio_path: Path to audio file (WAV, MP3, etc.)
+        match_id: Optional match ID for metadata
+        language: Language code (default: 'pt' for Portuguese)
+    
+    Returns:
+        Dict with:
+        - success: bool
+        - text: transcribed text
+        - srtContent: SRT formatted content
+        - segments: list of segments with timestamps
+        - provider: which provider was used
+        - error: error message if failed
+    """
+    if not os.path.exists(audio_path):
+        return {
+            "success": False,
+            "error": f"Audio file not found: {audio_path}"
+        }
+    
+    audio_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
+    print(f"[TranscribeFile] Transcrevendo {audio_path} ({audio_size_mb:.2f}MB)...")
+    
+    # Priority 1: Local Whisper (FREE)
+    if LOCAL_WHISPER_ENABLED:
+        print(f"[TranscribeFile] Tentando Local Whisper...")
+        result = _transcribe_with_local_whisper(audio_path, match_id)
+        if result.get('success'):
+            result['provider'] = 'local_whisper'
+            print(f"[TranscribeFile] ✓ Local Whisper: {len(result.get('text', ''))} chars")
+            return result
+        else:
+            print(f"[TranscribeFile] Local Whisper falhou: {result.get('error')}")
+    
+    # Priority 2: OpenAI Whisper API
+    if OPENAI_API_KEY and OPENAI_ENABLED:
+        print(f"[TranscribeFile] Tentando OpenAI Whisper API...")
+        try:
+            with open(audio_path, 'rb') as audio_file:
+                response = requests.post(
+                    f'{OPENAI_API_URL}/audio/transcriptions',
+                    headers={'Authorization': f'Bearer {OPENAI_API_KEY}'},
+                    files={'file': audio_file},
+                    data={
+                        'model': 'whisper-1',
+                        'language': language,
+                        'response_format': 'verbose_json'
+                    },
+                    timeout=300
+                )
+            
+            if response.ok:
+                data = response.json()
+                text = data.get('text', '')
+                segments = data.get('segments', [])
+                
+                # Generate SRT from segments
+                srt_lines = []
+                for i, seg in enumerate(segments, 1):
+                    start_str = _format_srt_time(seg.get('start', 0))
+                    end_str = _format_srt_time(seg.get('end', 0))
+                    srt_lines.append(f"{i}\n{start_str} --> {end_str}\n{seg.get('text', '').strip()}\n")
+                
+                print(f"[TranscribeFile] ✓ OpenAI Whisper: {len(text)} chars")
+                return {
+                    "success": True,
+                    "text": text,
+                    "srtContent": '\n'.join(srt_lines),
+                    "segments": segments,
+                    "provider": "openai_whisper",
+                    "matchId": match_id
+                }
+            else:
+                print(f"[TranscribeFile] OpenAI falhou: {response.status_code}")
+        except Exception as e:
+            print(f"[TranscribeFile] OpenAI erro: {e}")
+    
+    # Priority 3: ElevenLabs
+    if ELEVENLABS_API_KEY and ELEVENLABS_ENABLED:
+        print(f"[TranscribeFile] Tentando ElevenLabs...")
+        result = _transcribe_with_elevenlabs(audio_path, match_id)
+        if result.get('success'):
+            result['provider'] = 'elevenlabs'
+            print(f"[TranscribeFile] ✓ ElevenLabs: {len(result.get('text', ''))} chars")
+            return result
+        else:
+            print(f"[TranscribeFile] ElevenLabs falhou: {result.get('error')}")
+    
+    return {
+        "success": False,
+        "error": "Nenhum provedor de transcrição disponível. Configure LOCAL_WHISPER, OPENAI_API_KEY ou ELEVENLABS_API_KEY."
+    }
+
+
 def call_openai_gpt5(
     messages: List[Dict[str, str]],
     model: str = 'gpt-5',

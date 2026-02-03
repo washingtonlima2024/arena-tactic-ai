@@ -1,6 +1,15 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/apiClient';
 
+export type TranscriptionStage = 
+  | 'queued' 
+  | 'downloading' 
+  | 'splitting' 
+  | 'extracting_audio' 
+  | 'transcribing' 
+  | 'combining' 
+  | 'completed';
+
 export interface TranscriptionJob {
   id: string;
   match_id: string;
@@ -10,9 +19,14 @@ export interface TranscriptionJob {
   progress: number;
   current_step?: string;
   error_message?: string;
+  stage?: TranscriptionStage;
   total_chunks: number;
   completed_chunks: number;
   chunk_results?: Array<{ chunk: number; status: string; text?: string }>;
+  chunk_duration_seconds?: number;
+  manifest_path?: string;
+  chunks_dir?: string;
+  media_prepared?: boolean;
   srt_content?: string;
   plain_text?: string;
   provider_used?: string;
@@ -71,6 +85,16 @@ export function useCreateTranscriptionJob() {
   });
 }
 
+const STAGE_LABELS: Record<TranscriptionStage, string> = {
+  queued: 'Aguardando na fila...',
+  downloading: 'Baixando vídeo...',
+  splitting: 'Dividindo em chunks...',
+  extracting_audio: 'Extraindo áudio...',
+  transcribing: 'Transcrevendo chunks...',
+  combining: 'Combinando resultados...',
+  completed: 'Transcrição completa!'
+};
+
 /**
  * Hook to get computed transcription progress info.
  */
@@ -84,7 +108,10 @@ export function useTranscriptionProgress(job: TranscriptionJob | null) {
       isPartial: false,
       progress: 0,
       message: 'Aguardando...',
+      stage: null as TranscriptionStage | null,
+      stageLabel: '',
       chunksInfo: null,
+      mediaPrepared: false,
     };
   }
 
@@ -92,6 +119,9 @@ export function useTranscriptionProgress(job: TranscriptionJob | null) {
   const isCompleted = job.status === 'completed';
   const isFailed = job.status === 'failed';
   const isPartial = job.status === 'partial';
+
+  const stage = job.stage || 'queued';
+  const stageLabel = STAGE_LABELS[stage] || stage;
 
   const chunksInfo = job.total_chunks > 1 
     ? `${job.completed_chunks}/${job.total_chunks} partes`
@@ -104,10 +134,14 @@ export function useTranscriptionProgress(job: TranscriptionJob | null) {
     isFailed,
     isPartial,
     progress: job.progress,
-    message: job.current_step || 'Processando...',
+    message: job.current_step || stageLabel,
+    stage,
+    stageLabel,
     chunksInfo,
     errorMessage: job.error_message,
     provider: job.provider_used,
     hasResult: !!(job.srt_content || job.plain_text),
+    mediaPrepared: job.media_prepared || false,
+    chunkDuration: job.chunk_duration_seconds || 10,
   };
 }
