@@ -329,10 +329,19 @@ class TranscriptionJob(Base):
     current_step = Column(String(255))
     error_message = Column(Text)
     
+    # Processing stage for granular progress
+    stage = Column(String(50), default='queued')  # queued, downloading, splitting, extracting_audio, transcribing, combining, completed
+    
     # Chunk tracking for resilient processing
     total_chunks = Column(Integer, default=1)
     completed_chunks = Column(Integer, default=0)
     chunk_results = Column(JSON, default=list)
+    
+    # Media chunking configuration
+    chunk_duration_seconds = Column(Integer, default=10)
+    manifest_path = Column(Text)
+    chunks_dir = Column(Text)
+    media_prepared = Column(Boolean, default=False)
     
     # Results
     srt_content = Column(Text)
@@ -354,9 +363,14 @@ class TranscriptionJob(Base):
             'progress': self.progress,
             'current_step': self.current_step,
             'error_message': self.error_message,
+            'stage': self.stage,
             'total_chunks': self.total_chunks,
             'completed_chunks': self.completed_chunks,
             'chunk_results': self.chunk_results,
+            'chunk_duration_seconds': self.chunk_duration_seconds,
+            'manifest_path': self.manifest_path,
+            'chunks_dir': self.chunks_dir,
+            'media_prepared': self.media_prepared,
             'srt_content': self.srt_content,
             'plain_text': self.plain_text,
             'provider_used': self.provider_used,

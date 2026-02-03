@@ -8549,27 +8549,30 @@ transcription_jobs = {}
 
 @app.route('/api/transcription-jobs', methods=['POST'])
 def create_transcription_job():
-    """Cria um novo job de transcrição assíncrono."""
+    """Cria um novo job de transcrição assíncrono com chunking."""
     from models import TranscriptionJob
     
     data = request.json or {}
     match_id = data.get('match_id')
     video_id = data.get('video_id')
     video_path = data.get('video_path')
+    chunk_duration = data.get('chunk_duration_seconds', 10)
     
     if not match_id or not video_path:
         return jsonify({'error': 'match_id and video_path are required'}), 400
     
     session = get_session()
     try:
-        # Create job in database
+        # Create job in database with new fields
         job = TranscriptionJob(
             match_id=match_id,
             video_id=video_id,
             video_path=video_path,
             status='queued',
             progress=0,
-            current_step='Aguardando na fila...'
+            current_step='Aguardando na fila...',
+            stage='queued',
+            chunk_duration_seconds=chunk_duration
         )
         session.add(job)
         session.commit()
@@ -8583,9 +8586,11 @@ def create_transcription_job():
             'status': 'queued',
             'progress': 0,
             'current_step': 'Aguardando na fila...',
+            'stage': 'queued',
             'match_id': match_id,
             'video_id': video_id,
-            'video_path': video_path
+            'video_path': video_path,
+            'chunk_duration_seconds': chunk_duration
         }
         
         # Start processing in background thread
@@ -8601,6 +8606,85 @@ def create_transcription_job():
         return jsonify({'error': str(e)}), 500
     finally:
         session.close()
+
+
+@app.route('/api/jobs/<job_id>/prepare-media', methods=['POST'])
+def prepare_job_media(job_id: str):
+    """
+    Endpoint para preparar mídia de um job manualmente.
+    
+    Fase 1: Download + split de vídeo + extração de áudio.
+    Idempotente: pula chunks que já existem.
+    """
+    import media_chunker
+    from models import TranscriptionJob
+    
+    data = request.json or {}
+    chunk_duration = data.get('chunk_duration_seconds', 10)
+    
+    session = get_session()
+    try:
+        job = session.query(TranscriptionJob).filter_by(id=job_id).first()
+        if not job:
+            return jsonify({'error': 'Job not found'}), 404
+        
+        if not job.video_path:
+            return jsonify({'error': 'Job has no video_path'}), 400
+        
+        # Check if already prepared
+        if job.media_prepared:
+            manifest = media_chunker.load_manifest(job_id)
+            return jsonify({
+                'success': True,
+                'message': 'Media already prepared',
+                'manifest': manifest
+            })
+        
+        # Prepare media
+        manifest = media_chunker.prepare_media_for_job(
+            job_id=job_id,
+            video_path=job.video_path,
+            chunk_duration=chunk_duration
+        )
+        
+        if manifest.get('status') == 'failed':
+            return jsonify({
+                'success': False,
+                'error': manifest.get('error', 'Media preparation failed')
+            }), 500
+        
+        # Update job
+        job.media_prepared = True
+        job.manifest_path = str(media_chunker.get_chunks_dir(job_id) / 'manifest.json')
+        job.chunks_dir = str(media_chunker.get_chunks_dir(job_id))
+        job.total_chunks = manifest.get('total_chunks', 0)
+        job.chunk_duration_seconds = chunk_duration
+        session.commit()
+        
+        return jsonify({
+            'success': True,
+            'message': 'Media prepared successfully',
+            'manifest': manifest
+        })
+        
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/jobs/<job_id>/manifest', methods=['GET'])
+def get_job_manifest(job_id: str):
+    """Retorna o manifest de mídia de um job."""
+    import media_chunker
+    
+    manifest = media_chunker.load_manifest(job_id)
+    
+    if not manifest:
+        return jsonify({'error': 'Manifest not found'}), 404
+    
+    return jsonify(manifest)
 
 
 @app.route('/api/transcription-jobs/<job_id>', methods=['GET'])
@@ -8624,11 +8708,20 @@ def get_transcription_job(job_id: str):
 
 
 def _process_transcription_job(job_id: str, match_id: str, video_path: str):
-    """Processa um job de transcrição em background."""
+    """
+    Processa um job de transcrição em background com fatiamento de mídia.
+    
+    Fluxo:
+    1. Preparar mídia (split vídeo + extrai áudio por chunk)
+    2. Transcrever cada chunk WAV com Whisper
+    3. Combinar transcrições com ajuste de timestamps
+    4. Salvar resultado final
+    """
     from models import TranscriptionJob
+    import media_chunker
     import time
     
-    def update_job(status=None, progress=None, current_step=None, **kwargs):
+    def update_job(status=None, progress=None, current_step=None, stage=None, **kwargs):
         if job_id in transcription_jobs:
             if status:
                 transcription_jobs[job_id]['status'] = status
@@ -8636,6 +8729,8 @@ def _process_transcription_job(job_id: str, match_id: str, video_path: str):
                 transcription_jobs[job_id]['progress'] = progress
             if current_step:
                 transcription_jobs[job_id]['current_step'] = current_step
+            if stage:
+                transcription_jobs[job_id]['stage'] = stage
             transcription_jobs[job_id].update(kwargs)
         
         # Update database
@@ -8649,6 +8744,8 @@ def _process_transcription_job(job_id: str, match_id: str, video_path: str):
                     job.progress = progress
                 if current_step:
                     job.current_step = current_step
+                if stage:
+                    job.stage = stage
                 for key, value in kwargs.items():
                     if hasattr(job, key):
                         setattr(job, key, value)
@@ -8660,42 +8757,251 @@ def _process_transcription_job(job_id: str, match_id: str, video_path: str):
             session.close()
     
     try:
-        update_job(status='processing', progress=5, current_step='Iniciando transcrição...', started_at=datetime.now().isoformat())
+        update_job(
+            status='processing', 
+            progress=2, 
+            current_step='Iniciando processamento...', 
+            stage='downloading',
+            started_at=datetime.now().isoformat()
+        )
         
         # Check if file exists
         if not os.path.exists(video_path):
             update_job(status='failed', error_message=f'Arquivo não encontrado: {video_path}')
             return
         
-        update_job(progress=10, current_step='Extraindo áudio...')
+        # ========================================
+        # FASE 1: Preparar mídia (split + audio)
+        # ========================================
+        update_job(progress=5, current_step='Preparando mídia...', stage='splitting')
         
-        # Use ai_services to transcribe
-        result = ai_services.transcribe_audio_from_video(video_path, match_id=match_id)
+        def on_media_progress(stage_name, current, total, message):
+            if stage_name == 'splitting':
+                prog = 5 + int((current / total) * 15)  # 5-20%
+            elif stage_name == 'extracting_audio':
+                prog = 20 + int((current / total) * 15)  # 20-35%
+            else:
+                prog = 35
+            update_job(progress=prog, current_step=message, stage=stage_name)
         
-        if result.get('success'):
+        manifest = media_chunker.prepare_media_for_job(
+            job_id=job_id,
+            video_path=video_path,
+            chunk_duration=10,  # 10 seconds per chunk
+            on_progress=on_media_progress
+        )
+        
+        if manifest.get('status') == 'failed':
             update_job(
-                status='completed',
-                progress=100,
-                current_step='Transcrição concluída!',
-                srt_content=result.get('srtContent'),
-                plain_text=result.get('text'),
-                provider_used=result.get('provider', 'unknown'),
-                completed_at=datetime.now().isoformat()
+                status='failed', 
+                error_message=manifest.get('error', 'Falha na preparação de mídia')
+            )
+            return
+        
+        # Update job with manifest info
+        chunks = manifest.get('chunks', [])
+        total_chunks = len(chunks)
+        ready_chunks = [c for c in chunks if c.get('status') == 'ready']
+        
+        update_job(
+            progress=35,
+            current_step=f'Mídia preparada: {len(ready_chunks)}/{total_chunks} chunks',
+            stage='transcribing',
+            total_chunks=total_chunks,
+            media_prepared=True,
+            manifest_path=str(media_chunker.get_chunks_dir(job_id) / 'manifest.json'),
+            chunks_dir=str(media_chunker.get_chunks_dir(job_id))
+        )
+        
+        # ========================================
+        # FASE 2: Transcrever cada chunk
+        # ========================================
+        all_transcriptions = []
+        chunk_results = []
+        completed_chunks = 0
+        
+        for chunk in ready_chunks:
+            chunk_index = chunk['chunk_index']
+            audio_path = media_chunker.get_chunk_audio_path(job_id, chunk_index)
+            
+            if not audio_path:
+                chunk_results.append({
+                    'chunk': chunk_index,
+                    'status': 'error',
+                    'error': 'Audio file not found'
+                })
+                continue
+            
+            # Progress: 35-90% for transcription
+            progress_pct = 35 + int((completed_chunks / total_chunks) * 55)
+            update_job(
+                progress=progress_pct,
+                current_step=f'Transcrevendo chunk {chunk_index}/{total_chunks}...',
+                completed_chunks=completed_chunks
             )
             
-            # Save to storage
-            if result.get('srtContent'):
-                save_file(match_id, 'srt', result['srtContent'].encode('utf-8'), 'transcription.srt')
-            if result.get('text'):
-                save_file(match_id, 'texts', result['text'].encode('utf-8'), 'transcription.txt')
+            try:
+                # Transcrever usando ai_services (Whisper Local prioritário)
+                result = ai_services.transcribe_audio_file(
+                    audio_path, 
+                    match_id=match_id,
+                    language='pt'
+                )
+                
+                if result.get('success') and result.get('text'):
+                    # Ajustar timestamps com offset do chunk
+                    chunk_start_ms = chunk['start_ms']
+                    chunk_text = result.get('text', '')
+                    chunk_srt = result.get('srtContent', '')
+                    
+                    # Ajustar SRT timestamps se disponível
+                    if chunk_srt:
+                        adjusted_srt = _adjust_srt_timestamps(chunk_srt, chunk_start_ms)
+                        all_transcriptions.append({
+                            'text': chunk_text,
+                            'srt': adjusted_srt,
+                            'start_ms': chunk_start_ms,
+                            'end_ms': chunk['end_ms']
+                        })
+                    else:
+                        all_transcriptions.append({
+                            'text': chunk_text,
+                            'srt': '',
+                            'start_ms': chunk_start_ms,
+                            'end_ms': chunk['end_ms']
+                        })
+                    
+                    chunk_results.append({
+                        'chunk': chunk_index,
+                        'status': 'completed',
+                        'text_length': len(chunk_text)
+                    })
+                    completed_chunks += 1
+                else:
+                    chunk_results.append({
+                        'chunk': chunk_index,
+                        'status': 'error',
+                        'error': result.get('error', 'Unknown error')
+                    })
+            except Exception as e:
+                print(f"[TranscriptionJob] Chunk {chunk_index} error: {e}")
+                chunk_results.append({
+                    'chunk': chunk_index,
+                    'status': 'error',
+                    'error': str(e)
+                })
+        
+        # ========================================
+        # FASE 3: Combinar resultados
+        # ========================================
+        update_job(
+            progress=92,
+            current_step='Combinando transcrições...',
+            stage='combining',
+            completed_chunks=completed_chunks,
+            chunk_results=chunk_results
+        )
+        
+        # Combine all transcriptions
+        combined_text = '\n\n'.join([t['text'] for t in all_transcriptions if t.get('text')])
+        combined_srt = '\n\n'.join([t['srt'] for t in all_transcriptions if t.get('srt')])
+        
+        # Renumber SRT entries
+        if combined_srt:
+            combined_srt = _renumber_srt(combined_srt)
+        
+        # Determine final status
+        if completed_chunks == total_chunks:
+            final_status = 'completed'
+        elif completed_chunks > 0:
+            final_status = 'partial'
         else:
-            update_job(
-                status='failed',
-                error_message=result.get('error', 'Erro desconhecido na transcrição')
-            )
+            final_status = 'failed'
+        
+        # ========================================
+        # FASE 4: Salvar resultados
+        # ========================================
+        update_job(
+            status=final_status,
+            progress=100 if final_status == 'completed' else 95,
+            current_step='Transcrição concluída!' if final_status == 'completed' else f'Parcial: {completed_chunks}/{total_chunks} chunks',
+            stage='completed',
+            srt_content=combined_srt,
+            plain_text=combined_text,
+            provider_used='whisper_chunked',
+            completed_at=datetime.now().isoformat()
+        )
+        
+        # Save to storage
+        if combined_srt:
+            save_file(match_id, 'srt', combined_srt.encode('utf-8'), 'transcription.srt')
+        if combined_text:
+            save_file(match_id, 'texts', combined_text.encode('utf-8'), 'transcription.txt')
+        
+        print(f"[TranscriptionJob] ✓ Job {job_id} completed: {completed_chunks}/{total_chunks} chunks, {len(combined_text)} chars")
+        
     except Exception as e:
         print(f"[TranscriptionJob] Exception: {e}")
+        import traceback
+        traceback.print_exc()
         update_job(status='failed', error_message=str(e))
+
+
+def _adjust_srt_timestamps(srt_content: str, offset_ms: int) -> str:
+    """
+    Ajusta timestamps de um SRT adicionando offset.
+    
+    Args:
+        srt_content: Conteúdo SRT original
+        offset_ms: Offset em milissegundos a adicionar
+        
+    Returns:
+        SRT com timestamps ajustados
+    """
+    import re
+    
+    def add_offset_to_timestamp(match):
+        h, m, s, ms = map(int, match.groups())
+        total_ms = h * 3600000 + m * 60000 + s * 1000 + ms + offset_ms
+        
+        new_h = total_ms // 3600000
+        new_m = (total_ms % 3600000) // 60000
+        new_s = (total_ms % 60000) // 1000
+        new_ms = total_ms % 1000
+        
+        return f"{new_h:02d}:{new_m:02d}:{new_s:02d},{new_ms:03d}"
+    
+    # Pattern: 00:00:00,000
+    pattern = r'(\d{2}):(\d{2}):(\d{2}),(\d{3})'
+    return re.sub(pattern, add_offset_to_timestamp, srt_content)
+
+
+def _renumber_srt(srt_content: str) -> str:
+    """
+    Renumera entradas de SRT para sequência contínua.
+    
+    Args:
+        srt_content: Conteúdo SRT combinado
+        
+    Returns:
+        SRT com numeração sequencial
+    """
+    import re
+    
+    # Split into entries
+    entries = re.split(r'\n\n+', srt_content.strip())
+    renumbered = []
+    counter = 1
+    
+    for entry in entries:
+        lines = entry.strip().split('\n')
+        if len(lines) >= 2:
+            # Replace first line (number) with new counter
+            lines[0] = str(counter)
+            renumbered.append('\n'.join(lines))
+            counter += 1
+    
+    return '\n\n'.join(renumbered)
 
 
 # ============================================================================
