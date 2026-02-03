@@ -1,112 +1,82 @@
 
-## Plano: Adicionar Botão para Criar Novo Usuário no Painel Admin
+## Plano: Corrigir Campo de Futebol Cortado no Mapa de Calor
 
 ### Problema Identificado
 
-O componente `UsersManager.tsx` permite apenas editar usuários existentes, mas não oferece uma funcionalidade para criar novos usuários diretamente no painel de administração.
+Na página de Análise Tática, a seção "Mapa de Calor - Formação dos Jogadores" mostra o campo de futebol com as laterais cortadas. Os gols e as medidas (7.32m, GOL) ficam parcialmente visíveis nas bordas.
 
-### Abordagem
+### Causa Raiz
 
-Existem duas opções para criar usuários:
+Após a expansão do `viewBox` para incluir espaço para os gols e medidas, algumas referências no SVG ficaram inconsistentes:
 
-1. **Convite por Email (Recomendado)**: Enviar um convite para o email do usuário, onde ele clica no link e define sua senha
-2. **Criação Direta com Senha Temporária**: O admin define uma senha inicial que o usuário deve trocar
+1. **Outer boundary rect**: Usa `VIEW_WIDTH` e `VIEW_HEIGHT` (dimensões do viewBox com padding) em vez de `FIFA_FIELD.length` e `FIFA_FIELD.width` (dimensões reais do campo 105m x 68m)
 
-Vou implementar a **opção 1** (convite por email) por ser mais segura e seguir boas práticas de autenticação.
+2. **Linha central**: Usa `VIEW_HEIGHT` para a altura, o que estende além do campo
 
----
+3. **Grid overlay**: Também usa `VIEW_WIDTH` e `VIEW_HEIGHT` incorretamente
 
 ### Alterações Propostas
 
-#### A. Adicionar Botão "Novo Usuário" no Header
+**Arquivo**: `src/components/tactical/OfficialFootballField.tsx`
 
-**Arquivo**: `src/components/admin/UsersManager.tsx`
-
-Adicionar um botão ao lado do título:
+#### A. Corrigir Outer Boundary Rect (linha ~145-151)
 
 ```tsx
-<CardHeader>
-  <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-    <div>
-      <CardTitle className="flex items-center gap-2">
-        <Users className="h-5 w-5" />
-        Usuários
-      </CardTitle>
-      <CardDescription>Gerencie os usuários e suas permissões</CardDescription>
-    </div>
-    <Button onClick={() => setShowInviteDialog(true)}>
-      <UserPlus className="h-4 w-4 mr-2" />
-      Novo Usuário
-    </Button>
-  </div>
-</CardHeader>
+// ANTES (incorreto):
+<rect
+  x={m(0)}
+  y={m(0)}
+  width={VIEW_WIDTH}
+  height={VIEW_HEIGHT}
+  rx="4"
+/>
+
+// DEPOIS (correto):
+<rect
+  x={m(0)}
+  y={m(0)}
+  width={m(FIFA_FIELD.length)}
+  height={m(FIFA_FIELD.width)}
+  rx="4"
+/>
 ```
 
-#### B. Criar Dialog de Convite de Usuário
+#### B. Corrigir Linha Central (linhas ~153-159)
 
-Novo dialog com campos para:
-- **Email** (obrigatório)
-- **Nome** (obrigatório)
-- **Papel/Role** (seleção)
-- **Empresa** (opcional)
+```tsx
+// ANTES:
+<line
+  x1={m(FIELD_CALCULATIONS.halfLength)}
+  y1={m(0)}
+  x2={m(FIELD_CALCULATIONS.halfLength)}
+  y2={VIEW_HEIGHT}
+/>
 
-#### C. Criar Edge Function para Convite Admin
-
-**Arquivo**: `supabase/functions/admin-invite-user/index.ts`
-
-Uma edge function segura que:
-1. Verifica se o solicitante é admin ou superadmin
-2. Usa a API Admin do Supabase para criar o convite
-3. Cria o profile e role do usuário automaticamente
-
-#### D. Adicionar Hook para Convite
-
-**Arquivo**: `src/hooks/useAdminUsers.ts`
-
-Adicionar mutação `inviteUser` que chama a edge function.
-
----
-
-### Fluxo de Criação de Usuário
-
-```text
-┌─────────────────────────────────────────────────────────────────┐
-│ 1. Admin clica em "Novo Usuário"                                │
-│                      ↓                                          │
-│ 2. Preenche: Email, Nome, Papel, Empresa                        │
-│                      ↓                                          │
-│ 3. Edge function cria usuário via Supabase Admin API            │
-│                      ↓                                          │
-│ 4. Usuário recebe email com link para definir senha             │
-│                      ↓                                          │
-│ 5. Profile e role já criados pelo trigger handle_new_user       │
-│                      ↓                                          │
-│ 6. Usuário clica no link, define senha e está ativo             │
-└─────────────────────────────────────────────────────────────────┘
+// DEPOIS:
+<line
+  x1={m(FIELD_CALCULATIONS.halfLength)}
+  y1={m(0)}
+  x2={m(FIELD_CALCULATIONS.halfLength)}
+  y2={m(FIFA_FIELD.width)}
+/>
 ```
 
----
+#### C. Corrigir Grid Overlay (linhas ~119-140)
 
-### Arquivos a Modificar/Criar
-
-| Arquivo | Ação |
-|---------|------|
-| `src/components/admin/UsersManager.tsx` | Adicionar botão e dialog de convite |
-| `supabase/functions/admin-invite-user/index.ts` | Nova edge function para convite seguro |
-| `src/hooks/useAdminUsers.ts` | Adicionar função `inviteUser` |
-
----
-
-### Notas Técnicas
-
-1. A edge function precisará do `SUPABASE_SERVICE_ROLE_KEY` para usar a Admin API
-2. O trigger `handle_new_user` já cria automaticamente o profile e role
-3. Será necessário atualizar o profile com nome e empresa após criação (via edge function)
-4. O convite envia email automático com link de confirmação
+```tsx
+// Substituir VIEW_WIDTH e VIEW_HEIGHT por m(FIFA_FIELD.length) e m(FIFA_FIELD.width)
+// nas linhas do grid
+```
 
 ### Resultado Esperado
 
-- Botão "Novo Usuário" visível no header da lista de usuários
-- Dialog com formulário simples para convidar usuários
-- Usuário recebe email e pode definir sua senha
-- Profile já vem com nome e empresa pré-configurados pelo admin
+- Campo de futebol visível integralmente dentro do container
+- Gols e medidas (7.32m) visíveis em ambos os lados
+- Indicadores "GOL" vermelho com setas visíveis
+- Grid e linhas do campo alinhadas corretamente com as bordas reais
+
+### Arquivos a Modificar
+
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/components/tactical/OfficialFootballField.tsx` | Corrigir referências de `VIEW_WIDTH`/`VIEW_HEIGHT` para usar dimensões do campo real |
