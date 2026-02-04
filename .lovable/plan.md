@@ -1,202 +1,257 @@
 
-# Plano: Corrigir Botões de Re-análise e Busca de Transcrição
+# Plano: Corrigir Eventos Duplicados, Placar Errado e Clips Repetidos
 
 ## Problemas Identificados
 
-### 1. **Formato de resposta incompatível em `listMatchFiles`**
+### 1. **Placar Invertido: Argentina 1 x 0 Brasil (deveria ser Brasil 2 x 0)**
 
-O `apiClient.listMatchFiles()` define o tipo de retorno como `files.srt`, mas o backend (`/api/matches/{matchId}/files`) retorna `folders.srt`.
+**Causa Raiz**: A função `detect_team_from_text()` em `ai_services.py` (linhas 450-471) usa uma lógica fraca para detectar o time:
 
-**Frontend espera:**
-```typescript
-files: { srt: any[], videos: any[], ... }
+```python
+# PROBLEMA: Default para 'home' quando nenhum time identificado
+else:
+    return 'unknown'  # ← O frontend depois assume 'home' por default
 ```
 
-**Backend retorna:**
-```json
-{ "matchId": "...", "folders": { "srt": [...], "videos": {...}, ... } }
+Porém, na versão de fallback por keywords (linhas 2797-2802):
+```python
+team = 'home'  # ← DEFAULT É SEMPRE 'home'
+if away_team.lower() in line_lower:
+    team = 'away'
+elif home_team.lower() in line_lower:
+    team = 'home'
 ```
 
-**Localização:** 
-- `src/lib/apiClient.ts` linhas 1430-1444 (tipo definido)
-- `src/pages/Events.tsx` linhas 291-292 (`result?.files?.srt` - sempre undefined!)
+O problema é que:
+1. A IA pode não detectar o nome do time na transcrição
+2. Quando `team='unknown'`, o placar no `server.py` (linha 3800-3803) assume **home**:
+   ```python
+   else:
+       # Last resort: default to home
+       home_score += 1
+   ```
+3. Os gols do Brasil podem estar sendo atribuídos à Argentina (posições invertidas)
 
----
+### 2. **Eventos Duplicados (mesmo gol 3 vezes)**
 
-### 2. **ReanalyzeHalfDialog busca no Supabase Cloud (modo local ativo)**
+**Causa Raiz**: A função `deduplicate_events()` (linhas 474-520) usa `threshold_seconds=30`, mas:
 
-A função `loadExistingTranscription()` em `ReanalyzeHalfDialog.tsx` usa `supabase.from('analysis_jobs')` para buscar a transcrição original, mas o sistema está em modo **100% local** com SQLite.
+1. **Problema de videoSecond**: Se o `videoSecond` calculado estiver errado, dois eventos do mesmo gol podem ter tempos muito diferentes (ex: 180s vs 1485s)
+2. **Fallback cria duplicatas**: Quando o Ollama falha e o fallback por keywords entra, ele pode não ter o `videoSecond` correto, causando eventos duplicados
+3. **Não há deduplicação na DB**: Ao salvar, o código deleta eventos anteriores do half, mas se dois half-types diferentes tiverem o mesmo gol, não são deduplicados
 
-**Código problemático:**
-```typescript
-const { data } = await supabase
-  .from('analysis_jobs')  // ❌ Não existe no Cloud!
-  .select('result')
-  .eq('match_id', matchId)
+### 3. **Tempo do Gol Errado no Vídeo**
+
+**Causa Raiz**: O cálculo de `videoSecond` (linha 3864):
+```python
+video_second = (original_minute - segment_start_minute) * 60 + event_second
 ```
 
-**Localização:** `src/components/events/ReanalyzeHalfDialog.tsx` linhas 141-182
+Problemas:
+1. Se `segment_start_minute` estiver errado, o cálculo fica fora
+2. O fallback de keywords pode usar `current_minute` em vez do timestamp real do SRT
+3. Se a transcrição não tiver timestamps precisos, o sistema usa inferência
 
 ---
 
-### 3. **ReanalyzeHalfDialog verifica vídeos no Supabase**
+## Soluções Propostas
 
-As funções `checkVideoSize()` e `handleExtractTranscription()` também usam `supabase.from('videos')` em vez do servidor local.
+### Correção 1: Melhorar Detecção de Time com Aliases
 
-**Localização:** `src/components/events/ReanalyzeHalfDialog.tsx` linhas 104-139 e 225-278
+**Arquivo**: `video-processor/ai_services.py`
 
----
-
-### 4. **Botão "Analisar Transcrição Existente" não encontra arquivos**
-
-Como `result?.files?.srt` é sempre `undefined` (problema 1), a UI nunca detecta que há arquivos SRT salvos e não exibe o alerta de análise manual.
-
----
-
-## Solução Proposta
-
-### Correção 1: Ajustar `apiClient.listMatchFiles` para o formato correto
-
-```typescript
-// src/lib/apiClient.ts
-listMatchFiles: async (matchId: string): Promise<{
-  matchId: string;
-  statistics: { totalFiles: number; totalSizeBytes: number; totalSizeMB: number };
-  folders: {  // Renomear 'files' para 'folders' para corresponder ao backend
-    srt: any[];
-    texts: any[];
-    audio: any[];
-    images: any[];
-    json: any[];
-    videos: { original: any[]; optimized: any[] };
-    clips: Record<string, any[]>;
-  };
-}> => {
-  return apiRequest(`/api/matches/${matchId}/files`);
-},
+```python
+def detect_team_from_text(text: str, home_team: str, away_team: str) -> str:
+    """
+    Detect which team is mentioned in the text.
+    Returns 'home', 'away', or 'unknown'.
+    
+    IMPROVED: Uses aliases and partial matching for better accuracy.
+    """
+    text_upper = text.upper()
+    home_upper = home_team.upper()
+    away_upper = away_team.upper()
+    
+    # Get all words from team names (length > 2)
+    home_words = [w for w in home_upper.split() if len(w) > 2]
+    away_words = [w for w in away_upper.split() if len(w) > 2]
+    
+    # Add aliases from TEAM_ALIASES dictionary
+    for key, aliases in TEAM_ALIASES.items():
+        if key.upper() in home_upper or home_upper in key.upper():
+            home_words.extend([a.upper() for a in aliases])
+        if key.upper() in away_upper or away_upper in key.upper():
+            away_words.extend([a.upper() for a in aliases])
+    
+    # Check for any word match
+    home_found = any(w in text_upper for w in home_words if len(w) > 3) or home_upper in text_upper
+    away_found = any(w in text_upper for w in away_words if len(w) > 3) or away_upper in text_upper
+    
+    if home_found and not away_found:
+        return 'home'
+    elif away_found and not home_found:
+        return 'away'
+    else:
+        return 'unknown'
 ```
 
----
+### Correção 2: Deduplicação Melhorada (por minuto E time)
 
-### Correção 2: Atualizar `Events.tsx` para usar `folders` em vez de `files`
+**Arquivo**: `video-processor/ai_services.py`
 
-```typescript
-// src/pages/Events.tsx - linha 291-292
-const srtFiles = result?.folders?.srt || [];  // Antes: files?.srt
+```python
+def deduplicate_events(events: List[Dict], threshold_seconds: int = 60) -> List[Dict]:
+    """
+    Remove duplicate events of the SAME TYPE and SAME TEAM that are too close.
+    
+    IMPROVED: 
+    - Increased threshold to 60s (narradores repetem gols por ~1min)
+    - Also considers 'team' field to avoid removing goals from different teams
+    """
+    if not events:
+        return []
+    
+    # Sort by timestamp
+    sorted_events = sorted(events, key=lambda e: e.get('videoSecond', e.get('minute', 0) * 60))
+    
+    result = []
+    
+    for event in sorted_events:
+        event_type = event.get('event_type')
+        event_team = event.get('team', 'unknown')
+        event_time = event.get('videoSecond', event.get('minute', 0) * 60)
+        
+        # Check if there's already an event of the SAME TYPE AND TEAM too close
+        is_duplicate = False
+        
+        for existing in result:
+            if (existing.get('event_type') == event_type and 
+                existing.get('team', 'unknown') == event_team):
+                
+                existing_time = existing.get('videoSecond', existing.get('minute', 0) * 60)
+                time_diff = abs(event_time - existing_time)
+                
+                if time_diff < threshold_seconds:
+                    is_duplicate = True
+                    # Keep the one with higher confidence
+                    if event.get('confidence', 0) > existing.get('confidence', 0):
+                        result.remove(existing)
+                        result.append(event)
+                    break
+        
+        if not is_duplicate:
+            result.append(event)
+    
+    return result
 ```
 
----
+### Correção 3: Deduplicação na DB Antes de Salvar
 
-### Correção 3: Migrar `ReanalyzeHalfDialog` para servidor local
+**Arquivo**: `video-processor/server.py`
 
-Substituir todas as chamadas `supabase.from(...)` por `apiClient.*`:
+Adicionar verificação antes de salvar cada evento:
 
-**a) loadExistingTranscription():**
-```typescript
-// ANTES (Supabase Cloud)
-const { data } = await supabase.from('analysis_jobs')...
+```python
+# Em analyze_match() antes do loop de salvamento:
+# Verificar eventos existentes para evitar duplicatas cross-half
+existing_events = session.query(MatchEvent).filter_by(match_id=match_id).all()
 
-// DEPOIS (Servidor Local)
-const files = await apiClient.listMatchFiles(matchId);
-const srtFiles = files?.folders?.srt || [];
-const txtFiles = files?.folders?.texts || [];
+for event_data in events:
+    # Check for duplicate in ANY half
+    is_duplicate = False
+    for existing in existing_events:
+        if (existing.event_type == event_data.get('event_type') and
+            abs(existing.minute - event_data.get('minute', 0)) <= 2):
+            is_duplicate = True
+            print(f"[ANALYZE] ⚠ Evento duplicado ignorado: {event_data.get('event_type')} {event_data.get('minute')}'")
+            break
+    
+    if is_duplicate:
+        continue
+    
+    # ... resto do salvamento
+```
 
-// Priorizar arquivo SRT, fallback para TXT
-const transcriptionFile = srtFiles.find(f => 
-  f.filename.includes(half) || f.filename.includes('transcription')
-) || txtFiles[0];
+### Correção 4: Fallback por Keywords com VideoSecond do SRT
 
-if (transcriptionFile) {
-  const content = await apiClient.get<string>(transcriptionFile.url);
-  setOriginalTranscription(content);
+**Arquivo**: `video-processor/ai_services.py`
+
+Na função `detect_events_by_keywords()` (versão do texto), adicionar cálculo correto de `videoSecond`:
+
+```python
+# Linha ~2813
+event = {
+    'minute': current_minute,
+    'second': current_second,
+    'event_type': event_type,
+    'team': team,
+    # ADICIONAR: videoSecond correto do timestamp SRT
+    'videoSecond': current_minute * 60 + current_second,  # Posição absoluta no vídeo
+    'description': line[:150],
+    'confidence': 0.6,
+    'is_highlight': event_type in ['goal', 'yellow_card', 'red_card', 'penalty'],
+    'isOwnGoal': False,
+    'source': 'keyword_fallback'
 }
 ```
 
-**b) checkVideoSize():**
-```typescript
-// ANTES (Supabase Cloud)
-const { data: videos } = await supabase.from('videos')...
+### Correção 5: Log Detalhado de Atribuição de Time
 
-// DEPOIS (Servidor Local)
-const videos = await apiClient.getVideos(matchId);
-```
+**Arquivo**: `video-processor/server.py`
 
-**c) handleExtractTranscription():**
-```typescript
-// ANTES (Supabase Cloud)
-const { data: videos } = await supabase.from('videos')...
-
-// DEPOIS (Servidor Local)
-const videos = await apiClient.getVideos(matchId);
-```
-
-**d) handleReanalyze() - deletar eventos:**
-```typescript
-// ANTES (Supabase Cloud)
-await supabase.from('match_events').delete()...
-
-// DEPOIS (Servidor Local)
-await apiClient.delete(`/api/matches/${matchId}/events?half=${half}`);
-```
-
----
-
-### Correção 4: Criar endpoint para deletar eventos por half (se não existir)
+No cálculo do placar (linha ~3770), adicionar logs:
 
 ```python
-# video-processor/server.py
-@app.route('/api/matches/<match_id>/events', methods=['DELETE'])
-def delete_match_events(match_id: str):
-    """Delete match events, optionally filtered by half."""
-    half = request.args.get('half')  # 'first' ou 'second'
+for goal in goal_events:
+    team = goal.get('team', 'unknown')
+    description = (goal.get('description') or '')[:60]
     
-    with get_db_session() as session:
-        query = session.query(MatchEvent).filter_by(match_id=match_id)
-        
-        if half:
-            query = query.filter_by(match_half=half)
-        
-        deleted = query.delete()
-        
-    return jsonify({'success': True, 'deleted_count': deleted})
+    print(f"[SCORE] 🔍 Analisando gol:")
+    print(f"[SCORE]   team field: '{team}'")
+    print(f"[SCORE]   description: '{description}'")
+    print(f"[SCORE]   isOwnGoal: {goal.get('isOwnGoal', False)}")
+    
+    # ... resto da lógica de placar
 ```
 
 ---
 
 ## Arquivos a Modificar
 
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/lib/apiClient.ts` | Corrigir tipo de retorno de `listMatchFiles` (files → folders) |
-| `src/pages/Events.tsx` | Usar `folders.srt` em vez de `files.srt` |
-| `src/components/events/ReanalyzeHalfDialog.tsx` | Migrar de Supabase para apiClient |
-| `video-processor/server.py` | Verificar/adicionar endpoint DELETE para eventos por half |
+| Arquivo | Alteração | Prioridade |
+|---------|-----------|------------|
+| `video-processor/ai_services.py` | Melhorar `detect_team_from_text()` com aliases | Alta |
+| `video-processor/ai_services.py` | Aumentar threshold de dedup para 60s e considerar team | Alta |
+| `video-processor/ai_services.py` | Adicionar `videoSecond` no fallback por keywords | Alta |
+| `video-processor/server.py` | Deduplicação cross-half antes de salvar na DB | Alta |
+| `video-processor/server.py` | Logs detalhados de atribuição de placar | Média |
 
 ---
 
 ## Fluxo Corrigido
 
 ```text
-1. Usuário clica "Re-analisar 1º Tempo"
+1. Transcrição processada
    ↓
-2. ReanalyzeHalfDialog abre
+2. Detecção de eventos (Ollama/Keywords)
    ↓
-3. loadExistingTranscription() busca SRT/TXT via apiClient.listMatchFiles()
+3. detect_team_from_text() com aliases → 'home'/'away' preciso
    ↓
-4. Se encontrar, carrega conteúdo via apiClient.get(url)
+4. deduplicate_events() com threshold=60s e verificação de team
    ↓
-5. Usuário vê transcrição original pré-carregada
+5. Deduplicação cross-half na DB (verifica ±2 minutos)
    ↓
-6. Ao confirmar, eventos são deletados via apiClient.delete()
+6. Salvamento com videoSecond correto
    ↓
-7. Nova análise é disparada com a transcrição
+7. Cálculo de placar com logs detalhados
 ```
 
 ---
 
-## Benefícios
+## Teste Recomendado
 
-- **Transcrições encontradas**: Arquivos SRT/TXT salvos no storage serão detectados corretamente
-- **Modo local funcional**: ReanalyzeHalfDialog não dependerá mais do Supabase Cloud
-- **Consistência**: Todos os componentes usarão o mesmo servidor local
-- **Re-análise funcional**: Botão de re-analisar terá acesso às transcrições existentes
+Após implementação, rodar re-análise da partida Brasil x Argentina:
+1. Verificar logs para ver atribuição de time em cada gol
+2. Confirmar que `team` está 'home' (Brasil) ou 'away' (Argentina) correto
+3. Verificar que não há duplicatas (mesmo gol só aparece 1x)
+4. Confirmar placar final: Brasil 2 x 0 Argentina
