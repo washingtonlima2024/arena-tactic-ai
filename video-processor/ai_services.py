@@ -2755,6 +2755,218 @@ def _transcribe_chunked(
     }
 
 
+def transcribe_upload_segments(
+    upload_id: str,
+    manifest_path: str,
+    max_retries: int = 3,
+    progress_callback: callable = None
+) -> Dict[str, Any]:
+    """
+    Transcribe audio segments created by audio_processor.
+    
+    ROBUST FEATURES:
+    - Loads checkpoint per segment (resumable)
+    - Continues on error (logs and skips)
+    - Saves progress after each segment
+    - Uses local Whisper GPU for speed
+    
+    Args:
+        upload_id: Upload ID (for checkpoints)
+        manifest_path: Path to manifest.json with segment info
+        max_retries: Maximum retries per segment
+        progress_callback: Function called with (current, total, segment_text)
+    
+    Returns:
+        Dict with 'success', 'text', 'srtContent', 'segments', 'errors'
+    """
+    global _whisper_model, _whisper_model_name
+    
+    print(f"[UploadTranscribe] =====================================")
+    print(f"[UploadTranscribe] 🎤 Iniciando transcrição de segmentos")
+    print(f"[UploadTranscribe] Upload ID: {upload_id}")
+    print(f"[UploadTranscribe] Manifest: {manifest_path}")
+    
+    # Load manifest
+    try:
+        with open(manifest_path, 'r') as f:
+            manifest = json.load(f)
+    except Exception as e:
+        print(f"[UploadTranscribe] ❌ Erro ao carregar manifest: {e}")
+        return {"success": False, "error": f"Erro ao carregar manifest: {e}", "errors": [str(e)]}
+    
+    segments = manifest.get('segments', [])
+    total = len(segments)
+    
+    if total == 0:
+        return {"success": False, "error": "Nenhum segmento encontrado no manifest", "errors": ["No segments"]}
+    
+    print(f"[UploadTranscribe] Total de segmentos: {total}")
+    
+    # Check if Whisper is available
+    if not _FASTER_WHISPER_AVAILABLE:
+        return {
+            "success": False,
+            "error": "faster-whisper não instalado. Execute: pip install faster-whisper==1.1.0",
+            "errors": ["faster-whisper not available"]
+        }
+    
+    # Load Whisper model (singleton)
+    try:
+        from faster_whisper import WhisperModel
+        import torch
+        
+        model_name = LOCAL_WHISPER_MODEL or 'base'
+        
+        # Check device availability
+        if _CTRANSLATE2_ROCM_ERROR:
+            device = "cpu"
+            compute_type = "int8"
+            print(f"[UploadTranscribe] ⚠️ Usando CPU (ROCm workaround)")
+        else:
+            cuda_available = torch.cuda.is_available()
+            device = "cuda" if cuda_available else "cpu"
+            compute_type = "float16" if device == "cuda" else "int8"
+        
+        print(f"[UploadTranscribe] Device: {device.upper()}")
+        
+        if _whisper_model is None or _whisper_model_name != model_name:
+            print(f"[UploadTranscribe] Carregando modelo '{model_name}'...")
+            try:
+                _whisper_model = WhisperModel(model_name, device=device, compute_type=compute_type)
+            except (OSError, FileNotFoundError, RuntimeError) as load_error:
+                if 'rocm' in str(load_error).lower() or 'cuda' in str(load_error).lower():
+                    print(f"[UploadTranscribe] ⚠️ Fallback para CPU...")
+                    _whisper_model = WhisperModel(model_name, device="cpu", compute_type="int8")
+                else:
+                    raise
+            _whisper_model_name = model_name
+            print(f"[UploadTranscribe] ✓ Modelo carregado!")
+            
+    except ImportError as e:
+        return {"success": False, "error": f"Dependência não instalada: {e}", "errors": [str(e)]}
+    except Exception as e:
+        return {"success": False, "error": f"Erro ao carregar modelo: {e}", "errors": [str(e)]}
+    
+    # Import checkpoint functions from audio_processor
+    from audio_processor import load_segment_checkpoint, save_segment_checkpoint
+    
+    all_transcripts = []
+    errors = []
+    
+    for i, seg in enumerate(segments):
+        segment_path = seg.get('path')
+        start_ms = seg.get('startMs', 0)
+        end_ms = seg.get('endMs', 0)
+        
+        # 1. Check existing checkpoint
+        checkpoint = load_segment_checkpoint(upload_id, i)
+        if checkpoint:
+            print(f"[UploadTranscribe] ⏩ Segmento {i+1}/{total} já transcrito (checkpoint)")
+            all_transcripts.append({
+                'text': checkpoint.get('text', ''),
+                'startMs': checkpoint.get('startMs', start_ms),
+                'endMs': checkpoint.get('endMs', end_ms)
+            })
+            if progress_callback:
+                progress_callback(i + 1, total, checkpoint.get('text', '')[:50])
+            continue
+        
+        # 2. Verify segment file exists
+        if not segment_path or not os.path.exists(segment_path):
+            print(f"[UploadTranscribe] ❌ Segmento {i+1} não encontrado: {segment_path}")
+            errors.append(f"Segmento {i+1} não encontrado")
+            continue
+        
+        # 3. Transcribe with retries
+        segment_text = ""
+        transcribed = False
+        
+        for retry in range(max_retries):
+            try:
+                segments_gen, info = _whisper_model.transcribe(
+                    segment_path,
+                    language="pt",
+                    beam_size=5,
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=500)
+                )
+                
+                # Collect text from generator
+                texts = []
+                for seg_result in segments_gen:
+                    text = seg_result.text.strip()
+                    if text:
+                        texts.append(text)
+                
+                segment_text = ' '.join(texts)
+                
+                # 4. Save checkpoint immediately
+                save_segment_checkpoint(
+                    upload_id, i,
+                    text=segment_text,
+                    start_ms=start_ms,
+                    end_ms=end_ms
+                )
+                
+                all_transcripts.append({
+                    'text': segment_text,
+                    'startMs': start_ms,
+                    'endMs': end_ms
+                })
+                
+                print(f"[UploadTranscribe] ✓ Segmento {i+1}/{total} ({len(segment_text)} chars)")
+                transcribed = True
+                break
+                
+            except Exception as e:
+                if retry == max_retries - 1:
+                    errors.append(f"Segmento {i+1}: {str(e)}")
+                    print(f"[UploadTranscribe] ❌ Segmento {i+1} falhou após {max_retries} tentativas: {e}")
+                else:
+                    print(f"[UploadTranscribe] ⚠ Retry {retry+1}/{max_retries} para segmento {i+1}: {e}")
+        
+        # 5. Update progress
+        if progress_callback:
+            progress_callback(i + 1, total, segment_text[:50] if segment_text else '')
+    
+    # 6. Generate final SRT
+    srt_lines = []
+    for idx, seg in enumerate(all_transcripts, 1):
+        text = seg.get('text', '').strip()
+        if not text:
+            continue
+        
+        start_ms = seg.get('startMs', 0)
+        end_ms = seg.get('endMs', 0)
+        
+        start_str = _format_srt_time(start_ms / 1000.0)
+        end_str = _format_srt_time(end_ms / 1000.0)
+        
+        srt_lines.append(f"{idx}\n{start_str} --> {end_str}\n{text}\n")
+    
+    srt_content = '\n'.join(srt_lines)
+    full_text = ' '.join(seg.get('text', '') for seg in all_transcripts)
+    
+    print(f"[UploadTranscribe] =====================================")
+    print(f"[UploadTranscribe] ✅ TRANSCRIÇÃO COMPLETA!")
+    print(f"[UploadTranscribe] Total: {len(full_text)} caracteres, {len(all_transcripts)} segmentos")
+    if errors:
+        print(f"[UploadTranscribe] ⚠ Erros: {len(errors)} segmentos falharam")
+    print(f"[UploadTranscribe] =====================================")
+    
+    return {
+        "success": True,
+        "text": full_text,
+        "srtContent": srt_content,
+        "segments": all_transcripts,
+        "errors": errors,
+        "provider": "local_whisper",
+        "model": _whisper_model_name or "base",
+        "total_segments": total,
+        "transcribed_segments": len(all_transcripts)
+    }
+
+
 def _transcribe_with_elevenlabs(audio_path: str, match_id: str = None) -> Dict[str, Any]:
     """
     Transcribe audio using ElevenLabs Scribe API (scribe_v1).
