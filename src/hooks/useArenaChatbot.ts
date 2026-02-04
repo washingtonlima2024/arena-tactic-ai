@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { apiClient } from '@/lib/apiClient';
+import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 interface Message {
@@ -58,6 +59,45 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
     return ctx;
   }, [matchContext]);
 
+  // Fallback to Lovable Cloud edge function
+  const sendViaCloud = useCallback(async (
+    message: string,
+    conversationHistory: { role: string; content: string }[]
+  ): Promise<string | null> => {
+    console.log('[ArenaChatbot] Using Lovable Cloud fallback...');
+    
+    try {
+      const { data, error } = await supabase.functions.invoke('arena-chatbot', {
+        body: {
+          message,
+          matchContext: matchContext ? {
+            homeTeam: matchContext.homeTeam,
+            awayTeam: matchContext.awayTeam,
+            homeScore: matchContext.homeScore,
+            awayScore: matchContext.awayScore,
+            competition: matchContext.match?.competition,
+            status: matchContext.match?.status,
+          } : undefined,
+          conversationHistory,
+        },
+      });
+
+      if (error) {
+        console.error('[ArenaChatbot] Cloud error:', error);
+        throw new Error(error.message || 'Erro no serviço de IA');
+      }
+
+      if (data?.error) {
+        throw new Error(data.error);
+      }
+
+      return data?.text || null;
+    } catch (error) {
+      console.error('[ArenaChatbot] Cloud fallback failed:', error);
+      throw error;
+    }
+  }, [matchContext]);
+
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return;
 
@@ -83,28 +123,43 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
         content: m.content,
       }));
 
-      const data = await apiClient.chatbot({
-        message: enrichedText,
-        matchContext: matchContext ? {
-          homeTeam: matchContext.homeTeam,
-          awayTeam: matchContext.awayTeam,
-          homeScore: matchContext.homeScore,
-          awayScore: matchContext.awayScore,
-          competition: matchContext.match?.competition,
-          status: matchContext.match?.status,
-        } : undefined,
-        conversationHistory,
-      });
+      let responseText: string | null = null;
 
-      const assistantMessage: Message = {
-        id: generateId(),
-        role: 'assistant',
-        content: data.text,
-        timestamp: new Date(),
-      };
+      // Try local server first
+      try {
+        const data = await apiClient.chatbot({
+          message: enrichedText,
+          matchContext: matchContext ? {
+            homeTeam: matchContext.homeTeam,
+            awayTeam: matchContext.awayTeam,
+            homeScore: matchContext.homeScore,
+            awayScore: matchContext.awayScore,
+            competition: matchContext.match?.competition,
+            status: matchContext.match?.status,
+          } : undefined,
+          conversationHistory,
+        });
+        responseText = data.text;
+      } catch (localError) {
+        console.warn('[ArenaChatbot] Local server failed, trying cloud fallback:', localError);
+        
+        // Fallback to Lovable Cloud
+        responseText = await sendViaCloud(enrichedText, conversationHistory);
+      }
 
-      setMessages(prev => [...prev, assistantMessage]);
-      return data.text;
+      if (responseText) {
+        const assistantMessage: Message = {
+          id: generateId(),
+          role: 'assistant',
+          content: responseText,
+          timestamp: new Date(),
+        };
+
+        setMessages(prev => [...prev, assistantMessage]);
+        return responseText;
+      }
+
+      throw new Error('Não foi possível obter resposta do assistente');
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
@@ -113,17 +168,35 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [messages, isLoading, contextString, matchContext]);
+  }, [messages, isLoading, contextString, matchContext, sendViaCloud]);
 
   const speakText = useCallback(async (text: string) => {
     if (!text || isPlaying) return;
 
     setIsPlaying(true);
     try {
-      const data = await apiClient.tts({ text, voice: 'onyx' });
+      // Try local TTS first
+      let audioContent: string | undefined;
+      
+      try {
+        const data = await apiClient.tts({ text, voice: 'onyx' });
+        audioContent = data?.audioContent;
+      } catch {
+        // TTS not available without local server, use browser TTS
+        console.log('[ArenaChatbot] Using browser TTS fallback');
+        if ('speechSynthesis' in window) {
+          const utterance = new SpeechSynthesisUtterance(text);
+          utterance.lang = 'pt-BR';
+          utterance.onend = () => setIsPlaying(false);
+          utterance.onerror = () => setIsPlaying(false);
+          window.speechSynthesis.speak(utterance);
+          return;
+        }
+        throw new Error('TTS não disponível');
+      }
 
-      if (data?.audioContent) {
-        const audioData = atob(data.audioContent);
+      if (audioContent) {
+        const audioData = atob(audioContent);
         const audioArray = new Uint8Array(audioData.length);
         for (let i = 0; i < audioData.length; i++) {
           audioArray[i] = audioData.charCodeAt(i);
@@ -163,6 +236,10 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
       audioRef.current.pause();
       audioRef.current.currentTime = 0;
       setIsPlaying(false);
+    }
+    // Also stop browser TTS if active
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
     }
   }, []);
 
