@@ -18,12 +18,13 @@ import {
   Loader2,
   Square,
   Settings2,
-  VolumeX
+  VolumeX,
+  Video
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { useMatchEvents, useMatchAnalysis } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
-import { useNarrationGeneration } from '@/hooks/useNarrationGeneration';
 import { usePodcastGeneration, PodcastType } from '@/hooks/usePodcastGeneration';
 import { TeamChatbotCard } from '@/components/audio/TeamChatbotCard';
 import { useWebSpeechTTS } from '@/hooks/useWebSpeechTTS';
@@ -31,14 +32,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
 import { calculateScoreFromEvents } from '@/hooks/useDynamicMatchStats';
-
-type VoiceType = 'narrator' | 'commentator' | 'dynamic';
+import apiClient, { normalizeStorageUrl } from '@/lib/apiClient';
 
 export default function Audio() {
   const [isPlaying, setIsPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [selectedVoice, setSelectedVoice] = useState<VoiceType>('narrator');
   const audioRef = useRef<HTMLAudioElement | null>(null);
   
   // Use centralized match selection hook
@@ -47,7 +46,27 @@ export default function Audio() {
   
   const { data: events } = useMatchEvents(matchId);
   const { data: analysis } = useMatchAnalysis(matchId);
-  const { isGenerating, narration, generateNarration, loadNarration, downloadAudio } = useNarrationGeneration();
+  
+  // Fetch videos for the match (for original audio)
+  const { data: matchVideos, isLoading: videosLoading } = useQuery({
+    queryKey: ['match-videos-audio', matchId],
+    queryFn: async () => {
+      if (!matchId) return [];
+      try {
+        return await apiClient.getVideos(matchId);
+      } catch (e) {
+        console.error('[Audio] Error fetching videos:', e);
+        return [];
+      }
+    },
+    enabled: !!matchId,
+  });
+
+  // Get the primary video URL for original audio
+  const primaryVideo = matchVideos?.find((v: any) => v.file_url && v.file_url.length > 0);
+  const originalAudioUrl = primaryVideo?.file_url ? normalizeStorageUrl(primaryVideo.file_url) : null;
+  const videoDuration = primaryVideo?.duration_seconds || 0;
+
   const { 
     isGenerating: isPodcastGenerating, 
     generatingType: podcastGeneratingType,
@@ -90,15 +109,14 @@ export default function Audio() {
     away: (events?.length || 0) > 0 ? dynamicScore.away : (selectedMatch?.away_score || 0)
   };
 
-  // Load saved audio when match changes
+  // Load saved podcasts when match changes
   useEffect(() => {
-    if (matchId && selectedVoice) {
-      loadNarration(matchId, selectedVoice);
+    if (matchId) {
       loadPodcasts(matchId);
     }
-  }, [matchId, selectedVoice]);
+  }, [matchId]);
 
-  // Audio player controls - recreate audio element when URL changes
+  // Audio player controls - recreate audio element when URL changes (using original video audio)
   useEffect(() => {
     // Clean up previous audio
     if (audioRef.current) {
@@ -111,14 +129,14 @@ export default function Audio() {
     setCurrentTime(0);
     setDuration(0);
     
-    if (!narration?.audioUrl) return;
+    if (!originalAudioUrl) return;
     
     const audio = document.createElement('audio') as HTMLAudioElement;
     audio.crossOrigin = 'anonymous';
     audio.preload = 'metadata';
     
     const handleLoadedMetadata = () => {
-      console.log('Audio loaded, duration:', audio.duration);
+      console.log('Original audio loaded, duration:', audio.duration);
       setDuration(audio.duration);
     };
     
@@ -145,8 +163,13 @@ export default function Audio() {
     audio.addEventListener('error', handleError);
     audio.addEventListener('canplay', handleCanPlay);
     
-    audio.src = narration.audioUrl;
+    audio.src = originalAudioUrl;
     audioRef.current = audio;
+    
+    // Use video duration if available
+    if (videoDuration > 0) {
+      setDuration(videoDuration);
+    }
     
     return () => {
       audio.removeEventListener('loadedmetadata', handleLoadedMetadata);
@@ -157,7 +180,7 @@ export default function Audio() {
       audio.pause();
       audio.removeAttribute('src');
     };
-  }, [narration?.audioUrl]);
+  }, [originalAudioUrl, videoDuration]);
 
   const togglePlay = () => {
     if (!audioRef.current) return;
@@ -176,39 +199,14 @@ export default function Audio() {
     return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const handleGenerateNarration = async () => {
-    if (!selectedMatch || !events?.length) return;
-    
-    // Clean up previous audio
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
-    setIsPlaying(false);
-    setCurrentTime(0);
-    setDuration(0);
-
-    const result = await generateNarration(
-      matchId,
-      events,
-      selectedMatch.home_team?.name || 'Time Casa',
-      selectedMatch.away_team?.name || 'Time Fora',
-      displayScore.home,
-      displayScore.away,
-      selectedVoice
-    );
-
-    // If only script was generated (no audio), redirect to free TTS tab
-    if (result?.scriptOnly && result.script) {
-      setTtsText(result.script);
-      setActiveTab('free-tts');
-    }
-  };
-
   const handleDownload = () => {
-    if (!narration?.audioUrl) return;
-    const filename = `narracao-${selectedMatch?.home_team?.short_name || 'home'}-vs-${selectedMatch?.away_team?.short_name || 'away'}.mp3`;
-    downloadAudio(narration.audioUrl, filename);
+    if (!originalAudioUrl) return;
+    const filename = `audio-original-${selectedMatch?.home_team?.short_name || 'home'}-vs-${selectedMatch?.away_team?.short_name || 'away'}.mp4`;
+    const link = document.createElement('a');
+    link.href = originalAudioUrl;
+    link.download = filename;
+    link.target = '_blank';
+    link.click();
   };
 
   const handleGeneratePodcast = async (podcastType: PodcastType) => {
@@ -310,11 +308,6 @@ export default function Audio() {
   const homeTeamShort = selectedMatch?.home_team?.short_name || homeTeamName.slice(0, 3).toUpperCase();
   const awayTeamShort = selectedMatch?.away_team?.short_name || awayTeamName.slice(0, 3).toUpperCase();
 
-  const voiceOptions = [
-    { id: 'narrator', name: 'Narrador Clássico', description: 'Estilo tradicional brasileiro' },
-    { id: 'commentator', name: 'Comentarista Técnico', description: 'Análise tática detalhada' },
-    { id: 'dynamic', name: 'Locutor Dinâmico', description: 'Alta energia e emoção' },
-  ];
 
   return (
     <AppLayout>
@@ -324,27 +317,8 @@ export default function Audio() {
           <div>
             <h1 className="font-display text-3xl font-bold">Podcast & Locução</h1>
             <p className="text-muted-foreground">
-              {selectedMatch.home_team?.name} vs {selectedMatch.away_team?.name} • Gere narrações, podcasts e análises em áudio
+              {selectedMatch.home_team?.name} vs {selectedMatch.away_team?.name} • Áudio original e podcasts da partida
             </p>
-          </div>
-          <div className="flex gap-3">
-            <Button 
-              variant="arena" 
-              onClick={handleGenerateNarration}
-              disabled={isGenerating || !events?.length}
-            >
-              {isGenerating ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Gerando...
-                </>
-              ) : (
-                <>
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  Gerar Áudio
-                </>
-              )}
-            </Button>
           </div>
         </div>
 
@@ -403,79 +377,86 @@ export default function Audio() {
                   <CardHeader>
                     <div className="flex items-start justify-between">
                       <div>
-                        <CardTitle>Narração Completa da Partida</CardTitle>
+                        <CardTitle className="flex items-center gap-2">
+                          <Video className="h-5 w-5" />
+                          Áudio Original da Transmissão
+                        </CardTitle>
                         <CardDescription>
-                          {homeTeamName} vs {awayTeamName}
+                          {homeTeamName} vs {awayTeamName} • Áudio extraído do vídeo do jogo
                         </CardDescription>
                       </div>
-                      {narration ? (
-                        <Badge variant="success">Pronto</Badge>
+                      {originalAudioUrl ? (
+                        <Badge variant="success">Disponível</Badge>
+                      ) : videosLoading ? (
+                        <Badge variant="arena">Carregando...</Badge>
                       ) : (
-                        <Badge variant="arena">Aguardando geração</Badge>
+                        <Badge variant="destructive">Sem vídeo</Badge>
                       )}
                     </div>
                   </CardHeader>
                   <CardContent className="space-y-6">
-                    {/* Waveform Placeholder */}
-                    <div className="relative h-24 rounded-lg bg-muted overflow-hidden">
-                      <div className="absolute inset-0 flex items-center justify-center gap-0.5">
-                        {Array.from({ length: 100 }).map((_, i) => (
-                          <div 
-                            key={i}
-                            className="w-1 rounded-full bg-primary/30"
-                            style={{ 
-                              height: `${20 + Math.random() * 60}%`,
-                              opacity: duration > 0 && i < (currentTime / duration) * 100 ? 1 : 0.3
-                            }}
-                          />
-                        ))}
+                    {!originalAudioUrl && !videosLoading && (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <Video className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                        <p className="text-sm">Nenhum vídeo disponível para esta partida</p>
+                        <p className="text-xs mt-1">Faça upload de um vídeo na página de Upload para ouvir o áudio original</p>
                       </div>
-                      {duration > 0 && (
-                        <div 
-                          className="absolute left-0 top-0 h-full bg-gradient-to-r from-primary/20 to-transparent transition-all"
-                          style={{ width: `${(currentTime / duration) * 100}%` }}
-                        />
-                      )}
-                    </div>
-
-                    {/* Controls */}
-                    <div className="flex items-center gap-4">
-                      <Button 
-                        variant="arena" 
-                        size="icon-lg"
-                        onClick={togglePlay}
-                        disabled={!narration}
-                      >
-                        {isPlaying ? (
-                          <Pause className="h-6 w-6" />
-                        ) : (
-                          <Play className="h-6 w-6 ml-1" />
-                        )}
-                      </Button>
-                      <div className="flex-1">
-                        <Progress value={duration > 0 ? (currentTime / duration) * 100 : 0} className="h-2" />
-                        <div className="mt-1 flex justify-between text-xs text-muted-foreground">
-                          <span>{formatTime(currentTime)}</span>
-                          <span>{duration > 0 ? formatTime(duration) : '--:--'}</span>
+                    )}
+                    
+                    {originalAudioUrl && (
+                      <>
+                        {/* Waveform Placeholder */}
+                        <div className="relative h-24 rounded-lg bg-muted overflow-hidden">
+                          <div className="absolute inset-0 flex items-center justify-center gap-0.5">
+                            {Array.from({ length: 100 }).map((_, i) => (
+                              <div 
+                                key={i}
+                                className="w-1 rounded-full bg-primary/30"
+                                style={{ 
+                                  height: `${20 + Math.random() * 60}%`,
+                                  opacity: duration > 0 && i < (currentTime / duration) * 100 ? 1 : 0.3
+                                }}
+                              />
+                            ))}
+                          </div>
+                          {duration > 0 && (
+                            <div 
+                              className="absolute left-0 top-0 h-full bg-gradient-to-r from-primary/20 to-transparent transition-all"
+                              style={{ width: `${(currentTime / duration) * 100}%` }}
+                            />
+                          )}
                         </div>
-                      </div>
-                      <Button variant="ghost" size="icon" disabled={!narration}>
-                        <Volume2 className="h-5 w-5" />
-                      </Button>
-                      <Button variant="outline" onClick={handleDownload} disabled={!narration}>
-                        <Download className="mr-2 h-4 w-4" />
-                        Download
-                      </Button>
-                    </div>
 
-                    {/* Script Preview */}
-                    {narration?.script && (
-                      <div className="rounded-lg bg-muted/50 p-4 max-h-40 overflow-y-auto">
-                        <p className="text-sm font-medium mb-2">Script da Narração:</p>
-                        <p className="text-sm text-muted-foreground whitespace-pre-wrap">
-                          {narration.script}
-                        </p>
-                      </div>
+                        {/* Controls */}
+                        <div className="flex items-center gap-4">
+                          <Button 
+                            variant="arena" 
+                            size="icon-lg"
+                            onClick={togglePlay}
+                            disabled={!originalAudioUrl}
+                          >
+                            {isPlaying ? (
+                              <Pause className="h-6 w-6" />
+                            ) : (
+                              <Play className="h-6 w-6 ml-1" />
+                            )}
+                          </Button>
+                          <div className="flex-1">
+                            <Progress value={duration > 0 ? (currentTime / duration) * 100 : 0} className="h-2" />
+                            <div className="mt-1 flex justify-between text-xs text-muted-foreground">
+                              <span>{formatTime(currentTime)}</span>
+                              <span>{duration > 0 ? formatTime(duration) : '--:--'}</span>
+                            </div>
+                          </div>
+                          <Button variant="ghost" size="icon" disabled={!originalAudioUrl}>
+                            <Volume2 className="h-5 w-5" />
+                          </Button>
+                          <Button variant="outline" onClick={handleDownload} disabled={!originalAudioUrl}>
+                            <Download className="mr-2 h-4 w-4" />
+                            Download
+                          </Button>
+                        </div>
+                      </>
                     )}
 
                     {/* Info */}
@@ -501,27 +482,36 @@ export default function Audio() {
               <div className="space-y-4">
                 <Card variant="glass">
                   <CardHeader>
-                    <CardTitle className="text-lg">Vozes Disponíveis</CardTitle>
+                    <CardTitle className="text-lg">Informações do Vídeo</CardTitle>
                   </CardHeader>
                   <CardContent className="space-y-3">
-                    {voiceOptions.map((voice) => (
-                      <div 
-                        key={voice.id}
-                        onClick={() => setSelectedVoice(voice.id as VoiceType)}
-                        className={`flex items-center gap-3 rounded-lg border p-3 cursor-pointer transition-colors ${
-                          selectedVoice === voice.id ? 'border-primary bg-primary/5' : 'border-border hover:bg-muted/50'
-                        }`}
-                      >
-                        <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-                          <Mic className="h-5 w-5 text-primary" />
+                    {matchVideos && matchVideos.length > 0 ? (
+                      matchVideos.map((video: any, idx: number) => (
+                        <div 
+                          key={video.id || idx}
+                          className="flex items-center gap-3 rounded-lg border p-3 border-primary bg-primary/5"
+                        >
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+                            <Video className="h-5 w-5 text-primary" />
+                          </div>
+                          <div className="flex-1">
+                            <p className="text-sm font-medium">
+                              {video.video_type === 'first_half' ? '1º Tempo' : 
+                               video.video_type === 'second_half' ? '2º Tempo' : 
+                               video.file_name || 'Vídeo'}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {video.duration_seconds ? formatTime(video.duration_seconds) : '--:--'}
+                            </p>
+                          </div>
+                          <Badge variant="success">Disponível</Badge>
                         </div>
-                        <div className="flex-1">
-                          <p className="text-sm font-medium">{voice.name}</p>
-                          <p className="text-xs text-muted-foreground">{voice.description}</p>
-                        </div>
-                        {selectedVoice === voice.id && <Badge variant="arena">Ativo</Badge>}
+                      ))
+                    ) : (
+                      <div className="text-center py-4 text-muted-foreground">
+                        <p className="text-sm">Nenhum vídeo vinculado</p>
                       </div>
-                    ))}
+                    )}
                   </CardContent>
                 </Card>
 
