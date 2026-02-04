@@ -66,22 +66,40 @@ export function useMatchSelection(): UseMatchSelectionResult {
       console.log('[MatchSelection] Match changed from', previousMatchId.current, 'to', currentMatchId);
       
       // Invalidate all match-related queries to force refetch
-      // Use both singular and plural forms to cover all query patterns
+      // Use exact key matching for more precise invalidation
+      const queriesToInvalidate = [
+        ['match-events', previousMatchId.current],
+        ['match-events', currentMatchId],
+        ['match-videos', previousMatchId.current],
+        ['match-videos', currentMatchId],
+        ['match-video', previousMatchId.current],
+        ['match-video', currentMatchId],
+        ['match-analysis', previousMatchId.current],
+        ['match-analysis', currentMatchId],
+        ['event-thumbnails', previousMatchId.current],
+        ['event-thumbnails', currentMatchId],
+        ['thumbnails', previousMatchId.current],
+        ['thumbnails', currentMatchId],
+        ['analysis-jobs', previousMatchId.current],
+        ['analysis-jobs', currentMatchId],
+        ['generated-audio', previousMatchId.current],
+        ['generated-audio', currentMatchId],
+        ['goal-events', previousMatchId.current],
+        ['goal-events', currentMatchId],
+        ['match-videos-audio', previousMatchId.current],
+        ['match-videos-audio', currentMatchId],
+      ];
+      
+      queriesToInvalidate.forEach(queryKey => {
+        queryClient.invalidateQueries({ queryKey });
+      });
+      
+      // Also invalidate by partial key match for broader coverage
       queryClient.invalidateQueries({ queryKey: ['match-events'] });
-      queryClient.invalidateQueries({ queryKey: ['match-videos'] });
-      queryClient.invalidateQueries({ queryKey: ['match-video'] }); // singular form used in some pages
-      queryClient.invalidateQueries({ queryKey: ['match'] });
-      queryClient.invalidateQueries({ queryKey: ['event-thumbnails'] });
-      queryClient.invalidateQueries({ queryKey: ['thumbnails'] }); // alternative key
-      queryClient.invalidateQueries({ queryKey: ['analysis-jobs'] });
-      queryClient.invalidateQueries({ queryKey: ['analysis-job-source'] });
-      queryClient.invalidateQueries({ queryKey: ['clips'] });
-      queryClient.invalidateQueries({ queryKey: ['clips-by-half'] });
-      queryClient.invalidateQueries({ queryKey: ['playlists'] });
-      queryClient.invalidateQueries({ queryKey: ['generated-audio'] });
-      queryClient.invalidateQueries({ queryKey: ['chatbot-conversations'] });
-      queryClient.invalidateQueries({ queryKey: ['video-cover'] });
+      queryClient.invalidateQueries({ queryKey: ['match-video'] });
       queryClient.invalidateQueries({ queryKey: ['match-analysis'] });
+      queryClient.invalidateQueries({ queryKey: ['clips'] });
+      queryClient.invalidateQueries({ queryKey: ['playlists'] });
       
       // Dispatch custom event for components that need direct notification
       window.dispatchEvent(new CustomEvent('match-selection-changed', { 
