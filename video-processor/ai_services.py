@@ -4431,7 +4431,7 @@ Formato obrigatório:
             goals = [e for e in events if e.get('event_type') == 'goal']
             print(f"[Ollama] Total: {len(events)} eventos, {len(goals)} gols")
             for g in goals:
-            print(f"[Ollama] ⚽ GOL: {g.get('minute', 0)}' - {g.get('team', 'unknown')}")
+                print(f"[Ollama] ⚽ GOL: {g.get('minute', 0)}' - {g.get('team', 'unknown')}")
             
             # VALIDAÇÃO PÓS-OLLAMA: Remover gols falsos verificando contexto
             events = _validate_goals_with_context(events, transcription)
