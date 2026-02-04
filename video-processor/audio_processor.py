@@ -405,6 +405,54 @@ def merge_segments_to_text(segments: List[Dict[str, Any]]) -> str:
     return ' '.join(texts)
 
 
+def complete_transcription(
+    upload_id: str,
+    manifest_path: str,
+    dirs: Dict[str, Path],
+    update_job: callable,
+    add_event: callable
+) -> Dict[str, Any]:
+    """
+    Execute transcription of all segments and update job progress.
+    Called automatically after segmentation.
+    
+    ROBUST FEATURES:
+    - Loads checkpoint per segment (resumable)
+    - Continues on error (logs and skips)
+    - Saves progress after each segment
+    
+    Args:
+        upload_id: Upload job ID
+        manifest_path: Path to segments manifest.json
+        dirs: Dictionary of upload directories
+        update_job: Function to update job status
+        add_event: Function to add event log
+    
+    Returns:
+        Dict with 'success', 'text', 'srtContent', 'segments', 'errors'
+    """
+    from ai_services import transcribe_upload_segments
+    
+    def progress_callback(current: int, total: int, segment_text: str):
+        """Update progress in database."""
+        progress_percent = int(80 + (current / total) * 20)  # 80-100%
+        update_job({
+            'transcription_segment_current': current,
+            'transcription_progress': int((current / total) * 100),
+            'progress': progress_percent,
+            'current_step': f'Transcrevendo segmento {current}/{total}...'
+        })
+    
+    # Call the robust transcription function
+    result = transcribe_upload_segments(
+        upload_id=upload_id,
+        manifest_path=manifest_path,
+        progress_callback=progress_callback
+    )
+    
+    return result
+
+
 def process_upload_media(upload_id: str) -> Dict[str, Any]:
     """
     Process uploaded media: convert video, extract audio, segment for Whisper.
@@ -499,21 +547,95 @@ def process_upload_media(upload_id: str) -> Dict[str, Any]:
         total_segments = result.get('totalSegments', 0)
         add_event(f'Áudio fatiado em {total_segments} segmentos')
         
+        # Step 4: Start transcription automatically
         update_job({
-            'status': 'ready_for_transcription',
-            'stage': 'awaiting_transcription',
+            'status': 'transcribing',
+            'stage': 'transcribing_segments',
             'transcription_segment_total': total_segments,
-            'progress': 80
+            'transcription_segment_current': 0,
+            'progress': 80,
+            'current_step': 'Iniciando transcrição com Whisper Local...'
         })
+        add_event('Iniciando transcrição com Whisper Local...')
         
-        return {
-            'success': True,
-            'audioPath': audio_wav,
-            'segmentsDir': segments_dir,
-            'manifestPath': result.get('manifestPath'),
-            'totalSegments': total_segments
-        }
+        manifest_path = result.get('manifestPath')
+        transcription_result = complete_transcription(upload_id, manifest_path, dirs, update_job, add_event)
+        
+        if transcription_result.get('success'):
+            add_event(f'Transcrição completa: {len(transcription_result.get("text", ""))} caracteres')
+            
+            # Save SRT and TXT files
+            srt_content = transcription_result.get('srtContent', '')
+            text_content = transcription_result.get('text', '')
+            
+            srt_path = dirs['transcript'] / 'final.srt'
+            txt_path = dirs['transcript'] / 'final.txt'
+            
+            srt_path.write_text(srt_content, encoding='utf-8')
+            txt_path.write_text(text_content, encoding='utf-8')
+            
+            update_job({
+                'status': 'complete',
+                'stage': 'complete',
+                'progress': 100,
+                'srt_path': str(srt_path),
+                'txt_path': str(txt_path),
+                'completed_at': datetime.utcnow()
+            })
+            add_event('Upload e transcrição completos!')
+            
+            return {
+                'success': True,
+                'audioPath': audio_wav,
+                'segmentsDir': segments_dir,
+                'manifestPath': manifest_path,
+                'totalSegments': total_segments,
+                'srtPath': str(srt_path),
+                'txtPath': str(txt_path),
+                'transcription': transcription_result
+            }
+        else:
+            errors = transcription_result.get('errors', [])
+            add_event(f'Transcrição concluída com erros: {errors}')
+            
+            # Still mark as complete if we got some text
+            if transcription_result.get('text'):
+                srt_content = transcription_result.get('srtContent', '')
+                text_content = transcription_result.get('text', '')
+                
+                srt_path = dirs['transcript'] / 'final.srt'
+                txt_path = dirs['transcript'] / 'final.txt'
+                
+                if srt_content:
+                    srt_path.write_text(srt_content, encoding='utf-8')
+                if text_content:
+                    txt_path.write_text(text_content, encoding='utf-8')
+                
+                update_job({
+                    'status': 'complete',
+                    'stage': 'complete_with_errors',
+                    'progress': 100,
+                    'srt_path': str(srt_path) if srt_content else None,
+                    'txt_path': str(txt_path) if text_content else None,
+                    'completed_at': datetime.utcnow()
+                })
+                
+                return {
+                    'success': True,
+                    'audioPath': audio_wav,
+                    'segmentsDir': segments_dir,
+                    'manifestPath': manifest_path,
+                    'totalSegments': total_segments,
+                    'srtPath': str(srt_path) if srt_content else None,
+                    'transcription': transcription_result,
+                    'warnings': errors
+                }
+            else:
+                update_job({'status': 'error', 'error_message': f'Transcrição falhou: {errors}'})
+                return {'success': False, 'error': f'Transcrição falhou: {errors}'}
         
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         update_job({'status': 'error', 'error_message': str(e)})
         return {'success': False, 'error': str(e)}
