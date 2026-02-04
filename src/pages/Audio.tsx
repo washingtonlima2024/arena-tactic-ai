@@ -456,6 +456,23 @@ export default function Audio() {
                             Download
                           </Button>
                         </div>
+                        
+                        {/* Transcription Text */}
+                        {analysis?.transcription && (
+                          <div className="space-y-2">
+                            <div className="flex items-center justify-between">
+                              <p className="text-sm font-medium">Transcrição da Narração</p>
+                              <Badge variant="outline" className="text-xs">
+                                {analysis.transcription.split(' ').length} palavras
+                              </Badge>
+                            </div>
+                            <div className="max-h-48 overflow-y-auto rounded-lg border bg-muted/30 p-4">
+                              <p className="text-sm text-muted-foreground whitespace-pre-wrap leading-relaxed">
+                                {analysis.transcription}
+                              </p>
+                            </div>
+                          </div>
+                        )}
                       </>
                     )}
 
