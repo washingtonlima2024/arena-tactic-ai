@@ -937,7 +937,8 @@ export default function VideoUpload() {
       progress: 50,
       status: 'uploading',
       isLink: false,
-      half: localBrowserHalf || undefined,
+      // 🔧 Garantir half baseado em videoType se não especificado
+      half: localBrowserHalf || (videoType === 'second_half' ? 'second' : videoType === 'first_half' ? 'first' : undefined),
     };
     setSegments(prev => [...prev, newSegment]);
 
@@ -1055,10 +1056,14 @@ export default function VideoUpload() {
     segments.forEach(s => console.log(`  - ${s.name}: half=${s.half}, type=${s.videoType}`));
     
     setSegments(prev => prev.map(s => {
-      // 🆕 Incluir 'full' no filtro do 1º tempo
-      if ((half === 'first' && (s.half === 'first' || s.videoType === 'first_half' || s.videoType === 'full')) ||
-          (half === 'second' && (s.half === 'second' || s.videoType === 'second_half'))) {
-        console.log(`[SRT Drop] ✓ Associando SRT ao segmento: ${s.name}`);
+      // 🔧 Matching robusto: half OU videoType OU nome do arquivo
+      const isFirstHalfSegment = s.half === 'first' || s.videoType === 'first_half' || s.videoType === 'full';
+      const isSecondHalfSegment = s.half === 'second' || s.videoType === 'second_half' || 
+                                  // Fallback: se não tem half e o nome sugere segundo tempo
+                                  (!s.half && (s.name.toLowerCase().includes('segundo') || s.name.toLowerCase().includes('2nd') || s.name.toLowerCase().includes('second')));
+      
+      if ((half === 'first' && isFirstHalfSegment) || (half === 'second' && isSecondHalfSegment)) {
+        console.log(`[SRT Drop] ✓ Associando SRT ao segmento: ${s.name} (half=${s.half}, type=${s.videoType})`);
         return { ...s, transcription: srtContent };
       }
       return s;
@@ -1514,8 +1519,10 @@ export default function VideoUpload() {
         const firstHalfSegments = currentSegments.filter(s => 
           s.half === 'first' || s.videoType === 'first_half' || s.videoType === 'full'
         );
+        // 🔧 Matching robusto para segundo tempo (inclui fallback por nome)
         const secondHalfSegments = currentSegments.filter(s => 
-          s.half === 'second' || s.videoType === 'second_half'
+          s.half === 'second' || s.videoType === 'second_half' ||
+          (!s.half && (s.name.toLowerCase().includes('segundo') || s.name.toLowerCase().includes('2nd') || s.name.toLowerCase().includes('second')))
         );
         
         if (!firstHalfTranscription && firstHalfSegments[0]?.transcription) {
@@ -1525,6 +1532,18 @@ export default function VideoUpload() {
         if (!secondHalfTranscription && secondHalfSegments[0]?.transcription) {
           secondHalfTranscription = secondHalfSegments[0].transcription;
           console.log('📝 Transcrição 2º tempo carregada do segmento:', secondHalfTranscription.length, 'chars');
+        }
+        
+        // 🆕 Validar que segundo tempo tem transcrição se tem vídeo
+        if (secondHalfSegments.length > 0 && !secondHalfTranscription) {
+          console.error('[ASYNC] ⚠️ Vídeo do 2º tempo SEM transcrição! Abortando pipeline async.');
+          toast({
+            title: "⚠️ Transcrição do 2º tempo não encontrada",
+            description: "Arraste o arquivo SRT do 2º tempo antes de iniciar a análise.",
+            variant: "destructive"
+          });
+          setProcessingStage('idle');
+          return;
         }
         
         // Build video inputs for async processing
