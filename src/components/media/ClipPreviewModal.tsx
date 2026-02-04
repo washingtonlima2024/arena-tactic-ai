@@ -351,7 +351,7 @@ export function ClipPreviewModal({
         const filesData = await apiClient.listMatchFiles(matchId);
         
         // Find SRT files
-        const srtFiles = filesData.files?.srt || [];
+        const srtFiles = filesData.folders?.srt || [];
         
         if (srtFiles.length === 0) {
           // No SRT found, use example subtitles

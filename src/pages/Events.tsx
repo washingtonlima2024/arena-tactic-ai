@@ -289,7 +289,7 @@ export default function Events() {
       try {
         // Check for existing SRT files via local server
         const result = await apiClient.listMatchFiles(currentMatchId);
-        const srtFiles = result?.files?.srt || [];
+        const srtFiles = result?.folders?.srt || [];
         
         if (srtFiles.length > 0) {
           // Fetch the first SRT file content via storage endpoint

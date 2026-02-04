@@ -1429,15 +1429,15 @@ export const apiClient = {
 
   listMatchFiles: async (matchId: string): Promise<{
     matchId: string;
-    stats: { total_files: number; total_size: number; total_size_mb: number };
-    files: {
-      videos: any[];
-      clips: any[];
+    statistics: { totalFiles: number; totalSizeBytes: number; totalSizeMB: number };
+    folders: {
       srt: any[];
       texts: any[];
       audio: any[];
       images: any[];
       json: any[];
+      videos: { original: any[]; optimized: any[] };
+      clips: Record<string, any[]>;
     };
   }> => {
     return apiRequest(`/api/matches/${matchId}/files`);
