@@ -1086,14 +1086,15 @@ EVENT_KEYWORDS = {
         r'LEVA AMARELO',
         r'ESTÁ AMARELADO',
     ],
-    'red_card': [
-        r'CARTÃO VERMELHO',
-        r'VERMELHO PARA',
-        r'EXPULSO',
-        r'FOI EXPULSO',
-        r'RECEBE O VERMELHO',
-        r'LEVA VERMELHO',
-    ],
+    # 🔧 red_card DESABILITADO - menções de cartão vermelho serão ignoradas
+    # 'red_card': [
+    #     r'CARTÃO VERMELHO',
+    #     r'VERMELHO PARA',
+    #     r'EXPULSO',
+    #     r'FOI EXPULSO',
+    #     r'RECEBE O VERMELHO',
+    #     r'LEVA VERMELHO',
+    # ],
     'foul': [
         r'FALTA DE',
         r'FALTA PARA',
@@ -3487,7 +3488,7 @@ TIMES DA PARTIDA:
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 Para CADA evento detectado, extraia:
-- event_type: goal, shot, save, foul, yellow_card, red_card, corner, chance, penalty, etc.
+- event_type: goal, shot, save, foul, yellow_card, corner, chance, penalty, etc.
 - minute: MINUTO do timestamp SRT [HH:MM:SS] - extraia o valor de MM
 - second: SEGUNDO do timestamp SRT [HH:MM:SS] - extraia o valor de SS
 - team: "home" ou "away"
@@ -4093,7 +4094,7 @@ def detect_events_by_keywords_from_text(
     patterns = {
         'goal': [r'go+l', r'golaço', r'bola na rede', r'abre o placar', r'empata'],
         'yellow_card': [r'cartão amarelo', r'amarelou'],
-        'red_card': [r'cartão vermelho', r'expuls'],
+        # 🔧 red_card REMOVIDO - menções de cartão vermelho serão ignoradas
         'penalty': [r'pênalti', r'penalidade'],
         'save': [r'grande defesa', r'salvou', r'espalmou'],
     }
@@ -4298,7 +4299,6 @@ PERÍODO: {half_desc}
 EVENTOS PARA DETECTAR:
 - goal: "GOOOL", "GOLAÇO", "abre o placar", "empata", "virou", "bola na rede"
 - yellow_card: "cartão amarelo", "amarelou"
-- red_card: "cartão vermelho", "expulso"
 - penalty: "pênalti", "penalidade máxima"
 - save: "grande defesa", "salvou", "espalmou"
 - chance: "quase gol", "na trave", "passou perto"
@@ -4554,7 +4554,7 @@ def _enrich_events(
         Enriched events with all required fields
     """
     VALID_EVENT_TYPES = [
-        'goal', 'shot', 'save', 'foul', 'yellow_card', 'red_card',
+        'goal', 'shot', 'save', 'foul', 'yellow_card',  # 🔧 red_card REMOVIDO
         'corner', 'offside', 'substitution', 'chance', 'penalty',
         'free_kick', 'throw_in', 'kick_off', 'half_time', 'full_time',
         'var', 'injury', 'assist', 'cross', 'tackle', 'interception',
@@ -4565,6 +4565,14 @@ def _enrich_events(
     enriched = []
     for event in events:
         event_type = event.get('event_type', 'unknown')
+        
+        # 🔧 CONVERSÃO: Cartão vermelho → Falta
+        if event_type == 'red_card':
+            print(f"[Sanitize] 🔄 Convertendo red_card → foul (min {event.get('minute', '?')}')")
+            event_type = 'foul'
+            event['event_type'] = 'foul'
+            event['description'] = f"Falta (menção a cartão): {(event.get('description') or '')[:80]}"[:100]
+        
         if event_type not in VALID_EVENT_TYPES:
             event_type = 'unknown'
         
@@ -4574,7 +4582,8 @@ def _enrich_events(
         event['team'] = event.get('team', 'home')
         event['description'] = (event.get('description') or '')[:200]
         event['confidence'] = event.get('confidence', 0.8)
-        event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'yellow_card', 'red_card', 'penalty'])
+        # 🔧 red_card removido de highlights
+        event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'yellow_card', 'penalty'])
         event['isOwnGoal'] = event.get('isOwnGoal', False)
         event['validated'] = True
         event['validation_reason'] = 'Approved by Ollama local'
