@@ -510,33 +510,72 @@ def validate_card_event(
     return {'is_valid': True, 'confidence': confidence, 'reason': 'validated'}
 
 
-def _extract_context_around_timestamp(transcription: str, minute: int, second: int, window_chars: int = 400) -> str:
+def _extract_context_around_timestamp(
+    transcription: str, 
+    minute: int, 
+    second: int, 
+    event_type: str = None,
+    window_chars: int = 1000  # ~40 segundos = 20s cada lado
+) -> str:
     """
-    Extract text context around a timestamp from transcription.
-    Searches for time patterns like HH:MM:SS or minute references.
+    Extrai contexto centrado na palavra-chave do evento.
+    
+    Estratégia:
+    1. Buscar palavra-chave do tipo de evento no texto
+    2. Centralizar janela de 1000 chars (500 antes, 500 depois)
+    3. Fallback: posição estimada se não encontrar keyword
+    
+    Args:
+        transcription: Texto completo da transcrição
+        minute: Minuto do evento
+        second: Segundo do evento
+        event_type: Tipo do evento (goal, red_card, etc.)
+        window_chars: Tamanho da janela em caracteres (~40s = 1000 chars)
+    
+    Returns:
+        Contexto extraído centrado na keyword ou posição estimada
     """
-    total_seconds = minute * 60 + second
+    # Mapa de keywords por tipo de evento
+    event_keywords = {
+        'goal': ['gol', 'golaço', 'bola na rede', 'abre o placar', 'marca', 'gooool'],
+        'red_card': ['vermelho', 'expuls', 'cartão vermelho', 'direto pro chuveiro'],
+        'yellow_card': ['amarelo', 'cartão amarelo', 'amarelou', 'recebe amarelo'],
+        'penalty': ['pênalti', 'penalidade', 'marca pênalti', 'penalty'],
+        'save': ['defesa', 'salvou', 'espalmou', 'defendeu'],
+    }
     
-    # Try to find timestamp pattern in transcription
-    time_patterns = [
-        rf'{minute:02d}:{second:02d}',
-        rf'{minute}:{second:02d}',
-        rf'{minute}\s*minuto',
-        rf"aos\s*{minute}",
-    ]
+    # 1. Tentar encontrar keyword do evento
+    keywords = event_keywords.get(event_type, [])
     
-    for pattern in time_patterns:
-        match = re.search(pattern, transcription, re.IGNORECASE)
-        if match:
-            start = max(0, match.start() - window_chars // 2)
-            end = min(len(transcription), match.end() + window_chars // 2)
+    for keyword in keywords:
+        # Buscar todas as ocorrências (case insensitive)
+        pattern = re.escape(keyword)
+        matches = list(re.finditer(pattern, transcription.lower()))
+        
+        if matches:
+            # Se há múltiplas ocorrências, escolher a mais próxima do timestamp estimado
+            total_seconds = minute * 60 + second
+            estimated_pos = int(len(transcription) * (total_seconds / (45 * 60)))
+            
+            # Encontrar match mais próximo da posição estimada
+            best_match = min(matches, key=lambda m: abs(m.start() - estimated_pos))
+            center_pos = best_match.start()
+            
+            # Extrair janela centrada na keyword
+            half_window = window_chars // 2
+            start = max(0, center_pos - half_window)
+            end = min(len(transcription), center_pos + half_window)
+            
             return transcription[start:end]
     
-    # Fallback: estimate position based on transcription length
-    # Assume ~45 minutes of content
+    # 2. Fallback: posição estimada baseada no timestamp
+    total_seconds = minute * 60 + second
     estimated_pos = int(len(transcription) * (total_seconds / (45 * 60)))
-    start = max(0, estimated_pos - window_chars // 2)
-    end = min(len(transcription), estimated_pos + window_chars // 2)
+    
+    half_window = window_chars // 2
+    start = max(0, estimated_pos - half_window)
+    end = min(len(transcription), estimated_pos + half_window)
+    
     return transcription[start:end]
 
 
@@ -557,8 +596,12 @@ def _validate_all_events_with_context(
         minute = event.get('minute', 0)
         second = event.get('second', 0)
         
-        # Extrair contexto ao redor do timestamp
-        context = _extract_context_around_timestamp(transcription, minute, second)
+        # Extrair contexto centrado na keyword do evento (janela 40s)
+        context = _extract_context_around_timestamp(
+            transcription, minute, second, 
+            event_type=event_type,
+            window_chars=1000
+        )
         
         # 1. Validar cartões vermelhos
         if event_type == 'red_card':
@@ -4143,8 +4186,12 @@ def _validate_goals_with_context(events: List[Dict[str, Any]], transcription: st
         minute = event.get('minute', 0)
         second = event.get('second', 0)
         
-        # Extrair contexto: ~30 segundos ao redor do timestamp
-        context = _extract_context_around_timestamp(transcription, minute, second)
+        # Extrair contexto centrado na keyword 'gol' (janela 40s)
+        context = _extract_context_around_timestamp(
+            transcription, minute, second,
+            event_type='goal',
+            window_chars=1000
+        )
         context_lower = context.lower()
         
         # Verificar negações
@@ -4172,39 +4219,8 @@ def _validate_goals_with_context(events: List[Dict[str, Any]], transcription: st
     return validated
 
 
-def _extract_context_around_timestamp(transcription: str, minute: int, second: int, window_seconds: int = 30) -> str:
-    """
-    Extrai texto da transcrição ao redor de um timestamp específico.
-    
-    Procura por blocos SRT próximos ao timestamp e retorna o texto combinado.
-    
-    Args:
-        transcription: Texto completo (pode ser SRT ou plain text)
-        minute: Minuto alvo
-        second: Segundo alvo
-        window_seconds: Janela de busca em segundos (±)
-        
-    Returns:
-        Texto encontrado ao redor do timestamp
-    """
-    target_total_seconds = minute * 60 + second
-    
-    # Tentar parsear como SRT
-    srt_pattern = r'(\d{2}):(\d{2}):(\d{2}),\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}\s*\n(.*?)(?=\n\n|\n\d+\n|\Z)'
-    matches = re.findall(srt_pattern, transcription, re.DOTALL)
-    
-    if matches:
-        # É um arquivo SRT - buscar blocos próximos
-        context_parts = []
-        for hours, mins, secs, text in matches:
-            block_seconds = int(hours) * 3600 + int(mins) * 60 + int(secs)
-            if abs(block_seconds - target_total_seconds) <= window_seconds:
-                context_parts.append(text.strip())
-        return " ".join(context_parts)
-    
-    # Fallback: texto plano - retornar os primeiros 500 chars
-    # (menos preciso, mas melhor que nada)
-    return transcription[:500]
+    # Nota: Função _extract_context_around_timestamp consolidada na linha 513
+    # Esta duplicata foi removida para evitar conflito
 
 
 def _analyze_events_with_ollama(
