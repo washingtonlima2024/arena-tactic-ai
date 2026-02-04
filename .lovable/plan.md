@@ -1,165 +1,197 @@
 
+# Plano: Habilitar Transcrição 100% Local (Whisper Local para Áudio Base64)
 
-# Plano: Desabilitar Detecção de Cartão Vermelho (Converter para Falta)
+## Problema Identificado
 
-## Objetivo
+A função `transcribe_audio_base64` (usada pelo endpoint `/api/transcribe-audio` e pelo hook `useVideoAudioTranscription`) **exige OPENAI_API_KEY** e **não usa Whisper Local**, mesmo quando está instalado e habilitado.
 
-Remover a detecção de cartão vermelho do sistema, pois a validação não está conseguindo distinguir corretamente menções hipotéticas de expulsões reais. A abordagem será:
+### Mapeamento de Funções
 
-1. **Cartão Amarelo**: Manter detecção normalmente
-2. **Cartão Vermelho**: Converter automaticamente para **Falta** (`foul`)
+| Função | Usado por | Usa Local Whisper? | Problema |
+|--------|-----------|-------------------|----------|
+| `transcribe_audio_base64()` | `/api/transcribe-audio`, Live Broadcast | ❌ Só OpenAI | **ERRO** - Não funciona offline |
+| `transcribe_audio()` | Interno | ❌ Só OpenAI | Função auxiliar antiga |
+| `transcribe_audio_file()` | Pipeline de arquivos | ✅ Local primeiro | Correto, mas não usada para base64 |
+| `_transcribe_with_local_whisper()` | Interno | ✅ Local | Disponível, mas não chamada |
+
+### Fluxo Atual (Problema)
+
+```text
+Frontend (Live Broadcast)
+    │
+    ▼
+useVideoAudioTranscription.ts
+    │ supabase.functions.invoke("transcribe-audio")
+    │ ou apiClient.transcribeAudio()
+    ▼
+/api/transcribe-audio
+    │
+    ▼
+ai_services.transcribe_audio_base64()
+    │
+    ▼
+❌ OPENAI_API_KEY obrigatória!
+    └── Erro: "OPENAI_API_KEY not configured"
+```
+
+---
+
+## Solução
+
+Modificar `transcribe_audio_base64()` para usar a mesma lógica de prioridade de `transcribe_audio_file()`:
+
+1. **Local Whisper** (GRATUITO, offline) - PRIORIDADE
+2. **OpenAI Whisper API** (pago) - Fallback
+3. **ElevenLabs** (pago) - Último recurso
+
+### Código Proposto
+
+**Arquivo**: `video-processor/ai_services.py` (função `transcribe_audio_base64`, linha ~5624)
+
+```python
+def transcribe_audio_base64(audio_base64: str, language: str = 'pt') -> Optional[str]:
+    """
+    Transcribe audio from base64 data using best available provider.
+    
+    Priority:
+    1. Local Whisper (FREE, offline)
+    2. OpenAI Whisper API (paid)
+    
+    Args:
+        audio_base64: Base64-encoded audio data
+        language: Language code
+    
+    Returns:
+        Transcription text or None on error
+    """
+    import tempfile
+    
+    # Decode base64 and save to temp file
+    audio_data = base64.b64decode(audio_base64)
+    
+    with tempfile.NamedTemporaryFile(suffix='.webm', delete=False) as tmp:
+        tmp.write(audio_data)
+        tmp_path = tmp.name
+    
+    try:
+        # PRIORIDADE 1: Local Whisper (GRATUITO)
+        if LOCAL_WHISPER_ENABLED and _FASTER_WHISPER_AVAILABLE:
+            print(f"[TranscribeBase64] 🆓 Usando Local Whisper...")
+            result = _transcribe_with_local_whisper(tmp_path, match_id=None)
+            if result.get('success') and result.get('text'):
+                print(f"[TranscribeBase64] ✓ Local Whisper: {len(result['text'])} chars")
+                return result['text']
+            else:
+                print(f"[TranscribeBase64] Local Whisper falhou: {result.get('error')}")
+        
+        # PRIORIDADE 2: OpenAI Whisper (pago)
+        if OPENAI_API_KEY:
+            print(f"[TranscribeBase64] Tentando OpenAI Whisper...")
+            text = transcribe_audio(tmp_path, language)
+            if text:
+                print(f"[TranscribeBase64] ✓ OpenAI: {len(text)} chars")
+                return text
+        
+        # Nenhum provedor disponível
+        raise ValueError(
+            "Nenhum provedor de transcrição disponível. "
+            "Instale faster-whisper (gratuito) ou configure OPENAI_API_KEY."
+        )
+    finally:
+        import os
+        os.unlink(tmp_path)
+```
+
+---
+
+## Mudanças Detalhadas
+
+### Mudança 1: Atualizar `transcribe_audio_base64` (ai_services.py)
+
+**Linhas ~5624-5652**
+
+- Adicionar verificação de `LOCAL_WHISPER_ENABLED` e `_FASTER_WHISPER_AVAILABLE`
+- Chamar `_transcribe_with_local_whisper()` como primeira opção
+- Manter OpenAI como fallback
+- Melhorar mensagem de erro
+
+### Mudança 2: Adicionar conversão para WAV se necessário
+
+O WebM/OGG do navegador pode precisar de conversão para o Whisper Local:
+
+```python
+# Converter para WAV se necessário (Whisper prefere WAV)
+wav_path = tmp_path.replace('.webm', '.wav')
+try:
+    subprocess.run([
+        'ffmpeg', '-y', '-i', tmp_path,
+        '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
+        wav_path
+    ], capture_output=True, timeout=30)
+    transcribe_path = wav_path
+except:
+    transcribe_path = tmp_path  # Usar original se conversão falhar
+```
+
+---
+
+## Nota Sobre Ollama
+
+**Ollama NÃO faz transcrição de áudio** - ele é um modelo de texto (LLM) usado para:
+- Análise de eventos
+- Geração de descrições
+- Chat/conversação
+
+Para transcrição de áudio, as opções são:
+- **Whisper Local** (faster-whisper) - GRATUITO
+- **OpenAI Whisper API** - pago
+- **ElevenLabs Scribe** - pago
+- **Google Gemini** - pago (para arquivos de vídeo)
+
+---
+
+## Fluxo Após Correção
+
+```text
+Frontend (Live Broadcast)
+    │
+    ▼
+/api/transcribe-audio
+    │
+    ▼
+ai_services.transcribe_audio_base64()
+    │
+    ├── 1️⃣ LOCAL_WHISPER_ENABLED? ──▶ _transcribe_with_local_whisper() ✅
+    │                                      │
+    │                                      └── Transcrição 100% LOCAL e GRÁTIS
+    │
+    └── 2️⃣ OPENAI_API_KEY? ──────────▶ transcribe_audio() (pago)
+```
+
+---
 
 ## Arquivos a Modificar
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `video-processor/ai_services.py` | Remover `red_card` dos padrões de detecção e converter para `foul` em múltiplos locais |
-
----
-
-## Mudanças Técnicas
-
-### Mudança 1: Remover `red_card` do dicionário de padrões (linha ~1089)
-
-```python
-# ANTES:
-'red_card': [
-    r'CARTÃO VERMELHO',
-    r'VERMELHO PARA',
-    r'EXPULSO',
-    ...
-],
-
-# DEPOIS:
-# 🔧 REMOVIDO - Cartão vermelho desabilitado (convertido para foul)
-# 'red_card': [...],
-```
-
-### Mudança 2: Remover `red_card` dos padrões de texto (linha ~4096)
-
-```python
-# ANTES:
-patterns = {
-    'goal': [...],
-    'yellow_card': [r'cartão amarelo', r'amarelou'],
-    'red_card': [r'cartão vermelho', r'expuls'],  # ← REMOVER
-    'penalty': [...],
-}
-
-# DEPOIS:
-patterns = {
-    'goal': [...],
-    'yellow_card': [r'cartão amarelo', r'amarelou'],
-    # 🔧 red_card REMOVIDO - menções de cartão vermelho serão ignoradas
-    'penalty': [...],
-}
-```
-
-### Mudança 3: Atualizar prompt do Ollama (linhas ~4299-4306)
-
-```python
-# ANTES:
-EVENTOS PARA DETECTAR:
-- goal: "GOOOL", "GOLAÇO", "abre o placar", "empata", "virou", "bola na rede"
-- yellow_card: "cartão amarelo", "amarelou"
-- red_card: "cartão vermelho", "expulso"  # ← REMOVER
-- penalty: "pênalti", "penalidade máxima"
-
-# DEPOIS:
-EVENTOS PARA DETECTAR:
-- goal: "GOOOL", "GOLAÇO", "abre o placar", "empata", "virou", "bola na rede"
-- yellow_card: "cartão amarelo", "amarelou"
-# 🔧 red_card removido - menções serão ignoradas
-- penalty: "pênalti", "penalidade máxima"
-```
-
-### Mudança 4: Converter `red_card` para `foul` na validação final (linha ~4555)
-
-Adicionar conversão automática após a detecção:
-
-```python
-def sanitize_events(events):
-    """Limpa e valida lista de eventos da IA."""
-    VALID_EVENT_TYPES = [
-        'goal', 'shot', 'save', 'foul', 'yellow_card',  # ← red_card REMOVIDO
-        'corner', 'offside', 'substitution', 'chance', 'penalty',
-        'free_kick', 'throw_in', 'kick_off', 'half_time', 'full_time',
-    ]
-    
-    cleaned = []
-    for event in events:
-        event_type = (event.get('event_type') or '').lower().strip()
-        
-        # 🔧 CONVERSÃO: Cartão vermelho → Falta
-        if event_type == 'red_card':
-            print(f"[Sanitize] 🔄 Convertendo red_card → foul (min {event.get('minute', '?')}')")
-            event_type = 'foul'
-            event['event_type'] = 'foul'
-            event['description'] = f"Falta (menção a cartão): {event.get('description', '')}"[:100]
-        
-        # ... resto da validação
-```
-
-### Mudança 5: Atualizar `is_highlight` (linha ~4577)
-
-```python
-# ANTES:
-event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'yellow_card', 'red_card', 'penalty'])
-
-# DEPOIS:
-# 🔧 red_card removido de highlights
-event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'yellow_card', 'penalty'])
-```
-
-### Mudança 6: Atualizar prompt principal (linha ~3490)
-
-```python
-# ANTES:
-- event_type: goal, shot, save, foul, yellow_card, red_card, corner, chance, penalty, etc.
-
-# DEPOIS:
-# 🔧 red_card removido - não detectar expulsões
-- event_type: goal, shot, save, foul, yellow_card, corner, chance, penalty, etc.
-```
-
----
-
-## Fluxo Após Mudanças
-
-```text
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  DETECÇÃO DE EVENTOS (CARTÕES)                                               │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  📝 Narrador menciona "cartão amarelo"                                       │
-│     └── Detectado como yellow_card ✓                                         │
-│     └── Badge amarelo na timeline ✓                                          │
-│                                                                              │
-│  📝 Narrador menciona "cartão vermelho" ou "expulso"                         │
-│     └── ANTES: Detectado como red_card → validação falha → evento falso ❌   │
-│     └── DEPOIS: Ignorado pela IA ✓                                           │
-│     └── OU se detectado, convertido para foul automaticamente ✓              │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+| `video-processor/ai_services.py` | Linha ~5624: Reescrever `transcribe_audio_base64` com prioridade para Local Whisper |
 
 ---
 
 ## Resultado Esperado
 
-| Evento | Antes | Depois |
-|--------|-------|--------|
-| Cartão Amarelo | Detectado normalmente ✓ | Continua funcionando ✓ |
-| Cartão Vermelho Real | Às vezes detectado ❓ | Ignorado ou convertido para falta |
-| Menção Hipotética de Vermelho | Falso positivo ❌ | Ignorado ✓ |
-| Badge na Timeline | Vermelho falso aparece ❌ | Só amarelo aparece ✓ |
+| Cenário | Antes | Depois |
+|---------|-------|--------|
+| Whisper Local instalado | ❌ Erro - exige OpenAI | ✅ Transcreve offline |
+| Sem API keys | ❌ Erro | ✅ Funciona com Whisper Local |
+| OpenAI configurada | ✅ Funciona | ✅ Usa como fallback |
+| Live Broadcast | ❌ Falha | ✅ Transcrição em tempo real |
 
 ---
 
-## Consideração
+## Verificação Pós-Implementação
 
-Se no futuro quiser reativar a detecção de cartão vermelho, basta:
-1. Descomentar os padrões de `red_card`
-2. Remover a conversão automática em `sanitize_events`
-3. Melhorar a validação com regras mais precisas
-
+1. Iniciar servidor Python
+2. Verificar log: `[AI Services] LOCAL_WHISPER: ✓ disponível`
+3. Testar Live Broadcast - áudio deve ser transcrito
+4. Verificar log: `[TranscribeBase64] 🆓 Usando Local Whisper...`
