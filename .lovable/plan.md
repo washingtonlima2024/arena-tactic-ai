@@ -1,156 +1,114 @@
 
-
-# Plano: Corrigir Importação Incremental do Segundo Tempo
+# Plano: Corrigir Análise do Segundo Tempo (SRT Errado + Validação)
 
 ## Problema Identificado
 
-Quando o usuário importa apenas o segundo tempo de uma partida (que já tinha o primeiro tempo analisado), **nenhum evento do 2º tempo é gerado**. 
+A análise do segundo tempo gerou apenas 1 evento porque:
 
-## Diagnóstico
+1. **SRT Errado no Fallback**: Quando o Ollama detecta menos de 3 eventos e aciona o fallback por keywords, o código usa **o primeiro SRT encontrado** sem verificar se corresponde ao tempo sendo analisado.
 
-Após análise detalhada do código:
+2. **Filtro de SRT por Glob**: O `glob('*.srt')` não garante ordem e pode retornar o SRT do primeiro tempo antes do segundo.
 
-| Componente | Problema |
-|------------|----------|
-| **Upload.tsx** (linhas 1504-1528) | A transcrição do 2º tempo só é coletada de `secondHalfSrt` OU do segmento. Se o SRT foi arrastado mas não associado, fica vazio |
-| **Upload.tsx** (linhas 1517-1519) | O filtro de segmentos do 2º tempo depende de `s.half === 'second'` que pode não estar setado |
-| **Upload.tsx** (linhas 1543-1552) | O pipeline assíncrono envia `secondHalfTranscription` mas não valida se está vazio antes |
-| **server.py** (linhas 7772-7790) | O backend só processa se `len(second_half_transcription.strip()) > 100`. Se estiver vazio, ignora silenciosamente |
+## Código Problemático
 
-### Fluxo Atual (Problema)
+**Arquivo**: `video-processor/ai_services.py` (linhas 4453-4466)
+
+```python
+srt_folder = get_subfolder_path(match_id, 'srt')
+srt_files = list(srt_folder.glob('*.srt')) if srt_folder.exists() else []
+
+if srt_files:
+    # ⚠️ PROBLEMA: Usa PRIMEIRO SRT encontrado independente do tempo!
+    print(f"[Ollama] Usando SRT: {srt_files[0].name}")
+    keyword_events = detect_events_by_keywords(
+        srt_path=str(srt_files[0]),  # ← Pode ser o SRT errado!
+        home_team=home_team,
+        away_team=away_team,
+        half=match_half,
+        segment_start_minute=game_start_minute
+    )
+```
+
+## Solução
+
+### Mudança 1: Selecionar SRT Correto Baseado no Tempo
+
+Modificar a lógica para filtrar o SRT pelo `match_half`:
+
+```python
+srt_folder = get_subfolder_path(match_id, 'srt')
+srt_files = list(srt_folder.glob('*.srt')) if srt_folder.exists() else []
+
+# 🔧 Filtrar SRT pelo tempo correto
+target_srt = None
+if srt_files:
+    # Prioridade: arquivo específico do tempo
+    srt_patterns = [
+        f'{match_half}_half.srt',      # second_half.srt
+        f'{match_half}_transcription.srt',  # second_transcription.srt
+        f'{match_half}.srt',           # second.srt
+    ]
+    
+    for pattern in srt_patterns:
+        for srt_file in srt_files:
+            if pattern in srt_file.name.lower():
+                target_srt = srt_file
+                break
+        if target_srt:
+            break
+    
+    # Fallback: usar qualquer SRT se só existe um
+    if not target_srt and len(srt_files) == 1:
+        target_srt = srt_files[0]
+
+if target_srt:
+    print(f"[Ollama] Usando SRT do {match_half}: {target_srt.name}")
+    keyword_events = detect_events_by_keywords(
+        srt_path=str(target_srt),
+        home_team=home_team,
+        away_team=away_team,
+        half=match_half,
+        segment_start_minute=game_start_minute
+    )
+else:
+    print(f"[Ollama] SRT do {match_half} não encontrado, usando texto bruto...")
+    keyword_events = detect_events_by_keywords_from_text(...)
+```
+
+### Mudança 2: Logs de Diagnóstico
+
+Adicionar logs para identificar qual SRT está sendo usado:
+
+```python
+print(f"[Ollama] 📂 SRTs disponíveis: {[f.name for f in srt_files]}")
+print(f"[Ollama] 🎯 Buscando SRT para tempo: {match_half}")
+```
+
+---
+
+## Fluxo Corrigido
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│  IMPORTAÇÃO DO 2º TEMPO (modo local)                                         │
+│  ANÁLISE DO SEGUNDO TEMPO (CORRIGIDO)                                        │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  1. Usuário vincula vídeo do 2º tempo (LocalFileBrowser)                     │
-│     └── Segmento criado com half: 'second', videoType: 'second_half' ✓       │
+│  1. Ollama analisa transcrição do 2º tempo                                   │
+│     └── Detecta N eventos                                                    │
 │                                                                              │
-│  2. Usuário arrasta SRT do 2º tempo (HalfDropzone)                           │
-│     └── secondHalfSrt setado ✓                                               │
-│     └── handleSrtDrop tenta associar ao segmento...                          │
-│         └── ⚠️ Filtro usa (s.half === 'second')                              │
-│         └── ⚠️ Se half não estiver setado, SRT não é associado!              │
+│  2. Validação pós-Ollama                                                     │
+│     └── _validate_goals_with_context()                                       │
+│     └── _validate_all_events_with_context()                                  │
 │                                                                              │
-│  3. handleStartAnalysis() inicia pipeline assíncrono                         │
-│     └── Lê secondHalfSrt → secondHalfTranscription ✓ (se tiver)              │
-│     └── ⚠️ Mas também tenta ler do segmento.transcription (backup)           │
-│     └── ⚠️ Se nenhum dos dois tem, secondHalfTranscription = ''              │
+│  3. Fallback (se N < 3 eventos)                                              │
+│     ├── ANTES: Usava PRIMEIRO SRT encontrado (possivelmente 1º tempo) ❌     │
+│     └── DEPOIS: Filtra por 'second_half.srt' ou similar ✓                    │
 │                                                                              │
-│  4. Backend recebe secondHalfTranscription                                   │
-│     └── ⚠️ Se vazio ou < 100 chars → IGNORA SILENCIOSAMENTE                  │
+│  4. Merge + Deduplicate                                                      │
+│     └── Eventos finais salvos                                                │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
-
----
-
-## Solução Proposta
-
-### Mudança 1: Melhorar associação SRT ao segmento (Upload.tsx)
-
-Atualizar `handleSrtDrop` para ser mais robusto na associação:
-
-**Arquivo**: `src/pages/Upload.tsx` (linhas 1057-1065)
-
-```typescript
-// ANTES:
-if ((half === 'first' && (s.half === 'first' || s.videoType === 'first_half' || s.videoType === 'full')) ||
-    (half === 'second' && (s.half === 'second' || s.videoType === 'second_half'))) {
-
-// DEPOIS:
-// 🔧 Melhorar matching: incluir segmentos sem half definido mas com videoType correto
-const isFirstHalfSegment = s.half === 'first' || s.videoType === 'first_half' || s.videoType === 'full';
-const isSecondHalfSegment = s.half === 'second' || s.videoType === 'second_half' || 
-                            // Fallback: se não tem half e o nome sugere segundo tempo
-                            (!s.half && s.name.toLowerCase().includes('segundo'));
-
-if ((half === 'first' && isFirstHalfSegment) || (half === 'second' && isSecondHalfSegment)) {
-```
-
-### Mudança 2: Garantir que vídeo local tem `half` setado (Upload.tsx)
-
-Atualizar `handleLocalFileSelect` para sempre setar `half`:
-
-**Arquivo**: `src/pages/Upload.tsx` (linha 940)
-
-```typescript
-// ANTES:
-half: localBrowserHalf || undefined,
-
-// DEPOIS:
-// 🔧 Garantir half baseado em videoType se não especificado
-half: localBrowserHalf || (videoType === 'second_half' ? 'second' : videoType === 'first_half' ? 'first' : undefined),
-```
-
-### Mudança 3: Adicionar validação antes de chamar pipeline assíncrono (Upload.tsx)
-
-Adicionar verificação e toast de erro se transcrição do 2º tempo estiver vazia quando há vídeo:
-
-**Arquivo**: `src/pages/Upload.tsx` (após linha 1527)
-
-```typescript
-// 🆕 Validar que segundo tempo tem transcrição se tem vídeo
-if (secondHalfSegments.length > 0 && !secondHalfTranscription) {
-  console.error('[ASYNC] ⚠️ Vídeo do 2º tempo SEM transcrição! Abortando pipeline async.');
-  toast({
-    title: "⚠️ Transcrição do 2º tempo não encontrada",
-    description: "Arraste o arquivo SRT do 2º tempo antes de iniciar a análise.",
-    variant: "destructive"
-  });
-  setProcessingStage('idle');
-  return;
-}
-```
-
-### Mudança 4: Log detalhado no backend (server.py)
-
-Adicionar logs para diagnóstico quando transcrição é ignorada:
-
-**Arquivo**: `video-processor/server.py` (após linha 7774)
-
-```python
-# 🆕 Log quando transcrição do 2º tempo é ignorada
-if not has_preloaded_second and second_half_transcription:
-    print(f"[ASYNC-PIPELINE] ⚠️ 2nd half transcription too short ({len(second_half_transcription)} chars < 100) - IGNORED")
-elif not second_half_transcription:
-    print(f"[ASYNC-PIPELINE] ⚠️ 2nd half transcription EMPTY - will need Whisper or existing SRT file")
-```
-
-### Mudança 5: Buscar SRT do storage se não fornecido (server.py)
-
-Adicionar fallback para buscar SRT salvo anteriormente:
-
-**Arquivo**: `video-processor/server.py` (após linha 7790, dentro do bloco de transcrições pré-carregadas)
-
-```python
-# 🆕 Fallback: Se não tem transcrição do 2º tempo, tentar ler do storage
-if not has_preloaded_second:
-    existing_srt_path = get_subfolder_path(match_id, 'srt') / 'second_half.srt'
-    existing_txt_path = get_subfolder_path(match_id, 'texts') / 'second_half_transcription.txt'
-    
-    if existing_srt_path.exists():
-        with open(existing_srt_path, 'r', encoding='utf-8') as f:
-            second_half_text = f.read()
-        print(f"[ASYNC-PIPELINE] ✓ 2nd half transcription loaded from storage: {len(second_half_text)} chars")
-    elif existing_txt_path.exists():
-        with open(existing_txt_path, 'r', encoding='utf-8') as f:
-            second_half_text = f.read()
-        print(f"[ASYNC-PIPELINE] ✓ 2nd half TXT loaded from storage: {len(second_half_text)} chars")
-```
-
----
-
-## Resultado Esperado
-
-| Cenário | Antes | Depois |
-|---------|-------|--------|
-| SRT arrastado no 2º tempo | Pode não associar ao segmento | Sempre associa corretamente |
-| Vídeo local do 2º tempo | Pode ficar sem `half` | Sempre tem `half: 'second'` |
-| Pipeline async sem SRT | Ignora silenciosamente | Mostra erro claro e aborta |
-| SRT já salvo no storage | Não usa | Usado como fallback automático |
-| Placar após análise | Não atualizado | Sincronizado via `syncMatchScoreFromEvents` |
 
 ---
 
@@ -158,33 +116,30 @@ if not has_preloaded_second:
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/pages/Upload.tsx` | Melhorar associação SRT, garantir `half` no segmento, validação antes do async |
-| `video-processor/server.py` | Logs de diagnóstico, fallback para SRT do storage |
+| `video-processor/ai_services.py` | Linha ~4454: Filtrar SRT pelo tempo (`match_half`) antes de usar no fallback |
 
 ---
 
-## Diagrama do Fluxo Corrigido
+## Resultado Esperado
 
-```text
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  IMPORTAÇÃO INCREMENTAL DO 2º TEMPO (CORRIGIDO)                              │
-├──────────────────────────────────────────────────────────────────────────────┤
-│                                                                              │
-│  1. Vídeo vinculado → half: 'second' GARANTIDO ✓                             │
-│                                                                              │
-│  2. SRT arrastado → Matching robusto (half OU videoType OU nome) ✓           │
-│                                                                              │
-│  3. handleStartAnalysis()                                                    │
-│     ├── Lê secondHalfSrt → transcription                                     │
-│     ├── Valida: tem vídeo + sem transcrição? → ERRO + ABORT                  │
-│     └── Envia para backend com transcrição ✓                                 │
-│                                                                              │
-│  4. Backend processa                                                         │
-│     ├── Usa transcrição enviada OU                                           │
-│     ├── Busca SRT/TXT do storage (fallback)                                  │
-│     ├── Analisa eventos do 2º tempo                                          │
-│     └── Gera clips + atualiza placar ✓                                       │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
-```
+| Cenário | Antes | Depois |
+|---------|-------|--------|
+| Fallback do 2º tempo | Usa `first_half.srt` se vier primeiro | Usa `second_half.srt` especificamente |
+| SRTs múltiplos no diretório | Comportamento imprevisível | Seleção determinística por padrão de nome |
+| Logs | Não indicava qual SRT usado | Mostra arquivos disponíveis e selecionado |
 
+---
+
+## Diagnóstico Adicional
+
+Para verificar a causa exata, seria útil:
+
+1. **Verificar logs do servidor Python** - procurar por:
+   - `[Ollama] ⚠️ Poucos eventos` - confirma se fallback foi acionado
+   - `[Ollama] Usando SRT:` - mostra qual arquivo foi usado
+   - `[Validate] ⚠️` - mostra eventos rejeitados
+
+2. **Verificar arquivos SRT no storage**:
+   - `storage/{match_id}/srt/` - listar arquivos existentes
+
+Se o problema persistir após esta correção, pode haver também uma questão na validação contextual que está rejeitando eventos válidos.
