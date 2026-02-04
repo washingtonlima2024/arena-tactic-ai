@@ -15,7 +15,10 @@ import {
   Sparkles,
   Clock,
   AlertCircle,
-  Loader2
+  Loader2,
+  Square,
+  Settings2,
+  VolumeX
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useMatchEvents, useMatchAnalysis } from '@/hooks/useMatchDetails';
@@ -23,6 +26,10 @@ import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { useNarrationGeneration } from '@/hooks/useNarrationGeneration';
 import { usePodcastGeneration, PodcastType } from '@/hooks/usePodcastGeneration';
 import { TeamChatbotCard } from '@/components/audio/TeamChatbotCard';
+import { useWebSpeechTTS } from '@/hooks/useWebSpeechTTS';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Slider } from '@/components/ui/slider';
+import { Textarea } from '@/components/ui/textarea';
 
 type VoiceType = 'narrator' | 'commentator' | 'dynamic';
 
@@ -52,6 +59,10 @@ export default function Audio() {
   // State for podcast audio players
   const [playingPodcast, setPlayingPodcast] = useState<PodcastType | null>(null);
   const podcastAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  // Web Speech TTS (free, browser-based)
+  const webTTS = useWebSpeechTTS();
+  const [ttsText, setTtsText] = useState('');
 
   // Get highlights from events (goals, saves, etc.)
   const highlights = events?.filter(e => 
@@ -363,7 +374,7 @@ export default function Audio() {
 
         {/* Main Content */}
         <Tabs defaultValue="narration" className="space-y-6">
-          <TabsList className="grid w-full grid-cols-3">
+          <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="narration">
               <Mic className="mr-2 h-4 w-4" />
               Locução
@@ -371,6 +382,10 @@ export default function Audio() {
             <TabsTrigger value="podcast">
               <Radio className="mr-2 h-4 w-4" />
               Podcast
+            </TabsTrigger>
+            <TabsTrigger value="free-tts">
+              <Volume2 className="mr-2 h-4 w-4" />
+              TTS Grátis
             </TabsTrigger>
             <TabsTrigger value="chatbots">
               <MessageSquare className="mr-2 h-4 w-4" />
@@ -652,6 +667,208 @@ export default function Audio() {
                   </Card>
                 );
               })}
+            </div>
+          </TabsContent>
+
+          {/* Free TTS Tab */}
+          <TabsContent value="free-tts" className="space-y-6">
+            <div className="grid gap-6 lg:grid-cols-3">
+              {/* Main TTS Panel */}
+              <div className="lg:col-span-2">
+                <Card variant="glow">
+                  <CardHeader>
+                    <div className="flex items-start justify-between">
+                      <div>
+                        <CardTitle className="flex items-center gap-2">
+                          <Volume2 className="h-5 w-5" />
+                          Leitor de Texto (100% Gratuito)
+                        </CardTitle>
+                        <CardDescription>
+                          Converta texto em áudio usando vozes do navegador - sem API key necessária
+                        </CardDescription>
+                      </div>
+                      {webTTS.isSupported ? (
+                        <Badge variant="success">Disponível</Badge>
+                      ) : (
+                        <Badge variant="destructive">Não suportado</Badge>
+                      )}
+                    </div>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {!webTTS.isSupported ? (
+                      <div className="text-center py-8 text-muted-foreground">
+                        <VolumeX className="h-12 w-12 mx-auto mb-2 opacity-50" />
+                        <p>Seu navegador não suporta a Web Speech API</p>
+                        <p className="text-sm">Tente Chrome, Edge ou Safari</p>
+                      </div>
+                    ) : (
+                      <>
+                        {/* Text Input */}
+                        <div>
+                          <label className="text-sm font-medium mb-2 block">Texto para leitura:</label>
+                          <Textarea
+                            value={ttsText}
+                            onChange={(e) => setTtsText(e.target.value)}
+                            placeholder={`Cole aqui o texto que deseja ouvir...\n\nExemplo: "${homeTeamName} vence ${awayTeamName} por ${displayScore.home} a ${displayScore.away} em partida emocionante!"`}
+                            className="min-h-[150px]"
+                          />
+                          <div className="flex justify-between mt-1 text-xs text-muted-foreground">
+                            <span>{ttsText.length} caracteres</span>
+                            <Button
+                              variant="link"
+                              size="sm"
+                              className="h-auto p-0"
+                              onClick={() => {
+                                const summary = `${homeTeamName} enfrentou ${awayTeamName} em uma partida que terminou ${displayScore.home} a ${displayScore.away}. ` +
+                                  `Foram ${events?.length || 0} eventos detectados durante o jogo. ` +
+                                  (highlights.length > 0 
+                                    ? `Os principais lances incluíram: ${highlights.slice(0, 3).map(h => `${h.event} aos ${h.time}`).join(', ')}.`
+                                    : '');
+                                setTtsText(summary);
+                              }}
+                            >
+                              Gerar resumo automático
+                            </Button>
+                          </div>
+                        </div>
+
+                        {/* Progress Bar */}
+                        {webTTS.isSpeaking && (
+                          <div className="space-y-2">
+                            <Progress value={webTTS.progress} className="h-2" />
+                            <p className="text-xs text-center text-muted-foreground">
+                              {Math.round(webTTS.progress)}% concluído
+                            </p>
+                          </div>
+                        )}
+
+                        {/* Controls */}
+                        <div className="flex items-center gap-3">
+                          <Button
+                            variant="arena"
+                            size="icon-lg"
+                            onClick={() => {
+                              if (webTTS.isSpeaking && !webTTS.isPaused) {
+                                webTTS.pause();
+                              } else if (webTTS.isPaused) {
+                                webTTS.resume();
+                              } else {
+                                webTTS.speak(ttsText);
+                              }
+                            }}
+                            disabled={!ttsText.trim()}
+                          >
+                            {webTTS.isSpeaking && !webTTS.isPaused ? (
+                              <Pause className="h-6 w-6" />
+                            ) : (
+                              <Play className="h-6 w-6 ml-1" />
+                            )}
+                          </Button>
+                          
+                          {webTTS.isSpeaking && (
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              onClick={() => webTTS.stop()}
+                            >
+                              <Square className="h-4 w-4" />
+                            </Button>
+                          )}
+                          
+                          <div className="flex-1 text-sm text-muted-foreground">
+                            {webTTS.isSpeaking ? (
+                              webTTS.isPaused ? 'Pausado' : 'Reproduzindo...'
+                            ) : (
+                              'Pronto para ler'
+                            )}
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              {/* Settings Sidebar */}
+              <div className="space-y-4">
+                <Card variant="glass">
+                  <CardHeader>
+                    <CardTitle className="text-lg flex items-center gap-2">
+                      <Settings2 className="h-4 w-4" />
+                      Configurações de Voz
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {/* Voice Selection */}
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">Voz:</label>
+                      <Select
+                        value={webTTS.selectedVoice?.voiceURI || ''}
+                        onValueChange={(uri) => {
+                          const voice = webTTS.voices.find(v => v.voiceURI === uri);
+                          if (voice) webTTS.setSelectedVoice(voice);
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione uma voz" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {webTTS.voices.map((voice) => (
+                            <SelectItem key={voice.voiceURI} value={voice.voiceURI}>
+                              {voice.name} ({voice.lang})
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground mt-1">
+                        {webTTS.voices.filter(v => v.lang.startsWith('pt')).length} vozes em português disponíveis
+                      </p>
+                    </div>
+
+                    {/* Speed */}
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">
+                        Velocidade: {webTTS.rate.toFixed(1)}x
+                      </label>
+                      <Slider
+                        value={[webTTS.rate]}
+                        onValueChange={([val]) => webTTS.setRate(val)}
+                        min={0.5}
+                        max={2}
+                        step={0.1}
+                        className="w-full"
+                      />
+                    </div>
+
+                    {/* Pitch */}
+                    <div>
+                      <label className="text-sm font-medium mb-2 block">
+                        Tom: {webTTS.pitch.toFixed(1)}
+                      </label>
+                      <Slider
+                        value={[webTTS.pitch]}
+                        onValueChange={([val]) => webTTS.setPitch(val)}
+                        min={0.5}
+                        max={2}
+                        step={0.1}
+                        className="w-full"
+                      />
+                    </div>
+                  </CardContent>
+                </Card>
+
+                <Card variant="glass">
+                  <CardHeader>
+                    <CardTitle className="text-lg">💡 Dicas</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm text-muted-foreground">
+                    <p>• As vozes disponíveis dependem do seu sistema operacional</p>
+                    <p>• Vozes em português geralmente têm prefixo "pt-BR" ou "pt-PT"</p>
+                    <p>• O áudio é gerado localmente, sem uso de API</p>
+                    <p>• Use velocidade 1.0 para narração natural</p>
+                  </CardContent>
+                </Card>
+              </div>
             </div>
           </TabsContent>
 
