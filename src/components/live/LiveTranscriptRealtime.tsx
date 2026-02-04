@@ -326,7 +326,7 @@ export const LiveTranscriptRealtime = ({
           {/* Source indicator */}
           <Badge variant="outline" className="text-xs gap-1">
             <Video className="h-3 w-3" />
-            Whisper Local
+            kakttus.ai Local
           </Badge>
         </div>
       </div>
@@ -413,7 +413,7 @@ export const LiveTranscriptRealtime = ({
             <div className="text-center py-8 text-muted-foreground">
               <FileText className="h-12 w-12 mx-auto mb-2 opacity-50" />
               <p className="text-sm">Inicie a gravação para ver a transcrição ao vivo</p>
-              <p className="text-xs mt-1">Usando Whisper Local (GPU)</p>
+              <p className="text-xs mt-1">Usando kakttus.ai Local (GPU)</p>
             </div>
           )}
 

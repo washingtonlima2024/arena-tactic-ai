@@ -386,7 +386,7 @@ export default function Audio() {
             </TabsTrigger>
             <TabsTrigger value="free-tts">
               <Volume2 className="mr-2 h-4 w-4" />
-              TTS Grátis
+              kakttus Voice
             </TabsTrigger>
             <TabsTrigger value="chatbots">
               <MessageSquare className="mr-2 h-4 w-4" />
@@ -682,10 +682,10 @@ export default function Audio() {
                       <div>
                         <CardTitle className="flex items-center gap-2">
                           <Volume2 className="h-5 w-5" />
-                          Leitor de Texto (100% Gratuito)
+                          kakttus Voice
                         </CardTitle>
                         <CardDescription>
-                          Converta texto em áudio usando vozes do navegador - sem API key necessária
+                          Converta texto em áudio usando vozes nativas - integrado ao sistema
                         </CardDescription>
                       </div>
                       {webTTS.isSupported ? (

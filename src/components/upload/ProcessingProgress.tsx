@@ -51,8 +51,8 @@ const PROCESSING_STEPS: Omit<ProcessingStep, 'status' | 'progress' | 'detail'>[]
   { id: 'prepare', name: 'Preparação', description: 'Validando arquivos e configurações' },
   { id: 'upload', name: 'Upload', description: 'Enviando vídeo para processamento' },
   { id: 'audio', name: 'Extração de Áudio', description: 'Extraindo faixa de áudio com FFmpeg' },
-  { id: 'transcribe', name: 'Transcrição', description: 'Transcrevendo áudio com Whisper AI' },
-  { id: 'analyze', name: 'Análise', description: 'Identificando eventos com IA' },
+  { id: 'transcribe', name: 'Transcrição', description: 'Transcrevendo áudio com kakttus.ai' },
+  { id: 'analyze', name: 'Análise', description: 'Identificando eventos com kakttus.ai' },
   { id: 'save', name: 'Salvando', description: 'Persistindo eventos no banco' },
 ];
 

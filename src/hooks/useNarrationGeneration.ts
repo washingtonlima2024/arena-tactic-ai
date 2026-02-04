@@ -78,7 +78,7 @@ export function useNarrationGeneration() {
         
         toast({
           title: "Script gerado!",
-          description: "Use a aba 'TTS Grátis' para ouvir a narração com as vozes do navegador.",
+          description: "Use a aba 'kakttus Voice' para ouvir a narração.",
           variant: "default",
         });
         

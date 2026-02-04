@@ -259,7 +259,7 @@ export function ReanalyzeHalfDialog({
       if (isVideoTooLarge && videoSizeMB) {
         toast.info(`Vídeo grande (${videoSizeMB}MB) - será dividido em partes para transcrição...`);
       } else {
-        toast.info('Transcrevendo áudio com Whisper...');
+        toast.info('Transcrevendo áudio com kakttus.ai...');
       }
 
       // Passar o tamanho do vídeo para habilitar processamento em partes
@@ -269,17 +269,17 @@ export function ReanalyzeHalfDialog({
         const transcriptionContent = result.text || result.srtContent;
         setUploadedFiles(prev => {
           const filtered = prev.filter(f => 
-            f.name !== '🎙️ whisper-transcription.txt' && 
-            f.name !== '🎙️ whisper-timestamps.srt'
+            f.name !== '🎙️ kakttus-transcription.txt' && 
+            f.name !== '🎙️ kakttus-timestamps.srt'
           );
           
           return [
             ...filtered,
-            { name: '🎙️ whisper-transcription.txt', content: transcriptionContent, isOriginal: false }
+            { name: '🎙️ kakttus-transcription.txt', content: transcriptionContent, isOriginal: false }
           ];
         });
 
-        toast.success(`Transcrição Whisper concluída! (${(transcriptionContent.length / 1024).toFixed(1)}KB)`);
+        toast.success(`Transcrição concluída! (${(transcriptionContent.length / 1024).toFixed(1)}KB)`);
       } else {
         toast.warning('Transcrição vazia retornada');
       }
@@ -534,7 +534,7 @@ export function ReanalyzeHalfDialog({
               ) : (
                 <>
                   <Mic className="mr-2 h-4 w-4" />
-                  Extrair Nova Transcrição (Whisper)
+                  Extrair Nova Transcrição
                 </>
               )}
             </Button>
