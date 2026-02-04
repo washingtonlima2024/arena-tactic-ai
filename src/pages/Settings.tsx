@@ -86,7 +86,7 @@ export default function Settings() {
 
   // Ollama settings - ENABLED BY DEFAULT (FREE local AI)
   const [ollamaUrl, setOllamaUrl] = useState("http://localhost:11434");
-  const [ollamaModel, setOllamaModel] = useState("washingtonlima/kakttus");
+  const [ollamaModel, setOllamaModel] = useState("mistral:7b-instruct"); // Modelo otimizado para extração JSON
   const [ollamaEnabled, setOllamaEnabled] = useState(true); // ALWAYS ON BY DEFAULT
   const [ollamaModels, setOllamaModels] = useState<Array<{ name: string; size: string; family: string }>>([]);
   const [loadingOllamaModels, setLoadingOllamaModels] = useState(false);
@@ -163,7 +163,7 @@ export default function Settings() {
       // Ollama settings - DEFAULT TO TRUE (FREE!)
       setOllamaUrl(apiSettings.find((s) => s.setting_key === "ollama_url")?.setting_value || "http://localhost:11434");
       setOllamaModel(
-        apiSettings.find((s) => s.setting_key === "ollama_model")?.setting_value || "washingtonlima/kakttus",
+        apiSettings.find((s) => s.setting_key === "ollama_model")?.setting_value || "mistral:7b-instruct", // Modelo otimizado
       );
       // Se não houver configuração salva, usar true como padrão (gratuito!)
       const ollamaSetting = apiSettings.find((s) => s.setting_key === "ollama_enabled")?.setting_value;
