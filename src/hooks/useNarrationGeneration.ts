@@ -6,6 +6,7 @@ interface NarrationResult {
   script: string;
   audioUrl: string;
   voice: string;
+  scriptOnly?: boolean;
 }
 
 export function useNarrationGeneration() {
@@ -45,7 +46,7 @@ export function useNarrationGeneration() {
     homeScore: number,
     awayScore: number,
     voice: 'narrator' | 'commentator' | 'dynamic' = 'narrator'
-  ) => {
+  ): Promise<NarrationResult | null> => {
     setIsGenerating(true);
     
     try {
@@ -65,26 +66,30 @@ export function useNarrationGeneration() {
 
       // Check if audio was actually generated
       if (!data.audioUrl) {
-        toast({
-          title: "Script gerado, mas sem áudio",
-          description: "O provedor de TTS (OpenAI/ElevenLabs) não está configurado no servidor. Reinicie o servidor após configurar.",
-          variant: "destructive",
-        });
-        
         // Still save the script for display
-        setNarration({
+        const scriptOnlyResult = {
           script: data.script,
           audioUrl: '',
           voice: data.voice,
+          scriptOnly: true, // Flag to indicate only script was generated
+        };
+        
+        setNarration(scriptOnlyResult);
+        
+        toast({
+          title: "Script gerado!",
+          description: "Use a aba 'TTS Grátis' para ouvir a narração com as vozes do navegador.",
+          variant: "default",
         });
         
-        return null;
+        return scriptOnlyResult;
       }
 
-      const result = {
+      const result: NarrationResult = {
         script: data.script,
         audioUrl: normalizeStorageUrl(data.audioUrl) || data.audioUrl,
         voice: data.voice,
+        scriptOnly: false,
       };
 
       setNarration(result);
