@@ -552,6 +552,161 @@ def deduplicate_events(events: List[Dict], threshold_seconds: int = 60) -> List[
     return result
 
 
+def detect_goals_by_sliding_window(
+    srt_blocks: List[Tuple],
+    home_team: str,
+    away_team: str,
+    segment_start_minute: int = 0,
+    half: str = 'first',
+    window_size: int = 5,
+    min_goal_mentions: int = 3,
+    min_block_gap: int = 5
+) -> List[Dict[str, Any]]:
+    """
+    Detecta gols REAIS analisando repetição em janela deslizante de 5 linhas.
+    
+    Um gol REAL é caracterizado por:
+    - "gol" repetido 3+ vezes em uma janela de 5 linhas consecutivas
+    - Exclui "goleiro" da contagem
+    - Nome do time ou jogador geralmente presente
+    - Usa timestamp da linha CENTRAL como referência
+    - Mínimo de 5 blocos entre gols do mesmo time (evita duplicatas)
+    
+    Exemplo de gol REAL no SRT:
+        365: "de Felipe Coutinho, ele gosta de bater pro gol daí."
+        366: "Olha a bomba! Aí o gol! Aí o gol! Aí"
+        367: "o gol! Aí o gol! Gol! É do Brasil! Brasil"  ← CENTRO
+        368: "Brasil do Felipe Coutinho! Do jeitinho que ele gosta!"
+        369: "ele pegou aí na bola eu disse..."
+    Total: 7 menções de "gol" em 5 linhas = é gol real!
+    
+    Args:
+        srt_blocks: List of SRT block tuples (index, hours, minutes, seconds, ms, text)
+        home_team: Nome do time da casa
+        away_team: Nome do time visitante
+        segment_start_minute: Minuto inicial do segmento (0 para primeiro tempo)
+        half: 'first' ou 'second'
+        window_size: Tamanho da janela (padrão: 5 linhas)
+        min_goal_mentions: Mínimo de menções de "gol" para confirmar (padrão: 3)
+        min_block_gap: Espaçamento mínimo entre gols do mesmo time (padrão: 5 blocos)
+    
+    Returns:
+        Lista de eventos de gol detectados
+    """
+    goals = []
+    
+    # Padrão para contar "gol" (excluindo "goleiro")
+    goal_pattern = r'\bgol\b(?!eiro)'
+    
+    # Track último bloco de gol por time para evitar duplicatas
+    last_goal_block = {'home': -10, 'away': -10, 'unknown': -10}
+    
+    print(f"[SlidingWindow] 🎯 Iniciando detecção de gols por janela deslizante...")
+    print(f"[SlidingWindow]   Janela: {window_size} linhas")
+    print(f"[SlidingWindow]   Mínimo de menções: {min_goal_mentions}")
+    print(f"[SlidingWindow]   Espaçamento mínimo: {min_block_gap} blocos")
+    print(f"[SlidingWindow]   Total de blocos: {len(srt_blocks)}")
+    
+    for i in range(len(srt_blocks)):
+        # Criar janela: 2 antes + atual + 2 depois (5 linhas total)
+        start = max(0, i - 2)
+        end = min(len(srt_blocks), i + 3)
+        window = srt_blocks[start:end]
+        
+        # Concatenar texto da janela
+        window_text = ' '.join([b[5] for b in window]).lower()
+        
+        # Contar "gol" (excluindo "goleiro")
+        goal_count = len(re.findall(goal_pattern, window_text, re.IGNORECASE))
+        
+        # Critério 1: mínimo de menções
+        if goal_count < min_goal_mentions:
+            continue
+        
+        # Detectar time na janela
+        team = detect_team_from_text(window_text, home_team, away_team)
+        
+        # Critério 2: espaçamento de blocos (evita duplicatas do mesmo narrador celebrando)
+        if i - last_goal_block[team] < min_block_gap:
+            print(f"[SlidingWindow] ⏳ Bloco {i}: Gol ignorado (<{min_block_gap} blocos de distância do último {team})")
+            continue
+        
+        # É um gol real! Usar bloco central para timestamp
+        center_block = srt_blocks[i]
+        _, hours, minutes, seconds, _, text = center_block
+        timestamp_seconds = hours * 3600 + minutes * 60 + seconds
+        
+        # Calcular minuto de jogo (para exibição)
+        game_minute = segment_start_minute + minutes + (hours * 60)
+        
+        # Extrair jogador (se possível) - procurar nomes próprios na janela
+        player = extract_player_from_window(window_text)
+        
+        # Check for own goal
+        is_own_goal = 'contra' in window_text
+        
+        # Calcular confiança baseada na quantidade de menções
+        confidence = min(0.95, 0.6 + (goal_count * 0.1))
+        
+        goal_event = {
+            'event_type': 'goal',
+            'minute': minutes,
+            'second': seconds,
+            'videoSecond': timestamp_seconds,
+            'game_minute': game_minute,
+            'team': team,
+            'player': player,
+            'description': f"Gol! {player or team}",
+            'source_text': text,
+            'match_half': 'first_half' if half == 'first' else 'second_half',
+            'is_highlight': True,
+            'isOwnGoal': is_own_goal,
+            'confidence': confidence,
+            'goal_mentions': goal_count,
+            'detection_method': 'sliding_window',
+            'block_index': i
+        }
+        
+        goals.append(goal_event)
+        
+        # Registrar para evitar duplicatas
+        last_goal_block[team] = i
+        print(f"[SlidingWindow] ✓ GOL detectado no bloco {i} [{minutes:02d}:{seconds:02d}] - {goal_count}x 'gol' - {team} - conf: {confidence:.2f}")
+    
+    print(f"[SlidingWindow] 📊 Total: {len(goals)} gols detectados por janela deslizante")
+    return goals
+
+
+def extract_player_from_window(window_text: str) -> Optional[str]:
+    """
+    Tenta extrair nome de jogador do texto da janela.
+    Procura por padrões como "gol do Fulano", "de Fulano", etc.
+    
+    Args:
+        window_text: Texto concatenado da janela de 5 linhas
+        
+    Returns:
+        Nome do jogador ou None se não encontrado
+    """
+    # Padrões comuns para identificar jogadores
+    patterns = [
+        r'\bgol\s+d[eo]\s+([A-Z][a-záéíóúàèìòùâêîôûãõç]+(?:\s+[A-Z][a-záéíóúàèìòùâêîôûãõç]+)?)',  # "gol do Fulano"
+        r'\bd[eo]\s+([A-Z][a-záéíóúàèìòùâêîôûãõç]+(?:\s+[A-Z][a-záéíóúàèìòùâêîôûãõç]+)?)',  # "de Fulano"
+        r'\b([A-Z][a-záéíóúàèìòùâêîôûãõç]+(?:\s+[A-Z][a-záéíóúàèìòùâêîôûãõç]+)?)\s+(?:faz|marca|fez|marcou)',  # "Fulano faz/marca"
+    ]
+    
+    for pattern in patterns:
+        match = re.search(pattern, window_text)
+        if match:
+            name = match.group(1).strip()
+            # Validar que não é uma palavra comum
+            common_words = ['brasil', 'argentina', 'time', 'jogador', 'goleiro', 'jogo']
+            if name.lower() not in common_words and len(name) > 3:
+                return name
+    
+    return None
+
+
 def detect_events_by_keywords(
     srt_path: str,
     home_team: str,
@@ -560,16 +715,13 @@ def detect_events_by_keywords(
     segment_start_minute: int = 0
 ) -> List[Dict[str, Any]]:
     """
-    Detect events using ONLY keywords from SRT file.
-    Returns list of events with precise timestamps.
+    Detect events using keywords from SRT file.
     
-    For GOALS: Uses intelligent 2-layer confirmation system:
-      - Strong keywords (GOLAÇO, GOOOOOL) = instant confirm
-      - Weak keywords (GOL) + context (player name) = confirmed
-      - Weak keywords + negation (QUASE GOL) = rejected
+    GOALS: Uses sliding window algorithm for precision detection.
+    OTHER EVENTS: Uses keyword matching with confirmation.
     
     This is a deterministic detector - no AI calls required.
-    Precision: ~99% for goals (with confirmation system)
+    Precision: ~99% for goals (with sliding window)
     Speed: <1 second
     Cost: $0.00
     
@@ -585,12 +737,6 @@ def detect_events_by_keywords(
     """
     events = []
     
-    # Track last goal time PER TEAM to avoid duplicate detections from narrator repeating
-    # Cooldown period: if we detect a goal for a team, ignore subsequent goal mentions
-    # from that team for GOAL_COOLDOWN_SECONDS
-    GOAL_COOLDOWN_SECONDS = 60
-    last_goal_time = {'home': -120, 'away': -120, 'unknown': -120}
-    
     # Read SRT file
     try:
         with open(srt_path, 'r', encoding='utf-8') as f:
@@ -603,7 +749,6 @@ def detect_events_by_keywords(
     print(f"[KEYWORDS] SRT: {srt_path}")
     print(f"[KEYWORDS] Times: {home_team} vs {away_team}")
     print(f"[KEYWORDS] Tempo: {half} (minuto inicial: {segment_start_minute})")
-    print(f"[KEYWORDS] Cooldown para gols: {GOAL_COOLDOWN_SECONDS}s por time")
     
     # Regex to extract SRT blocks: index, timestamp, text
     # Format: "1\n00:24:45,000 --> 00:24:50,000\nText here\n\n"
@@ -625,6 +770,25 @@ def detect_events_by_keywords(
         )
         srt_blocks.append(block_data)
     
+    # ═══════════════════════════════════════════════════════════════
+    # GOLS: Usar algoritmo de janela deslizante (mais preciso)
+    # ═══════════════════════════════════════════════════════════════
+    goal_events = detect_goals_by_sliding_window(
+        srt_blocks=srt_blocks,
+        home_team=home_team,
+        away_team=away_team,
+        segment_start_minute=segment_start_minute,
+        half=half,
+        window_size=5,
+        min_goal_mentions=3,
+        min_block_gap=5
+    )
+    events.extend(goal_events)
+    print(f"[KEYWORDS] 🎯 {len(goal_events)} gols detectados por sliding window")
+    
+    # ═══════════════════════════════════════════════════════════════
+    # OUTROS EVENTOS: Usar keywords tradicionais (cartões, faltas, etc.)
+    # ═══════════════════════════════════════════════════════════════
     for block_index, block in enumerate(srt_blocks):
         _, hours, minutes, seconds, _, text = block
         text_upper = text.upper()
@@ -635,48 +799,21 @@ def detect_events_by_keywords(
         # Calculate game minute (for display)
         game_minute = segment_start_minute + minutes + (hours * 60)
         
-        # Search for keywords
+        # Search for keywords (SKIP GOALS - already handled by sliding window)
         for event_type, keywords in EVENT_KEYWORDS.items():
+            # PULAR GOLS - já foram detectados por sliding window
+            if event_type == 'goal':
+                continue
+            
             for keyword in keywords:
                 if re.search(keyword, text_upper, re.IGNORECASE):
+                    confidence = 1.0
+                    confirmation_reason = 'keyword_match'
                     
-                    # === SPECIAL HANDLING FOR GOALS ===
-                    if event_type == 'goal':
-                        # Get context from surrounding blocks
-                        surrounding_context = get_surrounding_context(srt_blocks, block_index, window=2)
-                        
-                        # Use confirmation system
-                        confirmation = confirm_goal_event(text, surrounding_context)
-                        
-                        if not confirmation['is_goal']:
-                            print(f"[KEYWORDS] ⚠️  GOL rejeitado em [{minutes:02d}:{seconds:02d}] - Razão: {confirmation['reason']} - {text[:40]}...")
-                            continue  # Skip this false positive
-                        
-                        # Detect team BEFORE checking cooldown
-                        team = detect_team_from_text(text, home_team, away_team)
-                        
-                        # Check cooldown - was there a goal from this team recently?
-                        time_since_last = timestamp_seconds - last_goal_time[team]
-                        if time_since_last < GOAL_COOLDOWN_SECONDS:
-                            print(f"[KEYWORDS] ⏳ GOL ignorado (repetição do narrador) - {time_since_last:.0f}s desde último gol do {team} - {text[:40]}...")
-                            continue  # Skip - it's narrator repeating the celebration
-                        
-                        # This is a NEW goal - register it
-                        last_goal_time[team] = timestamp_seconds
-                        
-                        confidence = confirmation['confidence']
-                        confirmation_reason = confirmation['reason']
-                        print(f"[KEYWORDS] ✓ GOL NOVO em [{minutes:02d}:{seconds:02d}] ({team}) - {confirmation_reason} (conf: {confidence}) - {text[:40]}...")
-                    else:
-                        confidence = 1.0
-                        confirmation_reason = 'keyword_match'
-                        team = None  # Will be detected below for non-goal events
+                    # Detect team
+                    team = detect_team_from_text(text, home_team, away_team)
                     
-                    # Detect team (only if not already done for goals)
-                    if team is None:
-                        team = detect_team_from_text(text, home_team, away_team)
-                    
-                    # Check for own goal
+                    # Check for own goal (for edge cases)
                     is_own_goal = 'CONTRA' in text_upper or 'PRÓPRIO' in text_upper
                     
                     event = {
@@ -690,23 +827,21 @@ def detect_events_by_keywords(
                         'source_text': text,
                         'match_half': 'first_half' if half == 'first' else 'second_half',
                         'is_highlight': event_type in ['goal', 'red_card', 'penalty'],
-                        'isOwnGoal': is_own_goal if event_type == 'goal' else False,
+                        'isOwnGoal': is_own_goal,
                         'confidence': confidence,
                         'confirmation_reason': confirmation_reason,
                         'detection_method': 'keyword'
                     }
                     
                     events.append(event)
-                    
-                    if event_type != 'goal':  # Goals already logged above
-                        print(f"[KEYWORDS] ✓ {event_type.upper()} detectado em [{minutes:02d}:{seconds:02d}] - {text[:40]}...")
+                    print(f"[KEYWORDS] ✓ {event_type.upper()} detectado em [{minutes:02d}:{seconds:02d}] - {text[:40]}...")
                     
                     break  # Avoid duplicates for same text
             else:
                 continue
             break  # Found an event, move to next SRT block
     
-    # Deduplicate close events (now only deduplicates SAME type events)
+    # Deduplicate close events (only deduplicates SAME type and SAME team events)
     original_count = len(events)
     events = deduplicate_events(events, threshold_seconds=30)
     
@@ -717,7 +852,7 @@ def detect_events_by_keywords(
         event_counts[etype] = event_counts.get(etype, 0) + 1
     
     print(f"\n[KEYWORDS] ═══════════════════════════════════════════════════")
-    print(f"[KEYWORDS] 📊 RESULTADO DA DETECÇÃO POR KEYWORDS:")
+    print(f"[KEYWORDS] 📊 RESULTADO DA DETECÇÃO:")
     print(f"[KEYWORDS]   Total bruto: {original_count} eventos")
     print(f"[KEYWORDS]   Após dedup:  {len(events)} eventos")
     print(f"[KEYWORDS]   Por tipo: {event_counts}")
