@@ -476,6 +476,10 @@ def validate_card_event(
     """
     Validate if a card event is REAL with advanced rules.
     
+    Para cartão vermelho, exige MÚLTIPLAS evidências de expulsão real:
+    - Palavras de expulsão (expulso, fora de campo, etc.)
+    - Ausência de condicionais (poderia, deveria, mereceu, etc.)
+    
     Args:
         text: Original text where keyword was found
         window_text: Surrounding context (2 blocks before/after)
@@ -486,6 +490,8 @@ def validate_card_event(
     Returns:
         {'is_valid': bool, 'confidence': float, 'reason': str}
     """
+    window_lower = window_text.lower()
+    
     # Filter 1: Not about another team/game
     if is_other_game_commentary(window_text, home_team, away_team):
         return {'is_valid': False, 'confidence': 0, 'reason': 'other_game'}
@@ -497,14 +503,45 @@ def validate_card_event(
         re.IGNORECASE
     ))
     
-    # Filter 3: For red card, should have "expulso" or "vermelho direto"
+    # Filter 3: For red card - VALIDAÇÃO REFORÇADA
     if card_type == 'red_card':
-        has_expulsion = any(kw in window_text.lower() for kw in [
-            'expuls', 'expulso', 'vermelho direto', 'fora de jogo', 
-            'fora de campo', 'deixa o campo', 'vai embora'
-        ])
+        # Palavras que indicam expulsão REAL
+        expulsion_keywords = [
+            'expuls', 'expulso', 'foi expulso',
+            'vermelho direto', 'cartão vermelho direto',
+            'deixa o campo', 'deixou o campo',
+            'vai pro chuveiro', 'direto pro chuveiro',
+            'fora de campo', 'fora da partida',
+            'ficou com um a menos', 'fica com um a menos',
+            'jogo com 10', 'com dez jogadores'
+        ]
+        
+        # Palavras que indicam menção HIPOTÉTICA (não expulsão real)
+        hypothetical_keywords = [
+            'poderia', 'deveria', 'mereceu', 'merecia',
+            'quase', 'por pouco', 'escapou',
+            'poderia ter sido', 'deveria ter sido',
+            'era para', 'era pra',
+            'pegou leve', 'só amarelo',
+            'podia ser vermelho', 'poderia ser vermelho'
+        ]
+        
+        # Verificar se há evidência de expulsão real
+        has_expulsion = any(kw in window_lower for kw in expulsion_keywords)
+        
+        # Verificar se é menção hipotética
+        is_hypothetical = any(kw in window_lower for kw in hypothetical_keywords)
+        
+        # Log para debug
+        print(f"[ValidateCard] Vermelho - expulsão:{has_expulsion}, hipotético:{is_hypothetical}")
+        print(f"[ValidateCard] Contexto (100 chars): {window_lower[:100]}...")
+        
+        # Rejeitar se não tem expulsão OU se é hipotético
         if not has_expulsion:
-            return {'is_valid': False, 'confidence': 0.3, 'reason': 'no_expulsion_context'}
+            return {'is_valid': False, 'confidence': 0.2, 'reason': 'no_expulsion_context'}
+        
+        if is_hypothetical:
+            return {'is_valid': False, 'confidence': 0.3, 'reason': 'hypothetical_mention'}
     
     confidence = 0.9 if has_player else 0.7
     return {'is_valid': True, 'confidence': confidence, 'reason': 'validated'}
