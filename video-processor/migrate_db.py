@@ -183,7 +183,179 @@ MIGRATIONS = [
         'type': 'TEXT',
         'default': 'NULL'
     },
+    # Upload Jobs - chunked upload system
+    {
+        'table': 'upload_jobs',
+        'column': 'match_id',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'original_filename',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'file_extension',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'file_type',
+        'type': 'TEXT',
+        'default': "'video'"
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'total_size_bytes',
+        'type': 'INTEGER',
+        'default': '0'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'chunk_size_bytes',
+        'type': 'INTEGER',
+        'default': '8388608'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'total_chunks',
+        'type': 'INTEGER',
+        'default': '1'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'received_chunks',
+        'type': 'TEXT',
+        'default': "'[]'"
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'chunks_dir',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'status',
+        'type': 'TEXT',
+        'default': "'uploading'"
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'stage',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'progress',
+        'type': 'INTEGER',
+        'default': '0'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'current_step',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'error_message',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'conversion_progress',
+        'type': 'INTEGER',
+        'default': '0'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'output_path',
+        'type': 'TEXT',
+        'default': 'NULL'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'transcription_segment_current',
+        'type': 'INTEGER',
+        'default': '0'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'transcription_segment_total',
+        'type': 'INTEGER',
+        'default': '0'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'transcription_progress',
+        'type': 'INTEGER',
+        'default': '0'
+    },
+    {
+        'table': 'upload_jobs',
+        'column': 'events_log',
+        'type': 'TEXT',
+        'default': "'[]'"
+    },
 ]
+
+
+def create_upload_jobs_table():
+    """Create upload_jobs table if it doesn't exist."""
+    if not os.path.exists(DATABASE_PATH):
+        return
+    
+    conn = sqlite3.connect(DATABASE_PATH)
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS upload_jobs (
+                id TEXT PRIMARY KEY,
+                match_id TEXT,
+                original_filename TEXT,
+                file_extension TEXT,
+                file_type TEXT DEFAULT 'video',
+                total_size_bytes INTEGER DEFAULT 0,
+                chunk_size_bytes INTEGER DEFAULT 8388608,
+                total_chunks INTEGER DEFAULT 1,
+                received_chunks TEXT DEFAULT '[]',
+                chunks_dir TEXT,
+                status TEXT DEFAULT 'uploading',
+                stage TEXT,
+                progress INTEGER DEFAULT 0,
+                current_step TEXT,
+                error_message TEXT,
+                upload_speed_bytes_per_sec INTEGER,
+                estimated_time_remaining_sec INTEGER,
+                needs_conversion BOOLEAN DEFAULT 0,
+                conversion_progress INTEGER DEFAULT 0,
+                output_path TEXT,
+                transcription_segment_current INTEGER DEFAULT 0,
+                transcription_segment_total INTEGER DEFAULT 0,
+                transcription_progress INTEGER DEFAULT 0,
+                srt_path TEXT,
+                txt_path TEXT,
+                events_log TEXT DEFAULT '[]',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                started_at TEXT,
+                completed_at TEXT,
+                paused_at TEXT
+            )
+        ''')
+        conn.commit()
+        print("  ✓ Tabela upload_jobs verificada/criada")
+    except Exception as e:
+        print(f"  ⚠ Erro ao criar upload_jobs: {e}")
+    finally:
+        conn.close()
 
 
 def create_profiles_table():
@@ -272,6 +444,7 @@ def create_transcription_jobs_table():
 # Execute table creation on import
 create_profiles_table()
 create_transcription_jobs_table()
+create_upload_jobs_table()
 
 
 def force_add_column_if_missing():

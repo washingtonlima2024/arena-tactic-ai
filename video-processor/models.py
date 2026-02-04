@@ -910,3 +910,87 @@ class CreditTransaction(Base):
             'created_by': self.created_by,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
+
+
+class UploadJob(Base):
+    """Chunked upload job for large files with resume capability."""
+    __tablename__ = 'upload_jobs'
+    
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    match_id = Column(String(36))
+    original_filename = Column(String(255))
+    file_extension = Column(String(10))
+    file_type = Column(String(20))  # 'video' or 'audio'
+    total_size_bytes = Column(Integer)
+    
+    # Chunking
+    chunk_size_bytes = Column(Integer, default=8*1024*1024)  # 8MB
+    total_chunks = Column(Integer)
+    received_chunks = Column(JSON, default=list)  # List of received indices
+    chunks_dir = Column(Text)
+    
+    # Status
+    status = Column(String(50), default='uploading')  # uploading, paused, assembling, converting, extracting, segmenting, transcribing, complete, error, cancelled
+    stage = Column(String(50))  # Detailed stage
+    progress = Column(Integer, default=0)
+    current_step = Column(String(255))
+    error_message = Column(Text)
+    
+    # Speed and time
+    upload_speed_bytes_per_sec = Column(Integer)
+    estimated_time_remaining_sec = Column(Integer)
+    
+    # Conversion
+    needs_conversion = Column(Boolean, default=False)
+    conversion_progress = Column(Integer, default=0)
+    output_path = Column(Text)
+    
+    # Transcription
+    transcription_segment_current = Column(Integer, default=0)
+    transcription_segment_total = Column(Integer, default=0)
+    transcription_progress = Column(Integer, default=0)
+    srt_path = Column(Text)
+    txt_path = Column(Text)
+    
+    # Event log
+    events_log = Column(JSON, default=list)
+    
+    # Timestamps
+    created_at = Column(DateTime, default=datetime.utcnow)
+    started_at = Column(DateTime)
+    completed_at = Column(DateTime)
+    paused_at = Column(DateTime)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'match_id': self.match_id,
+            'original_filename': self.original_filename,
+            'file_extension': self.file_extension,
+            'file_type': self.file_type,
+            'total_size_bytes': self.total_size_bytes,
+            'chunk_size_bytes': self.chunk_size_bytes,
+            'total_chunks': self.total_chunks,
+            'received_chunks': self.received_chunks,
+            'chunks_dir': self.chunks_dir,
+            'status': self.status,
+            'stage': self.stage,
+            'progress': self.progress,
+            'current_step': self.current_step,
+            'error_message': self.error_message,
+            'upload_speed_bytes_per_sec': self.upload_speed_bytes_per_sec,
+            'estimated_time_remaining_sec': self.estimated_time_remaining_sec,
+            'needs_conversion': self.needs_conversion,
+            'conversion_progress': self.conversion_progress,
+            'output_path': self.output_path,
+            'transcription_segment_current': self.transcription_segment_current,
+            'transcription_segment_total': self.transcription_segment_total,
+            'transcription_progress': self.transcription_progress,
+            'srt_path': self.srt_path,
+            'txt_path': self.txt_path,
+            'events_log': self.events_log,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'started_at': self.started_at.isoformat() if self.started_at else None,
+            'completed_at': self.completed_at.isoformat() if self.completed_at else None,
+            'paused_at': self.paused_at.isoformat() if self.paused_at else None
+        }
