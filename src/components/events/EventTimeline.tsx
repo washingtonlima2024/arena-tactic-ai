@@ -30,14 +30,14 @@ const eventBadgeVariants: Record<string, any> = {
   shot_on_target: 'shot',
   save: 'save',
   foul: 'foul',
-  yellow_card: 'foul',
-  red_card: 'foul',
+  yellow_card: 'card-yellow',  // Amarelo para cartão amarelo
+  red_card: 'foul',  // Laranja para red_card (convertido para falta)
   offside: 'offside',
 };
 
-// Normaliza tipos de evento para exibição (red_card/yellow_card → foul)
+// Normaliza tipos de evento apenas para red_card → foul (yellow_card mantém label próprio)
 const normalizeEventType = (type: string): string => {
-  if (type === 'red_card' || type === 'yellow_card') return 'foul';
+  if (type === 'red_card') return 'foul';
   return type;
 };
 
@@ -216,8 +216,8 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
                   {isHighlight && (
                     <Star className="h-4 w-4 fill-yellow-500 text-yellow-500" />
                   )}
-                  <Badge variant={isHighlight ? 'highlight' : (eventBadgeVariants[normalizeEventType(event.type)] || 'secondary')}>
-                    {getEventLabel(normalizeEventType(event.type))}
+                  <Badge variant={isHighlight ? 'highlight' : (eventBadgeVariants[event.type] || 'secondary')}>
+                    {getEventLabel(event.type === 'red_card' ? 'foul' : event.type)}
                   </Badge>
                   {team && (
                     <div className="flex items-center gap-1.5">
