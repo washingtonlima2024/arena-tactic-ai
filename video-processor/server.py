@@ -3768,39 +3768,73 @@ def analyze_match():
         goal_events = [e for e in events if e.get('event_type') == 'goal']
         
         for goal in goal_events:
-            team = goal.get('team', 'home')
+            team = goal.get('team', 'unknown')  # Changed default from 'home' to 'unknown'
             is_own_goal = goal.get('isOwnGoal', False)
             description = (goal.get('description') or '').lower()
+            video_second = goal.get('videoSecond', goal.get('minute', 0) * 60)
+            
+            # DETAILED LOGGING for score attribution debugging
+            print(f"[SCORE] ═══════════════════════════════════════")
+            print(f"[SCORE] 🔍 Analisando gol @ {video_second}s:")
+            print(f"[SCORE]   team field: '{team}'")
+            print(f"[SCORE]   description: '{description[:60]}...'")
+            print(f"[SCORE]   isOwnGoal: {is_own_goal}")
             
             # Determine which team scored based on 'team' field and 'isOwnGoal' flag
             if is_own_goal:
                 # Own goal: point goes to the OPPOSING team
                 if team == 'home':
                     away_score += 1
-                    print(f"[SCORE] Gol contra do {home_team} -> +1 para {away_team}")
+                    print(f"[SCORE]   ⚽ Gol contra do {home_team} -> +1 para {away_team}")
                 else:
                     home_score += 1
-                    print(f"[SCORE] Gol contra do {away_team} -> +1 para {home_team}")
+                    print(f"[SCORE]   ⚽ Gol contra do {away_team} -> +1 para {home_team}")
             else:
                 # Regular goal: point goes to the scoring team
                 if team == 'home':
                     home_score += 1
-                    print(f"[SCORE] Gol do {home_team} -> +1 para {home_team}")
+                    print(f"[SCORE]   ⚽ Gol do {home_team} -> +1 para {home_team}")
                 elif team == 'away':
                     away_score += 1
-                    print(f"[SCORE] Gol do {away_team} -> +1 para {away_team}")
+                    print(f"[SCORE]   ⚽ Gol do {away_team} -> +1 para {away_team}")
                 else:
-                    # Fallback: try to infer from description
-                    if home_team.lower() in description:
+                    # Team is 'unknown' - try to infer from description using team names and aliases
+                    home_lower = home_team.lower()
+                    away_lower = away_team.lower()
+                    
+                    # Import aliases for better matching
+                    from ai_services import TEAM_ALIASES
+                    
+                    # Build variants for home team
+                    home_variants = [home_lower] + [w for w in home_lower.split() if len(w) > 3]
+                    for key, aliases in TEAM_ALIASES.items():
+                        if key in home_lower or home_lower in key:
+                            home_variants.extend([a.lower() for a in aliases])
+                    
+                    # Build variants for away team
+                    away_variants = [away_lower] + [w for w in away_lower.split() if len(w) > 3]
+                    for key, aliases in TEAM_ALIASES.items():
+                        if key in away_lower or away_lower in key:
+                            away_variants.extend([a.lower() for a in aliases])
+                    
+                    # Check if any variant matches in description
+                    home_match = any(v in description for v in home_variants if len(v) > 3)
+                    away_match = any(v in description for v in away_variants if len(v) > 3)
+                    
+                    if home_match and not away_match:
                         home_score += 1
-                        print(f"[SCORE] Gol inferido do {home_team} via descrição")
-                    elif away_team.lower() in description:
+                        print(f"[SCORE]   ⚽ Gol inferido do {home_team} via descrição")
+                    elif away_match and not home_match:
                         away_score += 1
-                        print(f"[SCORE] Gol inferido do {away_team} via descrição")
+                        print(f"[SCORE]   ⚽ Gol inferido do {away_team} via descrição")
                     else:
-                        # Last resort: default to home
-                        home_score += 1
-                        print(f"[SCORE] Gol sem time identificado, atribuído ao mandante")
+                        # CRITICAL: Do NOT default to home - mark as unattributed
+                        print(f"[SCORE]   ⚠️ AVISO: Gol não pôde ser atribuído a nenhum time!")
+                        print(f"[SCORE]   Home variants: {home_variants[:5]}")
+                        print(f"[SCORE]   Away variants: {away_variants[:5]}")
+                        print(f"[SCORE]   Descrição: '{description}'")
+                        # We skip this goal instead of defaulting to home to avoid wrong scores
+                        print(f"[SCORE]   ❌ Gol IGNORADO no placar (verifique transcrição)")
         
         print(f"[ANALYZE-MATCH] ═══════════════════════════════════════")
         print(f"[ANALYZE-MATCH] PLACAR VALIDADO: {home_team} {home_score} x {away_score} {away_team}")
@@ -3839,6 +3873,16 @@ def analyze_match():
         except Exception as del_err:
             print(f"[ANALYZE-MATCH] ⚠️ Erro ao remover eventos antigos: {del_err}")
             session.rollback()
+        
+        # CROSS-HALF DEDUPLICATION: Check for existing events in OTHER halves
+        # This prevents duplicate goals when analyzing full match that was already analyzed per-half
+        try:
+            existing_events = session.query(MatchEvent).filter_by(match_id=match_id).all()
+            print(f"[ANALYZE-MATCH] 🔍 Verificando duplicatas cross-half ({len(existing_events)} eventos existentes)")
+        except Exception as e:
+            print(f"[ANALYZE-MATCH] ⚠️ Erro ao buscar eventos existentes: {e}")
+            existing_events = []
+        
         try:
             for event_data in events:
                 # Validate and ensure 'second' exists (CRITICAL for precise clips)
@@ -3857,6 +3901,27 @@ def analyze_match():
                 raw_minute = event_data.get('minute', 0)
                 if half_type == 'second' and raw_minute < 45:
                     raw_minute = raw_minute + 45
+                
+                # CROSS-HALF DEDUPLICATION CHECK
+                # Skip this event if a similar one already exists in ANY half
+                event_type_new = event_data.get('event_type', 'unknown')
+                event_team_new = event_data.get('team', 'unknown')
+                is_duplicate = False
+                
+                for existing in existing_events:
+                    # Check same type, same team (or both unknown), within ±2 minutes
+                    if existing.event_type == event_type_new:
+                        existing_team = (existing.event_metadata or {}).get('team', 'unknown') if existing.event_metadata else 'unknown'
+                        minute_diff = abs((existing.minute or 0) - raw_minute)
+                        
+                        # Same type + same team + within 2 minutes = duplicate
+                        if minute_diff <= 2 and (existing_team == event_team_new or existing_team == 'unknown' or event_team_new == 'unknown'):
+                            is_duplicate = True
+                            print(f"[ANALYZE-MATCH] ⚠️ Duplicata cross-half ignorada: {event_type_new} ({event_team_new}) @ {raw_minute}' (existente: {existing.minute}')")
+                            break
+                
+                if is_duplicate:
+                    continue
                 
                 # Calculate videoSecond for precise clip extraction
                 original_minute = event_data.get('minute', 0)
