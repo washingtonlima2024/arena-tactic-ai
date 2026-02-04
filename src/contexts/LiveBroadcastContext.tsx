@@ -2184,6 +2184,39 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
         description: "Nenhuma partida em andamento",
         variant: "destructive",
       });
+      // Reset clip state
+      setIsClipRecording(false);
+      setClipStartTime(null);
+      setClipEventType(null);
+      return;
+    }
+    
+    // Check if we have ANY video chunks available
+    const hasAnyChunks = allVideoChunksRef.current.length > 0 || 
+                         clipVideoChunksRef.current.length > 0 || 
+                         videoChunksRef.current.length > 0;
+    
+    // Warn if recording is too short (less than 3 seconds)
+    if (duration < 3) {
+      toast({
+        title: "Clip muito curto",
+        description: "Aguarde pelo menos 3 segundos antes de finalizar",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    // Warn if no video is being captured but continue anyway
+    if (!hasAnyChunks && recordingTimeRef.current < 15) {
+      toast({
+        title: "⏳ Aguarde mais um pouco",
+        description: "O vídeo ainda está sendo capturado. Tente novamente em alguns segundos.",
+        variant: "destructive",
+      });
+      // Reset clip state so user can try again
+      setIsClipRecording(false);
+      setClipStartTime(null);
+      setClipEventType(null);
       return;
     }
     
@@ -2255,8 +2288,14 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       };
       setApprovedEvents((prev) => [...prev, newEvent]);
       
+      // Debug: Log available chunks before trying to create clip
+      console.log(`[ManualClip] Clip window: ${clipStartTime}s - ${clipEndTime}s (${duration}s)`);
+      console.log(`[ManualClip] Available: clipVideoChunks=${clipVideoChunksRef.current.length}, allChunks=${allVideoChunksRef.current.length}, videoChunks=${videoChunksRef.current.length}`);
+      console.log(`[ManualClip] SegmentBuffer exists: ${!!segmentBufferRef.current}`);
+      
       // Extract clip from buffer - try multiple sources
       let clipBlob: Blob | null = null;
+      let clipSource = '';
       
       // Method 1: Use clipVideoChunksRef (more precise timestamps)
       const matchingChunks = clipVideoChunksRef.current.filter(chunk => {
@@ -2266,60 +2305,96 @@ export function LiveBroadcastProvider({ children }: { children: ReactNode }) {
       
       if (matchingChunks.length > 0) {
         clipBlob = new Blob(matchingChunks.map(c => c.blob), { type: 'video/webm' });
-        console.log(`[ManualClip] Created blob from ${matchingChunks.length} timestamped chunks: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
+        clipSource = 'timestamped-chunks';
+        console.log(`[ManualClip] Method 1 - ${matchingChunks.length} timestamped chunks: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
       }
       
       // Method 2: Fall back to segment buffer
       if (!clipBlob || clipBlob.size < 1000) {
-        clipBlob = segmentBufferRef.current?.getBlobForTimeRange(clipStartTime, clipEndTime) || null;
-        if (clipBlob) {
-          console.log(`[ManualClip] Fallback to segment buffer: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
+        const bufferBlob = segmentBufferRef.current?.getBlobForTimeRange(clipStartTime, clipEndTime);
+        if (bufferBlob && bufferBlob.size > (clipBlob?.size || 0)) {
+          clipBlob = bufferBlob;
+          clipSource = 'segment-buffer';
+          console.log(`[ManualClip] Method 2 - Segment buffer: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
         }
       }
       
-      // Method 3: Use all video chunks if buffer methods fail
+      // Method 3: Use current video chunks (accumulated since last save)
+      if (!clipBlob || clipBlob.size < 1000) {
+        if (videoChunksRef.current.length > 0) {
+          const tempBlob = new Blob(videoChunksRef.current, { type: 'video/webm' });
+          if (tempBlob.size > (clipBlob?.size || 0)) {
+            clipBlob = tempBlob;
+            clipSource = 'video-chunks';
+            console.log(`[ManualClip] Method 3 - videoChunksRef: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
+          }
+        }
+      }
+      
+      // Method 4: Use all video chunks if buffer methods fail
       if (!clipBlob || clipBlob.size < 1000) {
         if (allVideoChunksRef.current.length > 0) {
-          clipBlob = new Blob(allVideoChunksRef.current, { type: 'video/webm' });
-          console.log(`[ManualClip] Fallback to all chunks: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
+          const tempBlob = new Blob(allVideoChunksRef.current, { type: 'video/webm' });
+          if (tempBlob.size > (clipBlob?.size || 0)) {
+            clipBlob = tempBlob;
+            clipSource = 'all-chunks';
+            console.log(`[ManualClip] Method 4 - All chunks: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
+          }
         }
       }
       
-      if (clipBlob && clipBlob.size > 1000) {
-        console.log(`[ManualClip] Uploading clip: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
+      // Minimum valid size: 10KB (very small but usable)
+      const MIN_CLIP_SIZE = 10 * 1024;
+      
+      if (clipBlob && clipBlob.size >= MIN_CLIP_SIZE) {
+        console.log(`[ManualClip] ✅ Uploading clip from ${clipSource}: ${(clipBlob.size / 1024 / 1024).toFixed(2)}MB`);
         
         // Upload the clip
-        const clipResult = await apiClient.uploadBlob(
-          matchId, 
-          'clips', 
-          clipBlob, 
-          `clip_${eventId}.webm`
-        );
-        
-        if (clipResult?.url) {
-          // Update event with clip URL
-          await apiClient.updateEvent(eventId, {
-            clip_url: clipResult.url,
-            clip_pending: false
-          });
-          
-          // Update local event
-          setApprovedEvents((prev) => 
-            prev.map(e => e.id === eventId ? { ...e, clipUrl: clipResult.url } : e)
+        try {
+          const clipResult = await apiClient.uploadBlob(
+            matchId, 
+            'clips', 
+            clipBlob, 
+            `clip_${eventId}.webm`
           );
           
-          console.log(`[ManualClip] ✅ Clip uploaded: ${clipResult.url}`);
-          
+          if (clipResult?.url) {
+            // Update event with clip URL
+            await apiClient.updateEvent(eventId, {
+              clip_url: clipResult.url,
+              clip_pending: false
+            });
+            
+            // Update local event
+            setApprovedEvents((prev) => 
+              prev.map(e => e.id === eventId ? { ...e, clipUrl: clipResult.url } : e)
+            );
+            
+            console.log(`[ManualClip] ✅ Clip uploaded: ${clipResult.url}`);
+            
+            toast({
+              title: "✅ Clip salvo!",
+              description: `${description} - pronto para compartilhar`,
+            });
+          } else {
+            throw new Error('Upload returned no URL');
+          }
+        } catch (uploadError) {
+          console.error('[ManualClip] Upload failed:', uploadError);
           toast({
-            title: "Clip criado!",
-            description: `${description} salvo com sucesso`,
+            title: "Erro no upload",
+            description: "Clip será regenerado na análise pós-live",
+            variant: "destructive",
           });
         }
       } else {
-        console.log('[ManualClip] ⚠️ No blob available, clip will be generated post-live');
+        const availableSize = clipBlob?.size || 0;
+        console.log(`[ManualClip] ⚠️ No valid blob available (size: ${availableSize} bytes, need: ${MIN_CLIP_SIZE})`);
+        console.log('[ManualClip] Possible causes: Recording just started, codec not supported, or stream not captured');
+        
         toast({
           title: "Evento marcado",
-          description: `${description} - clip será gerado na análise pós-live`,
+          description: `${description} - clip será gerado quando mais vídeo for gravado`,
         });
       }
       
