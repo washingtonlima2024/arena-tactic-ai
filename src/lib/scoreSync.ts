@@ -8,9 +8,15 @@ interface ScoreSyncResult {
   updated: boolean;
 }
 
+interface GoalEvent {
+  metadata?: any;
+  description?: string | null;
+}
+
 /**
  * Synchronizes match score from goal events.
  * Respects score_locked flag unless force is true.
+ * Fetches events from local server first, then fallback to Supabase.
  * 
  * @param matchId - The match ID to sync
  * @param force - If true, updates even if score is locked
@@ -44,16 +50,26 @@ export async function syncMatchScoreFromEvents(
       };
     }
 
-    // 2. Fetch all goal events for this match
-    const { data: goalEvents, error: eventsError } = await supabase
-      .from('match_events')
-      .select('metadata, description')
-      .eq('match_id', matchId)
-      .eq('event_type', 'goal');
+    // 2. Fetch goal events - try local server first, then Supabase
+    let goalEvents: GoalEvent[] = [];
+    
+    try {
+      const localEvents = await apiClient.getMatchEvents(matchId);
+      goalEvents = (localEvents || []).filter((e: any) => e.event_type === 'goal');
+      console.log(`[ScoreSync] Found ${goalEvents.length} goals from local server`);
+    } catch (localError) {
+      console.log('[ScoreSync] Local server unavailable, trying Supabase...');
+      const { data: supabaseEvents, error: eventsError } = await supabase
+        .from('match_events')
+        .select('metadata, description')
+        .eq('match_id', matchId)
+        .eq('event_type', 'goal');
 
-    if (eventsError) {
-      console.error('Error fetching goal events:', eventsError);
-      return null;
+      if (eventsError) {
+        console.error('Error fetching goal events:', eventsError);
+        return null;
+      }
+      goalEvents = supabaseEvents || [];
     }
 
     // 3. Get team names to help identify teams
