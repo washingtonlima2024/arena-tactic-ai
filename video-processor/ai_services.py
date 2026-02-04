@@ -4453,11 +4453,36 @@ Formato obrigatório:
                     srt_folder = get_subfolder_path(match_id, 'srt')
                     srt_files = list(srt_folder.glob('*.srt')) if srt_folder.exists() else []
                     
+                    # 🔧 Filtrar SRT pelo tempo correto (match_half)
+                    print(f"[Ollama] 📂 SRTs disponíveis: {[f.name for f in srt_files]}")
+                    print(f"[Ollama] 🎯 Buscando SRT para tempo: {match_half}")
+                    
+                    target_srt = None
                     if srt_files:
-                        # Usar primeiro SRT encontrado (sliding window - mais preciso)
-                        print(f"[Ollama] Usando SRT: {srt_files[0].name}")
+                        # Prioridade: arquivo específico do tempo
+                        srt_patterns = [
+                            f'{match_half}_half.srt',           # second_half.srt
+                            f'{match_half}_transcription.srt',  # second_transcription.srt
+                            f'{match_half}.srt',                # second.srt
+                        ]
+                        
+                        for pattern in srt_patterns:
+                            for srt_file in srt_files:
+                                if pattern in srt_file.name.lower():
+                                    target_srt = srt_file
+                                    break
+                            if target_srt:
+                                break
+                        
+                        # Fallback: usar qualquer SRT se só existe um
+                        if not target_srt and len(srt_files) == 1:
+                            target_srt = srt_files[0]
+                            print(f"[Ollama] ⚠️ Usando único SRT disponível: {target_srt.name}")
+                    
+                    if target_srt:
+                        print(f"[Ollama] ✓ Usando SRT do {match_half}: {target_srt.name}")
                         keyword_events = detect_events_by_keywords(
-                            srt_path=str(srt_files[0]),
+                            srt_path=str(target_srt),
                             home_team=home_team,
                             away_team=away_team,
                             half=match_half,
