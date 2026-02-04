@@ -199,6 +199,219 @@ def get_team_variants(team_name: str) -> set:
     return variants
 
 
+def detect_goal_author(
+    window_text: str,
+    home_team: str,
+    away_team: str,
+    home_color: str = None,
+    away_color: str = None
+) -> Dict[str, Any]:
+    """
+    Detecta o AUTOR do gol usando análise de PROXIMIDADE textual.
+    
+    Esta função resolve o problema de atribuir gols ao time errado quando
+    ambos os times são mencionados na mesma janela de contexto.
+    
+    Ex: "Gol do Brasil! Brasil vence Argentina por 2 a 0!"
+    → O padrão "gol do Brasil" é detectado com certeza absoluta
+    → Argentina é ignorada (distante do "gol")
+    
+    Prioridades:
+    1. Padrão "gol do/de [TEAM]" - certeza absoluta (confidence=1.0)
+    2. Padrão "[TEAM] marca/marcou/faz/fez gol" (confidence=0.95)
+    3. Proximidade: time mencionado mais perto de "gol" (confidence=0.85)
+    4. Contagem: time mais mencionado (confidence=0.7)
+    5. Unknown - SEM fallback arbitrário (confidence=0.0)
+    
+    Args:
+        window_text: Texto concatenado da janela de 5 linhas SRT
+        home_team: Nome do time da casa
+        away_team: Nome do time visitante
+        home_color: Cor primária do home (opcional, para futura validação visual)
+        away_color: Cor primária do away (opcional, para futura validação visual)
+    
+    Returns:
+        {
+            'team': 'home' | 'away' | 'unknown',
+            'confidence': 0.0-1.0,
+            'method': 'pattern' | 'proximity' | 'count' | 'fallback',
+            'details': str
+        }
+    """
+    text_lower = window_text.lower()
+    
+    home_variants = get_team_variants(home_team)
+    away_variants = get_team_variants(away_team)
+    
+    # ═══════════════════════════════════════════════════════════════
+    # PRIORIDADE 1: Padrão "gol do/de [TEAM]"
+    # Certeza absoluta - o time logo após "gol do" é o autor
+    # Suporta: gol do, gol de, gol da, golaço do, golaço de
+    # ═══════════════════════════════════════════════════════════════
+    gol_de_patterns = [
+        r'go+l(?:aço)?\s+(?:d[eo]|da|dos|das)\s+(\w+(?:\s+\w+)?)',  # gol do/de/da X
+        r'é\s+go+l\s+(?:d[eo]|da)\s+(\w+)',  # é gol do X
+    ]
+    
+    for pattern in gol_de_patterns:
+        match = re.search(pattern, text_lower)
+        if match:
+            team_mentioned = match.group(1).strip()
+            
+            # Verificar se é home
+            for variant in home_variants:
+                if variant in team_mentioned or team_mentioned in variant:
+                    print(f"[GoalAuthor] ✓ Padrão direto: 'gol do {team_mentioned}' → HOME")
+                    return {
+                        'team': 'home',
+                        'confidence': 1.0,
+                        'method': 'pattern',
+                        'details': f'Matched "gol do {team_mentioned}" → home'
+                    }
+            
+            # Verificar se é away
+            for variant in away_variants:
+                if variant in team_mentioned or team_mentioned in variant:
+                    print(f"[GoalAuthor] ✓ Padrão direto: 'gol do {team_mentioned}' → AWAY")
+                    return {
+                        'team': 'away',
+                        'confidence': 1.0,
+                        'method': 'pattern',
+                        'details': f'Matched "gol do {team_mentioned}" → away'
+                    }
+    
+    # ═══════════════════════════════════════════════════════════════
+    # PRIORIDADE 2: Padrão "[TEAM] marca/marcou/faz/fez gol"
+    # ═══════════════════════════════════════════════════════════════
+    action_verbs = r'(?:marca|marcou|faz|fez|anota|anotou|abre|abriu|amplia|empata|empatou|vira|virou)'
+    
+    for variant in home_variants:
+        if len(variant) < 3:
+            continue
+        pattern = rf'\b{re.escape(variant)}\b\s+{action_verbs}'
+        if re.search(pattern, text_lower):
+            print(f"[GoalAuthor] ✓ Padrão ação: '{variant} [verbo]' → HOME")
+            return {
+                'team': 'home',
+                'confidence': 0.95,
+                'method': 'pattern',
+                'details': f'{variant} marca/faz → home'
+            }
+    
+    for variant in away_variants:
+        if len(variant) < 3:
+            continue
+        pattern = rf'\b{re.escape(variant)}\b\s+{action_verbs}'
+        if re.search(pattern, text_lower):
+            print(f"[GoalAuthor] ✓ Padrão ação: '{variant} [verbo]' → AWAY")
+            return {
+                'team': 'away',
+                'confidence': 0.95,
+                'method': 'pattern',
+                'details': f'{variant} marca/faz → away'
+            }
+    
+    # ═══════════════════════════════════════════════════════════════
+    # PRIORIDADE 3: Proximidade textual ao "gol"
+    # O time mencionado MAIS PERTO de "gol" é o autor
+    # ═══════════════════════════════════════════════════════════════
+    words = text_lower.split()
+    gol_indices = [i for i, w in enumerate(words) if re.match(r'go+l', w)]
+    
+    if gol_indices:
+        gol_pos = gol_indices[0]  # Usar primeira ocorrência de "gol"
+        
+        home_distance = float('inf')
+        away_distance = float('inf')
+        home_matched_word = None
+        away_matched_word = None
+        
+        # Encontrar distância do time home ao "gol"
+        for i, word in enumerate(words):
+            for variant in home_variants:
+                if len(variant) < 3:
+                    continue
+                if variant in word or word in variant:
+                    dist = abs(i - gol_pos)
+                    if dist < home_distance:
+                        home_distance = dist
+                        home_matched_word = word
+                    break
+        
+        # Encontrar distância do time away ao "gol"
+        for i, word in enumerate(words):
+            for variant in away_variants:
+                if len(variant) < 3:
+                    continue
+                if variant in word or word in variant:
+                    dist = abs(i - gol_pos)
+                    if dist < away_distance:
+                        away_distance = dist
+                        away_matched_word = word
+                    break
+        
+        # Se um está significativamente mais perto (2+ palavras de diferença)
+        if home_distance < away_distance and (away_distance - home_distance) >= 2:
+            print(f"[GoalAuthor] ✓ Proximidade: '{home_matched_word}' dist={home_distance} vs away dist={away_distance} → HOME")
+            return {
+                'team': 'home',
+                'confidence': 0.85,
+                'method': 'proximity',
+                'details': f'home_dist={home_distance} ({home_matched_word}), away_dist={away_distance}'
+            }
+        if away_distance < home_distance and (home_distance - away_distance) >= 2:
+            print(f"[GoalAuthor] ✓ Proximidade: '{away_matched_word}' dist={away_distance} vs home dist={home_distance} → AWAY")
+            return {
+                'team': 'away',
+                'confidence': 0.85,
+                'method': 'proximity',
+                'details': f'away_dist={away_distance} ({away_matched_word}), home_dist={home_distance}'
+            }
+    
+    # ═══════════════════════════════════════════════════════════════
+    # PRIORIDADE 4: Contagem - time mais mencionado
+    # ═══════════════════════════════════════════════════════════════
+    home_count = 0
+    away_count = 0
+    
+    for variant in home_variants:
+        if len(variant) >= 3:
+            home_count += len(re.findall(rf'\b{re.escape(variant)}\b', text_lower))
+    
+    for variant in away_variants:
+        if len(variant) >= 3:
+            away_count += len(re.findall(rf'\b{re.escape(variant)}\b', text_lower))
+    
+    if home_count > away_count:
+        print(f"[GoalAuthor] ✓ Contagem: home={home_count} > away={away_count} → HOME")
+        return {
+            'team': 'home',
+            'confidence': 0.7,
+            'method': 'count',
+            'details': f'home_count={home_count}, away_count={away_count}'
+        }
+    if away_count > home_count:
+        print(f"[GoalAuthor] ✓ Contagem: away={away_count} > home={home_count} → AWAY")
+        return {
+            'team': 'away',
+            'confidence': 0.7,
+            'method': 'count',
+            'details': f'away_count={away_count}, home_count={home_count}'
+        }
+    
+    # ═══════════════════════════════════════════════════════════════
+    # PRIORIDADE 5: Unknown (SEM fallback arbitrário para 'home')
+    # Isso evita atribuição errada quando não conseguimos determinar
+    # ═══════════════════════════════════════════════════════════════
+    print(f"[GoalAuthor] ⚠ Não foi possível determinar time (home_count={home_count}, away_count={away_count})")
+    return {
+        'team': 'unknown',
+        'confidence': 0.0,
+        'method': 'fallback',
+        'details': f'Could not determine team (home_count={home_count}, away_count={away_count})'
+    }
+
+
 def is_other_game_commentary(
     window_text: str,
     home_team: str,
@@ -1047,8 +1260,12 @@ def detect_goals_by_sliding_window(
             print(f"[SlidingWindow] ⚠ Bloco {i}: Gol ignorado (frase de outro jogo detectada)")
             continue
         
-        # Detectar time na janela
-        team = detect_team_from_text(window_text, home_team, away_team)
+        # Detectar time na janela usando ANÁLISE DE PROXIMIDADE
+        # Isso evita atribuir gols ao time errado quando ambos são mencionados
+        goal_author_result = detect_goal_author(window_text, home_team, away_team)
+        team = goal_author_result['team']
+        goal_confidence = goal_author_result['confidence']
+        goal_method = goal_author_result['method']
         
         # Critério 2: espaçamento de blocos (evita duplicatas do mesmo narrador celebrando)
         if i - last_goal_block[team] < min_block_gap:
@@ -1069,8 +1286,10 @@ def detect_goals_by_sliding_window(
         # Check for own goal
         is_own_goal = 'contra' in window_text
         
-        # Calcular confiança baseada na quantidade de menções
-        confidence = min(0.95, 0.6 + (goal_count * 0.1))
+        # Calcular confiança COMBINADA: menções + atribuição de time
+        mention_confidence = min(0.95, 0.6 + (goal_count * 0.1))
+        # Usar o menor entre confiança de menções e confiança de atribuição
+        confidence = min(mention_confidence, goal_confidence) if goal_confidence > 0 else mention_confidence * 0.8
         
         goal_event = {
             'event_type': 'goal',
@@ -1088,6 +1307,7 @@ def detect_goals_by_sliding_window(
             'confidence': confidence,
             'goal_mentions': goal_count,
             'detection_method': 'sliding_window',
+            'team_attribution_method': goal_method,  # pattern, proximity, count, fallback
             'block_index': i
         }
         
@@ -1095,7 +1315,7 @@ def detect_goals_by_sliding_window(
         
         # Registrar para evitar duplicatas
         last_goal_block[team] = i
-        print(f"[SlidingWindow] ✓ GOL detectado no bloco {i} [{minutes:02d}:{seconds:02d}] - {goal_count}x 'gol' - {team} - conf: {confidence:.2f}")
+        print(f"[SlidingWindow] ✓ GOL detectado no bloco {i} [{minutes:02d}:{seconds:02d}] - {goal_count}x 'gol' - {team} ({goal_method}) - conf: {confidence:.2f}")
     
     print(f"[SlidingWindow] 📊 Total: {len(goals)} gols detectados por janela deslizante")
     return goals
