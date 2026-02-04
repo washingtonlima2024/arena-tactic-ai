@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
-import { apiClient } from '@/lib/apiClient';
+import { apiClient, isLocalServerAvailable } from '@/lib/apiClient';
+import { supabase } from '@/integrations/supabase/client';
 
 export interface Match {
   id: string;
@@ -22,7 +23,29 @@ export function useMatches() {
   return useQuery({
     queryKey: ['matches'],
     queryFn: async () => {
-      return await apiClient.getMatches() as Match[];
+      // Try local server first, fallback to Supabase
+      const serverAvailable = await isLocalServerAvailable();
+      
+      if (serverAvailable) {
+        try {
+          return await apiClient.getMatches() as Match[];
+        } catch (error) {
+          console.warn('[useMatches] Servidor local falhou, usando Supabase:', error);
+        }
+      }
+      
+      // Fallback to Supabase
+      const { data, error } = await supabase
+        .from('matches')
+        .select(`
+          *,
+          home_team:teams!matches_home_team_id_fkey(id, name, short_name, primary_color, secondary_color, logo_url),
+          away_team:teams!matches_away_team_id_fkey(id, name, short_name, primary_color, secondary_color, logo_url)
+        `)
+        .order('created_at', { ascending: false });
+      
+      if (error) throw error;
+      return data as Match[];
     },
   });
 }
@@ -39,10 +62,40 @@ export function useCreateMatch() {
       venue?: string;
     }) => {
       const payload = { ...matchData, status: 'analyzing' };
-      return await apiClient.createMatch(payload);
+      
+      // Try local server first
+      const serverAvailable = await isLocalServerAvailable();
+      
+      if (serverAvailable) {
+        try {
+          const result = await apiClient.createMatch(payload);
+          return result;
+        } catch (error) {
+          console.warn('[useCreateMatch] Servidor local falhou, usando Supabase:', error);
+        }
+      }
+      
+      // Fallback to Supabase
+      console.log('[useCreateMatch] Criando partida diretamente no Supabase');
+      const { data, error } = await supabase
+        .from('matches')
+        .insert(payload)
+        .select(`
+          *,
+          home_team:teams!matches_home_team_id_fkey(id, name, short_name, primary_color, secondary_color, logo_url),
+          away_team:teams!matches_away_team_id_fkey(id, name, short_name, primary_color, secondary_color, logo_url)
+        `)
+        .single();
+      
+      if (error) throw error;
+      return data;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['matches'] });
+      toast({
+        title: 'Partida criada',
+        description: 'A partida foi criada com sucesso.',
+      });
     },
     onError: (error: Error) => {
       toast({
