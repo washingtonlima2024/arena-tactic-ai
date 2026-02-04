@@ -11,6 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
   Select,
   SelectContent,
@@ -90,6 +91,7 @@ export function EventEditDialog({
   const [playerName, setPlayerName] = useState('');
   const [positionX, setPositionX] = useState('');
   const [positionY, setPositionY] = useState('');
+  const [isOwnGoal, setIsOwnGoal] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isApproving, setIsApproving] = useState(false);
@@ -104,6 +106,7 @@ export function EventEditDialog({
       setPlayerName('');
       setPositionX('');
       setPositionY('');
+      setIsOwnGoal((event.metadata as { isOwnGoal?: boolean })?.isOwnGoal || false);
     }
   }, [event, homeTeam]);
 
@@ -137,6 +140,7 @@ export function EventEditDialog({
           metadata: { 
             team, 
             player: playerName || undefined,
+            isOwnGoal: eventType === 'goal' ? isOwnGoal : undefined,
             aiGenerated: false, 
             manual: true 
           },
@@ -166,6 +170,7 @@ export function EventEditDialog({
           metadata: { 
             team, 
             player: playerName || undefined,
+            isOwnGoal: eventType === 'goal' ? isOwnGoal : undefined,
             aiGenerated: false, 
             edited: true 
           },
@@ -405,6 +410,26 @@ export function EventEditDialog({
               </SelectContent>
             </Select>
           </div>
+
+          {/* Own Goal Checkbox - Only for goals */}
+          {eventType === 'goal' && (
+            <div className="flex items-start space-x-3 rounded-lg border border-orange-500/30 bg-orange-500/10 p-4">
+              <Checkbox
+                id="isOwnGoal"
+                checked={isOwnGoal}
+                onCheckedChange={(checked) => setIsOwnGoal(checked === true)}
+                className="mt-0.5"
+              />
+              <div className="space-y-1">
+                <Label htmlFor="isOwnGoal" className="font-medium cursor-pointer">
+                  Gol Contra
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  Marque se foi gol contra (beneficia o outro time)
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Player Name */}
           <div className="space-y-2">
