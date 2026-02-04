@@ -7773,8 +7773,36 @@ def _process_match_pipeline(job_id: str, data: dict):
             has_preloaded_first = bool(first_half_transcription and len(first_half_transcription.strip()) > 100)
             has_preloaded_second = bool(second_half_transcription and len(second_half_transcription.strip()) > 100)
             
+            # 🆕 Log detalhado quando transcrição é ignorada
+            if second_half_transcription and not has_preloaded_second:
+                print(f"[ASYNC-PIPELINE] ⚠️ 2nd half transcription too short ({len(second_half_transcription.strip())} chars < 100) - checking storage fallback...")
+            elif not second_half_transcription:
+                print(f"[ASYNC-PIPELINE] ⚠️ 2nd half transcription EMPTY - checking storage fallback...")
+            
             first_half_text = ''
             second_half_text = ''
+            
+            # 🆕 Fallback: Buscar SRT do storage se não fornecido
+            if not has_preloaded_second:
+                existing_srt_path = get_subfolder_path(match_id, 'srt') / 'second_half.srt'
+                existing_txt_path = get_subfolder_path(match_id, 'texts') / 'second_half_transcription.txt'
+                alt_srt_path = get_subfolder_path(match_id, 'srt') / 'second_transcription.srt'
+                
+                if existing_srt_path.exists():
+                    with open(existing_srt_path, 'r', encoding='utf-8') as f:
+                        second_half_text = f.read()
+                    has_preloaded_second = len(second_half_text.strip()) > 100
+                    print(f"[ASYNC-PIPELINE] ✓ 2nd half SRT loaded from storage: {len(second_half_text)} chars")
+                elif alt_srt_path.exists():
+                    with open(alt_srt_path, 'r', encoding='utf-8') as f:
+                        second_half_text = f.read()
+                    has_preloaded_second = len(second_half_text.strip()) > 100
+                    print(f"[ASYNC-PIPELINE] ✓ 2nd half SRT (alt) loaded from storage: {len(second_half_text)} chars")
+                elif existing_txt_path.exists():
+                    with open(existing_txt_path, 'r', encoding='utf-8') as f:
+                        second_half_text = f.read()
+                    has_preloaded_second = len(second_half_text.strip()) > 100
+                    print(f"[ASYNC-PIPELINE] ✓ 2nd half TXT loaded from storage: {len(second_half_text)} chars")
             
             if has_preloaded_first or has_preloaded_second:
                 # Use pre-loaded transcriptions - SKIP WHISPER
@@ -7785,7 +7813,8 @@ def _process_match_pipeline(job_id: str, data: dict):
                     first_half_text = first_half_transcription
                     print(f"[ASYNC-PIPELINE] ✓ 1st half transcription loaded: {len(first_half_text)} chars")
                 
-                if has_preloaded_second:
+                if has_preloaded_second and not second_half_text:
+                    # Only use provided transcription if we didn't load from storage
                     second_half_text = second_half_transcription
                     print(f"[ASYNC-PIPELINE] ✓ 2nd half transcription loaded: {len(second_half_text)} chars")
                 
