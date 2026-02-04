@@ -489,43 +489,8 @@ export default function Audio() {
                 </Card>
               </div>
 
-              {/* Sidebar */}
+              {/* Sidebar - Highlights only */}
               <div className="space-y-4">
-                <Card variant="glass">
-                  <CardHeader>
-                    <CardTitle className="text-lg">Informações do Vídeo</CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-3">
-                    {matchVideos && matchVideos.length > 0 ? (
-                      matchVideos.map((video: any, idx: number) => (
-                        <div 
-                          key={video.id || idx}
-                          className="flex items-center gap-3 rounded-lg border p-3 border-primary bg-primary/5"
-                        >
-                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
-                            <Video className="h-5 w-5 text-primary" />
-                          </div>
-                          <div className="flex-1">
-                            <p className="text-sm font-medium">
-                              {video.video_type === 'first_half' ? '1º Tempo' : 
-                               video.video_type === 'second_half' ? '2º Tempo' : 
-                               video.file_name || 'Vídeo'}
-                            </p>
-                            <p className="text-xs text-muted-foreground">
-                              {video.duration_seconds ? formatTime(video.duration_seconds) : '--:--'}
-                            </p>
-                          </div>
-                          <Badge variant="success">Disponível</Badge>
-                        </div>
-                      ))
-                    ) : (
-                      <div className="text-center py-4 text-muted-foreground">
-                        <p className="text-sm">Nenhum vídeo vinculado</p>
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
                 <Card variant="glass">
                   <CardHeader>
                     <CardTitle className="text-lg">Highlights em Áudio</CardTitle>
