@@ -9,7 +9,7 @@ export const EVENT_TYPE_LABELS_PT: Record<string, string> = {
   'corner': 'Escanteio',
   'offside': 'Impedimento',
   'yellow_card': 'Cartão Amarelo',
-  'red_card': 'Cartão Vermelho',
+  'red_card': 'Falta',
   'substitution': 'Substituição',
   'penalty': 'Pênalti',
   'free_kick': 'Tiro Livre',
