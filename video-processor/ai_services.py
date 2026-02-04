@@ -56,6 +56,410 @@ TEAM_ALIASES = {
     'fortaleza': ['leão do pici', 'tricolor de aço'],
 }
 
+# ═══════════════════════════════════════════════════════════════════════════
+# ANTI-EXTERNAL-TEAMS FILTER - Detect commentary about other games
+# ═══════════════════════════════════════════════════════════════════════════
+
+# Phrases that indicate commentary about OTHER games (not the current match)
+OTHER_GAME_PHRASES = [
+    "em outro jogo", "no outro jogo", "na outra partida",
+    "na rodada", "nesta rodada", "placar parcial",
+    "tabela", "classificação", "mostramos os gols",
+    "mostra os gols", "mostrar os gols", "gols continuam saindo",
+    "gols continuam", "gols na rodada", "enquanto isso",
+    "e lá no outro", "lá no maracanã", "lá no mineirão",
+    "lá em são paulo", "lá no morumbi", "lá em belo horizonte",
+    "lá no castelão", "lá na arena", "resultado parcial",
+    "outros jogos", "nas outras partidas"
+]
+
+
+def clean_text_for_analysis(text: str) -> str:
+    """
+    Clean text for team/event analysis.
+    Normalizes and lowercases text.
+    """
+    text = text.lower().strip()
+    text = text.replace("…", "...")
+    text = re.sub(r"\s+", " ", text)
+    return text
+
+
+def count_goal_hits(text: str) -> int:
+    """
+    Count goal mentions including emotional variations.
+    Pattern: g[o]{1,8}l captures: gol, gool, goool, gooool, etc.
+    Excludes 'goleiro'.
+    """
+    t = clean_text_for_analysis(text)
+    t = re.sub(r"[^\w\s]", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+
+    hits = 0
+    for tok in t.split(" "):
+        if not tok:
+            continue
+        # Match g + 1-8 o's + l, but exclude "goleiro"
+        if re.fullmatch(r"g[o]{1,8}l", tok) and "goleiro" not in t:
+            hits += 1
+    return hits
+
+
+def intensity_score(text: str) -> int:
+    """
+    Calculate intensity score based on emotional terms.
+    Higher score = more likely to be a real event.
+    """
+    t = clean_text_for_analysis(text)
+
+    intense_terms = [
+        "olha", "é gol", "goool", "golaço", "que bomba", "que chute",
+        "bateu", "chutou", "finalizou", "cruzamento", "cruzou",
+        "enfiada", "arrancou", "capricha", "rede", "ta la", "tá lá",
+        "entrou", "na trave", "defendeu", "uhhh", "olha aí",
+        "é dele", "do jogador", "que golaço", "sensacional"
+    ]
+
+    score = 0
+    for w in intense_terms:
+        if w in t:
+            score += 1
+
+    # Extra point for extended goal celebration
+    if re.search(r"g[o]{2,}l", t):
+        score += 1
+
+    return score
+
+
+def looks_like_other_game_commentary(text: str) -> bool:
+    """
+    Detect if text is about OTHER game (anti-false-positive).
+    Returns True if it's commentary about another match.
+    """
+    t = clean_text_for_analysis(text)
+
+    for p in OTHER_GAME_PHRASES:
+        if p in t:
+            return True
+
+    return False
+
+
+def detect_teams_in_text(text: str) -> List[str]:
+    """
+    Detect all teams mentioned in text using KNOWN_TEAMS + TEAM_ALIASES.
+    Returns list of detected team names (normalized).
+    """
+    text_lower = text.lower()
+    found = []
+    
+    # Check known teams
+    for team in KNOWN_TEAMS:
+        pattern = r'\b' + re.escape(team) + r'\b'
+        if re.search(pattern, text_lower):
+            if team not in found:
+                found.append(team)
+    
+    # Check aliases
+    for key, aliases in TEAM_ALIASES.items():
+        for alias in aliases:
+            pattern = r'\b' + re.escape(alias.lower()) + r'\b'
+            if re.search(pattern, text_lower):
+                if key not in found:
+                    found.append(key)
+    
+    return found
+
+
+def get_team_variants(team_name: str) -> set:
+    """
+    Get all variations/aliases for a team name.
+    Ex: "Sport" → {"sport", "leão", "sport recife", ...}
+    """
+    if not team_name:
+        return set()
+    
+    team_lower = team_name.lower().strip()
+    variants = {team_lower}
+    
+    # Add individual words from team name (if > 3 chars)
+    for word in team_lower.split():
+        if len(word) > 3:
+            variants.add(word)
+    
+    # Add aliases from TEAM_ALIASES
+    for key, aliases in TEAM_ALIASES.items():
+        # Match if team_name contains key or vice versa
+        if key in team_lower or team_lower in key or any(team_lower in a.lower() for a in aliases):
+            variants.add(key)
+            for alias in aliases:
+                variants.add(alias.lower())
+    
+    return variants
+
+
+def is_other_game_commentary(
+    window_text: str,
+    home_team: str,
+    away_team: str
+) -> bool:
+    """
+    Check if text is commentary about ANOTHER game.
+    
+    Returns True if:
+    1. Text contains explicit "other game" phrases, OR
+    2. Text mentions a team that is NOT home/away
+    
+    Args:
+        window_text: Text from SRT window (concatenated lines)
+        home_team: Home team name
+        away_team: Away team name
+    
+    Returns:
+        True if commentary is about another game (should reject event)
+    """
+    text_lower = window_text.lower()
+    
+    # Check 1: Explicit phrases about other games
+    if looks_like_other_game_commentary(text_lower):
+        return True
+    
+    # Check 2: Mentions team not in this match
+    detected_teams = detect_teams_in_text(text_lower)
+    
+    # If no team detected, accept the event (could be generic commentary)
+    if not detected_teams:
+        return False
+    
+    # Build valid teams set from home and away
+    home_variants = get_team_variants(home_team)
+    away_variants = get_team_variants(away_team)
+    valid_teams = home_variants | away_variants
+    
+    # Check if any detected team is NOT in valid teams
+    for detected in detected_teams:
+        detected_lower = detected.lower()
+        # Check if detected team matches any valid variant
+        is_valid = any(
+            detected_lower == v or detected_lower in v or v in detected_lower
+            for v in valid_teams
+        )
+        if not is_valid:
+            # Found a team that is NOT in this match
+            print(f"[AntiExternal] ⚠ Detected external team: '{detected}' (valid: {list(valid_teams)[:5]}...)")
+            return True
+    
+    return False
+
+
+def validate_card_event(
+    text: str,
+    window_text: str,
+    card_type: str,
+    home_team: str,
+    away_team: str
+) -> Dict[str, Any]:
+    """
+    Validate if a card event is REAL with advanced rules.
+    
+    Args:
+        text: Original text where keyword was found
+        window_text: Surrounding context (2 blocks before/after)
+        card_type: 'yellow_card' or 'red_card'
+        home_team: Home team name
+        away_team: Away team name
+    
+    Returns:
+        {'is_valid': bool, 'confidence': float, 'reason': str}
+    """
+    # Filter 1: Not about another team/game
+    if is_other_game_commentary(window_text, home_team, away_team):
+        return {'is_valid': False, 'confidence': 0, 'reason': 'other_game'}
+    
+    # Filter 2: Should have player name nearby (PARA Fulano, de Fulano, etc.)
+    has_player = bool(re.search(
+        r'(?:para|pra|de|do|em)\s+[A-ZÀ-Ú][a-záéíóúàèìòùâêîôûãõç]+',
+        window_text,
+        re.IGNORECASE
+    ))
+    
+    # Filter 3: For red card, should have "expulso" or "vermelho direto"
+    if card_type == 'red_card':
+        has_expulsion = any(kw in window_text.lower() for kw in [
+            'expuls', 'expulso', 'vermelho direto', 'fora de jogo', 
+            'fora de campo', 'deixa o campo', 'vai embora'
+        ])
+        if not has_expulsion:
+            return {'is_valid': False, 'confidence': 0.3, 'reason': 'no_expulsion_context'}
+    
+    confidence = 0.9 if has_player else 0.7
+    return {'is_valid': True, 'confidence': confidence, 'reason': 'validated'}
+
+
+def validate_penalty_event(
+    text: str,
+    window_text: str,
+    home_team: str,
+    away_team: str
+) -> Dict[str, Any]:
+    """
+    Validate if a penalty event is REAL with advanced rules.
+    
+    Args:
+        text: Original text where keyword was found
+        window_text: Surrounding context
+        home_team: Home team name
+        away_team: Away team name
+    
+    Returns:
+        {'is_valid': bool, 'confidence': float, 'reason': str}
+    """
+    window_lower = window_text.lower()
+    
+    # Filter 1: Not about another team/game
+    if is_other_game_commentary(window_text, home_team, away_team):
+        return {'is_valid': False, 'confidence': 0, 'reason': 'other_game'}
+    
+    # Filter 2: Should have emotion/intensity
+    intensity = intensity_score(window_text)
+    if intensity < 1:
+        return {'is_valid': False, 'confidence': 0.3, 'reason': 'low_intensity'}
+    
+    # Filter 3: Context about missing vs scoring
+    # "perdeu o pênalti" without positive context = uncertain
+    if 'perdeu' in window_lower:
+        if 'mas' not in window_lower and 'porém' not in window_lower:
+            # Still valid but mark as missed penalty
+            return {'is_valid': True, 'confidence': 0.7, 'reason': 'penalty_missed'}
+    
+    confidence = min(0.95, 0.7 + intensity * 0.1)
+    return {'is_valid': True, 'confidence': confidence, 'reason': 'validated'}
+
+
+def window_goal_features(window_blocks: List[Tuple]) -> Dict[str, Any]:
+    """
+    Extract goal detection features from a window of SRT blocks.
+    Used by advanced sliding window algorithm.
+    
+    Args:
+        window_blocks: List of SRT block tuples
+    
+    Returns:
+        Dict with detection features
+    """
+    gol_hits_per_line = []
+    lines_with_gol = 0
+    total_hits = 0
+    total_intensity = 0
+    any_other_game_phrase = False
+
+    for block in window_blocks:
+        text = block[5] if len(block) > 5 else ''
+        hits = count_goal_hits(text)
+        gol_hits_per_line.append(hits)
+        if hits > 0:
+            lines_with_gol += 1
+            total_hits += hits
+
+        total_intensity += intensity_score(text)
+        if looks_like_other_game_commentary(text):
+            any_other_game_phrase = True
+
+    need_one_line_two_or_more = any(h >= 2 for h in gol_hits_per_line)
+
+    return {
+        "lines_with_gol": lines_with_gol,
+        "total_gol_hits": total_hits,
+        "gol_hits_per_line": gol_hits_per_line,
+        "need_one_line_two_or_more": need_one_line_two_or_more,
+        "intensity": total_intensity,
+        "other_game_phrase": any_other_game_phrase,
+    }
+
+
+def build_goal_validator_prompt(window_blocks: List[Tuple]) -> str:
+    """
+    Build prompt for Ollama goal validation.
+    """
+    lines = []
+    for block in window_blocks:
+        if len(block) > 5:
+            start = f"{block[2]:02d}:{block[3]:02d}"
+            text = block[5]
+            lines.append(f"{start} {text}")
+    
+    snippet = "\n".join(lines)
+    
+    prompt = f"""Analise este trecho de legenda de uma transmissao de futebol.
+Determine se ha realmente um lance de gol na jogada atual.
+
+Criterios de gol verdadeiro:
+1. Ha descricao clara de jogada (chute, finalizacao, cruzamento)
+2. Ha emocao tipica de narracao (olha o gol, e gol, goool, que bomba)
+3. Ha repeticao de chamadas gol/goool
+4. A fala descreve acao ocorrendo na jogada atual
+
+Criterios para NAO ser gol:
+1. Fala sobre outro jogo ou outra partida
+2. Fala sobre estatisticas, historico ou tabela
+3. Apenas mencao neutra de gol sem emocao
+4. Nenhum verbo de acao recente
+
+Responda apenas SIM ou NAO.
+
+Trecho:
+{snippet}"""
+    
+    return prompt
+
+
+def validate_goal_with_ollama(
+    window_blocks: List[Tuple],
+    model: str = None
+) -> Optional[bool]:
+    """
+    Validate a goal candidate using Ollama.
+    
+    Returns:
+        True = is a real goal
+        False = not a goal
+        None = couldn't validate (inconclusive)
+    """
+    if not OLLAMA_ENABLED:
+        return None
+    
+    prompt = build_goal_validator_prompt(window_blocks)
+    
+    try:
+        response = call_ollama(
+            messages=[{"role": "user", "content": prompt}],
+            model=model or OLLAMA_MODEL,
+            temperature=0.1,
+            max_tokens=50
+        )
+        
+        if not response:
+            return None
+        
+        out = response.strip().lower()
+        
+        # Parse response
+        if "sim" in out and "nao" not in out and "não" not in out:
+            return True
+        if "não" in out or "nao" in out:
+            return False
+        if out.startswith("sim"):
+            return True
+        if out.startswith("nao") or out.startswith("não"):
+            return False
+        
+        return None  # Inconclusive
+        
+    except Exception as e:
+        print(f"[Ollama Validator] Error: {e}")
+        return None
+
 
 def detect_teams_in_transcription(transcription: str) -> Tuple[List[str], bool]:
     """
@@ -616,11 +1020,31 @@ def detect_goals_by_sliding_window(
         # Concatenar texto da janela
         window_text = ' '.join([b[5] for b in window]).lower()
         
-        # Contar "gol" (excluindo "goleiro")
-        goal_count = len(re.findall(goal_pattern, window_text, re.IGNORECASE))
+        # ═══════════════════════════════════════════════════════════════
+        # NOVO: Filtro Anti-Times-Externos
+        # Se mencionar time que NÃO está jogando, é sobre outro jogo
+        # ═══════════════════════════════════════════════════════════════
+        if is_other_game_commentary(window_text, home_team, away_team):
+            print(f"[SlidingWindow] ⚠ Bloco {i}: Gol ignorado (menciona time externo ou outro jogo)")
+            continue
+        
+        # Contar "gol" (excluindo "goleiro") - usar função avançada
+        goal_count = count_goal_hits(window_text)
+        
+        # Fallback: usar regex simples se count_goal_hits retornar 0
+        if goal_count == 0:
+            goal_count = len(re.findall(goal_pattern, window_text, re.IGNORECASE))
         
         # Critério 1: mínimo de menções
         if goal_count < min_goal_mentions:
+            continue
+        
+        # Extrair features avançadas da janela
+        features = window_goal_features(window)
+        
+        # Critério extra: verificar frases de "outro jogo"
+        if features['other_game_phrase']:
+            print(f"[SlidingWindow] ⚠ Bloco {i}: Gol ignorado (frase de outro jogo detectada)")
             continue
         
         # Detectar time na janela
@@ -799,6 +1223,14 @@ def detect_events_by_keywords(
         # Calculate game minute (for display)
         game_minute = segment_start_minute + minutes + (hours * 60)
         
+        # ═══════════════════════════════════════════════════════════════
+        # NOVO: Obter contexto da janela (2 blocos antes e depois)
+        # ═══════════════════════════════════════════════════════════════
+        window_start = max(0, block_index - 2)
+        window_end = min(len(srt_blocks), block_index + 3)
+        window_blocks = srt_blocks[window_start:window_end]
+        window_text = ' '.join([b[5] for b in window_blocks])
+        
         # Search for keywords (SKIP GOALS - already handled by sliding window)
         for event_type, keywords in EVENT_KEYWORDS.items():
             # PULAR GOLS - já foram detectados por sliding window
@@ -807,8 +1239,37 @@ def detect_events_by_keywords(
             
             for keyword in keywords:
                 if re.search(keyword, text_upper, re.IGNORECASE):
+                    
+                    # ═══════════════════════════════════════════════════════════════
+                    # NOVO: Filtro Anti-Times-Externos (aplica a TODOS os eventos)
+                    # ═══════════════════════════════════════════════════════════════
+                    if is_other_game_commentary(window_text, home_team, away_team):
+                        print(f"[KEYWORDS] ⚠ {event_type.upper()} ignorado (outro time/jogo mencionado)")
+                        continue
+                    
+                    # ═══════════════════════════════════════════════════════════════
+                    # NOVO: Validações específicas por tipo de evento
+                    # ═══════════════════════════════════════════════════════════════
                     confidence = 1.0
                     confirmation_reason = 'keyword_match'
+                    
+                    # Validação de cartões
+                    if event_type in ['yellow_card', 'red_card']:
+                        validation = validate_card_event(text, window_text, event_type, home_team, away_team)
+                        if not validation['is_valid']:
+                            print(f"[KEYWORDS] ⚠ {event_type.upper()} ignorado ({validation['reason']})")
+                            continue
+                        confidence = validation['confidence']
+                        confirmation_reason = validation['reason']
+                    
+                    # Validação de pênaltis
+                    if event_type == 'penalty':
+                        validation = validate_penalty_event(text, window_text, home_team, away_team)
+                        if not validation['is_valid']:
+                            print(f"[KEYWORDS] ⚠ {event_type.upper()} ignorado ({validation['reason']})")
+                            continue
+                        confidence = validation['confidence']
+                        confirmation_reason = validation['reason']
                     
                     # Detect team
                     team = detect_team_from_text(text, home_team, away_team)
@@ -834,7 +1295,7 @@ def detect_events_by_keywords(
                     }
                     
                     events.append(event)
-                    print(f"[KEYWORDS] ✓ {event_type.upper()} detectado em [{minutes:02d}:{seconds:02d}] - {text[:40]}...")
+                    print(f"[KEYWORDS] ✓ {event_type.upper()} detectado em [{minutes:02d}:{seconds:02d}] - {text[:40]}... (conf: {confidence:.2f})")
                     
                     break  # Avoid duplicates for same text
             else:
