@@ -65,7 +65,8 @@ from models import (
     GeneratedAudio, Thumbnail, Profile, UserRole, ApiSetting,
     ChatbotConversation, StreamConfiguration, SmartEditProject,
     SmartEditClip, SmartEditRender, SmartEditSetting,
-    Organization, SubscriptionPlan, OrganizationMember, CreditTransaction
+    Organization, SubscriptionPlan, OrganizationMember, CreditTransaction,
+    UploadJob
 )
 from storage import (
     save_file, save_uploaded_file, get_file_path, file_exists,
@@ -10924,6 +10925,199 @@ def recalculate_event_timestamps(match_id: str):
         return jsonify({'error': str(e)}), 500
     finally:
         session.close()
+
+
+# ============================================================================
+# CHUNKED UPLOAD ENDPOINTS
+# ============================================================================
+
+@app.route('/api/upload/init', methods=['POST', 'OPTIONS'])
+def init_chunked_upload():
+    """Initialize a new chunked upload."""
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True}), 200
+    
+    try:
+        data = request.get_json()
+        match_id = data.get('matchId')
+        filename = data.get('filename')
+        file_size = data.get('fileSize')
+        total_chunks = data.get('totalChunks')
+        file_type = data.get('fileType', 'video')
+        
+        if not all([filename, file_size, total_chunks]):
+            return jsonify({'success': False, 'error': 'Parâmetros obrigatórios: filename, fileSize, totalChunks'}), 400
+        
+        from chunked_upload import init_upload
+        result = init_upload(match_id, filename, file_size, total_chunks)
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/upload/chunk', methods=['POST', 'OPTIONS'])
+def receive_upload_chunk():
+    """Receive a single chunk of a chunked upload."""
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True}), 200
+    
+    try:
+        upload_id = request.form.get('uploadId')
+        chunk_index = request.form.get('chunkIndex')
+        checksum = request.form.get('checksum')
+        
+        if not upload_id or chunk_index is None:
+            return jsonify({'success': False, 'error': 'uploadId e chunkIndex são obrigatórios'}), 400
+        
+        chunk_file = request.files.get('chunk')
+        if not chunk_file:
+            return jsonify({'success': False, 'error': 'Chunk file is required'}), 400
+        
+        chunk_data = chunk_file.read()
+        
+        from chunked_upload import receive_chunk
+        result = receive_chunk(upload_id, int(chunk_index), chunk_data, checksum)
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/upload/complete', methods=['POST', 'OPTIONS'])
+def complete_chunked_upload():
+    """Complete chunked upload - assemble file and start processing."""
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True}), 200
+    
+    try:
+        data = request.get_json()
+        upload_id = data.get('uploadId')
+        auto_process = data.get('autoProcess', True)
+        
+        if not upload_id:
+            return jsonify({'success': False, 'error': 'uploadId é obrigatório'}), 400
+        
+        from chunked_upload import complete_upload
+        result = complete_upload(upload_id, auto_process)
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/upload/status/<upload_id>', methods=['GET', 'OPTIONS'])
+def get_upload_status(upload_id):
+    """Get status of a chunked upload."""
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True}), 200
+    
+    try:
+        from chunked_upload import get_upload_status as get_status
+        result = get_status(upload_id)
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 404
+            
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/upload/pause/<upload_id>', methods=['POST', 'OPTIONS'])
+def pause_upload(upload_id):
+    """Pause a chunked upload."""
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True}), 200
+    
+    try:
+        from chunked_upload import pause_upload as pause
+        result = pause(upload_id)
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/upload/resume/<upload_id>', methods=['POST', 'OPTIONS'])
+def resume_upload(upload_id):
+    """Resume a paused chunked upload."""
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True}), 200
+    
+    try:
+        from chunked_upload import resume_upload as resume
+        result = resume(upload_id)
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/upload/cancel/<upload_id>', methods=['DELETE', 'OPTIONS'])
+def cancel_upload(upload_id):
+    """Cancel a chunked upload and clean up files."""
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True}), 200
+    
+    try:
+        from chunked_upload import cancel_upload as cancel
+        result = cancel(upload_id)
+        
+        if result.get('success'):
+            return jsonify(result), 200
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+
+@app.route('/api/upload/pending', methods=['GET', 'OPTIONS'])
+def get_pending_uploads():
+    """Get list of pending uploads, optionally filtered by match."""
+    if request.method == 'OPTIONS':
+        return jsonify({'ok': True}), 200
+    
+    try:
+        match_id = request.args.get('matchId')
+        
+        from chunked_upload import get_pending_uploads as get_pending
+        uploads = get_pending(match_id)
+        
+        return jsonify({'success': True, 'uploads': uploads}), 200
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
 
 
 def print_startup_status():
