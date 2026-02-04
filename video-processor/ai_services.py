@@ -665,12 +665,59 @@ OPENAI_ENABLED = True
 ELEVENLABS_ENABLED = True
 
 # Local Whisper settings (FREE transcription)
-# Auto-detect if faster-whisper is installed
+# ============================================================================
+# WORKAROUND: ctranslate2 4.4.0 bug on Windows/CUDA
+# The library tries to access _rocm_sdk_core/bin which doesn't exist on CUDA
+# We suppress this error and fall back to CPU if necessary
+# ============================================================================
+import warnings
+import sys
+
+# Suppress ctranslate2 ROCm warnings on Windows/CUDA
+_CTRANSLATE2_ROCM_ERROR = False
+_CTRANSLATE2_ERROR_MSG = None
+
+# Auto-detect if faster-whisper is installed with proper error handling
 try:
-    from faster_whisper import WhisperModel
+    # Suppress the specific ROCm error during import
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', category=UserWarning)
+        warnings.filterwarnings('ignore', category=RuntimeWarning)
+        
+        # Try to import ctranslate2 first to catch ROCm errors
+        try:
+            import ctranslate2
+        except (OSError, FileNotFoundError) as e:
+            if '_rocm_sdk_core' in str(e) or 'rocm' in str(e).lower():
+                print(f"[LocalWhisper] ⚠️ ctranslate2 ROCm error detectado (ambiente CUDA/Windows)")
+                print(f"[LocalWhisper] ⚠️ Erro: {e}")
+                print(f"[LocalWhisper] ⚠️ Usando fallback para CPU...")
+                _CTRANSLATE2_ROCM_ERROR = True
+                _CTRANSLATE2_ERROR_MSG = str(e)
+                # Force CPU mode to avoid ROCm issues
+                import os as _os
+                _os.environ['CUDA_VISIBLE_DEVICES'] = ''
+                _os.environ['CT2_USE_EXPERIMENTAL_PACKED_GEMM'] = '0'
+                # Retry import
+                import ctranslate2
+            else:
+                raise
+        
+        from faster_whisper import WhisperModel
     _FASTER_WHISPER_AVAILABLE = True
-except ImportError:
+    
+    if _CTRANSLATE2_ROCM_ERROR:
+        print(f"[LocalWhisper] ✓ faster-whisper carregado em modo CPU (workaround ROCm)")
+    else:
+        print(f"[LocalWhisper] ✓ faster-whisper disponível")
+        
+except ImportError as e:
     _FASTER_WHISPER_AVAILABLE = False
+    print(f"[LocalWhisper] ✗ faster-whisper não disponível: {e}")
+except Exception as e:
+    _FASTER_WHISPER_AVAILABLE = False
+    _CTRANSLATE2_ERROR_MSG = str(e)
+    print(f"[LocalWhisper] ✗ Erro ao carregar faster-whisper: {e}")
 
 # Enable by default if library is installed, or via env var
 LOCAL_WHISPER_ENABLED = _FASTER_WHISPER_AVAILABLE or os.environ.get('LOCAL_WHISPER_ENABLED', 'false').lower() == 'true'
@@ -1507,9 +1554,17 @@ def _transcribe_with_local_whisper(
         model_name = LOCAL_WHISPER_MODEL or 'base'
         audio_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
         
-        # Check device availability - prefer CUDA
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-        compute_type = "float16" if device == "cuda" else "int8"
+        # Check device availability - prefer CUDA, but fallback to CPU if ROCm error
+        # WORKAROUND: ctranslate2 4.4.0 has a bug where it tries to access _rocm_sdk_core
+        # on Windows/CUDA systems. If we detected this error during import, force CPU.
+        if _CTRANSLATE2_ROCM_ERROR:
+            device = "cpu"
+            compute_type = "int8"
+            print(f"[LocalWhisper] ⚠️ Usando CPU devido a bug do ctranslate2 ROCm")
+        else:
+            cuda_available = torch.cuda.is_available()
+            device = "cuda" if cuda_available else "cpu"
+            compute_type = "float16" if device == "cuda" else "int8"
         
         print(f"[LocalWhisper] =====================================")
         print(f"[LocalWhisper] 🎤 Iniciando transcrição robusta")
@@ -1517,11 +1572,28 @@ def _transcribe_with_local_whisper(
         print(f"[LocalWhisper] Modelo: {model_name}")
         print(f"[LocalWhisper] Device: {device.upper()} {'🚀 GPU Acelerada!' if device == 'cuda' else '(CPU - mais lento)'}")
         print(f"[LocalWhisper] Compute Type: {compute_type}")
+        if _CTRANSLATE2_ROCM_ERROR:
+            print(f"[LocalWhisper] ⚠️ ROCm workaround ativo - GPU desabilitada temporariamente")
         
         # Load or reuse model (singleton pattern for efficiency)
+        # With extra error handling for ctranslate2 issues
         if _whisper_model is None or _whisper_model_name != model_name:
             print(f"[LocalWhisper] Carregando modelo '{model_name}'... (pode levar alguns minutos na primeira vez)")
-            _whisper_model = WhisperModel(model_name, device=device, compute_type=compute_type)
+            
+            try:
+                _whisper_model = WhisperModel(model_name, device=device, compute_type=compute_type)
+            except (OSError, FileNotFoundError, RuntimeError) as load_error:
+                error_str = str(load_error).lower()
+                # Check for ROCm-related errors and retry with CPU
+                if 'rocm' in error_str or '_rocm_sdk_core' in error_str or 'cuda' in error_str:
+                    print(f"[LocalWhisper] ⚠️ Erro GPU detectado: {load_error}")
+                    print(f"[LocalWhisper] ⚠️ Tentando fallback para CPU...")
+                    device = "cpu"
+                    compute_type = "int8"
+                    _whisper_model = WhisperModel(model_name, device=device, compute_type=compute_type)
+                else:
+                    raise
+            
             _whisper_model_name = model_name
             print(f"[LocalWhisper] ✓ Modelo carregado!")
         
