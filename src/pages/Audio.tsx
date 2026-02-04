@@ -61,6 +61,27 @@ export default function Audio() {
     event: e.description || e.event_type
   })) || [];
 
+  // Calculate score dynamically from goal events (same logic as other pages)
+  const calculatedScore = events?.reduce((acc, event) => {
+    if (event.event_type === 'goal') {
+      const metadata = event.metadata as { team?: string } | null;
+      const team = metadata?.team;
+      if (team === 'home') {
+        acc.home += 1;
+      } else if (team === 'away') {
+        acc.away += 1;
+      }
+    }
+    return acc;
+  }, { home: 0, away: 0 }) || { home: 0, away: 0 };
+
+  // Use calculated score if there are goal events, otherwise fall back to DB values
+  const hasGoalEvents = events?.some(e => e.event_type === 'goal');
+  const displayScore = {
+    home: hasGoalEvents ? calculatedScore.home : (selectedMatch?.home_score || 0),
+    away: hasGoalEvents ? calculatedScore.away : (selectedMatch?.away_score || 0)
+  };
+
   // Load saved audio when match changes
   useEffect(() => {
     if (matchId && selectedVoice) {
@@ -164,8 +185,8 @@ export default function Audio() {
       events,
       selectedMatch.home_team?.name || 'Time Casa',
       selectedMatch.away_team?.name || 'Time Fora',
-      selectedMatch.home_score || 0,
-      selectedMatch.away_score || 0,
+      displayScore.home,
+      displayScore.away,
       selectedVoice
     );
   };
@@ -184,8 +205,8 @@ export default function Audio() {
       events,
       selectedMatch.home_team?.name || 'Time Casa',
       selectedMatch.away_team?.name || 'Time Fora',
-      selectedMatch.home_score || 0,
-      selectedMatch.away_score || 0,
+      displayScore.home,
+      displayScore.away,
       podcastType,
       analysis?.tacticalAnalysis
     );
@@ -323,12 +344,12 @@ export default function Audio() {
                 <div className="flex items-center gap-4">
                   <div className="text-center">
                     <p className="font-semibold">{homeTeamName}</p>
-                    <p className="text-2xl font-bold">{selectedMatch.home_score || 0}</p>
+                    <p className="text-2xl font-bold">{displayScore.home}</p>
                   </div>
                   <span className="text-muted-foreground">vs</span>
                   <div className="text-center">
                     <p className="font-semibold">{awayTeamName}</p>
-                    <p className="text-2xl font-bold">{selectedMatch.away_score || 0}</p>
+                    <p className="text-2xl font-bold">{displayScore.away}</p>
                   </div>
                 </div>
                 <div className="flex gap-2">
