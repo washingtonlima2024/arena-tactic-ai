@@ -790,7 +790,8 @@ def call_ollama(
     messages: List[Dict[str, str]],
     model: str = None,
     temperature: float = 0.7,
-    max_tokens: int = 4096
+    max_tokens: int = 4096,
+    format: str = None  # NOVO: "json" para forçar resposta JSON válida
 ) -> Optional[str]:
     """
     Call local Ollama API.
@@ -800,6 +801,7 @@ def call_ollama(
         model: Model to use (default: from settings)
         temperature: Sampling temperature
         max_tokens: Maximum tokens in response
+        format: Response format - "json" forces valid JSON output (recommended for structured extraction)
     
     Returns:
         The AI response text or None on error
@@ -807,18 +809,26 @@ def call_ollama(
     model = model or OLLAMA_MODEL
     url = f"{OLLAMA_URL}/api/chat"
     
+    # Preparar payload
+    payload = {
+        'model': model,
+        'messages': messages,
+        'stream': False,
+        'options': {
+            'temperature': temperature,
+            'num_predict': max_tokens
+        }
+    }
+    
+    # Habilitar modo JSON nativo do Ollama (elimina problemas de parsing)
+    if format:
+        payload['format'] = format
+        print(f"[Ollama] Modo JSON nativo ativado para resposta estruturada")
+    
     try:
         response = requests.post(
             url,
-            json={
-                'model': model,
-                'messages': messages,
-                'stream': False,
-                'options': {
-                    'temperature': temperature,
-                    'num_predict': max_tokens
-                }
-            },
+            json=payload,
             timeout=300
         )
         
@@ -2735,6 +2745,115 @@ def detect_events_by_keywords(
     return events
 
 
+def _validate_goals_with_context(events: List[Dict[str, Any]], transcription: str) -> List[Dict[str, Any]]:
+    """
+    Validação pós-Ollama: Remove gols falsos verificando contexto na transcrição.
+    
+    Analisa a vizinhança do timestamp de cada gol para identificar negações
+    que indicam que NÃO foi realmente um gol (ex: "quase gol", "na trave").
+    
+    Args:
+        events: Lista de eventos detectados pelo Ollama
+        transcription: Texto completo da transcrição
+        
+    Returns:
+        Lista de eventos validados (gols falsos removidos)
+    """
+    # Palavras que NEGAM um gol (indicam que não entrou)
+    NEGATION_PATTERNS = [
+        r'\bquase\b',           # "quase gol"
+        r'\bpor\s+pouco\b',     # "por pouco"
+        r'\bperdeu\b',          # "perdeu o gol"
+        r'\bna\s+trave\b',      # "bateu na trave"
+        r'\bno\s+travessão\b',  # "bateu no travessão"
+        r'\bpra\s+fora\b',      # "mandou pra fora"
+        r'\bdefendeu\b',        # "goleiro defendeu"
+        r'\bespalmou\b',        # "goleiro espalmou"
+        r'\bsalvou\b',          # "goleiro salvou"
+        r'\bnão\s+foi\b',       # "não foi gol"
+        r'\banulado\b',         # "gol anulado"
+        r'\bimpedido\b',        # "estava impedido"
+        r'\bpassou\s+perto\b',  # "passou perto"
+        r'\braspou\b',          # "raspou a trave"
+        r'\btirou\b',           # "zagueiro tirou"
+    ]
+    
+    validated = []
+    removed_count = 0
+    
+    for event in events:
+        # Só validar gols - outros eventos passam direto
+        if event.get('event_type') != 'goal':
+            validated.append(event)
+            continue
+        
+        minute = event.get('minute', 0)
+        second = event.get('second', 0)
+        
+        # Extrair contexto: ~30 segundos ao redor do timestamp
+        context = _extract_context_around_timestamp(transcription, minute, second)
+        context_lower = context.lower()
+        
+        # Verificar negações
+        is_negated = False
+        negation_found = None
+        
+        for pattern in NEGATION_PATTERNS:
+            if re.search(pattern, context_lower, re.IGNORECASE):
+                is_negated = True
+                negation_found = pattern
+                break
+        
+        if is_negated:
+            print(f"[Validate] ⚠️ Gol em {minute}'{second:02d}\" REJEITADO - negação detectada: '{negation_found}'")
+            print(f"[Validate]    Contexto: \"{context[:100]}...\"")
+            removed_count += 1
+            continue
+        
+        # Gol validado
+        validated.append(event)
+    
+    if removed_count > 0:
+        print(f"[Validate] ✓ Validação concluída: {removed_count} gol(s) falso(s) removido(s)")
+    
+    return validated
+
+
+def _extract_context_around_timestamp(transcription: str, minute: int, second: int, window_seconds: int = 30) -> str:
+    """
+    Extrai texto da transcrição ao redor de um timestamp específico.
+    
+    Procura por blocos SRT próximos ao timestamp e retorna o texto combinado.
+    
+    Args:
+        transcription: Texto completo (pode ser SRT ou plain text)
+        minute: Minuto alvo
+        second: Segundo alvo
+        window_seconds: Janela de busca em segundos (±)
+        
+    Returns:
+        Texto encontrado ao redor do timestamp
+    """
+    target_total_seconds = minute * 60 + second
+    
+    # Tentar parsear como SRT
+    srt_pattern = r'(\d{2}):(\d{2}):(\d{2}),\d{3}\s*-->\s*\d{2}:\d{2}:\d{2},\d{3}\s*\n(.*?)(?=\n\n|\n\d+\n|\Z)'
+    matches = re.findall(srt_pattern, transcription, re.DOTALL)
+    
+    if matches:
+        # É um arquivo SRT - buscar blocos próximos
+        context_parts = []
+        for hours, mins, secs, text in matches:
+            block_seconds = int(hours) * 3600 + int(mins) * 60 + int(secs)
+            if abs(block_seconds - target_total_seconds) <= window_seconds:
+                context_parts.append(text.strip())
+        return " ".join(context_parts)
+    
+    # Fallback: texto plano - retornar os primeiros 500 chars
+    # (menos preciso, mas melhor que nada)
+    return transcription[:500]
+
+
 def _analyze_events_with_ollama(
     transcription: str,
     home_team: str,
@@ -2759,86 +2878,48 @@ def _analyze_events_with_ollama(
     Returns:
         List of detected events
     """
-    half_desc = "1º Tempo (0-45 min)" if match_half == 'first' else "2º Tempo (45-90 min)"
+    half_desc = "1º Tempo" if match_half == 'first' else "2º Tempo"
     
-    prompt = f"""Você é um analista de futebol ESPECIALISTA em extrair eventos de narrações esportivas.
-
-⚽⚽⚽ REGRA NÚMERO 1 - NUNCA PERCA UM GOL! ⚽⚽⚽
-
-════════════════════════════════════════════════════════════════
-PALAVRAS-CHAVE PARA GOLS (EXTRAIA TODOS - PRIORIDADE MÁXIMA):
-════════════════════════════════════════════════════════════════
-- "GOOOL", "GOOOOL", "GOLAÇO", "É GOL" → goal
-- "PRA DENTRO", "ENTROU", "MANDOU PRA REDE" → goal
-- "BOLA NO FUNDO DA REDE", "ESTUFOU A REDE" → goal
-- "ABRE O PLACAR", "AMPLIA", "EMPATA", "VIRA O JOGO" → goal
-- "CONTRA", "GOL CONTRA", "CONTRA O PRÓPRIO" → goal (isOwnGoal: true)
-
-════════════════════════════════════════════════════════════════
-OUTROS EVENTOS IMPORTANTES (EXTRAIA TODOS):
-════════════════════════════════════════════════════════════════
-CARTÕES:
-- "CARTÃO AMARELO", "RECEBE O AMARELO", "AMARELOU" → yellow_card
-- "CARTÃO VERMELHO", "EXPULSO", "PRA FORA" → red_card
-
-FALTAS E INFRAÇÕES:
-- "FALTA DE", "FALTA PERIGOSA", "DERRUBOU" → foul
-- "IMPEDIDO", "IMPEDIMENTO", "POSIÇÃO IRREGULAR" → offside
-- "PÊNALTI", "PENALIDADE MÁXIMA", "NA MARCA DA CAL" → penalty
-
-JOGADAS:
-- "ESCANTEIO", "CÓRNER", "PELA LINHA DE FUNDO" → corner
-- "GRANDE DEFESA", "SALVOU", "ESPALMOU" → save
-- "QUASE GOL", "NA TRAVE", "PASSOU PERTO", "POR POUCO" → chance
-- "CHUTE", "FINALIZOU", "BATEU", "ARRISCOU" → shot
-- "SUBSTITUIÇÃO", "ENTROU", "SAIU" → substitution
+    # ═══════════════════════════════════════════════════════════════════════════
+    # PROMPT OTIMIZADO - Versão 2.0
+    # Simplificado para melhor performance com modelos 7B (mistral, qwen2.5)
+    # ═══════════════════════════════════════════════════════════════════════════
+    prompt = f"""Extraia eventos de futebol desta transcrição SRT.
 
 PARTIDA: {home_team} (casa) vs {away_team} (visitante)
-PERÍODO: {half_desc} (minutos {game_start_minute}' a {game_end_minute}')
+PERÍODO: {half_desc}
 
-╔══════════════════════════════════════════════════════════════╗
-║  🚨 REGRA CRÍTICA DE TIMESTAMP - LEIA COM ATENÇÃO! 🚨       ║
-╠══════════════════════════════════════════════════════════════╣
-║  A transcrição está no formato SRT com timestamps assim:     ║
-║                                                              ║
-║  368                                                         ║
-║  00:24:52,253 --> 00:24:56,308                               ║
-║  GOOOOL! Gol do Brasil!                                      ║
-║                                                              ║
-║  → Use o TIMESTAMP DO BLOCO SRT: 00:24:52                    ║
-║  → minute = 24, second = 52                                  ║
-║                                                              ║
-║  ⚠️ NÃO use o "minuto de jogo" falado pelo narrador!        ║
-║  ⚠️ USE APENAS o timestamp técnico do arquivo SRT!          ║
-╚══════════════════════════════════════════════════════════════╝
+EVENTOS PARA DETECTAR:
+- goal: "GOOOL", "GOLAÇO", "abre o placar", "empata", "virou", "bola na rede"
+- yellow_card: "cartão amarelo", "amarelou"
+- red_card: "cartão vermelho", "expulso"
+- penalty: "pênalti", "penalidade máxima"
+- save: "grande defesa", "salvou", "espalmou"
+- chance: "quase gol", "na trave", "passou perto"
+- foul: "falta de", "derrubou"
+- corner: "escanteio"
+- shot: "chutou", "finalizou", "arriscou"
+
+REGRA CRÍTICA DE TIMESTAMP:
+Use o timestamp do bloco SRT (00:MM:SS), NÃO o minuto falado pelo narrador.
+Exemplo: Se o bloco SRT mostra "00:24:52,253 --> ..." use minute=24, second=52
 
 TRANSCRIÇÃO:
-{transcription}
+{transcription[:8000]}
 
-═══════════════════════════════════════════════════════════════
-📋 CHECKLIST OBRIGATÓRIO (siga rigorosamente):
-═══════════════════════════════════════════════════════════════
-□ Extrair minute/second do TIMESTAMP SRT (00:MM:SS), NÃO do narrador
-□ Retornar NO MÍNIMO 10-20 eventos para cada tempo de jogo
-□ Para CADA menção de "GOL", "GOOOL", "GOLAÇO" = criar evento goal
-□ Incluir TODOS: chutes, faltas, escanteios, cartões, defesas
-□ team: "home" para {home_team}, "away" para {away_team}
-□ Incluir source_text com o trecho exato da transcrição
-□ confidence: 0.9+ para gols, 0.7+ para outros eventos
-
-RESPONDA APENAS COM O JSON. NENHUM TEXTO ANTES OU DEPOIS.
-COMECE COM [ E TERMINE COM ]. NÃO USE ```. NÃO EXPLIQUE NADA.
-
-[{{"minute":24,"second":52,"event_type":"goal","team":"home","description":"Gol de cabeça","confidence":0.95,"is_highlight":true,"isOwnGoal":false,"source_text":"GOOOL!"}}]"""
+Retorne APENAS um array JSON com os eventos detectados. Sem texto antes ou depois.
+Formato obrigatório:
+[{{"minute":24,"second":52,"event_type":"goal","team":"home","description":"Gol de cabeça","confidence":0.95}}]"""
 
     try:
-        print(f"[Ollama] Analisando transcrição com {OLLAMA_MODEL}...")
+        print(f"[Ollama] Analisando transcrição com {OLLAMA_MODEL} (temperature=0.1, format=json)...")
         
         result = call_ollama(
             messages=[{'role': 'user', 'content': prompt}],
             model=OLLAMA_MODEL,
-            temperature=0.3,
-            max_tokens=8192
+            temperature=0.1,  # Mais baixo para precisão máxima
+            max_tokens=4096,
+            format="json"     # Força JSON válido (elimina parsing errors)
         )
         
         if not result:
@@ -2894,6 +2975,9 @@ COMECE COM [ E TERMINE COM ]. NÃO USE ```. NÃO EXPLIQUE NADA.
             print(f"[Ollama] Total: {len(events)} eventos, {len(goals)} gols")
             for g in goals:
                 print(f"[Ollama] ⚽ GOL: {g.get('minute', 0)}' - {g.get('team', 'unknown')}")
+            
+            # VALIDAÇÃO PÓS-OLLAMA: Remover gols falsos verificando contexto
+            events = _validate_goals_with_context(events, transcription)
         else:
             print(f"[Ollama] ⚠️ Nenhum evento extraído!")
         
