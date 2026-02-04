@@ -64,6 +64,7 @@ export default function Audio() {
   // Web Speech TTS (free, browser-based)
   const webTTS = useWebSpeechTTS();
   const [ttsText, setTtsText] = useState('');
+  const [activeTab, setActiveTab] = useState('narration');
 
   // Get highlights from events (goals, saves, etc.)
   const highlights = events?.filter(e => 
@@ -187,7 +188,7 @@ export default function Audio() {
     setCurrentTime(0);
     setDuration(0);
 
-    await generateNarration(
+    const result = await generateNarration(
       matchId,
       events,
       selectedMatch.home_team?.name || 'Time Casa',
@@ -196,6 +197,12 @@ export default function Audio() {
       displayScore.away,
       selectedVoice
     );
+
+    // If only script was generated (no audio), redirect to free TTS tab
+    if (result?.scriptOnly && result.script) {
+      setTtsText(result.script);
+      setActiveTab('free-tts');
+    }
   };
 
   const handleDownload = () => {
@@ -367,7 +374,7 @@ export default function Audio() {
         )}
 
         {/* Main Content */}
-        <Tabs defaultValue="narration" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-4">
             <TabsTrigger value="narration">
               <Mic className="mr-2 h-4 w-4" />
