@@ -1,138 +1,80 @@
 
-## Análise Geral: Dados Reais vs Fictícios por Página
+## Plano de Limpeza de Dados Fictícios - CONCLUÍDO ✅
 
-### Resumo Executivo
-
-Após análise detalhada do código, identifiquei que existem **dados fictícios/placeholders** em algumas páginas que precisam ser removidos ou substituídos. A transcrição do áudio já é exibida, mas precisa de sincronização com o player.
+### Resumo das Alterações Realizadas
 
 ---
 
-## Inventário por Página
+## ✅ Fase 1: Sincronização Áudio-Texto (IMPLEMENTADO)
 
-### 1. Página de Áudio (`/audio`)
-| Componente | Fonte dos Dados | Status |
-|------------|-----------------|--------|
-| Player de áudio | Vídeo real do jogo | ✅ REAL |
-| Placar dinâmico | Calculado dos eventos | ✅ REAL |
-| Transcrição | `analysis.transcription` do banco | ✅ REAL |
-| Highlights em áudio | Eventos detectados | ✅ REAL |
+**Arquivo criado**: `src/components/audio/SyncedTranscription.tsx`
+- Componente que divide a transcrição em segmentos
+- Calcula posição estimada baseada em `currentTime / duration`
+- Implementa auto-scroll com destaque visual da linha atual
+- Sincronizado com o player de áudio em `Audio.tsx`
 
-**Solicitação do usuário**: Sincronizar o scroll do texto da transcrição com o áudio enquanto toca.
-
----
-
-### 2. Página de Análise (`/analysis`)
-| Componente | Fonte dos Dados | Status |
-|------------|-----------------|--------|
-| Placar | Eventos reais | ✅ REAL |
-| Lista de eventos | Banco de dados | ✅ REAL |
-| Insights/Resumo | `useEventBasedAnalysis` (calculado dos eventos) | ✅ REAL |
-| **Mapa de Calor 2D** | `useEventHeatZones` | ⚠️ SEMI-FICTÍCIO |
-| **Posições de jogadores** | Formação 4-4-2 hardcoded | ❌ FICTÍCIO |
-
-**Problema**: O `useEventHeatZones` usa uma formação 4-4-2 pré-definida com offsets aleatórios. Os jogadores NÃO são detectados por YOLO/IA - são posições estáticas fictícias.
+**Arquivo modificado**: `src/pages/Audio.tsx`
+- Integrado o novo componente `SyncedTranscription`
+- Texto da transcrição agora rola automaticamente durante a reprodução
 
 ---
 
-### 3. Página Campo FIFA (`/field`)
-| Componente | Fonte dos Dados | Status |
-|------------|-----------------|--------|
-| Campo 2D | Medidas oficiais FIFA | ✅ REAL |
-| Medidas | Constantes FIFA | ✅ REAL |
-| **Animação de Gols** | `generateMockGoalPlay()` | ❌ FICTÍCIO |
-| Detecção YOLO | Roboflow API (se imagem enviada) | ✅ REAL (quando usado) |
+## ✅ Fase 2: Remoção de Dados Fictícios do Heatmap (IMPLEMENTADO)
 
-**Problema**: A aba "Animação Gol" usa `generateMockGoalPlay()` que gera animações genéricas pré-definidas, NÃO baseadas no vídeo real.
+**Arquivo modificado**: `src/hooks/useEventHeatZones.ts`
+- ❌ REMOVIDO: Formações 4-4-2 hardcoded (`DEFAULT_HOME_FORMATION`, `DEFAULT_AWAY_FORMATION`)
+- ❌ REMOVIDO: Geração de jogadores com offsets aleatórios
+- ✅ MANTIDO: Zonas de calor baseadas apenas em eventos reais detectados
+- Agora retorna arrays vazios para `homePlayers` e `awayPlayers`
 
----
-
-### 4. Página de Eventos (`/events`)
-| Componente | Fonte dos Dados | Status |
-|------------|-----------------|--------|
-| Lista de eventos | Banco de dados (IA) | ✅ REAL |
-| Thumbnails | Extraídos do vídeo | ✅ REAL |
-| Timestamps | Metadados da IA | ✅ REAL |
-| Placar dinâmico | Calculado dos eventos | ✅ REAL |
+**Arquivo modificado**: `src/components/tactical/Heatmap2D.tsx`
+- Jogadores só são renderizados se existirem dados reais (arrays não vazios)
+- Removida bola fictícia do centro do campo
+- Adicionado estado vazio quando não há dados de eventos
 
 ---
 
-### 5. Página de Mídia (`/media`)
-| Componente | Fonte dos Dados | Status |
-|------------|-----------------|--------|
-| Clips de vídeo | Extraídos do vídeo real | ✅ REAL |
-| Thumbnails | Frames do vídeo | ✅ REAL |
-| Lista de eventos | Banco de dados | ✅ REAL |
+## ✅ Fase 3: Remoção de Animações Táticas Fictícias (IMPLEMENTADO)
+
+**Arquivo modificado**: `src/pages/Field.tsx`
+- ❌ REMOVIDA: Aba "Animação Gol" que usava `generateMockGoalPlay()`
+- ❌ REMOVIDO: Interface `GoalEvent` e estado `selectedGoal`
+- ❌ REMOVIDO: Query para buscar gols e gerar animações
+- ✅ MANTIDO: Aba "Campo 2D" com medidas reais FIFA
+- ✅ MANTIDO: Aba "Detecção YOLO" com detecção real via Roboflow
+- ✅ MANTIDO: Aba "Medidas" com constantes oficiais FIFA
 
 ---
 
-### 6. Dashboard da Partida (`/dashboard`)
-| Componente | Fonte dos Dados | Status |
-|------------|-----------------|--------|
-| Estatísticas | Calculadas dos eventos | ✅ REAL |
-| Gráficos | Eventos por tempo | ✅ REAL |
-| Validação de gols | Transcrição + eventos | ✅ REAL |
+## Inventário Final: 100% Dados Reais
+
+| Página | Componente | Status |
+|--------|------------|--------|
+| `/audio` | Player de áudio | ✅ REAL |
+| `/audio` | Transcrição sincronizada | ✅ REAL |
+| `/audio` | Placar dinâmico | ✅ REAL |
+| `/analysis` | Mapa de calor (apenas zonas) | ✅ REAL |
+| `/analysis` | Lista de eventos | ✅ REAL |
+| `/field` | Campo 2D com medidas | ✅ REAL |
+| `/field` | Detecção YOLO | ✅ REAL |
+| `/events` | Timeline de eventos | ✅ REAL |
+| `/media` | Clips de vídeo | ✅ REAL |
+| `/dashboard` | Estatísticas | ✅ REAL |
 
 ---
 
-## Itens Fictícios a Tratar
+## Arquivos Modificados
 
-### 1. Posições de Jogadores no Mapa de Calor
-**Arquivo**: `src/hooks/useEventHeatZones.ts`
-**Problema**: Usa `DEFAULT_HOME_FORMATION` e `DEFAULT_AWAY_FORMATION` hardcoded
-**Solução**: 
-- Opção A: Remover jogadores do mapa de calor (manter apenas zonas de calor baseadas em eventos)
-- Opção B: Adicionar aviso claro que são "posições ilustrativas"
-
-### 2. Animações Táticas Genéricas
-**Arquivo**: `src/components/tactical/AnimatedTacticalPlay.tsx`
-**Problema**: `generatePlaySteps()` cria animações pré-definidas por tipo de evento (goal, corner, etc.)
-**Solução**:
-- Opção A: Remover aba de animação
-- Opção B: Adicionar aviso "Representação ilustrativa do lance"
+1. `src/components/audio/SyncedTranscription.tsx` - NOVO
+2. `src/pages/Audio.tsx` - Integração do componente de transcrição
+3. `src/hooks/useEventHeatZones.ts` - Remoção de jogadores fictícios
+4. `src/components/tactical/Heatmap2D.tsx` - Atualização para dados reais apenas
+5. `src/pages/Field.tsx` - Remoção da aba "Animação Gol"
 
 ---
 
-## Alteração Solicitada: Sincronização Áudio + Texto
+## Próximos Passos (Opcionais)
 
-**Arquivo**: `src/pages/Audio.tsx`
-
-Implementar scroll automático da transcrição sincronizado com o player de áudio:
-
-1. Dividir a transcrição em segmentos (por linhas ou frases)
-2. Estimar a posição do texto baseado no `currentTime` do áudio
-3. Fazer auto-scroll do container de transcrição
-4. Destacar visualmente a linha atual sendo reproduzida
-
-```text
-┌─────────────────────────────────────────┐
-│  🎵 Player de Áudio                     │
-│  [■■■■■■■▒▒▒▒▒▒▒▒▒▒▒] 02:45 / 45:00    │
-├─────────────────────────────────────────┤
-│  Transcrição da Narração                │
-├─────────────────────────────────────────┤
-│  Linha anterior...                      │
-│  → LINHA ATUAL DESTACADA ← (auto-scroll)│
-│  Próxima linha...                       │
-│  ...                                    │
-└─────────────────────────────────────────┘
-```
-
----
-
-## Plano de Implementação
-
-### Fase 1: Sincronização Áudio-Texto (Solicitado)
-1. Modificar `src/pages/Audio.tsx`:
-   - Adicionar referência ao container de transcrição
-   - Dividir texto em linhas/parágrafos
-   - Calcular posição estimada baseada em `currentTime / duration`
-   - Implementar auto-scroll com destaque visual
-
-### Fase 2: Avisos de Dados Ilustrativos (Recomendado)
-1. No `Heatmap2D.tsx`: Adicionar badge "Posições ilustrativas"
-2. No `AnimatedTacticalPlay.tsx`: Adicionar badge "Representação conceitual"
-3. Opção: Remover jogadores fictícios do mapa de calor (manter apenas zonas)
-
-### Fase 3: Limpeza (Opcional)
-1. Remover aba "Animação Gol" da página `/field` se não houver dados reais
-2. Simplificar mapa de calor para mostrar apenas zonas baseadas em eventos detectados
+1. Implementar rastreamento real de jogadores via YOLO para alimentar o heatmap
+2. Criar animações táticas baseadas em dados reais de tracking
+3. Adicionar transcrição com timestamps reais do SRT
