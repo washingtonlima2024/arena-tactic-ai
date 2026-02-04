@@ -86,20 +86,60 @@ function calculateScoresFromGoals(
 ): { homeGoals: number; awayGoals: number } {
   let homeGoals = 0;
   let awayGoals = 0;
+  
+  const homeNameLower = (homeTeamName || '').toLowerCase();
+  const awayNameLower = (awayTeamName || '').toLowerCase();
 
   goalEvents.forEach((goal: any) => {
     const metadata = goal.metadata as Record<string, any> | null;
-    const team = metadata?.team || metadata?.scoring_team;
-    const isOwnGoal = metadata?.isOwnGoal === true;
+    const description = (goal.description || '').toLowerCase();
+    const team = (metadata?.team || metadata?.scoring_team || '').toLowerCase();
+    const isOwnGoal = metadata?.isOwnGoal === true || 
+      description.includes('contra') || 
+      description.includes('own goal');
+    
+    // Determine team type with partial matching
+    let teamType: 'home' | 'away' | 'unknown' = 'unknown';
+    
+    if (team === 'home' || team === 'casa') {
+      teamType = 'home';
+    } else if (team === 'away' || team === 'visitante' || team === 'fora') {
+      teamType = 'away';
+    } else if (homeNameLower && team) {
+      // Partial match: first 4+ characters
+      if (team.includes(homeNameLower.slice(0, 4)) || homeNameLower.includes(team.slice(0, 4))) {
+        teamType = 'home';
+      } else if (awayNameLower && (team.includes(awayNameLower.slice(0, 4)) || awayNameLower.includes(team.slice(0, 4)))) {
+        teamType = 'away';
+      }
+    } else if (awayNameLower && team) {
+      if (team.includes(awayNameLower.slice(0, 4)) || awayNameLower.includes(team.slice(0, 4))) {
+        teamType = 'away';
+      }
+    }
+    
+    // Try description if team still unknown
+    if (teamType === 'unknown') {
+      if (homeNameLower && description.includes(homeNameLower.slice(0, 4))) {
+        teamType = 'home';
+      } else if (awayNameLower && description.includes(awayNameLower.slice(0, 4))) {
+        teamType = 'away';
+      } else {
+        // Default: assume home team scored (most broadcasts focus on home team)
+        teamType = 'home';
+      }
+    }
 
     if (isOwnGoal) {
       // Own goal: opposite team scores
-      if (team === 'home') awayGoals++;
-      else if (team === 'away') homeGoals++;
+      if (teamType === 'home') awayGoals++;
+      else if (teamType === 'away') homeGoals++;
+      else awayGoals++; // Default: home concedes
     } else {
       // Normal goal
-      if (team === 'home' || team === homeTeamName) homeGoals++;
-      else if (team === 'away' || team === awayTeamName) awayGoals++;
+      if (teamType === 'home') homeGoals++;
+      else if (teamType === 'away') awayGoals++;
+      else homeGoals++; // Default: home scores
     }
   });
 
