@@ -1,74 +1,53 @@
 
 
-# Plano: Corrigir Detecção de Eventos (Truncagem + Fallback)
+# Plano: Corrigir Detecção de Cartões Vermelhos Falsos
 
 ## Problema Identificado
 
-### Causa Raiz 1: Truncagem da Transcrição
-```python
-# ai_services.py linha 4173
-prompt = f"""...
-TRANSCRIÇÃO:
-{transcription[:8000]}   # ← PROBLEMA! Só 8000 chars de 38000+
-"""
-```
+Dois cartões vermelhos estão sendo gerados **sem existir** na partida. Há **duas fontes** de eventos não validados:
 
-**Impacto**: 80% da transcrição é ignorada. Gols que ocorrem depois de ~8 minutos do vídeo não são detectados.
+| Fonte | Problema |
+|-------|----------|
+| **Ollama** (linhas 4152-4296) | Gera eventos de cartão diretos, mas só valida **gols** com `_validate_goals_with_context()` |
+| **Keywords Texto** (linhas 3935-3999) | Detecta `cartão vermelho` e `expuls` **sem validação contextual** |
 
-### Causa Raiz 2: Fallback Fraco
-Quando Ollama retorna menos de 3 eventos, o fallback usa `detect_events_by_keywords_from_text()` que:
-- Usa regex simples no texto bruto
-- Não tem acesso ao arquivo SRT original
-- Não usa o algoritmo de sliding window (mais preciso)
+### Fluxo Atual
 
 ```text
-┌───────────────────────────────────────────────────────────────────────┐
-│                      FLUXO ATUAL (PROBLEMÁTICO)                       │
-├───────────────────────────────────────────────────────────────────────┤
-│                                                                       │
-│  SRT 62KB ──► Trunca para 8KB ──► Ollama ──► 1 evento                 │
-│                                      │                                │
-│                                      ▼                                │
-│                          Fallback detect_events_by_keywords_from_text │
-│                          (texto bruto, sem sliding window)            │
-│                                      │                                │
-│                                      ▼                                │
-│                          Poucos eventos adicionais                    │
-│                                                                       │
-└───────────────────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────────┐
+│  Ollama responde:                                                       │
+│  [{"event_type":"red_card", "minute":15, ...}]  ← SEM VALIDAÇÃO!        │
+│                                │                                        │
+│                                ▼                                        │
+│            _validate_goals_with_context()                               │
+│            ├── Só valida GOLS                                           │
+│            └── Cartões passam direto ❌                                 │
+└─────────────────────────────────────────────────────────────────────────┘
 ```
+
+### Por Que Cartões Falsos Aparecem
+
+O Ollama pode interpretar frases como:
+- "poderia ter sido expulso" → detecta `red_card`
+- "mereceu cartão vermelho" → detecta `red_card`
+- "levou amarelo, poderia ser vermelho" → detecta `red_card`
+
+Sem verificar contexto de **expulsão real** (jogador deixando o campo), eventos falsos são criados.
 
 ---
 
 ## Solução Proposta
 
-### 1. Aumentar limite de transcrição para Ollama
-Modelos 7B (mistral, qwen2.5) suportam **32K tokens** (~100K chars). Aumentar de 8000 para **24000 caracteres**.
+### 1. Criar função de validação pós-Ollama para TODOS os eventos
 
-### 2. Usar fallback por SRT quando disponível
-Passar o `match_id` para a função de fallback e usar `detect_events_by_keywords()` (que lê o SRT diretamente).
+Nova função `_validate_all_events_with_context()` que valida:
+- **Cartões vermelhos**: Exigir contexto de expulsão real
+- **Cartões amarelos**: Verificar se realmente foi dado
+- **Pênaltis**: Validar intensidade e contexto
 
-```text
-┌───────────────────────────────────────────────────────────────────────┐
-│                      FLUXO CORRIGIDO                                  │
-├───────────────────────────────────────────────────────────────────────┤
-│                                                                       │
-│  SRT 62KB ──► Usa até 24KB ──► Ollama ──► N eventos                   │
-│                                   │                                   │
-│                                   ▼                                   │
-│                      Se < 3 eventos:                                  │
-│                      ┌─────────────────────────────────┐              │
-│                      │ detect_events_by_keywords(SRT)  │              │
-│                      │ • Sliding window para gols      │              │
-│                      │ • Validação por contexto        │              │
-│                      │ • 99% precisão                  │              │
-│                      └─────────────────────────────────┘              │
-│                                   │                                   │
-│                                   ▼                                   │
-│                      Eventos combinados e deduplicados                │
-│                                                                       │
-└───────────────────────────────────────────────────────────────────────┘
-```
+### 2. Adicionar validação em `detect_events_by_keywords_from_text()`
+
+A função de texto bruto atualmente não valida cartões. Adicionar chamada a `validate_card_event()`.
 
 ---
 
@@ -76,57 +55,81 @@ Passar o `match_id` para a função de fallback e usar `detect_events_by_keyword
 
 ### Arquivo: `video-processor/ai_services.py`
 
-#### Mudança 1: Aumentar limite de caracteres (linha ~4172)
-```python
-# ANTES:
-{transcription[:8000]}
+#### Mudança 1: Criar `_validate_all_events_with_context()` (nova função)
 
-# DEPOIS:
-{transcription[:24000]}
+```python
+def _validate_all_events_with_context(events: List[Dict], transcription: str, home_team: str, away_team: str) -> List[Dict]:
+    """
+    Validação pós-Ollama para TODOS os tipos de eventos.
+    Remove eventos falsos verificando contexto na transcrição.
+    """
+    validated = []
+    
+    for event in events:
+        event_type = event.get('event_type')
+        minute = event.get('minute', 0)
+        second = event.get('second', 0)
+        
+        # Extrair contexto
+        context = _extract_context_around_timestamp(transcription, minute, second)
+        
+        # 1. Validar cartões vermelhos
+        if event_type == 'red_card':
+            validation = validate_card_event(context, context, 'red_card', home_team, away_team)
+            if not validation['is_valid']:
+                print(f"[Validate] ⚠️ Cartão vermelho {minute}' REJEITADO: {validation['reason']}")
+                continue
+        
+        # 2. Validar cartões amarelos
+        if event_type == 'yellow_card':
+            validation = validate_card_event(context, context, 'yellow_card', home_team, away_team)
+            if not validation['is_valid']:
+                print(f"[Validate] ⚠️ Cartão amarelo {minute}' REJEITADO: {validation['reason']}")
+                continue
+        
+        # 3. Validar pênaltis
+        if event_type == 'penalty':
+            validation = validate_penalty_event(context, context, home_team, away_team)
+            if not validation['is_valid']:
+                print(f"[Validate] ⚠️ Pênalti {minute}' REJEITADO: {validation['reason']}")
+                continue
+        
+        validated.append(event)
+    
+    return validated
 ```
 
-#### Mudança 2: Atualizar função `_analyze_events_with_ollama` para receber match_id e usar fallback por SRT
+#### Mudança 2: Atualizar `_analyze_events_with_ollama()` (linha ~4296)
 
-Na seção de fallback (linhas ~4301-4319), modificar para:
+**Substituir**:
 ```python
-# FALLBACK: Se Ollama retornou poucos eventos, usar SRT keywords
-if len(events) < 3:
-    print(f"[Ollama] ⚠️ Poucos eventos ({len(events)}), usando fallback por SRT...")
+events = _validate_goals_with_context(events, transcription)
+```
+
+**Por**:
+```python
+# Validar TODOS os eventos (gols, cartões, pênaltis)
+events = _validate_goals_with_context(events, transcription)
+events = _validate_all_events_with_context(events, transcription, home_team, away_team)
+```
+
+#### Mudança 3: Atualizar `detect_events_by_keywords_from_text()` (linhas 3944-3999)
+
+Adicionar validação para cartões na seção de criação de eventos:
+
+```python
+# Após linha 3974 (antes de criar o evento):
+# Validar cartões antes de adicionar
+if event_type in ['red_card', 'yellow_card']:
+    # Obter contexto ao redor
+    context_start = max(0, keyword_pos - 200)
+    context_end = min(len(transcription), keyword_pos + 200)
+    context = transcription[context_start:context_end]
     
-    # Tentar usar detect_events_by_keywords (SRT direto) se temos match_id
-    if match_id:
-        from storage import get_subfolder_path
-        srt_path = get_subfolder_path(match_id, 'srt')
-        srt_files = list(srt_path.glob('*.srt')) if srt_path.exists() else []
-        
-        if srt_files:
-            # Usar primeiro SRT encontrado
-            keyword_events = detect_events_by_keywords(
-                srt_path=str(srt_files[0]),
-                home_team=home_team,
-                away_team=away_team,
-                half=match_half,
-                segment_start_minute=game_start_minute
-            )
-            print(f"[Ollama] Detecção por SRT (sliding window): {len(keyword_events)} eventos")
-        else:
-            # Fallback para texto bruto se não tiver SRT
-            keyword_events = detect_events_by_keywords_from_text(...)
-    else:
-        # Fallback para texto bruto se não tiver match_id
-        keyword_events = detect_events_by_keywords_from_text(...)
-    
-    # Merge eventos novos
-    for ke in keyword_events:
-        already_exists = any(
-            abs(e.get('minute', 0) - ke.get('minute', 0)) < 2 and 
-            e.get('event_type') == ke.get('event_type')
-            for e in events
-        )
-        if not already_exists:
-            events.append(ke)
-    
-    print(f"[Ollama] Total após fallback: {len(events)} eventos")
+    validation = validate_card_event(match.group(), context, event_type, home_team, away_team)
+    if not validation['is_valid']:
+        print(f"[Keywords-Text] ⚠ {event_type} ignorado: {validation['reason']}")
+        continue
 ```
 
 ---
@@ -135,10 +138,28 @@ if len(events) < 3:
 
 | Aspecto | Antes | Depois |
 |---------|-------|--------|
-| Texto analisado | 8KB (~20%) | 24KB (~60%) |
-| Fallback | Texto bruto (impreciso) | SRT + Sliding Window (99% precisão) |
-| Eventos detectados | 1 gol | Todos os gols + outros eventos |
-| Tempo de análise | Similar | Similar |
+| Validação de gols | ✓ Sim | ✓ Sim |
+| Validação de cartões | ❌ Não | ✓ Sim |
+| Validação de pênaltis | ❌ Não (Ollama) | ✓ Sim |
+| Falsos positivos | Cartões sem expulsão | Rejeitados |
+
+---
+
+## Regras de Validação Existentes (já implementadas)
+
+A função `validate_card_event()` (linhas 469-510) já tem regras robustas:
+
+```python
+# Para cartão vermelho:
+has_expulsion = any(kw in window_text.lower() for kw in [
+    'expuls', 'expulso', 'vermelho direto', 'fora de jogo', 
+    'fora de campo', 'deixa o campo', 'vai embora'
+])
+if not has_expulsion:
+    return {'is_valid': False, 'reason': 'no_expulsion_context'}
+```
+
+**O problema é que essa validação não estava sendo chamada para eventos do Ollama!**
 
 ---
 
@@ -146,15 +167,7 @@ if len(events) < 3:
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `video-processor/ai_services.py` | Aumentar limite 8K→24K + usar fallback por SRT |
-
----
-
-## Teste Recomendado
-
-Após a correção, reanalisar a partida Brasil x Argentina:
-1. Ir para `/events`
-2. Selecionar a partida
-3. Clicar em "Reanalisar" 
-4. Verificar se mais gols são detectados
+| `video-processor/ai_services.py` | Nova função `_validate_all_events_with_context()` |
+| `video-processor/ai_services.py` | Atualizar `_analyze_events_with_ollama()` para validar todos os eventos |
+| `video-processor/ai_services.py` | Atualizar `detect_events_by_keywords_from_text()` para validar cartões |
 
