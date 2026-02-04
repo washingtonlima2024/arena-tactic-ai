@@ -1,44 +1,138 @@
 
+## Análise Geral: Dados Reais vs Fictícios por Página
 
-## Plano: Corrigir Exibição de Cartões Vermelhos Falsos
+### Resumo Executivo
 
-### Problema Identificado
+Após análise detalhada do código, identifiquei que existem **dados fictícios/placeholders** em algumas páginas que precisam ser removidos ou substituídos. A transcrição do áudio já é exibida, mas precisa de sincronização com o player.
 
-Os eventos de "Cartão Vermelho" que você está vendo foram detectados incorretamente pela IA baseados em comentários hipotéticos do narrador. Apesar da correção no backend para prevenir novas detecções, **os eventos já existentes no banco de dados ainda possuem o tipo `red_card`**.
+---
 
-### Solução
+## Inventário por Página
 
-Aplicar uma correção no frontend para tratar eventos `red_card` como `foul` (Falta) na exibição, garantindo que:
+### 1. Página de Áudio (`/audio`)
+| Componente | Fonte dos Dados | Status |
+|------------|-----------------|--------|
+| Player de áudio | Vídeo real do jogo | ✅ REAL |
+| Placar dinâmico | Calculado dos eventos | ✅ REAL |
+| Transcrição | `analysis.transcription` do banco | ✅ REAL |
+| Highlights em áudio | Eventos detectados | ✅ REAL |
 
-1. O texto exibido seja "Falta" ao invés de "Cartão Vermelho"
-2. A cor do badge seja laranja (foul) ao invés de vermelho (card-red)
+**Solicitação do usuário**: Sincronizar o scroll do texto da transcrição com o áudio enquanto toca.
 
-### Alterações Técnicas
+---
 
-#### 1. Arquivo: `src/components/events/EventTimeline.tsx`
+### 2. Página de Análise (`/analysis`)
+| Componente | Fonte dos Dados | Status |
+|------------|-----------------|--------|
+| Placar | Eventos reais | ✅ REAL |
+| Lista de eventos | Banco de dados | ✅ REAL |
+| Insights/Resumo | `useEventBasedAnalysis` (calculado dos eventos) | ✅ REAL |
+| **Mapa de Calor 2D** | `useEventHeatZones` | ⚠️ SEMI-FICTÍCIO |
+| **Posições de jogadores** | Formação 4-4-2 hardcoded | ❌ FICTÍCIO |
 
-Adicionar mapeamento que converte `red_card` para `foul` antes de renderizar:
+**Problema**: O `useEventHeatZones` usa uma formação 4-4-2 pré-definida com offsets aleatórios. Os jogadores NÃO são detectados por YOLO/IA - são posições estáticas fictícias.
 
-```typescript
-// Função para normalizar tipo do evento (red_card → foul)
-const normalizeEventType = (type: string): string => {
-  if (type === 'red_card') return 'foul';
-  return type;
-};
+---
+
+### 3. Página Campo FIFA (`/field`)
+| Componente | Fonte dos Dados | Status |
+|------------|-----------------|--------|
+| Campo 2D | Medidas oficiais FIFA | ✅ REAL |
+| Medidas | Constantes FIFA | ✅ REAL |
+| **Animação de Gols** | `generateMockGoalPlay()` | ❌ FICTÍCIO |
+| Detecção YOLO | Roboflow API (se imagem enviada) | ✅ REAL (quando usado) |
+
+**Problema**: A aba "Animação Gol" usa `generateMockGoalPlay()` que gera animações genéricas pré-definidas, NÃO baseadas no vídeo real.
+
+---
+
+### 4. Página de Eventos (`/events`)
+| Componente | Fonte dos Dados | Status |
+|------------|-----------------|--------|
+| Lista de eventos | Banco de dados (IA) | ✅ REAL |
+| Thumbnails | Extraídos do vídeo | ✅ REAL |
+| Timestamps | Metadados da IA | ✅ REAL |
+| Placar dinâmico | Calculado dos eventos | ✅ REAL |
+
+---
+
+### 5. Página de Mídia (`/media`)
+| Componente | Fonte dos Dados | Status |
+|------------|-----------------|--------|
+| Clips de vídeo | Extraídos do vídeo real | ✅ REAL |
+| Thumbnails | Frames do vídeo | ✅ REAL |
+| Lista de eventos | Banco de dados | ✅ REAL |
+
+---
+
+### 6. Dashboard da Partida (`/dashboard`)
+| Componente | Fonte dos Dados | Status |
+|------------|-----------------|--------|
+| Estatísticas | Calculadas dos eventos | ✅ REAL |
+| Gráficos | Eventos por tempo | ✅ REAL |
+| Validação de gols | Transcrição + eventos | ✅ REAL |
+
+---
+
+## Itens Fictícios a Tratar
+
+### 1. Posições de Jogadores no Mapa de Calor
+**Arquivo**: `src/hooks/useEventHeatZones.ts`
+**Problema**: Usa `DEFAULT_HOME_FORMATION` e `DEFAULT_AWAY_FORMATION` hardcoded
+**Solução**: 
+- Opção A: Remover jogadores do mapa de calor (manter apenas zonas de calor baseadas em eventos)
+- Opção B: Adicionar aviso claro que são "posições ilustrativas"
+
+### 2. Animações Táticas Genéricas
+**Arquivo**: `src/components/tactical/AnimatedTacticalPlay.tsx`
+**Problema**: `generatePlaySteps()` cria animações pré-definidas por tipo de evento (goal, corner, etc.)
+**Solução**:
+- Opção A: Remover aba de animação
+- Opção B: Adicionar aviso "Representação ilustrativa do lance"
+
+---
+
+## Alteração Solicitada: Sincronização Áudio + Texto
+
+**Arquivo**: `src/pages/Audio.tsx`
+
+Implementar scroll automático da transcrição sincronizado com o player de áudio:
+
+1. Dividir a transcrição em segmentos (por linhas ou frases)
+2. Estimar a posição do texto baseado no `currentTime` do áudio
+3. Fazer auto-scroll do container de transcrição
+4. Destacar visualmente a linha atual sendo reproduzida
+
+```text
+┌─────────────────────────────────────────┐
+│  🎵 Player de Áudio                     │
+│  [■■■■■■■▒▒▒▒▒▒▒▒▒▒▒] 02:45 / 45:00    │
+├─────────────────────────────────────────┤
+│  Transcrição da Narração                │
+├─────────────────────────────────────────┤
+│  Linha anterior...                      │
+│  → LINHA ATUAL DESTACADA ← (auto-scroll)│
+│  Próxima linha...                       │
+│  ...                                    │
+└─────────────────────────────────────────┘
 ```
 
-Aplicar essa normalização ao:
-- Obter a variante do badge
-- Obter o label do evento
-- Obter o ícone do evento
+---
 
-#### 2. Arquivo: `src/lib/eventLabels.ts`
+## Plano de Implementação
 
-Atualizar a entrada de `red_card` para exibir "Falta" ao invés de "Cartão Vermelho".
+### Fase 1: Sincronização Áudio-Texto (Solicitado)
+1. Modificar `src/pages/Audio.tsx`:
+   - Adicionar referência ao container de transcrição
+   - Dividir texto em linhas/parágrafos
+   - Calcular posição estimada baseada em `currentTime / duration`
+   - Implementar auto-scroll com destaque visual
 
-### Resultado Esperado
+### Fase 2: Avisos de Dados Ilustrativos (Recomendado)
+1. No `Heatmap2D.tsx`: Adicionar badge "Posições ilustrativas"
+2. No `AnimatedTacticalPlay.tsx`: Adicionar badge "Representação conceitual"
+3. Opção: Remover jogadores fictícios do mapa de calor (manter apenas zonas)
 
-- Eventos que foram detectados como `red_card` aparecerão como "Falta" com cor laranja
-- A lógica de detecção no backend já previne novas detecções incorretas
-- Após reprocessar a partida, os eventos antigos serão substituídos corretamente
-
+### Fase 3: Limpeza (Opcional)
+1. Remover aba "Animação Gol" da página `/field` se não houver dados reais
+2. Simplificar mapa de calor para mostrar apenas zonas baseadas em eventos detectados
