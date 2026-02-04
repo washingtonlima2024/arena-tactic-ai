@@ -1,145 +1,165 @@
 
-# Plano: Corrigir Análise do Segundo Tempo (SRT Errado + Validação)
 
-## Problema Identificado
+# Plano: Desabilitar Detecção de Cartão Vermelho (Converter para Falta)
 
-A análise do segundo tempo gerou apenas 1 evento porque:
+## Objetivo
 
-1. **SRT Errado no Fallback**: Quando o Ollama detecta menos de 3 eventos e aciona o fallback por keywords, o código usa **o primeiro SRT encontrado** sem verificar se corresponde ao tempo sendo analisado.
+Remover a detecção de cartão vermelho do sistema, pois a validação não está conseguindo distinguir corretamente menções hipotéticas de expulsões reais. A abordagem será:
 
-2. **Filtro de SRT por Glob**: O `glob('*.srt')` não garante ordem e pode retornar o SRT do primeiro tempo antes do segundo.
+1. **Cartão Amarelo**: Manter detecção normalmente
+2. **Cartão Vermelho**: Converter automaticamente para **Falta** (`foul`)
 
-## Código Problemático
+## Arquivos a Modificar
 
-**Arquivo**: `video-processor/ai_services.py` (linhas 4453-4466)
+| Arquivo | Alteração |
+|---------|-----------|
+| `video-processor/ai_services.py` | Remover `red_card` dos padrões de detecção e converter para `foul` em múltiplos locais |
+
+---
+
+## Mudanças Técnicas
+
+### Mudança 1: Remover `red_card` do dicionário de padrões (linha ~1089)
 
 ```python
-srt_folder = get_subfolder_path(match_id, 'srt')
-srt_files = list(srt_folder.glob('*.srt')) if srt_folder.exists() else []
+# ANTES:
+'red_card': [
+    r'CARTÃO VERMELHO',
+    r'VERMELHO PARA',
+    r'EXPULSO',
+    ...
+],
 
-if srt_files:
-    # ⚠️ PROBLEMA: Usa PRIMEIRO SRT encontrado independente do tempo!
-    print(f"[Ollama] Usando SRT: {srt_files[0].name}")
-    keyword_events = detect_events_by_keywords(
-        srt_path=str(srt_files[0]),  # ← Pode ser o SRT errado!
-        home_team=home_team,
-        away_team=away_team,
-        half=match_half,
-        segment_start_minute=game_start_minute
-    )
+# DEPOIS:
+# 🔧 REMOVIDO - Cartão vermelho desabilitado (convertido para foul)
+# 'red_card': [...],
 ```
 
-## Solução
-
-### Mudança 1: Selecionar SRT Correto Baseado no Tempo
-
-Modificar a lógica para filtrar o SRT pelo `match_half`:
+### Mudança 2: Remover `red_card` dos padrões de texto (linha ~4096)
 
 ```python
-srt_folder = get_subfolder_path(match_id, 'srt')
-srt_files = list(srt_folder.glob('*.srt')) if srt_folder.exists() else []
+# ANTES:
+patterns = {
+    'goal': [...],
+    'yellow_card': [r'cartão amarelo', r'amarelou'],
+    'red_card': [r'cartão vermelho', r'expuls'],  # ← REMOVER
+    'penalty': [...],
+}
 
-# 🔧 Filtrar SRT pelo tempo correto
-target_srt = None
-if srt_files:
-    # Prioridade: arquivo específico do tempo
-    srt_patterns = [
-        f'{match_half}_half.srt',      # second_half.srt
-        f'{match_half}_transcription.srt',  # second_transcription.srt
-        f'{match_half}.srt',           # second.srt
+# DEPOIS:
+patterns = {
+    'goal': [...],
+    'yellow_card': [r'cartão amarelo', r'amarelou'],
+    # 🔧 red_card REMOVIDO - menções de cartão vermelho serão ignoradas
+    'penalty': [...],
+}
+```
+
+### Mudança 3: Atualizar prompt do Ollama (linhas ~4299-4306)
+
+```python
+# ANTES:
+EVENTOS PARA DETECTAR:
+- goal: "GOOOL", "GOLAÇO", "abre o placar", "empata", "virou", "bola na rede"
+- yellow_card: "cartão amarelo", "amarelou"
+- red_card: "cartão vermelho", "expulso"  # ← REMOVER
+- penalty: "pênalti", "penalidade máxima"
+
+# DEPOIS:
+EVENTOS PARA DETECTAR:
+- goal: "GOOOL", "GOLAÇO", "abre o placar", "empata", "virou", "bola na rede"
+- yellow_card: "cartão amarelo", "amarelou"
+# 🔧 red_card removido - menções serão ignoradas
+- penalty: "pênalti", "penalidade máxima"
+```
+
+### Mudança 4: Converter `red_card` para `foul` na validação final (linha ~4555)
+
+Adicionar conversão automática após a detecção:
+
+```python
+def sanitize_events(events):
+    """Limpa e valida lista de eventos da IA."""
+    VALID_EVENT_TYPES = [
+        'goal', 'shot', 'save', 'foul', 'yellow_card',  # ← red_card REMOVIDO
+        'corner', 'offside', 'substitution', 'chance', 'penalty',
+        'free_kick', 'throw_in', 'kick_off', 'half_time', 'full_time',
     ]
     
-    for pattern in srt_patterns:
-        for srt_file in srt_files:
-            if pattern in srt_file.name.lower():
-                target_srt = srt_file
-                break
-        if target_srt:
-            break
-    
-    # Fallback: usar qualquer SRT se só existe um
-    if not target_srt and len(srt_files) == 1:
-        target_srt = srt_files[0]
-
-if target_srt:
-    print(f"[Ollama] Usando SRT do {match_half}: {target_srt.name}")
-    keyword_events = detect_events_by_keywords(
-        srt_path=str(target_srt),
-        home_team=home_team,
-        away_team=away_team,
-        half=match_half,
-        segment_start_minute=game_start_minute
-    )
-else:
-    print(f"[Ollama] SRT do {match_half} não encontrado, usando texto bruto...")
-    keyword_events = detect_events_by_keywords_from_text(...)
+    cleaned = []
+    for event in events:
+        event_type = (event.get('event_type') or '').lower().strip()
+        
+        # 🔧 CONVERSÃO: Cartão vermelho → Falta
+        if event_type == 'red_card':
+            print(f"[Sanitize] 🔄 Convertendo red_card → foul (min {event.get('minute', '?')}')")
+            event_type = 'foul'
+            event['event_type'] = 'foul'
+            event['description'] = f"Falta (menção a cartão): {event.get('description', '')}"[:100]
+        
+        # ... resto da validação
 ```
 
-### Mudança 2: Logs de Diagnóstico
-
-Adicionar logs para identificar qual SRT está sendo usado:
+### Mudança 5: Atualizar `is_highlight` (linha ~4577)
 
 ```python
-print(f"[Ollama] 📂 SRTs disponíveis: {[f.name for f in srt_files]}")
-print(f"[Ollama] 🎯 Buscando SRT para tempo: {match_half}")
+# ANTES:
+event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'yellow_card', 'red_card', 'penalty'])
+
+# DEPOIS:
+# 🔧 red_card removido de highlights
+event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'yellow_card', 'penalty'])
+```
+
+### Mudança 6: Atualizar prompt principal (linha ~3490)
+
+```python
+# ANTES:
+- event_type: goal, shot, save, foul, yellow_card, red_card, corner, chance, penalty, etc.
+
+# DEPOIS:
+# 🔧 red_card removido - não detectar expulsões
+- event_type: goal, shot, save, foul, yellow_card, corner, chance, penalty, etc.
 ```
 
 ---
 
-## Fluxo Corrigido
+## Fluxo Após Mudanças
 
 ```text
 ┌──────────────────────────────────────────────────────────────────────────────┐
-│  ANÁLISE DO SEGUNDO TEMPO (CORRIGIDO)                                        │
+│  DETECÇÃO DE EVENTOS (CARTÕES)                                               │
 ├──────────────────────────────────────────────────────────────────────────────┤
 │                                                                              │
-│  1. Ollama analisa transcrição do 2º tempo                                   │
-│     └── Detecta N eventos                                                    │
+│  📝 Narrador menciona "cartão amarelo"                                       │
+│     └── Detectado como yellow_card ✓                                         │
+│     └── Badge amarelo na timeline ✓                                          │
 │                                                                              │
-│  2. Validação pós-Ollama                                                     │
-│     └── _validate_goals_with_context()                                       │
-│     └── _validate_all_events_with_context()                                  │
-│                                                                              │
-│  3. Fallback (se N < 3 eventos)                                              │
-│     ├── ANTES: Usava PRIMEIRO SRT encontrado (possivelmente 1º tempo) ❌     │
-│     └── DEPOIS: Filtra por 'second_half.srt' ou similar ✓                    │
-│                                                                              │
-│  4. Merge + Deduplicate                                                      │
-│     └── Eventos finais salvos                                                │
+│  📝 Narrador menciona "cartão vermelho" ou "expulso"                         │
+│     └── ANTES: Detectado como red_card → validação falha → evento falso ❌   │
+│     └── DEPOIS: Ignorado pela IA ✓                                           │
+│     └── OU se detectado, convertido para foul automaticamente ✓              │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Arquivos a Modificar
-
-| Arquivo | Alteração |
-|---------|-----------|
-| `video-processor/ai_services.py` | Linha ~4454: Filtrar SRT pelo tempo (`match_half`) antes de usar no fallback |
-
----
-
 ## Resultado Esperado
 
-| Cenário | Antes | Depois |
-|---------|-------|--------|
-| Fallback do 2º tempo | Usa `first_half.srt` se vier primeiro | Usa `second_half.srt` especificamente |
-| SRTs múltiplos no diretório | Comportamento imprevisível | Seleção determinística por padrão de nome |
-| Logs | Não indicava qual SRT usado | Mostra arquivos disponíveis e selecionado |
+| Evento | Antes | Depois |
+|--------|-------|--------|
+| Cartão Amarelo | Detectado normalmente ✓ | Continua funcionando ✓ |
+| Cartão Vermelho Real | Às vezes detectado ❓ | Ignorado ou convertido para falta |
+| Menção Hipotética de Vermelho | Falso positivo ❌ | Ignorado ✓ |
+| Badge na Timeline | Vermelho falso aparece ❌ | Só amarelo aparece ✓ |
 
 ---
 
-## Diagnóstico Adicional
+## Consideração
 
-Para verificar a causa exata, seria útil:
+Se no futuro quiser reativar a detecção de cartão vermelho, basta:
+1. Descomentar os padrões de `red_card`
+2. Remover a conversão automática em `sanitize_events`
+3. Melhorar a validação com regras mais precisas
 
-1. **Verificar logs do servidor Python** - procurar por:
-   - `[Ollama] ⚠️ Poucos eventos` - confirma se fallback foi acionado
-   - `[Ollama] Usando SRT:` - mostra qual arquivo foi usado
-   - `[Validate] ⚠️` - mostra eventos rejeitados
-
-2. **Verificar arquivos SRT no storage**:
-   - `storage/{match_id}/srt/` - listar arquivos existentes
-
-Se o problema persistir após esta correção, pode haver também uma questão na validação contextual que está rejeitando eventos válidos.
