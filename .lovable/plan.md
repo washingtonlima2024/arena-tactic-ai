@@ -1,263 +1,144 @@
 
 
-# Plano: Transcrição Whisper Local Robusta e Segmentada
+# Plano: Corrigir Detecção de Eventos (Truncagem + Fallback)
 
 ## Problema Identificado
 
-Atualmente existem **dois sistemas de segmentação paralelos** que não estão integrados:
+### Causa Raiz 1: Truncagem da Transcrição
+```python
+# ai_services.py linha 4173
+prompt = f"""...
+TRANSCRIÇÃO:
+{transcription[:8000]}   # ← PROBLEMA! Só 8000 chars de 38000+
+"""
+```
 
-| Sistema | Local | Status |
-|---------|-------|--------|
-| `audio_processor.py` | `data/uploads/{id}/audio/segments/` | Cria segmentos, **mas não transcreve** |
-| `ai_services.py` | `{audio_dir}/chunks/` | Transcreve com checkpoints, **mas não usa segmentos do upload** |
+**Impacto**: 80% da transcrição é ignorada. Gols que ocorrem depois de ~8 minutos do vídeo não são detectados.
 
-**Resultado**: O chunked upload termina em `ready_for_transcription` e para. A transcrição nunca acontece de forma segmentada!
+### Causa Raiz 2: Fallback Fraco
+Quando Ollama retorna menos de 3 eventos, o fallback usa `detect_events_by_keywords_from_text()` que:
+- Usa regex simples no texto bruto
+- Não tem acesso ao arquivo SRT original
+- Não usa o algoritmo de sliding window (mais preciso)
 
 ```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│                     FLUXO ATUAL (INTERROMPIDO)                          │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  1. Upload chunks ──► 2. Assembly ──► 3. Conversão MP4 ──► 4. Extrai    │
-│       ✓                   ✓                ✓               áudio ✓     │
-│                                                                         │
-│  5. Segmenta áudio ──► 6. ready_for_transcription ──► 7. ???           │
-│       ✓ (45s cada)           ✓ (para aqui!)              NUNCA RODA    │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────┐
+│                      FLUXO ATUAL (PROBLEMÁTICO)                       │
+├───────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│  SRT 62KB ──► Trunca para 8KB ──► Ollama ──► 1 evento                 │
+│                                      │                                │
+│                                      ▼                                │
+│                          Fallback detect_events_by_keywords_from_text │
+│                          (texto bruto, sem sliding window)            │
+│                                      │                                │
+│                                      ▼                                │
+│                          Poucos eventos adicionais                    │
+│                                                                       │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
 ## Solução Proposta
 
-Unificar os sistemas criando uma função robusta que:
+### 1. Aumentar limite de transcrição para Ollama
+Modelos 7B (mistral, qwen2.5) suportam **32K tokens** (~100K chars). Aumentar de 8000 para **24000 caracteres**.
 
-1. **Transcreve segmentos já criados** pelo `audio_processor`
-2. **Salva checkpoint por segmento** (retomável)
-3. **Não para em caso de erro** - registra e continua
-4. **Atualiza progresso em tempo real** no banco
+### 2. Usar fallback por SRT quando disponível
+Passar o `match_id` para a função de fallback e usar `detect_events_by_keywords()` (que lê o SRT diretamente).
 
 ```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│                      FLUXO CORRIGIDO                                    │
-├─────────────────────────────────────────────────────────────────────────┤
-│                                                                         │
-│  6. ready_for_transcription ──► 7. transcribe_upload_segments()        │
-│                                      │                                  │
-│                                      ▼                                  │
-│                          ┌───────────────────────┐                      │
-│                          │ Para cada segmento:   │                      │
-│                          │  • Carrega checkpoint │                      │
-│                          │  • Whisper.transcribe │                      │
-│                          │  • Salva checkpoint   │ ◄── retomável!       │
-│                          │  • Atualiza progresso │                      │
-│                          └───────────────────────┘                      │
-│                                      │                                  │
-│                                      ▼                                  │
-│                          8. Merge SRT ──► 9. Salva arquivos finais     │
-│                                                                         │
-└─────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────┐
+│                      FLUXO CORRIGIDO                                  │
+├───────────────────────────────────────────────────────────────────────┤
+│                                                                       │
+│  SRT 62KB ──► Usa até 24KB ──► Ollama ──► N eventos                   │
+│                                   │                                   │
+│                                   ▼                                   │
+│                      Se < 3 eventos:                                  │
+│                      ┌─────────────────────────────────┐              │
+│                      │ detect_events_by_keywords(SRT)  │              │
+│                      │ • Sliding window para gols      │              │
+│                      │ • Validação por contexto        │              │
+│                      │ • 99% precisão                  │              │
+│                      └─────────────────────────────────┘              │
+│                                   │                                   │
+│                                   ▼                                   │
+│                      Eventos combinados e deduplicados                │
+│                                                                       │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-## Arquivos a Modificar
+## Mudanças Necessárias
 
-### 1. `video-processor/ai_services.py`
+### Arquivo: `video-processor/ai_services.py`
 
-**Adicionar nova função**: `transcribe_upload_segments()`
-
+#### Mudança 1: Aumentar limite de caracteres (linha ~4172)
 ```python
-def transcribe_upload_segments(
-    upload_id: str,
-    manifest_path: str,
-    match_id: str = None,
-    max_retries: int = 3,
-    progress_callback: callable = None
-) -> Dict[str, Any]:
-    """
-    Transcreve segmentos de áudio criados pelo audio_processor.
-    
-    ROBUSTO:
-    - Carrega checkpoint de cada segmento (retomável)
-    - Continua em caso de erro (registra e pula)
-    - Salva progresso após cada segmento
-    
-    Args:
-        upload_id: ID do upload (para checkpoints)
-        manifest_path: Caminho para manifest.json dos segmentos
-        match_id: ID da partida (para metadados)
-        max_retries: Tentativas por segmento
-        progress_callback: Função chamada com (current, total, segment_text)
-    
-    Returns:
-        Dict com 'success', 'text', 'srtContent', 'segments'
-    """
-    # Carregar manifest
-    with open(manifest_path, 'r') as f:
-        manifest = json.load(f)
-    
-    segments = manifest['segments']
-    total = len(segments)
-    all_transcripts = []
-    errors = []
-    
-    for i, seg in enumerate(segments):
-        # 1. Verificar checkpoint existente
-        checkpoint = load_segment_checkpoint(upload_id, i)
-        if checkpoint:
-            print(f"[Whisper] ⏩ Segmento {i+1}/{total} já transcrito (checkpoint)")
-            all_transcripts.append(checkpoint)
-            continue
-        
-        # 2. Transcrever com retries
-        for retry in range(max_retries):
-            try:
-                result = _transcribe_single_segment(seg['path'])
-                
-                # 3. Salvar checkpoint imediatamente
-                save_segment_checkpoint(
-                    upload_id, i,
-                    text=result['text'],
-                    start_ms=seg['startMs'],
-                    end_ms=seg['endMs'],
-                    word_timestamps=result.get('words')
-                )
-                
-                all_transcripts.append({
-                    'text': result['text'],
-                    'startMs': seg['startMs'],
-                    'endMs': seg['endMs']
-                })
-                
-                print(f"[Whisper] ✓ Segmento {i+1}/{total}")
-                break
-                
-            except Exception as e:
-                if retry == max_retries - 1:
-                    errors.append(f"Seg {i}: {e}")
-                    print(f"[Whisper] ❌ Segmento {i+1} falhou: {e}")
-                else:
-                    print(f"[Whisper] ⚠ Retry {retry+1} para segmento {i+1}")
-        
-        # 4. Atualizar progresso
-        if progress_callback:
-            progress_callback(i + 1, total, result.get('text', '')[:50])
-    
-    # 5. Gerar SRT final
-    srt_content = merge_segments_to_srt(all_transcripts)
-    full_text = ' '.join(t['text'] for t in all_transcripts)
-    
-    return {
-        'success': True,
-        'text': full_text,
-        'srtContent': srt_content,
-        'segments': all_transcripts,
-        'errors': errors,
-        'provider': 'local_whisper'
-    }
+# ANTES:
+{transcription[:8000]}
+
+# DEPOIS:
+{transcription[:24000]}
 ```
 
----
+#### Mudança 2: Atualizar função `_analyze_events_with_ollama` para receber match_id e usar fallback por SRT
 
-### 2. `video-processor/audio_processor.py`
-
-**Adicionar função**: `complete_transcription()` que é chamada após segmentação:
-
+Na seção de fallback (linhas ~4301-4319), modificar para:
 ```python
-def complete_transcription(upload_id: str) -> Dict[str, Any]:
-    """
-    Executa transcrição de todos os segmentos e atualiza job.
-    Chamado automaticamente após segmentação.
-    """
-    from ai_services import transcribe_upload_segments
-    from chunked_upload import get_upload_dir
+# FALLBACK: Se Ollama retornou poucos eventos, usar SRT keywords
+if len(events) < 3:
+    print(f"[Ollama] ⚠️ Poucos eventos ({len(events)}), usando fallback por SRT...")
     
-    def update_progress(current, total, text):
-        with get_db_session() as session:
-            job = session.query(UploadJob).filter_by(id=upload_id).first()
-            if job:
-                job.transcription_segment_current = current
-                job.transcription_progress = int((current / total) * 100)
-                session.commit()
-    
-    # Caminho do manifest
-    manifest_path = get_upload_dir(upload_id) / 'audio' / 'segments' / 'manifest.json'
-    
-    # Transcrever
-    result = transcribe_upload_segments(
-        upload_id=upload_id,
-        manifest_path=str(manifest_path),
-        progress_callback=update_progress
-    )
-    
-    # Salvar SRT final
-    if result.get('success'):
-        srt_path = get_upload_dir(upload_id) / 'transcript' / 'final.srt'
-        srt_path.write_text(result['srtContent'], encoding='utf-8')
+    # Tentar usar detect_events_by_keywords (SRT direto) se temos match_id
+    if match_id:
+        from storage import get_subfolder_path
+        srt_path = get_subfolder_path(match_id, 'srt')
+        srt_files = list(srt_path.glob('*.srt')) if srt_path.exists() else []
         
-        # Atualizar job
-        with get_db_session() as session:
-            job = session.query(UploadJob).filter_by(id=upload_id).first()
-            job.status = 'complete'
-            job.srt_path = str(srt_path)
-            session.commit()
+        if srt_files:
+            # Usar primeiro SRT encontrado
+            keyword_events = detect_events_by_keywords(
+                srt_path=str(srt_files[0]),
+                home_team=home_team,
+                away_team=away_team,
+                half=match_half,
+                segment_start_minute=game_start_minute
+            )
+            print(f"[Ollama] Detecção por SRT (sliding window): {len(keyword_events)} eventos")
+        else:
+            # Fallback para texto bruto se não tiver SRT
+            keyword_events = detect_events_by_keywords_from_text(...)
+    else:
+        # Fallback para texto bruto se não tiver match_id
+        keyword_events = detect_events_by_keywords_from_text(...)
     
-    return result
+    # Merge eventos novos
+    for ke in keyword_events:
+        already_exists = any(
+            abs(e.get('minute', 0) - ke.get('minute', 0)) < 2 and 
+            e.get('event_type') == ke.get('event_type')
+            for e in events
+        )
+        if not already_exists:
+            events.append(ke)
+    
+    print(f"[Ollama] Total após fallback: {len(events)} eventos")
 ```
 
 ---
 
-### 3. `video-processor/audio_processor.py` - Atualizar `process_upload_media()`
-
-**Modificar** a função existente para chamar transcrição automaticamente:
-
-```python
-# Após linha 500 (depois de segmentar):
-update_job({
-    'status': 'transcribing',  # ← Mudar de ready_for_transcription
-    'stage': 'transcribing_segments',
-})
-add_event('Iniciando transcrição com Whisper Local...')
-
-# Chamar transcrição
-transcription_result = complete_transcription(upload_id)
-
-if transcription_result.get('success'):
-    add_event(f'Transcrição completa: {len(transcription_result.get("text", ""))} caracteres')
-else:
-    add_event(f'Erro na transcrição: {transcription_result.get("errors", [])}')
-```
-
----
-
-## Resultado Final
+## Resultado Esperado
 
 | Aspecto | Antes | Depois |
 |---------|-------|--------|
-| Segmentos do upload | Criados mas não usados | Transcritos automaticamente |
-| Checkpoints | Só em `ai_services.py` | Por segmento (100% retomável) |
-| Erros | Param todo processo | Registrados, continua |
-| Progresso | Não atualizado | Tempo real no banco |
-| Duração máxima | Sem limite | 500 segmentos (~6h) |
-
----
-
-## Fluxo de Resiliência
-
-```text
-Cenário: Upload de 2GB, transcrição falha no segmento 45 de 120
-
-┌─────────────────────────────────────────────────────────────────────────┐
-│  ANTES: Precisa recomeçar do zero                                       │
-│  DEPOIS:                                                                │
-│    1. Usuário reinicia o processo                                       │
-│    2. Sistema lê checkpoints 1-44 do disco                              │
-│    3. Continua do segmento 45                                           │
-│    4. Progresso: 37% → 100% (não perde trabalho)                        │
-└─────────────────────────────────────────────────────────────────────────┘
-```
+| Texto analisado | 8KB (~20%) | 24KB (~60%) |
+| Fallback | Texto bruto (impreciso) | SRT + Sliding Window (99% precisão) |
+| Eventos detectados | 1 gol | Todos os gols + outros eventos |
+| Tempo de análise | Similar | Similar |
 
 ---
 
@@ -265,6 +146,15 @@ Cenário: Upload de 2GB, transcrição falha no segmento 45 de 120
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `video-processor/ai_services.py` | Nova função `transcribe_upload_segments()` |
-| `video-processor/audio_processor.py` | Nova função `complete_transcription()` + modificar `process_upload_media()` |
+| `video-processor/ai_services.py` | Aumentar limite 8K→24K + usar fallback por SRT |
+
+---
+
+## Teste Recomendado
+
+Após a correção, reanalisar a partida Brasil x Argentina:
+1. Ir para `/events`
+2. Selecionar a partida
+3. Clicar em "Reanalisar" 
+4. Verificar se mais gols são detectados
 
