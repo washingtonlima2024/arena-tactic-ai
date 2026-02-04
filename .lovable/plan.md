@@ -1,53 +1,29 @@
 
 
-# Plano: Corrigir Detecção de Cartões Vermelhos Falsos
+# Plano: Simplificar Extração de Contexto (Palavra-chave no Centro + Janela 40s)
 
-## Problema Identificado
+## Problema Atual
 
-Dois cartões vermelhos estão sendo gerados **sem existir** na partida. Há **duas fontes** de eventos não validados:
+A função `_extract_context_around_timestamp` tenta localizar contexto baseado no timestamp do evento:
 
-| Fonte | Problema |
-|-------|----------|
-| **Ollama** (linhas 4152-4296) | Gera eventos de cartão diretos, mas só valida **gols** com `_validate_goals_with_context()` |
-| **Keywords Texto** (linhas 3935-3999) | Detecta `cartão vermelho` e `expuls` **sem validação contextual** |
-
-### Fluxo Atual
-
-```text
-┌─────────────────────────────────────────────────────────────────────────┐
-│  Ollama responde:                                                       │
-│  [{"event_type":"red_card", "minute":15, ...}]  ← SEM VALIDAÇÃO!        │
-│                                │                                        │
-│                                ▼                                        │
-│            _validate_goals_with_context()                               │
-│            ├── Só valida GOLS                                           │
-│            └── Cartões passam direto ❌                                 │
-└─────────────────────────────────────────────────────────────────────────┘
+```python
+# Linha 513 - Busca padrões de timestamp
+time_patterns = [
+    rf'{minute:02d}:{second:02d}',  # ← Falha se formato diferente
+    rf'{minute}:{second:02d}',
+    rf'{minute}\s*minuto',
+]
 ```
 
-### Por Que Cartões Falsos Aparecem
-
-O Ollama pode interpretar frases como:
-- "poderia ter sido expulso" → detecta `red_card`
-- "mereceu cartão vermelho" → detecta `red_card`
-- "levou amarelo, poderia ser vermelho" → detecta `red_card`
-
-Sem verificar contexto de **expulsão real** (jogador deixando o campo), eventos falsos são criados.
-
----
+**Problema**: Se o padrão não for encontrado, o fallback usa uma estimativa imprecisa baseada na posição proporcional no texto. Isso resulta em contexto errado → validação falha → eventos falsos passam.
 
 ## Solução Proposta
 
-### 1. Criar função de validação pós-Ollama para TODOS os eventos
+Mudar a abordagem para:
 
-Nova função `_validate_all_events_with_context()` que valida:
-- **Cartões vermelhos**: Exigir contexto de expulsão real
-- **Cartões amarelos**: Verificar se realmente foi dado
-- **Pênaltis**: Validar intensidade e contexto
-
-### 2. Adicionar validação em `detect_events_by_keywords_from_text()`
-
-A função de texto bruto atualmente não valida cartões. Adicionar chamada a `validate_card_event()`.
+1. **Palavra-chave no centro**: Quando o Ollama detecta um evento em determinado minuto, buscar a palavra-chave do evento no texto e centralizar ali
+2. **Janela expandida**: 20 segundos para cada lado (~40s total = ~1000-1200 caracteres)
+3. **Fallback simples**: Se não encontrar palavra-chave, usar janela de caracteres ao redor da posição estimada
 
 ---
 
@@ -55,81 +31,127 @@ A função de texto bruto atualmente não valida cartões. Adicionar chamada a `
 
 ### Arquivo: `video-processor/ai_services.py`
 
-#### Mudança 1: Criar `_validate_all_events_with_context()` (nova função)
+#### Mudança 1: Reescrever `_extract_context_around_timestamp()` (linha 513)
 
+**Lógica Nova:**
 ```python
-def _validate_all_events_with_context(events: List[Dict], transcription: str, home_team: str, away_team: str) -> List[Dict]:
+def _extract_context_around_timestamp(
+    transcription: str, 
+    minute: int, 
+    second: int, 
+    event_type: str = None,
+    window_chars: int = 1000  # ~40 segundos = 20s cada lado
+) -> str:
     """
-    Validação pós-Ollama para TODOS os tipos de eventos.
-    Remove eventos falsos verificando contexto na transcrição.
+    Extrai contexto centrado na palavra-chave do evento.
+    
+    Estratégia:
+    1. Buscar palavra-chave do tipo de evento no texto
+    2. Centralizar janela de 1000 chars (500 antes, 500 depois)
+    3. Fallback: posição estimada se não encontrar keyword
     """
-    validated = []
     
-    for event in events:
-        event_type = event.get('event_type')
-        minute = event.get('minute', 0)
-        second = event.get('second', 0)
-        
-        # Extrair contexto
-        context = _extract_context_around_timestamp(transcription, minute, second)
-        
-        # 1. Validar cartões vermelhos
-        if event_type == 'red_card':
-            validation = validate_card_event(context, context, 'red_card', home_team, away_team)
-            if not validation['is_valid']:
-                print(f"[Validate] ⚠️ Cartão vermelho {minute}' REJEITADO: {validation['reason']}")
-                continue
-        
-        # 2. Validar cartões amarelos
-        if event_type == 'yellow_card':
-            validation = validate_card_event(context, context, 'yellow_card', home_team, away_team)
-            if not validation['is_valid']:
-                print(f"[Validate] ⚠️ Cartão amarelo {minute}' REJEITADO: {validation['reason']}")
-                continue
-        
-        # 3. Validar pênaltis
-        if event_type == 'penalty':
-            validation = validate_penalty_event(context, context, home_team, away_team)
-            if not validation['is_valid']:
-                print(f"[Validate] ⚠️ Pênalti {minute}' REJEITADO: {validation['reason']}")
-                continue
-        
-        validated.append(event)
+    # Mapa de keywords por tipo de evento
+    event_keywords = {
+        'goal': ['gol', 'golaço', 'bola na rede', 'abre o placar'],
+        'red_card': ['vermelho', 'expuls', 'cartão vermelho'],
+        'yellow_card': ['amarelo', 'cartão amarelo', 'amarelou'],
+        'penalty': ['pênalti', 'penalidade'],
+        'save': ['defesa', 'salvou', 'espalmou'],
+    }
     
-    return validated
+    # 1. Tentar encontrar keyword do evento
+    keywords = event_keywords.get(event_type, [])
+    
+    for keyword in keywords:
+        # Buscar todas as ocorrências
+        pattern = re.escape(keyword)
+        matches = list(re.finditer(pattern, transcription.lower()))
+        
+        if matches:
+            # Usar a primeira ocorrência (ou a mais próxima do timestamp estimado)
+            best_match = matches[0]
+            center_pos = best_match.start()
+            
+            # Extrair janela centrada na keyword
+            half_window = window_chars // 2
+            start = max(0, center_pos - half_window)
+            end = min(len(transcription), center_pos + half_window)
+            
+            return transcription[start:end]
+    
+    # 2. Fallback: posição estimada baseada no timestamp
+    total_seconds = minute * 60 + second
+    estimated_pos = int(len(transcription) * (total_seconds / (45 * 60)))
+    
+    half_window = window_chars // 2
+    start = max(0, estimated_pos - half_window)
+    end = min(len(transcription), estimated_pos + half_window)
+    
+    return transcription[start:end]
 ```
 
-#### Mudança 2: Atualizar `_analyze_events_with_ollama()` (linha ~4296)
+#### Mudança 2: Atualizar chamada em `_validate_all_events_with_context()` (linha 561)
 
-**Substituir**:
+**Antes:**
 ```python
-events = _validate_goals_with_context(events, transcription)
+context = _extract_context_around_timestamp(transcription, minute, second)
 ```
 
-**Por**:
+**Depois:**
 ```python
-# Validar TODOS os eventos (gols, cartões, pênaltis)
-events = _validate_goals_with_context(events, transcription)
-events = _validate_all_events_with_context(events, transcription, home_team, away_team)
+context = _extract_context_around_timestamp(
+    transcription, minute, second, 
+    event_type=event_type,  # Passar tipo para buscar keyword correta
+    window_chars=1000       # 40 segundos = ~1000 chars
+)
 ```
 
-#### Mudança 3: Atualizar `detect_events_by_keywords_from_text()` (linhas 3944-3999)
+#### Mudança 3: Remover função duplicada (linha 4175)
 
-Adicionar validação para cartões na seção de criação de eventos:
+A segunda definição de `_extract_context_around_timestamp` (linha 4175-4207) **sobrescreve a primeira** e deve ser **removida** para evitar conflito.
 
+#### Mudança 4: Atualizar chamada em `_validate_goals_with_context()` (linha 4147)
+
+**Antes:**
 ```python
-# Após linha 3974 (antes de criar o evento):
-# Validar cartões antes de adicionar
-if event_type in ['red_card', 'yellow_card']:
-    # Obter contexto ao redor
-    context_start = max(0, keyword_pos - 200)
-    context_end = min(len(transcription), keyword_pos + 200)
-    context = transcription[context_start:context_end]
-    
-    validation = validate_card_event(match.group(), context, event_type, home_team, away_team)
-    if not validation['is_valid']:
-        print(f"[Keywords-Text] ⚠ {event_type} ignorado: {validation['reason']}")
-        continue
+context = _extract_context_around_timestamp(transcription, minute, second)
+```
+
+**Depois:**
+```python
+context = _extract_context_around_timestamp(
+    transcription, minute, second,
+    event_type='goal',
+    window_chars=1000
+)
+```
+
+---
+
+## Fluxo Corrigido
+
+```text
+┌───────────────────────────────────────────────────────────────────────────┐
+│                      EXTRAÇÃO DE CONTEXTO (NOVO)                          │
+├───────────────────────────────────────────────────────────────────────────┤
+│                                                                           │
+│  Evento: red_card em 15'                                                  │
+│                    │                                                      │
+│                    ▼                                                      │
+│  Buscar keywords: ['vermelho', 'expuls', 'cartão vermelho']               │
+│                    │                                                      │
+│                    ▼                                                      │
+│  Encontrou "vermelho" na posição 12340?                                   │
+│       ├── SIM → Extrair [11840...12840] (keyword no centro)               │
+│       └── NÃO → Fallback: posição estimada                                │
+│                    │                                                      │
+│                    ▼                                                      │
+│  Validar: contexto contém 'expuls'?                                       │
+│       ├── SIM → Evento VÁLIDO ✓                                           │
+│       └── NÃO → Evento REJEITADO ✗                                        │
+│                                                                           │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
 ---
@@ -138,28 +160,11 @@ if event_type in ['red_card', 'yellow_card']:
 
 | Aspecto | Antes | Depois |
 |---------|-------|--------|
-| Validação de gols | ✓ Sim | ✓ Sim |
-| Validação de cartões | ❌ Não | ✓ Sim |
-| Validação de pênaltis | ❌ Não (Ollama) | ✓ Sim |
-| Falsos positivos | Cartões sem expulsão | Rejeitados |
-
----
-
-## Regras de Validação Existentes (já implementadas)
-
-A função `validate_card_event()` (linhas 469-510) já tem regras robustas:
-
-```python
-# Para cartão vermelho:
-has_expulsion = any(kw in window_text.lower() for kw in [
-    'expuls', 'expulso', 'vermelho direto', 'fora de jogo', 
-    'fora de campo', 'deixa o campo', 'vai embora'
-])
-if not has_expulsion:
-    return {'is_valid': False, 'reason': 'no_expulsion_context'}
-```
-
-**O problema é que essa validação não estava sendo chamada para eventos do Ollama!**
+| Método | Busca timestamp exato | Busca keyword do evento |
+| Janela | 30s (400 chars) | 40s (1000 chars) |
+| Centro | Timestamp (impreciso) | Keyword (preciso) |
+| Fallback | 500 chars iniciais | Posição proporcional |
+| Funções duplicadas | 2 definições | 1 definição consolidada |
 
 ---
 
@@ -167,7 +172,8 @@ if not has_expulsion:
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `video-processor/ai_services.py` | Nova função `_validate_all_events_with_context()` |
-| `video-processor/ai_services.py` | Atualizar `_analyze_events_with_ollama()` para validar todos os eventos |
-| `video-processor/ai_services.py` | Atualizar `detect_events_by_keywords_from_text()` para validar cartões |
+| `video-processor/ai_services.py` | Reescrever `_extract_context_around_timestamp` (linha 513) |
+| `video-processor/ai_services.py` | Atualizar chamada em `_validate_all_events_with_context` (linha 561) |
+| `video-processor/ai_services.py` | **Remover** função duplicada (linhas 4175-4207) |
+| `video-processor/ai_services.py` | Atualizar chamada em `_validate_goals_with_context` (linha 4147) |
 
