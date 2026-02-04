@@ -4170,7 +4170,7 @@ Use o timestamp do bloco SRT (00:MM:SS), NÃO o minuto falado pelo narrador.
 Exemplo: Se o bloco SRT mostra "00:24:52,253 --> ..." use minute=24, second=52
 
 TRANSCRIÇÃO:
-{transcription[:8000]}
+{transcription[:24000]}
 
 Retorne APENAS um array JSON com os eventos detectados. Sem texto antes ou depois.
 Formato obrigatório:
@@ -4297,17 +4297,58 @@ Formato obrigatório:
         else:
             print(f"[Ollama] ⚠️ Nenhum evento extraído!")
         
-        # FALLBACK: Se Ollama retornou poucos eventos, usar keywords
+        # FALLBACK: Se Ollama retornou poucos eventos, usar SRT keywords (mais preciso)
         if len(events) < 3:
-            print(f"[Ollama] ⚠️ Poucos eventos ({len(events)}), usando fallback por keywords...")
-            keyword_events = detect_events_by_keywords_from_text(
-                transcription=transcription,
-                home_team=home_team,
-                away_team=away_team,
-                game_start_minute=game_start_minute,
-                video_duration=None  # Sem duração disponível neste contexto
-            )
-            # Adicionar eventos de keywords que não existam
+            print(f"[Ollama] ⚠️ Poucos eventos ({len(events)}), usando fallback por SRT...")
+            keyword_events = []
+            
+            # Tentar usar detect_events_by_keywords (SRT direto) se temos match_id
+            if match_id:
+                try:
+                    from storage import get_subfolder_path
+                    srt_folder = get_subfolder_path(match_id, 'srt')
+                    srt_files = list(srt_folder.glob('*.srt')) if srt_folder.exists() else []
+                    
+                    if srt_files:
+                        # Usar primeiro SRT encontrado (sliding window - mais preciso)
+                        print(f"[Ollama] Usando SRT: {srt_files[0].name}")
+                        keyword_events = detect_events_by_keywords(
+                            srt_path=str(srt_files[0]),
+                            home_team=home_team,
+                            away_team=away_team,
+                            half=match_half,
+                            segment_start_minute=game_start_minute
+                        )
+                        print(f"[Ollama] Detecção por SRT (sliding window): {len(keyword_events)} eventos")
+                    else:
+                        print(f"[Ollama] SRT não encontrado, usando texto bruto...")
+                        keyword_events = detect_events_by_keywords_from_text(
+                            transcription=transcription,
+                            home_team=home_team,
+                            away_team=away_team,
+                            game_start_minute=game_start_minute,
+                            video_duration=None
+                        )
+                except Exception as e:
+                    print(f"[Ollama] Erro ao buscar SRT: {e}, usando texto bruto...")
+                    keyword_events = detect_events_by_keywords_from_text(
+                        transcription=transcription,
+                        home_team=home_team,
+                        away_team=away_team,
+                        game_start_minute=game_start_minute,
+                        video_duration=None
+                    )
+            else:
+                # Sem match_id, usar texto bruto
+                keyword_events = detect_events_by_keywords_from_text(
+                    transcription=transcription,
+                    home_team=home_team,
+                    away_team=away_team,
+                    game_start_minute=game_start_minute,
+                    video_duration=None
+                )
+            
+            # Merge eventos novos (deduplicação)
             for ke in keyword_events:
                 already_exists = any(
                     abs(e.get('minute', 0) - ke.get('minute', 0)) < 2 and 
@@ -4316,7 +4357,7 @@ Formato obrigatório:
                 )
                 if not already_exists:
                     events.append(ke)
-            print(f"[Ollama] Total após keywords: {len(events)} eventos")
+            print(f"[Ollama] Total após fallback: {len(events)} eventos")
         
         return events
             
