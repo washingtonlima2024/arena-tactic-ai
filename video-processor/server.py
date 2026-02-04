@@ -2159,13 +2159,22 @@ def delete_event(event_id: str):
 
 @app.route('/api/matches/<match_id>/events', methods=['DELETE'])
 def clear_match_events(match_id: str):
-    """Remove todos os eventos de uma partida."""
+    """Remove eventos de uma partida, opcionalmente filtrados por tempo (half)."""
     session = get_session()
     try:
-        deleted_count = session.query(MatchEvent).filter_by(match_id=match_id).delete()
+        half = request.args.get('half')  # 'first' or 'second'
+        query = session.query(MatchEvent).filter_by(match_id=match_id)
+        
+        if half:
+            # Delete by match_half first (preferred)
+            query = query.filter_by(match_half=half)
+            
+        deleted_count = query.delete()
         session.commit()
-        print(f"[CLEAR-EVENTS] ✓ {deleted_count} eventos removidos da partida {match_id}")
-        return jsonify({'success': True, 'deleted_count': deleted_count})
+        
+        half_label = f" do {half} tempo" if half else ""
+        print(f"[CLEAR-EVENTS] ✓ {deleted_count} eventos{half_label} removidos da partida {match_id}")
+        return jsonify({'success': True, 'deleted_count': deleted_count, 'half': half})
     except Exception as e:
         session.rollback()
         print(f"[CLEAR-EVENTS] ❌ Erro: {e}")

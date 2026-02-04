@@ -34,11 +34,11 @@ import {
   Database
 } from 'lucide-react';
 import { SoccerBallLoader } from '@/components/ui/SoccerBallLoader';
-import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import { useQueryClient } from '@tanstack/react-query';
 import { useStartAnalysis } from '@/hooks/useAnalysisJob';
 import { useWhisperTranscription } from '@/hooks/useWhisperTranscription';
+import apiClient, { normalizeStorageUrl } from '@/lib/apiClient';
 
 interface UploadedFile {
   name: string;
@@ -105,13 +105,10 @@ export function ReanalyzeHalfDialog({
     try {
       setIsCheckingVideoSize(true);
       
-      const { data: videos } = await supabase
-        .from('videos')
-        .select('file_url, video_type, start_minute')
-        .eq('match_id', matchId)
-        .order('start_minute', { ascending: true });
+      // Use local API instead of Supabase
+      const videos = await apiClient.getVideos(matchId);
       
-      const halfVideo = videos?.find(v => {
+      const halfVideo = videos?.find((v: any) => {
         const start = v.start_minute || 0;
         const videoType = v.video_type;
         if (half === 'first') return videoType === 'first_half' || start < 45;
@@ -120,7 +117,9 @@ export function ReanalyzeHalfDialog({
       
       if (halfVideo?.file_url) {
         try {
-          const response = await fetch(halfVideo.file_url, { method: 'HEAD' });
+          // Normalize URL for local server
+          const videoUrl = normalizeStorageUrl(halfVideo.file_url);
+          const response = await fetch(videoUrl, { method: 'HEAD' });
           const contentLength = response.headers.get('content-length');
           if (contentLength) {
             const sizeMB = parseInt(contentLength) / (1024 * 1024);
@@ -142,40 +141,57 @@ export function ReanalyzeHalfDialog({
     try {
       setIsLoadingOriginal(true);
       
-      const { data } = await supabase
-        .from('analysis_jobs')
-        .select('result')
-        .eq('match_id', matchId)
-        .eq('status', 'completed')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      const result = data?.result as Record<string, any> | null;
+      // Use local API to list files in storage
+      const files = await apiClient.listMatchFiles(matchId);
+      const srtFiles = files?.folders?.srt || [];
+      const txtFiles = files?.folders?.texts || [];
       
-      if (result?.fullTranscription) {
-        const transcriptionText = result.fullTranscription as string;
-        setOriginalTranscription(transcriptionText);
-        
-        // Adiciona automaticamente como arquivo original
-        setUploadedFiles(prev => {
-          const withoutOriginal = prev.filter(f => !f.isOriginal);
-          return [
-            { 
-              name: '📌 transcrição-original.srt', 
-              content: transcriptionText, 
-              isOriginal: true 
-            },
-            ...withoutOriginal
-          ];
-        });
-        
-        toast.success('Transcrição original carregada automaticamente');
+      // Find transcription file for this half
+      const halfPattern = half === 'first' ? 'first' : 'second';
+      const transcriptionFile = srtFiles.find((f: any) => 
+        f.filename?.toLowerCase().includes(halfPattern) || 
+        f.filename?.toLowerCase().includes('transcription')
+      ) || srtFiles[0] || txtFiles.find((f: any) =>
+        f.filename?.toLowerCase().includes(halfPattern) ||
+        f.filename?.toLowerCase().includes('transcription')
+      ) || txtFiles[0];
+      
+      if (transcriptionFile) {
+        try {
+          // Fetch transcription content from local storage
+          const url = transcriptionFile.url || `/api/storage/${matchId}/srt/${transcriptionFile.filename}`;
+          const content = await apiClient.get<string>(url);
+          
+          if (content && typeof content === 'string') {
+            setOriginalTranscription(content);
+            
+            // Add as original file
+            setUploadedFiles(prev => {
+              const withoutOriginal = prev.filter(f => !f.isOriginal);
+              return [
+                { 
+                  name: `📌 ${transcriptionFile.filename || 'transcrição-original.srt'}`, 
+                  content: content, 
+                  isOriginal: true 
+                },
+                ...withoutOriginal
+              ];
+            });
+            
+            toast.success('Transcrição original carregada automaticamente');
+          } else {
+            setOriginalTranscription(null);
+          }
+        } catch (fetchError) {
+          console.warn('Could not fetch transcription content:', fetchError);
+          setOriginalTranscription(null);
+        }
       } else {
         setOriginalTranscription(null);
       }
     } catch (error) {
       console.error('Error loading existing transcription:', error);
+      setOriginalTranscription(null);
     } finally {
       setIsLoadingOriginal(false);
     }
@@ -224,13 +240,10 @@ export function ReanalyzeHalfDialog({
 
   const handleExtractTranscription = async () => {
     try {
-      const { data: videos } = await supabase
-        .from('videos')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('start_minute', { ascending: true });
+      // Use local API instead of Supabase
+      const videos = await apiClient.getVideos(matchId);
 
-      const halfVideo = videos?.find(v => {
+      const halfVideo = videos?.find((v: any) => {
         const start = v.start_minute || 0;
         const videoType = v.video_type;
         if (half === 'first') return videoType === 'first_half' || start < 45;
@@ -303,13 +316,10 @@ export function ReanalyzeHalfDialog({
     try {
       setIsDeleting(true);
 
-      const { data: videos } = await supabase
-        .from('videos')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('start_minute', { ascending: true });
+      // Use local API instead of Supabase
+      const videos = await apiClient.getVideos(matchId);
 
-      const halfVideo = videos?.find(v => {
+      const halfVideo = videos?.find((v: any) => {
         const start = v.start_minute || 0;
         if (half === 'first') return start < 45;
         return start >= 45;
@@ -320,29 +330,10 @@ export function ReanalyzeHalfDialog({
         return;
       }
 
-      // Delete events by match_half first (preferred), fallback to minute range
-      // This handles stoppage time correctly (e.g., 45'+2 stays in first half)
-      const { error: deleteByHalfError } = await supabase
-        .from('match_events')
-        .delete()
-        .eq('match_id', matchId)
-        .eq('match_half', half);
-
-      // Also delete events that might have been created before match_half column existed
-      const minMinute = half === 'first' ? 0 : 45;
-      const maxMinute = half === 'first' ? 48 : 95; // Include stoppage time
-
-      const { error: deleteByMinuteError } = await supabase
-        .from('match_events')
-        .delete()
-        .eq('match_id', matchId)
-        .gte('minute', minMinute)
-        .lte('minute', maxMinute)
-        .is('match_half', null); // Only delete if no match_half set
-
-      const deleteError = deleteByHalfError || deleteByMinuteError;
-
-      if (deleteError) {
+      // Delete events via local API (with half filter)
+      try {
+        await apiClient.delete(`/api/matches/${matchId}/events?half=${half}`);
+      } catch (deleteError) {
         console.error('Delete error:', deleteError);
         toast.error('Erro ao deletar eventos antigos');
         return;
@@ -350,15 +341,13 @@ export function ReanalyzeHalfDialog({
 
       setIsDeleting(false);
 
-      const { data: remainingGoals } = await supabase
-        .from('match_events')
-        .select('metadata')
-        .eq('match_id', matchId)
-        .eq('event_type', 'goal');
+      // Get remaining goals to update match score
+      const events = await apiClient.getMatchEvents(matchId);
+      const remainingGoals = events?.filter((e: any) => e.event_type === 'goal') || [];
 
       let homeScore = 0;
       let awayScore = 0;
-      remainingGoals?.forEach(g => {
+      remainingGoals.forEach((g: any) => {
         const meta = g.metadata as Record<string, any> | null;
         const isOwnGoal = meta?.isOwnGoal;
         const team = meta?.team;
@@ -371,10 +360,8 @@ export function ReanalyzeHalfDialog({
         }
       });
 
-      await supabase
-        .from('matches')
-        .update({ home_score: homeScore, away_score: awayScore })
-        .eq('id', matchId);
+      // Update match score via local API
+      await apiClient.updateMatch(matchId, { home_score: homeScore, away_score: awayScore });
 
       toast.info(`Re-análise do ${halfLabel} iniciada...`);
 
