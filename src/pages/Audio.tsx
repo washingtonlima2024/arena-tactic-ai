@@ -30,6 +30,7 @@ import { useWebSpeechTTS } from '@/hooks/useWebSpeechTTS';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
+import { calculateScoreFromEvents } from '@/hooks/useDynamicMatchStats';
 
 type VoiceType = 'narrator' | 'commentator' | 'dynamic';
 
@@ -72,25 +73,20 @@ export default function Audio() {
     event: e.description || e.event_type
   })) || [];
 
-  // Calculate score dynamically from goal events (same logic as other pages)
-  const calculatedScore = events?.reduce((acc, event) => {
-    if (event.event_type === 'goal') {
-      const metadata = event.metadata as { team?: string } | null;
-      const team = metadata?.team;
-      if (team === 'home') {
-        acc.home += 1;
-      } else if (team === 'away') {
-        acc.away += 1;
-      }
-    }
-    return acc;
-  }, { home: 0, away: 0 }) || { home: 0, away: 0 };
-
-  // Use calculated score if there are goal events, otherwise fall back to DB values
-  const hasGoalEvents = events?.some(e => e.event_type === 'goal');
+  // Calculate score dynamically using the same function as ProjectSelector
+  const homeTeamName = selectedMatch?.home_team?.name || 'Time Casa';
+  const awayTeamName = selectedMatch?.away_team?.name || 'Time Fora';
+  
+  const dynamicScore = calculateScoreFromEvents(
+    events || [],
+    homeTeamName,
+    awayTeamName
+  );
+  
+  // Use dynamic score if there are events, otherwise fall back to DB values
   const displayScore = {
-    home: hasGoalEvents ? calculatedScore.home : (selectedMatch?.home_score || 0),
-    away: hasGoalEvents ? calculatedScore.away : (selectedMatch?.away_score || 0)
+    home: (events?.length || 0) > 0 ? dynamicScore.home : (selectedMatch?.home_score || 0),
+    away: (events?.length || 0) > 0 ? dynamicScore.away : (selectedMatch?.away_score || 0)
   };
 
   // Load saved audio when match changes
@@ -304,8 +300,6 @@ export default function Audio() {
     );
   }
 
-  const homeTeamName = selectedMatch?.home_team?.name || 'Time Casa';
-  const awayTeamName = selectedMatch?.away_team?.name || 'Time Fora';
   const homeTeamShort = selectedMatch?.home_team?.short_name || homeTeamName.slice(0, 3).toUpperCase();
   const awayTeamShort = selectedMatch?.away_team?.short_name || awayTeamName.slice(0, 3).toUpperCase();
 
