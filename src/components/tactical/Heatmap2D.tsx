@@ -106,9 +106,9 @@ export function Heatmap2D({
   };
 
   return (
-    <div className={`relative ${className}`} style={{ height }}>
-      {/* 2D Football Field with overlays */}
-      <div className="w-full h-full rounded-lg overflow-hidden border border-border/30">
+    <div className={`relative w-full ${className}`}>
+      {/* 2D Football Field with overlays - using aspect ratio instead of fixed height */}
+      <div className="w-full rounded-lg overflow-visible border border-border/30" style={{ minHeight: height }}>
         <OfficialFootballField
           theme="grass"
           showMeasurements={false}
@@ -131,7 +131,7 @@ export function Heatmap2D({
 
       {/* Legend - only shows heat zones info since players require real tracking */}
       {showLegend && heatZones.length > 0 && (
-        <div className="absolute bottom-3 left-1/2 transform -translate-x-1/2 flex items-center gap-6 bg-background/80 backdrop-blur px-4 py-2 rounded-lg text-sm">
+        <div className="flex items-center justify-center gap-6 mt-3 bg-background/80 backdrop-blur px-4 py-2 rounded-lg text-sm mx-auto w-fit">
           <div className="flex items-center gap-2">
             <div 
               className="w-4 h-4 rounded-full opacity-60" 
