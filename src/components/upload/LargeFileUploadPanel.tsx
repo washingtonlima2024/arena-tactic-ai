@@ -249,7 +249,7 @@ export function LargeFileUploadPanel({
             </div>
             <span className="font-medium">{Math.round(overallProgress)}%</span>
           </div>
-          <Progress value={overallProgress} className="h-3" />
+          <Progress value={overallProgress} className="h-3" showStripes animate />
         </div>
 
         {/* Upload Details */}
