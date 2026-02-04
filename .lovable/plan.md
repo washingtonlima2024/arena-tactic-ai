@@ -1,80 +1,58 @@
 
-## Plano de Limpeza de Dados Fictícios - CONCLUÍDO ✅
+## Plano: Remover Visualizações Fictícias da Página de Análise
 
-### Resumo das Alterações Realizadas
+### Problema Identificado
 
----
+A página de Análise contém **três seções** que exibem dados fictícios não derivados do jogo real:
 
-## ✅ Fase 1: Sincronização Áudio-Texto (IMPLEMENTADO)
+1. **Cards de Formação (linhas 532-585)**: Dois cards "Formation Overview 2D" com jogadores em posições hardcoded (4-3-3 e 4-4-2 fixas)
+2. **Animações Táticas (linhas 587-644)**: O componente `AnimatedTacticalPlay` que gera sequências de movimentação pré-definidas para cada tipo de evento (o que você vê na screenshot com "Construção do Ataque")
 
-**Arquivo criado**: `src/components/audio/SyncedTranscription.tsx`
-- Componente que divide a transcrição em segmentos
-- Calcula posição estimada baseada em `currentTime / duration`
-- Implementa auto-scroll com destaque visual da linha atual
-- Sincronizado com o player de áudio em `Audio.tsx`
-
-**Arquivo modificado**: `src/pages/Audio.tsx`
-- Integrado o novo componente `SyncedTranscription`
-- Texto da transcrição agora rola automaticamente durante a reprodução
+Nenhuma dessas informações vem da análise do vídeo ou dos eventos detectados.
 
 ---
 
-## ✅ Fase 2: Remoção de Dados Fictícios do Heatmap (IMPLEMENTADO)
+### Solução Proposta
 
-**Arquivo modificado**: `src/hooks/useEventHeatZones.ts`
-- ❌ REMOVIDO: Formações 4-4-2 hardcoded (`DEFAULT_HOME_FORMATION`, `DEFAULT_AWAY_FORMATION`)
-- ❌ REMOVIDO: Geração de jogadores com offsets aleatórios
-- ✅ MANTIDO: Zonas de calor baseadas apenas em eventos reais detectados
-- Agora retorna arrays vazios para `homePlayers` e `awayPlayers`
+Remover completamente essas seções da página de Análise, mantendo apenas dados reais:
 
-**Arquivo modificado**: `src/components/tactical/Heatmap2D.tsx`
-- Jogadores só são renderizados se existirem dados reais (arrays não vazios)
-- Removida bola fictícia do centro do campo
-- Adicionado estado vazio quando não há dados de eventos
+| O que fica | Fonte |
+|------------|-------|
+| Mapa de Calor 2D | Zonas derivadas dos eventos detectados ✅ |
+| Comparativo de Estatísticas | Calculado a partir dos eventos ✅ |
+| Lista de Eventos | Banco de dados (detecção de IA) ✅ |
+| Insights e Resumo | Gerado a partir dos eventos ✅ |
 
----
-
-## ✅ Fase 3: Remoção de Animações Táticas Fictícias (IMPLEMENTADO)
-
-**Arquivo modificado**: `src/pages/Field.tsx`
-- ❌ REMOVIDA: Aba "Animação Gol" que usava `generateMockGoalPlay()`
-- ❌ REMOVIDO: Interface `GoalEvent` e estado `selectedGoal`
-- ❌ REMOVIDO: Query para buscar gols e gerar animações
-- ✅ MANTIDO: Aba "Campo 2D" com medidas reais FIFA
-- ✅ MANTIDO: Aba "Detecção YOLO" com detecção real via Roboflow
-- ✅ MANTIDO: Aba "Medidas" com constantes oficiais FIFA
+| O que será removido | Motivo |
+|---------------------|--------|
+| Cards "Formation Overview 2D" | Posições de jogadores são hardcoded |
+| "Jogadas Táticas Animadas" | Animações são genéricas pré-definidas |
 
 ---
 
-## Inventário Final: 100% Dados Reais
+### Alterações Técnicas
 
-| Página | Componente | Status |
-|--------|------------|--------|
-| `/audio` | Player de áudio | ✅ REAL |
-| `/audio` | Transcrição sincronizada | ✅ REAL |
-| `/audio` | Placar dinâmico | ✅ REAL |
-| `/analysis` | Mapa de calor (apenas zonas) | ✅ REAL |
-| `/analysis` | Lista de eventos | ✅ REAL |
-| `/field` | Campo 2D com medidas | ✅ REAL |
-| `/field` | Detecção YOLO | ✅ REAL |
-| `/events` | Timeline de eventos | ✅ REAL |
-| `/media` | Clips de vídeo | ✅ REAL |
-| `/dashboard` | Estatísticas | ✅ REAL |
+#### 1. Arquivo: `src/pages/Analysis.tsx`
 
----
+Remover:
+- **Linhas 532-585**: Bloco dos dois cards de formação com `FootballField` e jogadores hardcoded
+- **Linhas 587-644**: Bloco do card "Jogadas Táticas Animadas" com `AnimatedTacticalPlay`
+- **Linhas 8**: Importação do `AnimatedTacticalPlay`
+- **Linha 7**: Importação do `FootballField`
+- **Linhas 78-79**: States `selectedEventForPlay` e `videoDialogOpen` relacionados às animações
 
-## Arquivos Modificados
+#### 2. Limpeza (opcional futuro)
 
-1. `src/components/audio/SyncedTranscription.tsx` - NOVO
-2. `src/pages/Audio.tsx` - Integração do componente de transcrição
-3. `src/hooks/useEventHeatZones.ts` - Remoção de jogadores fictícios
-4. `src/components/tactical/Heatmap2D.tsx` - Atualização para dados reais apenas
-5. `src/pages/Field.tsx` - Remoção da aba "Animação Gol"
+Os arquivos `AnimatedTacticalPlay.tsx` e `FootballField.tsx` podem ser mantidos para uso futuro caso existam dados reais de rastreamento (YOLO), mas não serão usados na página de Análise.
 
 ---
 
-## Próximos Passos (Opcionais)
+### Resultado Esperado
 
-1. Implementar rastreamento real de jogadores via YOLO para alimentar o heatmap
-2. Criar animações táticas baseadas em dados reais de tracking
-3. Adicionar transcrição com timestamps reais do SRT
+A página de Análise exibirá apenas:
+1. **Mapa de Calor 2D** - Zonas de atividade baseadas em eventos reais detectados
+2. **Comparativo de Estatísticas** - Dados calculados dos eventos (passes, chutes, etc.)
+3. **Lista de Eventos Importantes** - Eventos detectados pela IA com thumbnails reais
+4. **Insights** - Análise textual gerada a partir dos eventos
+
+Nenhuma visualização fictícia será exibida em produção.
