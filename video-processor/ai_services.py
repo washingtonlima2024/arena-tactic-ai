@@ -451,15 +451,30 @@ def detect_team_from_text(text: str, home_team: str, away_team: str) -> str:
     """
     Detect which team is mentioned in the text.
     Returns 'home', 'away', or 'unknown'.
+    
+    IMPROVED: Uses aliases and partial matching for better accuracy.
     """
     text_upper = text.upper()
     home_upper = home_team.upper()
     away_upper = away_team.upper()
     
-    # Get significant words from team names (length > 3)
-    home_words = [w for w in home_upper.split() if len(w) > 3]
-    away_words = [w for w in away_upper.split() if len(w) > 3]
+    # Get significant words from team names (length > 2)
+    home_words = [w for w in home_upper.split() if len(w) > 2]
+    away_words = [w for w in away_upper.split() if len(w) > 2]
     
+    # Add aliases from TEAM_ALIASES dictionary for better matching
+    for key, aliases in TEAM_ALIASES.items():
+        key_upper = key.upper()
+        if key_upper in home_upper or home_upper in key_upper:
+            home_words.extend([a.upper() for a in aliases])
+        if key_upper in away_upper or away_upper in key_upper:
+            away_words.extend([a.upper() for a in aliases])
+    
+    # Remove duplicates and short words
+    home_words = list(set(w for w in home_words if len(w) > 3))
+    away_words = list(set(w for w in away_words if len(w) > 3))
+    
+    # Check for any word match
     home_found = any(w in text_upper for w in home_words) or home_upper in text_upper
     away_found = any(w in text_upper for w in away_words) or away_upper in text_upper
     
@@ -471,52 +486,69 @@ def detect_team_from_text(text: str, home_team: str, away_team: str) -> str:
         return 'unknown'
 
 
-def deduplicate_events(events: List[Dict], threshold_seconds: int = 30) -> List[Dict]:
+def deduplicate_events(events: List[Dict], threshold_seconds: int = 60) -> List[Dict]:
     """
-    Remove duplicate events of the SAME TYPE that are too close in time.
-    Events of DIFFERENT types are allowed even if close together.
+    Remove duplicate events of the SAME TYPE and SAME TEAM that are too close in time.
+    Events of DIFFERENT types or DIFFERENT teams are allowed even if close together.
     
-    This allows sequences like: Goal at 24:45, Foul at 24:50 (both kept)
-    But prevents: Goal at 24:45, Goal at 24:47 (duplicate, only one kept)
+    IMPROVED:
+    - Increased threshold to 60s (narrators repeat goals for ~1 minute)
+    - Also considers 'team' field to avoid removing goals from different teams
+    - Better timestamp handling: uses videoSecond, falls back to minute*60
+    
+    This allows:
+    - Goal at 24:45 (home), Goal at 24:50 (away) - both kept (different teams)
+    - Goal at 24:45, Foul at 24:50 - both kept (different types)
+    
+    But prevents:
+    - Goal at 24:45 (home), Goal at 24:47 (home) - duplicate, only one kept
     """
     if not events:
         return []
     
-    # Sort by timestamp
-    sorted_events = sorted(events, key=lambda e: e.get('videoSecond', 0))
-    
-    # Event priority (lower = more important, used for tie-breaking)
-    priority = {'goal': 1, 'penalty': 2, 'red_card': 3, 'yellow_card': 4, 'save': 5, 'chance': 6}
+    # Sort by timestamp - use videoSecond if available, otherwise calculate from minute
+    sorted_events = sorted(events, key=lambda e: e.get('videoSecond', e.get('minute', 0) * 60 + e.get('second', 0)))
     
     result = []
     
     for event in sorted_events:
         event_type = event.get('event_type')
-        event_time = event.get('videoSecond', 0)
+        event_team = event.get('team', 'unknown')
+        event_time = event.get('videoSecond', event.get('minute', 0) * 60 + event.get('second', 0))
         
-        # Check if there's already an event of the SAME TYPE too close
+        # Check if there's already an event of the SAME TYPE AND TEAM too close
         is_duplicate = False
         duplicate_index = -1
         
         for i, existing in enumerate(result):
-            if existing.get('event_type') == event_type:
-                time_diff = abs(event_time - existing.get('videoSecond', 0))
+            existing_type = existing.get('event_type')
+            existing_team = existing.get('team', 'unknown')
+            
+            # Only compare same type AND same team
+            if existing_type == event_type and existing_team == event_team:
+                existing_time = existing.get('videoSecond', existing.get('minute', 0) * 60 + existing.get('second', 0))
+                time_diff = abs(event_time - existing_time)
+                
                 if time_diff < threshold_seconds:
-                    # Same type, too close - it's a duplicate
+                    # Same type, same team, too close - it's a duplicate
                     is_duplicate = True
                     duplicate_index = i
                     
-                    # Keep the one with higher confidence or better text
+                    # Keep the one with higher confidence
                     curr_conf = event.get('confidence', 0)
                     existing_conf = existing.get('confidence', 0)
                     
                     if curr_conf > existing_conf:
                         result[duplicate_index] = event  # Replace with higher confidence
+                        print(f"[DEDUP] ♻️ Substituindo duplicata: {event_type} @ {event_time}s (conf: {existing_conf:.2f} → {curr_conf:.2f})")
+                    else:
+                        print(f"[DEDUP] ⚠️ Ignorando duplicata: {event_type} {event_team} @ {event_time}s (Δ{time_diff:.0f}s)")
                     break
         
         if not is_duplicate:
             result.append(event)
     
+    print(f"[DEDUP] ✓ {len(events)} eventos → {len(result)} após deduplicação (threshold: {threshold_seconds}s)")
     return result
 
 
