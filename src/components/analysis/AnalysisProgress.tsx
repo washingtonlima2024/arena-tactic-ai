@@ -15,9 +15,9 @@ const STEP_TIME_ESTIMATES: Record<string, number> = {
   'Preparação do vídeo': 5,
   'Download do vídeo': 30,
   'Extração de frames': 15,
-  'Análise visual (Vision AI)': 120, // Most time-consuming
+  'Análise visual (kakttus Vision)': 120, // Most time-consuming
   'Extração de áudio': 20,
-  'Transcrição (Whisper)': 60,
+  'Transcrição (kakttus.ai)': 60,
   'Identificação de eventos': 30,
   'Análise tática': 20,
   'Finalização': 5,

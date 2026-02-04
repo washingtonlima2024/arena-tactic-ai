@@ -920,12 +920,12 @@ export default function Settings() {
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <Mic className="h-5 w-5 text-emerald-500" />
-                      Whisper Local
+                      kakttus Transcrição
                       <Badge variant="outline" className="ml-2 text-emerald-500 border-emerald-500/50">
-                        GRATUITO
+                        LOCAL
                       </Badge>
                     </CardTitle>
-                    <CardDescription>Transcrição 100% local e offline usando Faster-Whisper</CardDescription>
+                    <CardDescription>Transcrição local e offline usando engine proprietário</CardDescription>
                   </div>
                   <Switch
                     checked={localWhisperEnabled}
@@ -942,7 +942,7 @@ export default function Settings() {
                             setting_value: String(checked),
                           }).catch(() => {}),
                         ]);
-                        toast.success(checked ? "Whisper Local ativado!" : "Whisper Local desativado");
+                        toast.success(checked ? "kakttus Transcrição ativado!" : "kakttus Transcrição desativado");
                       } catch (error) {
                         setLocalWhisperEnabled(!checked);
                         toast.error("Erro ao salvar configuração");
@@ -991,7 +991,7 @@ export default function Settings() {
                     <div className="space-y-1">
                       <p className="text-sm font-medium text-emerald-600">Vantagens:</p>
                       <ul className="text-xs text-muted-foreground space-y-0.5">
-                        <li>• 100% gratuito - sem custos de API</li>
+                        <li>• Processamento local incluído</li>
                         <li>• Funciona offline após download do modelo</li>
                         <li>• Sem limite de tamanho de arquivo</li>
                         <li>• Suporta aceleração GPU (CUDA) se disponível</li>
@@ -1032,9 +1032,9 @@ export default function Settings() {
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <Server className="h-5 w-5 text-orange-500" />
-                      Ollama (Local)
+                      kakttus.ai Local
                     </CardTitle>
-                    <CardDescription>Modelos de IA rodando localmente - gratuito e offline</CardDescription>
+                    <CardDescription>Modelos de IA rodando localmente - offline</CardDescription>
                   </div>
                   <Switch
                     checked={ollamaEnabled}
@@ -1054,7 +1054,7 @@ export default function Settings() {
                             setting_value: String(checked),
                           }).catch(() => {}), // Ignora erro se servidor offline
                         ]);
-                        toast.success(checked ? "Ollama ativado!" : "Ollama desativado");
+                        toast.success(checked ? "kakttus.ai Local ativado!" : "kakttus.ai Local desativado");
                       } catch (error) {
                         setOllamaEnabled(!checked);
                         toast.error("Erro ao salvar configuração");
@@ -1154,7 +1154,7 @@ export default function Settings() {
                         });
                         const data = await response.json();
                         if (data.success) {
-                          toast.success("IA Local ativada! Whisper + Ollama (100% gratuito)");
+                          toast.success("kakttus.ai Local ativado!");
                           // Atualizar estados do Ollama
                           setOllamaEnabled(true);
                           setOllamaUrl("http://localhost:11434");
@@ -1175,7 +1175,7 @@ export default function Settings() {
                     className="bg-green-600 hover:bg-green-700"
                   >
                     <Zap className="h-4 w-4 mr-2" />
-                    Ativar IA Local (Gratuito)
+                    Ativar kakttus.ai Local
                   </Button>
 
                   <p className="text-xs text-muted-foreground">Força Ollama como provedor primário (localhost:11434)</p>

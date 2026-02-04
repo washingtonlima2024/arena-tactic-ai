@@ -824,8 +824,8 @@ function EvidenceDialog({
               <CardContent>
                 <div className="space-y-2">
                   {[
-                    'Transcrição de áudio (Whisper API)',
-                    'Análise semântica (Gemini)',
+                    'Transcrição de áudio (kakttus.ai)',
+                    'Análise semântica (kakttus Pro)',
                     'Detecção de evento',
                     'Classificação por tipo',
                     'Atribuição de timestamp',
