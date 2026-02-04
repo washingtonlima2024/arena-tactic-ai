@@ -4,4 +4,8 @@ requests==2.31.0
 sqlalchemy==2.0.23
 openai==1.6.0
 faster-whisper==1.1.0
+# ctranslate2 4.4.0 has a bug on Windows/CUDA trying to access _rocm_sdk_core
+# Use 4.5.0+ when available, or fallback to CPU mode (handled in ai_services.py)
+ctranslate2>=4.4.0
 python-dotenv==1.0.0
+torch>=2.0.0
