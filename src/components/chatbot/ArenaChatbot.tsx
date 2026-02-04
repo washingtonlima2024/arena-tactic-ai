@@ -38,7 +38,7 @@ export function ArenaChatbot() {
   const [position, setPosition] = useState({ x: 20, y: 20 });
   const [isDragging, setIsDragging] = useState(false);
   const [dragOffset, setDragOffset] = useState({ x: 0, y: 0 });
-  const [autoSpeak, setAutoSpeak] = useState(true);
+  const [autoSpeak, setAutoSpeak] = useState(true); // Áudio automático ativado por padrão
   const [isHovered, setIsHovered] = useState(false);
   
   // Ref for the floating button (when closed)
