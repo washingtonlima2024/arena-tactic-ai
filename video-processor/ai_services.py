@@ -5,11 +5,14 @@ Handles calls to OpenAI, Lovable AI, and other AI APIs.
 
 import os
 import json
+import json as json_module
 import base64
 import requests
 import re
 import subprocess
 from typing import Optional, List, Dict, Any, Tuple
+from pathlib import Path
+from datetime import datetime
 
 # Carregar variáveis de ambiente do .env
 from dotenv import load_dotenv
@@ -1367,16 +1370,121 @@ def transcribe_audio(audio_path: str, language: str = 'pt') -> Optional[str]:
     return data.get('text')
 
 
-def _transcribe_with_local_whisper(audio_path: str, match_id: str = None) -> Dict[str, Any]:
+def _get_checkpoint_path(audio_path: str, match_id: str = None) -> str:
+    """Get checkpoint file path for resumable transcription."""
+    base_name = os.path.basename(audio_path).rsplit('.', 1)[0]
+    checkpoint_dir = Path(audio_path).parent / "checkpoints"
+    checkpoint_dir.mkdir(exist_ok=True)
+    return str(checkpoint_dir / f"{base_name}_checkpoint.json")
+
+
+def _load_checkpoint(checkpoint_path: str) -> Dict[str, Any]:
+    """Load existing checkpoint if available."""
+    try:
+        if os.path.exists(checkpoint_path):
+            with open(checkpoint_path, 'r', encoding='utf-8') as f:
+                data = json_module.load(f)
+                print(f"[LocalWhisper] ✓ Checkpoint encontrado: {data.get('completed_chunks', 0)} chunks completos")
+                return data
+    except Exception as e:
+        print(f"[LocalWhisper] ⚠ Erro ao carregar checkpoint: {e}")
+    return {"completed_chunks": 0, "segments": [], "text_parts": []}
+
+
+def _save_checkpoint(checkpoint_path: str, data: Dict[str, Any]):
+    """Save checkpoint for resumable transcription."""
+    try:
+        with open(checkpoint_path, 'w', encoding='utf-8') as f:
+            json_module.dump(data, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[LocalWhisper] ⚠ Erro ao salvar checkpoint: {e}")
+
+
+def _split_audio_into_chunks(audio_path: str, chunk_duration_seconds: int = 45, overlap_seconds: int = 2) -> List[Tuple[str, float, float]]:
+    """
+    Split audio file into chunks for processing.
+    
+    Args:
+        audio_path: Path to audio file
+        chunk_duration_seconds: Duration of each chunk (default 45s for Whisper optimization)
+        overlap_seconds: Overlap between chunks to avoid cutting words (default 2s)
+    
+    Returns:
+        List of tuples: (chunk_path, start_time, end_time)
+    """
+    import subprocess
+    
+    # Get audio duration
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', audio_path],
+            capture_output=True, text=True, timeout=30
+        )
+        total_duration = float(result.stdout.strip())
+    except Exception as e:
+        print(f"[LocalWhisper] ⚠ Erro ao obter duração: {e}")
+        return [(audio_path, 0.0, 0.0)]  # Return original file
+    
+    if total_duration <= chunk_duration_seconds:
+        return [(audio_path, 0.0, total_duration)]  # No need to split
+    
+    chunks = []
+    chunk_dir = Path(audio_path).parent / "chunks"
+    chunk_dir.mkdir(exist_ok=True)
+    
+    start_time = 0.0
+    chunk_index = 0
+    
+    while start_time < total_duration:
+        end_time = min(start_time + chunk_duration_seconds, total_duration)
+        chunk_path = str(chunk_dir / f"chunk_{chunk_index:04d}.wav")
+        
+        # Only create chunk if it doesn't exist
+        if not os.path.exists(chunk_path):
+            try:
+                subprocess.run([
+                    'ffmpeg', '-y', '-i', audio_path,
+                    '-ss', str(start_time), '-t', str(chunk_duration_seconds + overlap_seconds),
+                    '-ar', '16000', '-ac', '1',  # 16kHz mono for Whisper
+                    '-c:a', 'pcm_s16le',
+                    chunk_path
+                ], capture_output=True, timeout=60)
+            except Exception as e:
+                print(f"[LocalWhisper] ⚠ Erro ao criar chunk {chunk_index}: {e}")
+                continue
+        
+        chunks.append((chunk_path, start_time, end_time))
+        start_time = end_time - overlap_seconds  # Overlap for continuity
+        chunk_index += 1
+        
+        if chunk_index > 500:  # Safety limit (500 chunks = ~6 hours)
+            break
+    
+    print(f"[LocalWhisper] Áudio dividido em {len(chunks)} chunks de ~{chunk_duration_seconds}s")
+    return chunks
+
+
+def _transcribe_with_local_whisper(
+    audio_path: str, 
+    match_id: str = None,
+    force_restart: bool = False,
+    chunk_duration: int = 45
+) -> Dict[str, Any]:
     """
     Transcribe audio using local Faster-Whisper (100% FREE, offline).
     
-    Uses faster-whisper library for efficient local transcription.
-    Supports CPU and CUDA acceleration.
+    Enhanced with:
+    - GPU (CUDA) acceleration when available
+    - Chunked processing for large files
+    - Checkpoint system for resumable transcription
+    - Auto-retry on failures
     
     Args:
         audio_path: Path to audio file
         match_id: Optional match ID for metadata
+        force_restart: If True, ignore existing checkpoints and start fresh
+        chunk_duration: Duration of each chunk in seconds (default 45s)
     
     Returns:
         Dict with 'success', 'text', 'srtContent', 'segments'
@@ -1398,13 +1506,17 @@ def _transcribe_with_local_whisper(audio_path: str, match_id: str = None) -> Dic
     try:
         model_name = LOCAL_WHISPER_MODEL or 'base'
         audio_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
-        print(f"[LocalWhisper] Iniciando transcrição local ({model_name}) para arquivo de {audio_size_mb:.1f}MB...")
         
-        # Check device availability
+        # Check device availability - prefer CUDA
         device = "cuda" if torch.cuda.is_available() else "cpu"
         compute_type = "float16" if device == "cuda" else "int8"
         
-        print(f"[LocalWhisper] Device: {device}, Compute: {compute_type}")
+        print(f"[LocalWhisper] =====================================")
+        print(f"[LocalWhisper] 🎤 Iniciando transcrição robusta")
+        print(f"[LocalWhisper] Arquivo: {os.path.basename(audio_path)} ({audio_size_mb:.1f}MB)")
+        print(f"[LocalWhisper] Modelo: {model_name}")
+        print(f"[LocalWhisper] Device: {device.upper()} {'🚀 GPU Acelerada!' if device == 'cuda' else '(CPU - mais lento)'}")
+        print(f"[LocalWhisper] Compute Type: {compute_type}")
         
         # Load or reuse model (singleton pattern for efficiency)
         if _whisper_model is None or _whisper_model_name != model_name:
@@ -1413,58 +1525,220 @@ def _transcribe_with_local_whisper(audio_path: str, match_id: str = None) -> Dic
             _whisper_model_name = model_name
             print(f"[LocalWhisper] ✓ Modelo carregado!")
         
-        # Transcribe
-        print(f"[LocalWhisper] Transcrevendo áudio...")
-        segments_gen, info = _whisper_model.transcribe(
-            audio_path, 
-            language="pt",
-            beam_size=5,
-            vad_filter=True,  # Voice Activity Detection for better accuracy
-            vad_parameters=dict(min_silence_duration_ms=500)
-        )
+        # Check if file is large enough to need chunking
+        needs_chunking = audio_size_mb > 50  # 50MB threshold
         
-        print(f"[LocalWhisper] Idioma detectado: {info.language} (probabilidade: {info.language_probability:.2%})")
-        
-        # Build SRT and text output
-        srt_lines = []
-        full_text = []
-        segments_list = []
-        
-        for i, seg in enumerate(segments_gen, 1):
-            start_str = _format_srt_time(seg.start)
-            end_str = _format_srt_time(seg.end)
-            text = seg.text.strip()
-            
-            if text:
-                srt_lines.append(f"{i}\n{start_str} --> {end_str}\n{text}\n")
-                full_text.append(text)
-                segments_list.append({
-                    'start': seg.start,
-                    'end': seg.end,
-                    'text': text
-                })
-        
-        srt_content = '\n'.join(srt_lines)
-        text_content = ' '.join(full_text)
-        
-        print(f"[LocalWhisper] ✓ Transcrição completa: {len(text_content)} chars, {len(segments_list)} segmentos")
-        
-        return {
-            "success": True,
-            "text": text_content,
-            "srtContent": srt_content,
-            "segments": segments_list,
-            "matchId": match_id,
-            "provider": "local_whisper",
-            "model": model_name,
-            "device": device
-        }
+        if needs_chunking:
+            return _transcribe_chunked(audio_path, match_id, force_restart, chunk_duration)
+        else:
+            return _transcribe_single_file(audio_path, match_id)
         
     except Exception as e:
         import traceback
-        print(f"[LocalWhisper] Erro: {e}")
+        print(f"[LocalWhisper] ❌ Erro: {e}")
         traceback.print_exc()
         return {"error": f"Local Whisper error: {str(e)}", "success": False}
+
+
+def _transcribe_single_file(audio_path: str, match_id: str = None) -> Dict[str, Any]:
+    """Transcribe a single file (small files only)."""
+    global _whisper_model
+    
+    print(f"[LocalWhisper] Transcrevendo arquivo único...")
+    
+    segments_gen, info = _whisper_model.transcribe(
+        audio_path, 
+        language="pt",
+        beam_size=5,
+        vad_filter=True,  # Voice Activity Detection for better accuracy
+        vad_parameters=dict(min_silence_duration_ms=500)
+    )
+    
+    print(f"[LocalWhisper] Idioma detectado: {info.language} (probabilidade: {info.language_probability:.2%})")
+    
+    # Build SRT and text output
+    srt_lines = []
+    full_text = []
+    segments_list = []
+    
+    for i, seg in enumerate(segments_gen, 1):
+        start_str = _format_srt_time(seg.start)
+        end_str = _format_srt_time(seg.end)
+        text = seg.text.strip()
+        
+        if text:
+            srt_lines.append(f"{i}\n{start_str} --> {end_str}\n{text}\n")
+            full_text.append(text)
+            segments_list.append({
+                'start': seg.start,
+                'end': seg.end,
+                'text': text
+            })
+    
+    srt_content = '\n'.join(srt_lines)
+    text_content = ' '.join(full_text)
+    
+    print(f"[LocalWhisper] ✓ Transcrição completa: {len(text_content)} chars, {len(segments_list)} segmentos")
+    
+    return {
+        "success": True,
+        "text": text_content,
+        "srtContent": srt_content,
+        "segments": segments_list,
+        "matchId": match_id,
+        "provider": "local_whisper",
+        "model": _whisper_model_name,
+        "device": "cuda" if hasattr(_whisper_model, 'device') else "cpu"
+    }
+
+
+def _transcribe_chunked(
+    audio_path: str, 
+    match_id: str = None,
+    force_restart: bool = False,
+    chunk_duration: int = 45,
+    max_retries: int = 3
+) -> Dict[str, Any]:
+    """
+    Transcribe large audio file in chunks with checkpoint support.
+    
+    Features:
+    - Splits audio into manageable chunks
+    - Saves progress after each chunk
+    - Can resume from last checkpoint if interrupted
+    - Auto-retries failed chunks
+    
+    Args:
+        audio_path: Path to audio file
+        match_id: Optional match ID for metadata
+        force_restart: If True, ignore existing checkpoints
+        chunk_duration: Duration of each chunk in seconds
+        max_retries: Maximum retries per chunk
+    
+    Returns:
+        Dict with transcription results
+    """
+    global _whisper_model
+    
+    checkpoint_path = _get_checkpoint_path(audio_path, match_id)
+    
+    # Load or initialize checkpoint
+    if force_restart and os.path.exists(checkpoint_path):
+        os.remove(checkpoint_path)
+    
+    checkpoint = _load_checkpoint(checkpoint_path)
+    completed_chunks = checkpoint.get("completed_chunks", 0)
+    all_segments = checkpoint.get("segments", [])
+    text_parts = checkpoint.get("text_parts", [])
+    
+    # Split audio into chunks
+    chunks = _split_audio_into_chunks(audio_path, chunk_duration)
+    total_chunks = len(chunks)
+    
+    if completed_chunks >= total_chunks:
+        print(f"[LocalWhisper] ✓ Transcrição já completa (checkpoint)")
+    else:
+        print(f"[LocalWhisper] 📝 Processando {total_chunks} chunks...")
+        if completed_chunks > 0:
+            print(f"[LocalWhisper] ⏩ Retomando do chunk {completed_chunks + 1}")
+    
+    # Process remaining chunks
+    for i in range(completed_chunks, total_chunks):
+        chunk_path, start_time, end_time = chunks[i]
+        
+        print(f"[LocalWhisper] 📍 Chunk {i + 1}/{total_chunks} ({start_time:.1f}s - {end_time:.1f}s)")
+        
+        # Retry logic for each chunk
+        for retry in range(max_retries):
+            try:
+                segments_gen, info = _whisper_model.transcribe(
+                    chunk_path,
+                    language="pt",
+                    beam_size=5,
+                    vad_filter=True,
+                    vad_parameters=dict(min_silence_duration_ms=500)
+                )
+                
+                chunk_text = []
+                for seg in segments_gen:
+                    text = seg.text.strip()
+                    if text:
+                        # Adjust timestamps to global time
+                        adjusted_start = start_time + seg.start
+                        adjusted_end = start_time + seg.end
+                        
+                        all_segments.append({
+                            'start': adjusted_start,
+                            'end': adjusted_end,
+                            'text': text
+                        })
+                        chunk_text.append(text)
+                
+                text_parts.append(' '.join(chunk_text))
+                
+                # Save checkpoint after each successful chunk
+                completed_chunks = i + 1
+                checkpoint = {
+                    "completed_chunks": completed_chunks,
+                    "total_chunks": total_chunks,
+                    "segments": all_segments,
+                    "text_parts": text_parts,
+                    "last_updated": datetime.now().isoformat()
+                }
+                _save_checkpoint(checkpoint_path, checkpoint)
+                
+                print(f"[LocalWhisper] ✓ Chunk {i + 1}/{total_chunks} ({len(chunk_text)} frases)")
+                break  # Success, exit retry loop
+                
+            except Exception as e:
+                print(f"[LocalWhisper] ⚠ Erro no chunk {i + 1} (tentativa {retry + 1}/{max_retries}): {e}")
+                if retry == max_retries - 1:
+                    print(f"[LocalWhisper] ❌ Chunk {i + 1} falhou após {max_retries} tentativas. Continuando...")
+                    # Continue to next chunk instead of failing completely
+                    text_parts.append(f"[ERRO: chunk {i + 1} não transcrito]")
+    
+    # Build final SRT
+    srt_lines = []
+    for idx, seg in enumerate(all_segments, 1):
+        start_str = _format_srt_time(seg['start'])
+        end_str = _format_srt_time(seg['end'])
+        srt_lines.append(f"{idx}\n{start_str} --> {end_str}\n{seg['text']}\n")
+    
+    srt_content = '\n'.join(srt_lines)
+    full_text = ' '.join(text_parts)
+    
+    # Cleanup checkpoint on success
+    if os.path.exists(checkpoint_path):
+        os.remove(checkpoint_path)
+        print(f"[LocalWhisper] 🧹 Checkpoint removido")
+    
+    # Cleanup chunk files
+    chunk_dir = Path(audio_path).parent / "chunks"
+    if chunk_dir.exists():
+        import shutil
+        try:
+            shutil.rmtree(chunk_dir)
+            print(f"[LocalWhisper] 🧹 Chunks temporários removidos")
+        except Exception as e:
+            print(f"[LocalWhisper] ⚠ Erro ao limpar chunks: {e}")
+    
+    print(f"[LocalWhisper] =====================================")
+    print(f"[LocalWhisper] ✅ TRANSCRIÇÃO COMPLETA!")
+    print(f"[LocalWhisper] Total: {len(full_text)} caracteres, {len(all_segments)} segmentos")
+    print(f"[LocalWhisper] =====================================")
+    
+    return {
+        "success": True,
+        "text": full_text,
+        "srtContent": srt_content,
+        "segments": all_segments,
+        "matchId": match_id,
+        "provider": "local_whisper",
+        "model": _whisper_model_name,
+        "device": "cuda" if hasattr(_whisper_model, 'device') else "cpu",
+        "chunked": True,
+        "total_chunks": total_chunks
+    }
 
 
 def _transcribe_with_elevenlabs(audio_path: str, match_id: str = None) -> Dict[str, Any]:
