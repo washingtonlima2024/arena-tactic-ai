@@ -116,11 +116,8 @@ export default function VideoUpload() {
   // NOTE: Cloud sync removed - sistema opera em modo 100% local
   // Os dados são armazenados apenas no SQLite local
   
-  // Wizard state - driven by URL for reimport, otherwise by user actions
-  const [currentStep, setCurrentStep] = useState<WizardStep>(() => {
-    // Initial state based on URL - only once on mount
-    return existingMatchId ? 'videos' : 'choice';
-  });
+  // Wizard state - SEMPRE começa em 'choice' para mostrar a tela com logo
+  const [currentStep, setCurrentStep] = useState<WizardStep>('choice');
   
   // Selected match for adding videos - also from URL initially
   const [selectedExistingMatch, setSelectedExistingMatch] = useState<string | null>(() => {
@@ -166,19 +163,8 @@ export default function VideoUpload() {
     console.log('[Sync] segmentsRef atualizado:', segments.length, 'segmentos');
   }, [segments]);
   
-  // Sync state with URL param - but respect user's explicit "go back" action
-  useEffect(() => {
-    // If user clicked "Voltar", they want to go to choice - respect that
-    if (userWantsChoice) {
-      return; // Don't sync from URL, user is in control
-    }
-    
-    // Only navigate TO videos when URL has match ID
-    if (existingMatchId) {
-      setSelectedExistingMatch(existingMatchId);
-      setCurrentStep('videos');
-    }
-  }, [existingMatchId, userWantsChoice]);
+  // NOTE: Removido auto-sync para 'videos' - página SEMPRE inicia em 'choice'
+  // O usuário deve escolher explicitamente como prosseguir
   
   const [isDragging, setIsDragging] = useState(false);
   const [showLocalBrowser, setShowLocalBrowser] = useState(false);
