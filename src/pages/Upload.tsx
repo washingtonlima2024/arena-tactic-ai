@@ -48,6 +48,7 @@ import { TranscriptionQueue } from '@/components/upload/TranscriptionQueue';
 import { AsyncProcessingProgress } from '@/components/upload/AsyncProcessingProgress';
 import { toast } from '@/hooks/use-toast';
 import { apiClient } from '@/lib/apiClient';
+import { ChunkedUploadService, UploadState as ChunkedUploadState } from '@/lib/chunkedUpload';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import arenaPlayWordmark from '@/assets/arena-play-wordmark.png';
@@ -366,7 +367,9 @@ export default function VideoUpload() {
     });
   };
 
-  // Large file threshold (500MB for HTTP uploads)
+  // Cloudflare free tier limit (100MB) - use chunked upload above this
+  const CLOUDFLARE_LIMIT = 100 * 1024 * 1024;
+  // Large file threshold for warnings (500MB)
   const LARGE_FILE_THRESHOLD = 500 * 1024 * 1024;
   // Upload timeout (5 minutes for large files)
   const UPLOAD_TIMEOUT = 300000;
@@ -384,11 +387,17 @@ export default function VideoUpload() {
     // Format file size for display
     const fileSizeMB = (file.size / (1024 * 1024)).toFixed(1);
     const isLargeFile = file.size > LARGE_FILE_THRESHOLD;
+    const needsChunkedUpload = file.size > CLOUDFLARE_LIMIT && uploadMode !== 'local';
 
-    // Warn about very large files (only for HTTP upload, not local)
-    if (isLargeFile && uploadMode !== 'local') {
+    // Info about chunked upload for large files
+    if (needsChunkedUpload) {
       toast({
-        title: "⚠️ Arquivo muito grande",
+        title: "📦 Upload em partes",
+        description: `${file.name} (${fileSizeMB} MB) será enviado em partes de 8MB para evitar limites de rede.`,
+      });
+    } else if (isLargeFile && uploadMode !== 'local') {
+      toast({
+        title: "⚠️ Arquivo grande",
         description: `${file.name} (${fileSizeMB} MB) pode demorar. Para arquivos maiores, use o modo local.`,
         variant: "destructive",
       });
@@ -453,27 +462,84 @@ export default function VideoUpload() {
         throw new Error('Selecione uma partida primeiro antes de fazer upload.');
       }
 
-      // Usar uploadBlobWithProgress (XMLHttpRequest) - mais confiável que fetch para uploads grandes
-      const result = await apiClient.uploadBlobWithProgress(
-        matchId,
-        'videos',
-        file,
-        fileName,
-        (percent, loaded, total) => {
-          setSegments(prev => 
-            prev.map(s => 
-              s.id === segmentId 
-                ? { ...s, progress: percent }
-                : s
-            )
-          );
+      let resultUrl: string;
+
+      // Use chunked upload for files > 100MB (Cloudflare limit)
+      if (needsChunkedUpload) {
+        console.log(`[uploadFile] Using chunked upload for ${fileSizeMB}MB file`);
+        
+        const uploader = new ChunkedUploadService();
+        
+        let uploadResult: { uploadId: string; outputPath: string } | null = null;
+        
+        const uploadId = await uploader.start({
+          file,
+          matchId,
+          onProgress: (state: ChunkedUploadState) => {
+            const percent = Math.round((state.uploadedBytes / state.totalBytes) * 100);
+            setSegments(prev => 
+              prev.map(s => 
+                s.id === segmentId 
+                  ? { 
+                      ...s, 
+                      progress: percent,
+                      uploadSpeed: state.speedBps > 0 ? `${(state.speedBps / 1024 / 1024).toFixed(1)} MB/s` : undefined,
+                      currentChunk: state.currentChunk,
+                      totalChunks: state.totalChunks
+                    }
+                  : s
+              )
+            );
+          },
+          onComplete: (result) => {
+            console.log('[uploadFile] Chunked upload complete:', result);
+            uploadResult = result;
+          },
+          onError: (error) => {
+            console.error('[uploadFile] Chunked upload error:', error);
+          }
+        });
+        
+        console.log('[uploadFile] Chunked upload started with ID:', uploadId);
+        
+        // Wait for upload to complete by polling state
+        let state = uploader.getState();
+        while (state.status === 'uploading' || state.status === 'preparing') {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          state = uploader.getState();
         }
-      );
+        
+        if (state.status === 'error') {
+          throw new Error(state.errorMessage || 'Erro no upload em partes');
+        }
+        
+        // Get the final URL from the upload result
+        resultUrl = uploadResult?.outputPath || `/data/uploads/${uploadId}/media/output.mp4`;
+        
+      } else {
+        // Use regular upload for smaller files
+        const result = await apiClient.uploadBlobWithProgress(
+          matchId,
+          'videos',
+          file,
+          fileName,
+          (percent, loaded, total) => {
+            setSegments(prev => 
+              prev.map(s => 
+                s.id === segmentId 
+                  ? { ...s, progress: percent }
+                  : s
+              )
+            );
+          }
+        );
+        resultUrl = result.url;
+      }
 
       setSegments(prev => 
         prev.map(s => 
           s.id === segmentId 
-            ? { ...s, progress: 100, status: 'complete', url: result.url }
+            ? { ...s, progress: 100, status: 'complete', url: resultUrl }
             : s
         )
       );

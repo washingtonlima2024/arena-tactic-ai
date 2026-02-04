@@ -32,6 +32,10 @@ export interface VideoSegment {
   transcriptionParseResult?: ParseResult;
   uploadStartTime?: number;
   elapsedSeconds?: number;
+  // Chunked upload fields
+  uploadSpeed?: string;
+  currentChunk?: number;
+  totalChunks?: number;
 }
 
 interface VideoSegmentCardProps {
@@ -207,18 +211,30 @@ export function VideoSegmentCard({ segment, onChange, onRemove, onFallbackClick,
         {isUploading && (
           <div className="space-y-2">
             <div className="flex items-center justify-between text-xs text-muted-foreground">
-              <span className="flex items-center gap-1">
+              <span className="flex items-center gap-2">
                 <div className="animate-spin h-3 w-3 border-2 border-primary border-t-transparent rounded-full" />
-                Enviando...
+                <span>Enviando...</span>
+                {segment.currentChunk && segment.totalChunks && (
+                  <span className="text-primary font-medium">
+                    (Parte {segment.currentChunk}/{segment.totalChunks})
+                  </span>
+                )}
               </span>
-              {segment.elapsedSeconds && (
-                <span className="text-amber-400">
-                  {formatElapsedTime(segment.elapsedSeconds)}
-                  {segment.elapsedSeconds > 30 && " (arquivo grande...)"}
-                </span>
-              )}
+              <div className="flex items-center gap-3">
+                {segment.uploadSpeed && (
+                  <span className="text-primary font-medium">{segment.uploadSpeed}</span>
+                )}
+                {segment.elapsedSeconds && (
+                  <span className="text-amber-400">
+                    {formatElapsedTime(segment.elapsedSeconds)}
+                    {segment.elapsedSeconds > 30 && " (arquivo grande...)"}
+                  </span>
+                )}
+                <span className="font-mono font-bold text-primary">{segment.progress}%</span>
+              </div>
             </div>
-            {segment.elapsedSeconds && segment.elapsedSeconds > 45 && (
+            <Progress value={segment.progress} className="h-3" showStripes animate />
+            {segment.elapsedSeconds && segment.elapsedSeconds > 45 && !segment.currentChunk && (
               <p className="text-xs text-amber-400">
                 ⚠️ Upload lento. Considere usar link externo se continuar.
               </p>
