@@ -510,6 +510,83 @@ def validate_card_event(
     return {'is_valid': True, 'confidence': confidence, 'reason': 'validated'}
 
 
+def _extract_context_around_timestamp(transcription: str, minute: int, second: int, window_chars: int = 400) -> str:
+    """
+    Extract text context around a timestamp from transcription.
+    Searches for time patterns like HH:MM:SS or minute references.
+    """
+    total_seconds = minute * 60 + second
+    
+    # Try to find timestamp pattern in transcription
+    time_patterns = [
+        rf'{minute:02d}:{second:02d}',
+        rf'{minute}:{second:02d}',
+        rf'{minute}\s*minuto',
+        rf"aos\s*{minute}",
+    ]
+    
+    for pattern in time_patterns:
+        match = re.search(pattern, transcription, re.IGNORECASE)
+        if match:
+            start = max(0, match.start() - window_chars // 2)
+            end = min(len(transcription), match.end() + window_chars // 2)
+            return transcription[start:end]
+    
+    # Fallback: estimate position based on transcription length
+    # Assume ~45 minutes of content
+    estimated_pos = int(len(transcription) * (total_seconds / (45 * 60)))
+    start = max(0, estimated_pos - window_chars // 2)
+    end = min(len(transcription), estimated_pos + window_chars // 2)
+    return transcription[start:end]
+
+
+def _validate_all_events_with_context(
+    events: List[Dict],
+    transcription: str,
+    home_team: str,
+    away_team: str
+) -> List[Dict]:
+    """
+    Validação pós-Ollama para TODOS os tipos de eventos.
+    Remove eventos falsos verificando contexto na transcrição.
+    """
+    validated = []
+    
+    for event in events:
+        event_type = event.get('event_type')
+        minute = event.get('minute', 0)
+        second = event.get('second', 0)
+        
+        # Extrair contexto ao redor do timestamp
+        context = _extract_context_around_timestamp(transcription, minute, second)
+        
+        # 1. Validar cartões vermelhos
+        if event_type == 'red_card':
+            validation = validate_card_event(context, context, 'red_card', home_team, away_team)
+            if not validation['is_valid']:
+                print(f"[Validate] ⚠️ Cartão vermelho {minute}' REJEITADO: {validation['reason']}")
+                continue
+        
+        # 2. Validar cartões amarelos
+        if event_type == 'yellow_card':
+            validation = validate_card_event(context, context, 'yellow_card', home_team, away_team)
+            if not validation['is_valid']:
+                print(f"[Validate] ⚠️ Cartão amarelo {minute}' REJEITADO: {validation['reason']}")
+                continue
+        
+        # 3. Validar pênaltis
+        if event_type == 'penalty':
+            validation = validate_penalty_event(context, context, home_team, away_team)
+            if not validation['is_valid']:
+                print(f"[Validate] ⚠️ Pênalti {minute}' REJEITADO: {validation['reason']}")
+                continue
+        
+        validated.append(event)
+    
+    print(f"[Validate] Eventos após validação contextual: {len(validated)}/{len(events)}")
+    return validated
+
+
 def validate_penalty_event(
     text: str,
     window_text: str,
@@ -3972,6 +4049,17 @@ def detect_events_by_keywords_from_text(
                             )
                             confidence = 0.7
                     else:
+                        # VALIDAÇÃO: Verificar cartões antes de aceitar
+                        if event_type in ['red_card', 'yellow_card']:
+                            context_start = max(0, keyword_pos - 200)
+                            context_end = min(len(transcription), keyword_pos + 200)
+                            context = transcription[context_start:context_end]
+                            
+                            validation = validate_card_event(match.group(), context, event_type, home_team, away_team)
+                            if not validation['is_valid']:
+                                print(f"[Keywords-Text] ⚠ {event_type} ignorado: {validation['reason']}")
+                                continue
+                        
                         team = detect_team_from_text(
                             transcription[max(0, keyword_pos-100):keyword_pos+100],
                             home_team, away_team
@@ -4290,10 +4378,13 @@ Formato obrigatório:
             goals = [e for e in events if e.get('event_type') == 'goal']
             print(f"[Ollama] Total: {len(events)} eventos, {len(goals)} gols")
             for g in goals:
-                print(f"[Ollama] ⚽ GOL: {g.get('minute', 0)}' - {g.get('team', 'unknown')}")
+            print(f"[Ollama] ⚽ GOL: {g.get('minute', 0)}' - {g.get('team', 'unknown')}")
             
             # VALIDAÇÃO PÓS-OLLAMA: Remover gols falsos verificando contexto
             events = _validate_goals_with_context(events, transcription)
+            
+            # VALIDAÇÃO PÓS-OLLAMA: Validar TODOS os eventos (cartões, pênaltis)
+            events = _validate_all_events_with_context(events, transcription, home_team, away_team)
         else:
             print(f"[Ollama] ⚠️ Nenhum evento extraído!")
         
