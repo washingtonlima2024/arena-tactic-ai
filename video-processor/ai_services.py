@@ -5623,7 +5623,11 @@ Partida atual:
 
 def transcribe_audio_base64(audio_base64: str, language: str = 'pt') -> Optional[str]:
     """
-    Transcribe audio from base64 data using OpenAI Whisper.
+    Transcribe audio from base64 data using best available provider.
+    
+    Priority:
+    1. Local Whisper (FREE, offline) - PRIORITÁRIO
+    2. OpenAI Whisper API (paid) - Fallback
     
     Args:
         audio_base64: Base64-encoded audio data
@@ -5633,9 +5637,7 @@ def transcribe_audio_base64(audio_base64: str, language: str = 'pt') -> Optional
         Transcription text or None on error
     """
     import tempfile
-    
-    if not OPENAI_API_KEY:
-        raise ValueError("OPENAI_API_KEY not configured")
+    import subprocess
     
     # Decode base64 and save to temp file
     audio_data = base64.b64decode(audio_base64)
@@ -5644,11 +5646,76 @@ def transcribe_audio_base64(audio_base64: str, language: str = 'pt') -> Optional
         tmp.write(audio_data)
         tmp_path = tmp.name
     
+    wav_path = None
+    
     try:
-        return transcribe_audio(tmp_path, language)
+        # Converter para WAV 16kHz mono (melhor compatibilidade com Whisper)
+        wav_path = tmp_path.replace('.webm', '.wav')
+        try:
+            result = subprocess.run([
+                'ffmpeg', '-y', '-i', tmp_path,
+                '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le',
+                wav_path
+            ], capture_output=True, timeout=30)
+            if result.returncode == 0:
+                transcribe_path = wav_path
+                print(f"[TranscribeBase64] ✓ Convertido para WAV 16kHz")
+            else:
+                transcribe_path = tmp_path
+                print(f"[TranscribeBase64] ⚠ Falha na conversão WAV, usando original")
+        except Exception as e:
+            transcribe_path = tmp_path
+            print(f"[TranscribeBase64] ⚠ ffmpeg não disponível: {e}")
+        
+        # PRIORIDADE 1: Local Whisper (GRATUITO, offline)
+        if LOCAL_WHISPER_ENABLED and _FASTER_WHISPER_AVAILABLE:
+            print(f"[TranscribeBase64] 🆓 Usando Local Whisper...")
+            try:
+                result = _transcribe_with_local_whisper(transcribe_path, match_id=None)
+                if result.get('success') and result.get('text'):
+                    text = result['text'].strip()
+                    if text:
+                        print(f"[TranscribeBase64] ✓ Local Whisper: {len(text)} chars")
+                        return text
+                    else:
+                        print(f"[TranscribeBase64] Local Whisper retornou texto vazio")
+                else:
+                    print(f"[TranscribeBase64] Local Whisper falhou: {result.get('error', 'Unknown error')}")
+            except Exception as e:
+                print(f"[TranscribeBase64] Erro no Local Whisper: {e}")
+        
+        # PRIORIDADE 2: OpenAI Whisper (pago - fallback)
+        if OPENAI_API_KEY:
+            print(f"[TranscribeBase64] 💰 Tentando OpenAI Whisper (fallback)...")
+            try:
+                text = transcribe_audio(transcribe_path, language)
+                if text:
+                    print(f"[TranscribeBase64] ✓ OpenAI Whisper: {len(text)} chars")
+                    return text
+            except Exception as e:
+                print(f"[TranscribeBase64] Erro no OpenAI: {e}")
+        
+        # Nenhum provedor disponível ou todos falharam
+        if not LOCAL_WHISPER_ENABLED and not OPENAI_API_KEY:
+            raise ValueError(
+                "Nenhum provedor de transcrição disponível. "
+                "Instale faster-whisper (gratuito) ou configure OPENAI_API_KEY."
+            )
+        
+        print(f"[TranscribeBase64] ⚠ Todos os provedores falharam")
+        return None
+        
     finally:
         import os
-        os.unlink(tmp_path)
+        try:
+            os.unlink(tmp_path)
+        except:
+            pass
+        if wav_path:
+            try:
+                os.unlink(wav_path)
+            except:
+                pass
 
 
 def extract_live_events(
