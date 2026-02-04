@@ -161,19 +161,23 @@ export function EventEditDialog({
           queryClient.invalidateQueries({ queryKey: ['matches'] });
         }
       } else {
-        // Update existing event - mark clip as pending for regeneration
+        // Update existing event - MERGE metadata to preserve important fields
+        const existingMetadata = (event?.metadata || {}) as Record<string, unknown>;
+        const updatedMetadata = {
+          ...existingMetadata,
+          team, 
+          player: playerName || undefined,
+          isOwnGoal: eventType === 'goal' ? isOwnGoal : undefined,
+          aiGenerated: false, 
+          edited: true 
+        };
+
         await apiClient.updateEvent(event!.id!, {
           event_type: eventType,
           minute: minute ? parseInt(minute) : null,
           second: second ? parseInt(second) : null,
           description: description || null,
-          metadata: { 
-            team, 
-            player: playerName || undefined,
-            isOwnGoal: eventType === 'goal' ? isOwnGoal : undefined,
-            aiGenerated: false, 
-            edited: true 
-          },
+          metadata: updatedMetadata,
           position_x: positionX ? parseFloat(positionX) : null,
           position_y: positionY ? parseFloat(positionY) : null,
           approval_status: 'pending',
@@ -181,6 +185,8 @@ export function EventEditDialog({
           approved_at: null,
           clip_pending: true, // Mark for clip regeneration
         });
+        
+        console.log('[EventEdit] Updated with isOwnGoal:', isOwnGoal, 'metadata:', updatedMetadata);
 
         toast.success('Evento atualizado! Clip será regenerado automaticamente.');
         
