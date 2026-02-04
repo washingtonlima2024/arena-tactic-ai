@@ -86,12 +86,20 @@ export async function syncMatchScoreFromEvents(
       const metadata = goal.metadata as Record<string, any> | null;
       const description = (goal.description || '').toLowerCase();
       
-      // Detect own goal from description or metadata
+      // Keywords alinhadas com backend (ai_services.py linha 4602)
+      const ownGoalKeywords = [
+        'gol contra', 
+        'próprio gol', 
+        'mandou contra', 
+        'own goal', 
+        'autogol',
+        'contra o próprio',
+        'próprio patrimônio'
+      ];
+      
       const isOwnGoal = 
         metadata?.isOwnGoal === true ||
-        description.includes('contra') ||
-        description.includes('own goal') ||
-        description.includes('gol contra');
+        ownGoalKeywords.some(kw => description.includes(kw));
       
       // Determine which team scored
       let team = metadata?.team || metadata?.scoring_team || '';

@@ -96,12 +96,20 @@ export function useDynamicMatchStats(
         const metadata = goal.metadata;
         const description = (goal.description || '').toLowerCase();
         
-        // Detect own goal
+        // Keywords alinhadas com backend (ai_services.py linha 4602)
+        const ownGoalKeywords = [
+          'gol contra', 
+          'próprio gol', 
+          'mandou contra', 
+          'own goal', 
+          'autogol',
+          'contra o próprio',
+          'próprio patrimônio'
+        ];
+        
         const isOwnGoal = 
           metadata?.isOwnGoal === true ||
-          description.includes('contra') ||
-          description.includes('own goal') ||
-          description.includes('gol contra');
+          ownGoalKeywords.some(kw => description.includes(kw));
         
         const teamType = getTeamType(goal);
         
@@ -186,12 +194,20 @@ export function calculateScoreFromEvents(
     const description = (goal.description || '').toLowerCase();
     const team = (metadata?.team || metadata?.scoring_team || '').toLowerCase();
     
-    // Detect own goal
+    // Keywords alinhadas com backend (ai_services.py linha 4602)
+    const ownGoalKeywords = [
+      'gol contra', 
+      'próprio gol', 
+      'mandou contra', 
+      'own goal', 
+      'autogol',
+      'contra o próprio',
+      'próprio patrimônio'
+    ];
+    
     const isOwnGoal = 
       metadata?.isOwnGoal === true ||
-      description.includes('contra') ||
-      description.includes('own goal') ||
-      description.includes('gol contra');
+      ownGoalKeywords.some(kw => description.includes(kw));
     
     // Determine team
     let teamType: 'home' | 'away' | 'unknown' = 'unknown';
