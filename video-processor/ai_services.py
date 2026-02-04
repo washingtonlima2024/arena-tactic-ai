@@ -3567,15 +3567,94 @@ def _parse_ollama_events_fallback(text: str) -> List[Dict[str, Any]]:
     return events
 
 
-def detect_events_by_keywords(
+def validate_event_timestamps(
+    events: List[Dict[str, Any]], 
+    video_duration: float = None
+) -> List[Dict[str, Any]]:
+    """
+    Valida e corrige eventos com timestamps inválidos.
+    
+    - Remove eventos com minute=0, second=0 SE não houver videoSecond válido
+    - Distribui proporcionalmente se todos os eventos tiverem timestamp zero
+    
+    Args:
+        events: Lista de eventos detectados
+        video_duration: Duração do vídeo em segundos (para distribuição proporcional)
+    
+    Returns:
+        Lista de eventos com timestamps válidos
+    """
+    valid_events = []
+    zero_timestamp_events = []
+    
+    for event in events:
+        minute = event.get('minute', 0)
+        second = event.get('second', 0)
+        video_second = event.get('videoSecond', 0)
+        
+        # Evento tem timestamp válido?
+        if video_second > 0 or minute > 0 or second > 0:
+            valid_events.append(event)
+        else:
+            # Timestamp zero - pode ser inválido
+            zero_timestamp_events.append(event)
+    
+    # Se TODOS os eventos têm timestamp zero, algo está errado
+    if zero_timestamp_events and not valid_events:
+        print(f"[VALIDATE] ⚠ TODOS os {len(zero_timestamp_events)} eventos têm timestamp 0!")
+        print(f"[VALIDATE] ⚠ Isso indica falha no parsing do SRT.")
+        
+        # Se temos duração do vídeo, distribuir proporcionalmente
+        if video_duration and video_duration > 60:
+            print(f"[VALIDATE] 🔧 Distribuindo eventos proporcionalmente no vídeo de {video_duration:.0f}s")
+            
+            # Usar 10% a 90% do vídeo para evitar extremos
+            usable_duration = video_duration * 0.8
+            start_offset = video_duration * 0.1
+            
+            for i, event in enumerate(zero_timestamp_events):
+                # Distribuir eventos uniformemente
+                position = i / max(1, len(zero_timestamp_events) - 1) if len(zero_timestamp_events) > 1 else 0.5
+                new_second = start_offset + (position * usable_duration)
+                
+                event['videoSecond'] = int(new_second)
+                event['minute'] = int(new_second / 60)
+                event['second'] = int(new_second % 60)
+                event['timestampEstimated'] = True
+                
+                print(f"[VALIDATE]   → {event.get('event_type')}: distribuído para {new_second:.0f}s")
+            
+            valid_events.extend(zero_timestamp_events)
+        else:
+            print(f"[VALIDATE] ⚠ Sem duração de vídeo, descartando eventos com timestamp 0")
+    elif zero_timestamp_events:
+        # Há alguns eventos com timestamp 0 mas outros têm timestamps válidos
+        # Neste caso, descartar os de timestamp 0 (provavelmente parsing errado)
+        print(f"[VALIDATE] ⚠ Descartando {len(zero_timestamp_events)} eventos com timestamp 0 (outros {len(valid_events)} são válidos)")
+    
+    return valid_events
+
+
+def detect_events_by_keywords_from_text(
     transcription: str,
     home_team: str,
     away_team: str,
-    game_start_minute: int = 0
+    game_start_minute: int = 0,
+    video_duration: float = None
 ) -> List[Dict[str, Any]]:
     """
-    Fallback: Detecta eventos por palavras-chave quando IA falha.
-    Útil para garantir detecção mínima de gols e cartões.
+    Fallback: Detecta eventos por palavras-chave em TEXTO BRUTO.
+    MELHORADO: Cria mapa de timestamps ANTES de procurar keywords.
+    
+    Args:
+        transcription: Texto da transcrição (pode conter timestamps SRT)
+        home_team: Nome do time da casa
+        away_team: Nome do time visitante
+        game_start_minute: Minuto inicial do jogo
+        video_duration: Duração do vídeo em segundos (para validação)
+    
+    Returns:
+        Lista de eventos detectados com timestamps
     """
     import re
     events = []
@@ -3619,59 +3698,111 @@ def detect_events_by_keywords(
         ],
     }
     
-    # Procurar por timestamps no formato SRT (00:MM:SS)
+    # ═══════════════════════════════════════════════════════════════
+    # MELHORIA: Criar mapa de TODOS os timestamps PRIMEIRO
+    # ═══════════════════════════════════════════════════════════════
     timestamp_pattern = r'(\d{2}):(\d{2}):(\d{2})'
-    lines = transcription.split('\n')
     
-    current_minute = game_start_minute
-    current_second = 0
+    timestamp_map = {}  # posição no texto -> dados do timestamp
+    for match in re.finditer(timestamp_pattern, transcription):
+        position = match.start()
+        hours, mins, secs = match.groups()
+        total_seconds = int(hours) * 3600 + int(mins) * 60 + int(secs)
+        timestamp_map[position] = {
+            'minute': game_start_minute + int(mins) + int(hours) * 60,
+            'second': int(secs),
+            'videoSecond': total_seconds
+        }
     
-    for i, line in enumerate(lines):
-        # Atualizar timestamp se encontrar
-        ts_match = re.search(timestamp_pattern, line)
-        if ts_match:
-            # Extrair minuto e segundo do timestamp SRT
-            _, mins, secs = ts_match.groups()
-            current_minute = game_start_minute + int(mins)
-            current_second = int(secs)
-            continue
-        
-        line_lower = line.lower()
-        
-        # Procurar cada tipo de evento
-        for event_type, keyword_patterns in patterns.items():
-            for pattern in keyword_patterns:
-                if re.search(pattern, line_lower, re.IGNORECASE):
-                    # Detectar time (home ou away)
-                    team = 'home'
-                    if away_team.lower() in line_lower:
-                        team = 'away'
-                    elif home_team.lower() in line_lower:
-                        team = 'home'
-                    
-                    # Evitar duplicatas no mesmo minuto
-                    already_exists = any(
-                        e.get('minute') == current_minute and 
-                        e.get('event_type') == event_type and
-                        abs(e.get('second', 0) - current_second) < 10
-                        for e in events
-                    )
-                    
-                    if not already_exists:
-                        event = {
-                            'minute': current_minute,
-                            'second': current_second,
-                            'event_type': event_type,
-                            'team': team,
-                            'description': line[:150],
-                            'confidence': 0.6,  # Menor confiança por ser keyword
-                            'is_highlight': event_type in ['goal', 'yellow_card', 'red_card', 'penalty'],
-                            'isOwnGoal': False,
-                            'source': 'keyword_fallback'
-                        }
-                        events.append(event)
-                        print(f"[Keyword Fallback] ✓ {event_type} aos {current_minute}'{current_second}\" ({team})")
-                    break  # Evitar múltiplos matches na mesma linha
+    print(f"[Keyword Fallback] 📍 Mapa de timestamps: {len(timestamp_map)} entradas")
+    
+    # Se não há timestamps no texto, usar posição proporcional
+    text_len = len(transcription)
+    
+    # ═══════════════════════════════════════════════════════════════
+    # Procurar cada keyword e associar ao timestamp mais próximo
+    # ═══════════════════════════════════════════════════════════════
+    for event_type, keyword_patterns in patterns.items():
+        for pattern in keyword_patterns:
+            for match in re.finditer(pattern, transcription, re.IGNORECASE):
+                keyword_pos = match.start()
+                keyword_text = match.group(0)
+                
+                # Contexto ao redor da keyword (100 chars antes e depois)
+                context_start = max(0, keyword_pos - 100)
+                context_end = min(text_len, keyword_pos + 100)
+                context = transcription[context_start:context_end]
+                
+                # Encontrar timestamp mais próximo ANTES da keyword
+                closest_ts = None
+                min_distance = float('inf')
+                
+                for ts_pos, ts_data in timestamp_map.items():
+                    if ts_pos < keyword_pos:  # Timestamp antes da keyword
+                        distance = keyword_pos - ts_pos
+                        if distance < min_distance:
+                            min_distance = distance
+                            closest_ts = ts_data
+                
+                # Se não encontrou timestamp antes, pegar o mais próximo depois
+                if not closest_ts:
+                    for ts_pos, ts_data in timestamp_map.items():
+                        if ts_pos > keyword_pos:  # Timestamp depois
+                            distance = ts_pos - keyword_pos
+                            if distance < min_distance:
+                                min_distance = distance
+                                closest_ts = ts_data
+                
+                # Calcular valores de timestamp
+                if closest_ts:
+                    current_minute = closest_ts['minute']
+                    current_second = closest_ts['second']
+                    video_second = closest_ts['videoSecond']
+                elif video_duration:
+                    # Fallback: usar posição proporcional no texto
+                    position_ratio = keyword_pos / text_len
+                    video_second = int(position_ratio * video_duration)
+                    current_minute = game_start_minute + (video_second // 60)
+                    current_second = video_second % 60
+                else:
+                    # Sem referência de tempo - evento será descartado depois
+                    video_second = 0
+                    current_minute = 0
+                    current_second = 0
+                
+                # Detectar time usando detect_goal_author (mais preciso)
+                team_result = detect_goal_author(context, home_team, away_team)
+                team = team_result.get('team', 'unknown')
+                if team == 'unknown':
+                    team = 'home'  # Fallback para home
+                
+                # Evitar duplicatas
+                already_exists = any(
+                    e.get('event_type') == event_type and 
+                    abs(e.get('videoSecond', 0) - video_second) < 30
+                    for e in events
+                )
+                
+                if not already_exists:
+                    event = {
+                        'minute': current_minute,
+                        'second': current_second,
+                        'videoSecond': video_second,
+                        'event_type': event_type,
+                        'team': team,
+                        'description': context[:150],
+                        'confidence': 0.6,
+                        'is_highlight': event_type in ['goal', 'yellow_card', 'red_card', 'penalty'],
+                        'isOwnGoal': False,
+                        'source': 'keyword_fallback',
+                        'timestampSource': 'proximity_map' if closest_ts else 'proportional'
+                    }
+                    events.append(event)
+                    print(f"[Keyword Fallback] ✓ {event_type} aos {current_minute}'{current_second}\" ({team}) - videoSecond={video_second}")
+                break  # Evitar múltiplos matches na mesma posição
+    
+    # Validar e corrigir timestamps zero
+    events = validate_event_timestamps(events, video_duration)
     
     print(f"[Keyword Fallback] Total: {len(events)} eventos detectados por keywords")
     return events
@@ -3899,11 +4030,12 @@ Formato obrigatório:
             # Fallback final: Detecção por keywords (sempre funciona, 0% IA)
             if not result:
                 print(f"[Ollama] ⚠ Sem IA disponível! Usando detecção por keywords (100% determinístico)...")
-                keyword_events = detect_events_by_keywords(
+                keyword_events = detect_events_by_keywords_from_text(
                     transcription=transcription,
                     home_team=home_team,
                     away_team=away_team,
-                    game_start_minute=game_start_minute
+                    game_start_minute=game_start_minute,
+                    video_duration=None  # Sem duração disponível neste contexto
                 )
                 print(f"[Ollama] Detecção por keywords: {len(keyword_events)} eventos encontrados")
                 return keyword_events
@@ -3966,11 +4098,12 @@ Formato obrigatório:
         # FALLBACK: Se Ollama retornou poucos eventos, usar keywords
         if len(events) < 3:
             print(f"[Ollama] ⚠️ Poucos eventos ({len(events)}), usando fallback por keywords...")
-            keyword_events = detect_events_by_keywords(
+            keyword_events = detect_events_by_keywords_from_text(
                 transcription=transcription,
                 home_team=home_team,
                 away_team=away_team,
-                game_start_minute=game_start_minute
+                game_start_minute=game_start_minute,
+                video_duration=None  # Sem duração disponível neste contexto
             )
             # Adicionar eventos de keywords que não existam
             for ke in keyword_events:
