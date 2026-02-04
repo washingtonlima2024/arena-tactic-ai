@@ -25,14 +25,36 @@ KNOWN_TEAMS = [
     'grêmio', 'internacional', 'cruzeiro', 'atlético mineiro', 'atlético-mg',
     'vasco', 'botafogo', 'fluminense', 'bahia', 'fortaleza',
     # Série B / Regionais
-    'sport', 'novo horizontino', 'novorizontino', 'guarani', 'ponte preta',
-    'coritiba', 'goiás', 'vitória', 'ceará', 'américa mineiro',
-    'chapecoense', 'avaí', 'figueirense', 'juventude', 'sampaio corrêa',
+    'sport', 'sport recife', 'sport club do recife',
+    'novorizontino', 'novo horizontino', 'grêmio novorizontino',
+    'guarani', 'ponte preta', 'coritiba', 'goiás', 'vitória', 'ceará', 
+    'américa mineiro', 'chapecoense', 'avaí', 'figueirense', 'juventude', 
+    'sampaio corrêa', 'csa', 'crb', 'náutico', 'santa cruz',
     # Seleções
     'brasil', 'argentina', 'uruguai', 'chile', 'paraguai', 'colômbia',
     'alemanha', 'frança', 'espanha', 'itália', 'portugal', 'inglaterra',
     'seleção brasileira', 'seleção argentina'
 ]
+
+# Team aliases for better matching (nicknames, variations)
+TEAM_ALIASES = {
+    'sport': ['sport recife', 'leão', 'leão da ilha', 'rubro-negro recifense', 'sport club'],
+    'novorizontino': ['novo horizontino', 'tigre', 'novori', 'grêmio novorizontino', 'auriverde'],
+    'flamengo': ['mengão', 'rubro-negro', 'urubu', 'fla'],
+    'corinthians': ['timão', 'coringão', 'alvinegro paulista'],
+    'palmeiras': ['verdão', 'alviverde', 'porco'],
+    'são paulo': ['tricolor paulista', 'soberano', 'spfc'],
+    'santos': ['peixe', 'alvinegro praiano'],
+    'grêmio': ['tricolor gaúcho', 'imortal'],
+    'internacional': ['colorado', 'inter'],
+    'cruzeiro': ['raposa', 'cabuloso'],
+    'atlético mineiro': ['galo', 'atlético-mg', 'atletico-mg'],
+    'vasco': ['gigante da colina', 'vascão', 'cruzmaltino'],
+    'botafogo': ['fogão', 'glorioso', 'estrela solitária'],
+    'fluminense': ['tricolor carioca', 'flu', 'pó de arroz'],
+    'bahia': ['tricolor baiano', 'tricolor de aço', 'esquadrão'],
+    'fortaleza': ['leão do pici', 'tricolor de aço'],
+}
 
 
 def detect_teams_in_transcription(transcription: str) -> Tuple[List[str], bool]:
@@ -60,35 +82,57 @@ def validate_transcription_teams(
     """
     Validate if transcription mentions the expected teams.
     Returns validation result with warnings if mismatched.
+    
+    RELAXED LOGIC: Only marks contamination if:
+    1. Neither expected team was found AND
+    2. More than 5 different unexpected teams are mentioned (indicates wrong match)
     """
     text_lower = transcription.lower()
-    home_lower = home_team.lower()
-    away_lower = away_team.lower()
+    home_lower = home_team.lower().strip()
+    away_lower = away_team.lower().strip()
+    
+    # Build variants list including aliases
+    home_variants = [home_lower] + [w for w in home_lower.split() if len(w) > 3]
+    away_variants = [away_lower] + [w for w in away_lower.split() if len(w) > 3]
+    
+    # Add known aliases
+    for key, aliases in TEAM_ALIASES.items():
+        if key in home_lower or home_lower in key:
+            home_variants.extend(aliases)
+        if key in away_lower or away_lower in key:
+            away_variants.extend(aliases)
+    
+    # Remove duplicates and empty strings
+    home_variants = list(set(v for v in home_variants if v and len(v) > 2))
+    away_variants = list(set(v for v in away_variants if v and len(v) > 2))
     
     # Check if expected teams are mentioned
     home_found = any(
-        word in text_lower 
-        for word in home_lower.split() 
-        if len(word) > 3
+        re.search(r'\b' + re.escape(variant) + r'\b', text_lower)
+        for variant in home_variants
+        if len(variant) > 3
     )
     away_found = any(
-        word in text_lower 
-        for word in away_lower.split() 
-        if len(word) > 3
+        re.search(r'\b' + re.escape(variant) + r'\b', text_lower)
+        for variant in away_variants
+        if len(variant) > 3
     )
     
     # Detect other teams in transcription
-    detected_teams, has_other_teams = detect_teams_in_transcription(transcription)
+    detected_teams, _ = detect_teams_in_transcription(transcription)
     
-    # Filter out the expected teams from detected
+    # Filter out the expected teams from detected (more thorough matching)
+    all_expected_variants = home_variants + away_variants
     unexpected_teams = [
         t for t in detected_teams 
-        if t not in home_lower and t not in away_lower
-        and home_lower not in t and away_lower not in t
+        if not any(v in t or t in v for v in all_expected_variants)
     ]
     
     is_valid = home_found or away_found
-    has_contamination = len(unexpected_teams) > 0 and not is_valid
+    
+    # RELAXED: Only contaminate if MANY unexpected teams AND NO expected teams
+    # This allows narrators to mention other teams in passing comments
+    has_contamination = not is_valid and len(unexpected_teams) > 5
     
     return {
         'isValid': is_valid,
@@ -97,7 +141,7 @@ def validate_transcription_teams(
         'detectedTeams': detected_teams,
         'unexpectedTeams': unexpected_teams,
         'hasContamination': has_contamination,
-        'warning': None if is_valid else f"Transcrição não menciona {home_team} nem {away_team}. Times detectados: {', '.join(unexpected_teams) if unexpected_teams else 'nenhum'}"
+        'warning': None if is_valid else f"Times esperados não encontrados. Detectados: {', '.join(unexpected_teams[:5]) if unexpected_teams else 'nenhum'}"
     }
 
 
