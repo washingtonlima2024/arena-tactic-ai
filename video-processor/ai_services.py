@@ -573,10 +573,11 @@ def _extract_context_around_timestamp(
         Contexto extraído centrado na keyword ou posição estimada
     """
     # Mapa de keywords por tipo de evento
+    # 🔧 red_card e yellow_card REMOVIDOS - menções de cartão serão ignoradas
     event_keywords = {
         'goal': ['gol', 'golaço', 'bola na rede', 'abre o placar', 'marca', 'gooool'],
-        'red_card': ['vermelho', 'expuls', 'cartão vermelho', 'direto pro chuveiro'],
-        'yellow_card': ['amarelo', 'cartão amarelo', 'amarelou', 'recebe amarelo'],
+        # 'red_card': ['vermelho', 'expuls', 'cartão vermelho', 'direto pro chuveiro'],
+        # 'yellow_card': ['amarelo', 'cartão amarelo', 'amarelou', 'recebe amarelo'],
         'penalty': ['pênalti', 'penalidade', 'marca pênalti', 'penalty'],
         'save': ['defesa', 'salvou', 'espalmou', 'defendeu'],
     }
@@ -1079,13 +1080,14 @@ EVENT_KEYWORDS = {
         r'SEGUNDO GOL',    # Segundo gol
         r'TERCEIRO GOL',   # Terceiro gol
     ],
-    'yellow_card': [
-        r'CARTÃO AMARELO',
-        r'AMARELO PARA',
-        r'RECEBE O AMARELO',
-        r'LEVA AMARELO',
-        r'ESTÁ AMARELADO',
-    ],
+    # 🔧 yellow_card DESABILITADO - menções de cartão amarelo serão ignoradas
+    # 'yellow_card': [
+    #     r'CARTÃO AMARELO',
+    #     r'AMARELO PARA',
+    #     r'RECEBE O AMARELO',
+    #     r'LEVA AMARELO',
+    #     r'ESTÁ AMARELADO',
+    # ],
     # 🔧 red_card DESABILITADO - menções de cartão vermelho serão ignoradas
     # 'red_card': [
     #     r'CARTÃO VERMELHO',
@@ -3488,7 +3490,7 @@ TIMES DA PARTIDA:
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 Para CADA evento detectado, extraia:
-- event_type: goal, shot, save, foul, yellow_card, corner, chance, penalty, etc.
+- event_type: goal, shot, save, foul, corner, chance, penalty, etc. (NÃO detecte yellow_card ou red_card)
 - minute: MINUTO do timestamp SRT [HH:MM:SS] - extraia o valor de MM
 - second: SEGUNDO do timestamp SRT [HH:MM:SS] - extraia o valor de SS
 - team: "home" ou "away"
@@ -4093,7 +4095,7 @@ def detect_events_by_keywords_from_text(
     # 2. Padrões de eventos
     patterns = {
         'goal': [r'go+l', r'golaço', r'bola na rede', r'abre o placar', r'empata'],
-        'yellow_card': [r'cartão amarelo', r'amarelou'],
+        # 🔧 yellow_card REMOVIDO - menções de cartão amarelo serão ignoradas
         # 🔧 red_card REMOVIDO - menções de cartão vermelho serão ignoradas
         'penalty': [r'pênalti', r'penalidade'],
         'save': [r'grande defesa', r'salvou', r'espalmou'],
@@ -4298,7 +4300,6 @@ PERÍODO: {half_desc}
 
 EVENTOS PARA DETECTAR:
 - goal: "GOOOL", "GOLAÇO", "abre o placar", "empata", "virou", "bola na rede"
-- yellow_card: "cartão amarelo", "amarelou"
 - penalty: "pênalti", "penalidade máxima"
 - save: "grande defesa", "salvou", "espalmou"
 - chance: "quase gol", "na trave", "passou perto"
@@ -4573,6 +4574,13 @@ def _enrich_events(
             event['event_type'] = 'foul'
             event['description'] = f"Falta (menção a cartão): {(event.get('description') or '')[:80]}"[:100]
         
+        # 🔧 CONVERSÃO: Cartão amarelo → Falta (desativado - muitos falsos positivos)
+        if event_type == 'yellow_card':
+            print(f"[Sanitize] 🔄 Convertendo yellow_card → foul (min {event.get('minute', '?')}')")
+            event_type = 'foul'
+            event['event_type'] = 'foul'
+            event['description'] = f"Falta (menção a cartão): {(event.get('description') or '')[:80]}"[:100]
+        
         if event_type not in VALID_EVENT_TYPES:
             event_type = 'unknown'
         
@@ -4582,8 +4590,8 @@ def _enrich_events(
         event['team'] = event.get('team', 'home')
         event['description'] = (event.get('description') or '')[:200]
         event['confidence'] = event.get('confidence', 0.8)
-        # 🔧 red_card removido de highlights
-        event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'yellow_card', 'penalty'])
+        # 🔧 yellow_card e red_card removidos de highlights
+        event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'penalty'])
         event['isOwnGoal'] = event.get('isOwnGoal', False)
         event['validated'] = True
         event['validation_reason'] = 'Approved by Ollama local'
