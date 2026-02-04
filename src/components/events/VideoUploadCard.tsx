@@ -208,9 +208,9 @@ export function VideoUploadCard({ matchId, onVideoUploaded, eventsCount = 0 }: V
                     : 'Vinculando eventos ao vídeo...'}
                 </p>
               </div>
-              <Badge variant="outline">{uploadProgress}%</Badge>
+              <Badge variant="outline" className="font-mono">{uploadProgress}%</Badge>
             </div>
-            <Progress value={uploadProgress} className="h-2" />
+            <Progress value={uploadProgress} className="h-3" showStripes animate />
           </div>
         ) : (
           <div className="text-center py-4">
