@@ -623,16 +623,16 @@ export default function Settings() {
               openaiApiKey={openaiApiKey}
             />
 
-            {/* Google Gemini Configuration */}
+            {/* kakttus Pro Configuration */}
             <Card variant="glow">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <Sparkles className="h-5 w-5 text-blue-500" />
-                      Google Gemini
+                      kakttus Pro
                     </CardTitle>
-                    <CardDescription>Modelos avançados para análise de vídeo e texto</CardDescription>
+                    <CardDescription>Motor avançado para análise de vídeo e texto</CardDescription>
                   </div>
                   <Switch
                     checked={geminiEnabled}
@@ -650,7 +650,7 @@ export default function Settings() {
                             setting_value: String(checked),
                           }).catch(() => {}),
                         ]);
-                        toast.success(checked ? "Gemini ativado!" : "Gemini desativado");
+                        toast.success(checked ? "kakttus Pro ativado!" : "kakttus Pro desativado");
                       } catch (error) {
                         setGeminiEnabled(!checked);
                         toast.error("Erro ao salvar configuração");
@@ -693,10 +693,10 @@ export default function Settings() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="gemini-2.5-pro">Gemini 2.5 Pro (Mais preciso)</SelectItem>
-                        <SelectItem value="gemini-2.5-flash">Gemini 2.5 Flash (Balanceado)</SelectItem>
-                        <SelectItem value="gemini-2.5-flash-lite">Gemini 2.5 Flash Lite (Rápido)</SelectItem>
-                        <SelectItem value="gemini-3-pro-preview">Gemini 3 Pro Preview</SelectItem>
+                        <SelectItem value="gemini-2.5-pro">kakttus Pro Ultra (Mais preciso)</SelectItem>
+                        <SelectItem value="gemini-2.5-flash">kakttus Pro (Balanceado)</SelectItem>
+                        <SelectItem value="gemini-2.5-flash-lite">kakttus Pro Lite (Rápido)</SelectItem>
+                        <SelectItem value="gemini-3-pro-preview">kakttus Pro Preview</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -723,16 +723,16 @@ export default function Settings() {
               </CardContent>
             </Card>
 
-            {/* OpenAI GPT Configuration */}
+            {/* kakttus Vision Configuration */}
             <Card variant="glow">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <Brain className="h-5 w-5 text-green-500" />
-                      OpenAI GPT
+                      kakttus Vision
                     </CardTitle>
-                    <CardDescription>Modelos de linguagem para análise e geração de texto</CardDescription>
+                    <CardDescription>Motor de linguagem para análise e geração de texto</CardDescription>
                   </div>
                   <Switch
                     checked={openaiEnabled}
@@ -750,7 +750,7 @@ export default function Settings() {
                             setting_value: String(checked),
                           }).catch(() => {}),
                         ]);
-                        toast.success(checked ? "OpenAI ativado!" : "OpenAI desativado");
+                        toast.success(checked ? "kakttus Vision ativado!" : "kakttus Vision desativado");
                       } catch (error) {
                         setOpenaiEnabled(!checked);
                         toast.error("Erro ao salvar configuração");
@@ -793,13 +793,13 @@ export default function Settings() {
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="gpt-5">GPT-5 (Mais avançado)</SelectItem>
-                        <SelectItem value="gpt-5-mini">GPT-5 Mini (Balanceado)</SelectItem>
-                        <SelectItem value="gpt-5-nano">GPT-5 Nano (Rápido)</SelectItem>
-                        <SelectItem value="gpt-4o">GPT-4o (Multimodal)</SelectItem>
-                        <SelectItem value="gpt-4o-mini">GPT-4o Mini (Custo-benefício)</SelectItem>
-                        <SelectItem value="o3">O3 (Raciocínio avançado)</SelectItem>
-                        <SelectItem value="o4-mini">O4 Mini (Raciocínio rápido)</SelectItem>
+                        <SelectItem value="gpt-5">kakttus Vision Ultra (Mais avançado)</SelectItem>
+                        <SelectItem value="gpt-5-mini">kakttus Vision (Balanceado)</SelectItem>
+                        <SelectItem value="gpt-5-nano">kakttus Vision Lite (Rápido)</SelectItem>
+                        <SelectItem value="gpt-4o">kakttus Vision Multi (Multimodal)</SelectItem>
+                        <SelectItem value="gpt-4o-mini">kakttus Vision Mini (Custo-benefício)</SelectItem>
+                        <SelectItem value="o3">kakttus Reasoning (Raciocínio avançado)</SelectItem>
+                        <SelectItem value="o4-mini">kakttus Reasoning Lite (Raciocínio rápido)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
@@ -826,16 +826,16 @@ export default function Settings() {
               </CardContent>
             </Card>
 
-            {/* ElevenLabs Configuration */}
+            {/* kakttus Voice Pro Configuration */}
             <Card variant="glow">
               <CardHeader>
                 <div className="flex items-center justify-between">
                   <div>
                     <CardTitle className="flex items-center gap-2">
                       <Mic className="h-5 w-5 text-purple-500" />
-                      ElevenLabs
+                      kakttus Voice Pro
                     </CardTitle>
-                    <CardDescription>Transcrição de áudio e síntese de voz de alta qualidade</CardDescription>
+                    <CardDescription>Motor de transcrição e síntese de voz de alta qualidade</CardDescription>
                   </div>
                   <Switch
                     checked={elevenlabsEnabled}
@@ -853,7 +853,7 @@ export default function Settings() {
                             setting_value: String(checked),
                           }).catch(() => {}),
                         ]);
-                        toast.success(checked ? "ElevenLabs ativado!" : "ElevenLabs desativado");
+                        toast.success(checked ? "kakttus Voice Pro ativado!" : "kakttus Voice Pro desativado");
                       } catch (error) {
                         setElevenlabsEnabled(!checked);
                         toast.error("Erro ao salvar configuração");
@@ -888,7 +888,7 @@ export default function Settings() {
                     </Button>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Usado para transcrição de vídeos grandes (até 100MB) via ElevenLabs Scribe
+                    Usado para transcrição de vídeos grandes (até 100MB) via kakttus Scribe
                   </p>
                 </div>
                 <div
@@ -1219,10 +1219,10 @@ export default function Settings() {
               <CardContent>
                 <div className="grid gap-3 md:grid-cols-2">
                   {[
-                    { name: "Análise de Vídeo", desc: "Detecção de jogadores, bola e jogadas", provider: "Gemini" },
-                    { name: "Transcrição de Áudio", desc: "Conversão de narração em texto", provider: "Whisper/GPT" },
-                    { name: "Geração de Insights", desc: "Análise tática automatizada", provider: "Gemini/GPT" },
-                    { name: "Extração de Eventos", desc: "Identificação de gols, faltas, etc.", provider: "Gemini" },
+                    { name: "Análise de Vídeo", desc: "Detecção de jogadores, bola e jogadas", provider: "kakttus Pro" },
+                    { name: "Transcrição de Áudio", desc: "Conversão de narração em texto", provider: "kakttus.ai" },
+                    { name: "Geração de Insights", desc: "Análise tática automatizada", provider: "kakttus.ai" },
+                    { name: "Extração de Eventos", desc: "Identificação de gols, faltas, etc.", provider: "kakttus Pro" },
                   ].map((feature) => (
                     <div key={feature.name} className="flex items-start gap-2 p-3 rounded-lg bg-muted/30">
                       <CheckCircle2 className="h-4 w-4 text-primary mt-0.5 shrink-0" />
