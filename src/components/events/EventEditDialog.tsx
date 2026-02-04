@@ -411,8 +411,14 @@ export function EventEditDialog({
                 <SelectValue placeholder="Selecione o time" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={homeTeam}>{homeTeam}</SelectItem>
-                <SelectItem value={awayTeam}>{awayTeam}</SelectItem>
+                {homeTeam && homeTeam !== 'Time Casa' && (
+                  <SelectItem value={homeTeam}>{homeTeam} (Casa)</SelectItem>
+                )}
+                {awayTeam && awayTeam !== 'Time Visitante' && (
+                  <SelectItem value={awayTeam}>{awayTeam} (Visitante)</SelectItem>
+                )}
+                <SelectItem value="home">Time Casa</SelectItem>
+                <SelectItem value="away">Time Visitante</SelectItem>
               </SelectContent>
             </Select>
           </div>
