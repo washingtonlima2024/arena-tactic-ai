@@ -1,77 +1,86 @@
 
-# Plano: Corrigir Validação de Contaminação e Adicionar Opção de Bypass
+# Diagnóstico e Correção: Ollama Não Disponível
 
-## Problema
-A análise de transcrição está falhando com erro "CONTAMINAÇÃO DETECTADA" porque:
-1. O narrador menciona outros times (Flamengo, Corinthians, seleções, etc.) em comentários
-2. A busca por "Sport" ou "Novorizontino" pode estar falhando
-3. O fluxo automático `handleProcessMatch` não passa `skipValidation`
+## Problema Identificado
 
-## Solução Proposta
+Os logs mostram que a análise de eventos está falhando porque:
 
-### 1. Ajustar Lógica de Validação no Backend (ai_services.py)
+1. **Ollama não está rodando** em `http://localhost:11434`
+2. **Apenas Ollama está configurado** como provedor de IA na lista de prioridades
+3. Quando a conexão com Ollama falha, o sistema não tem fallback disponível
 
-Mudar a lógica de contaminação para ser menos rigorosa:
+```
+Ollama not available at http://localhost:11434
+[AI] Priority order: ollama
+[AI] Trying ollama...
+[AI] Error: All AI providers failed. Last error: None
+```
+
+---
+
+## Soluções (em ordem de prioridade)
+
+### Solução 1: Iniciar o Ollama no Servidor (Recomendado)
+
+Execute no terminal do servidor:
+
+```bash
+# Verificar se Ollama está instalado
+ollama --version
+
+# Se não estiver instalado:
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Iniciar serviço Ollama
+ollama serve &
+
+# Ou como serviço systemd (persistente)
+sudo systemctl start ollama
+sudo systemctl enable ollama
+
+# Baixar o modelo recomendado
+ollama pull mistral:7b-instruct
+```
+
+---
+
+### Solução 2: Adicionar Fallback para Gemini/OpenAI
+
+Se o Ollama não puder rodar permanentemente, podemos configurar fallback automático para APIs cloud:
+
+**Alteração em `video-processor/ai_services.py`:**
+
+Na função `call_ai()`, quando Ollama falha, o sistema deve tentar automaticamente outros provedores configurados (Gemini/OpenAI) mesmo que não estejam na lista de prioridade.
 
 ```python
-def validate_transcription_teams(...) -> Dict[str, Any]:
-    # ...
-    
-    # NOVA LÓGICA: Só marca contaminação se:
-    # 1. Nenhum dos times esperados foi encontrado E
-    # 2. Mais de 5 times diferentes são mencionados (indica outra partida)
-    # OU
-    # 3. Nenhum time esperado E a transcrição menciona placar/gol com times específicos
-    
-    is_valid = home_found or away_found
-    
-    # Relaxar contaminação: só bloquear se muitos times estranhos
-    has_severe_contamination = (
-        not is_valid and 
-        len(unexpected_teams) > 5  # Muitos times = provavelmente outra partida
-    )
-    
-    return {
-        'hasContamination': has_severe_contamination,  # Antes: qualquer time estranho
-        # ...
-    }
+# Em call_ai():
+# Se todos os provedores priorizados falharem, tentar fallback automático
+if not result and GOOGLE_API_KEY and GEMINI_ENABLED:
+    print("[AI] ⚠ Tentando fallback: Gemini")
+    result = call_google_gemini(messages, model, temperature, max_tokens)
 ```
 
-### 2. Adicionar Opção skipValidation no Fluxo Automático (Events.tsx)
+---
 
-Adicionar um checkbox ou opção para forçar análise:
+### Solução 3: Melhorar UI com Status em Tempo Real
 
-```typescript
-// Em handleProcessMatch, adicionar skipValidation baseado em preferência do usuário
-await apiClient.analyzeMatch({
-  // ... outros params
-  skipValidation: forceAnalysis  // Nova variável de estado
-});
-```
+Adicionar indicador visual na página de Eventos que mostre se o Ollama está acessível antes de iniciar a análise.
 
-### 3. Adicionar UI para Bypass de Validação (Events.tsx)
+**Alteração em `src/pages/Events.tsx`:**
 
-Adicionar um toggle ou opção no menu de processamento:
+- Adicionar verificação de saúde do Ollama antes de processar
+- Mostrar aviso se Ollama estiver offline
+- Sugerir ao usuário habilitar outro provedor em Configurações
 
-```tsx
-<DropdownMenuItem onClick={() => setForceAnalysis(true)}>
-  <AlertCircle className="mr-2 h-4 w-4" />
-  Forçar Análise (ignorar validação)
-</DropdownMenuItem>
-```
+---
 
-### 4. Melhorar Detecção de "Sport" e Variantes
+## Recomendação de Implementação
 
-Adicionar variantes do nome do time:
-
-```python
-KNOWN_TEAMS = [
-    # ...
-    'sport', 'sport recife', 'sport club',  # Variantes
-    'novorizontino', 'novo horizontino', 'tigre',  # Apelidos
-    # ...
-]
-```
+| Ordem | Ação | Complexidade | Impacto |
+|-------|------|--------------|---------|
+| 1 | Iniciar Ollama no servidor | Nenhuma (manual) | Resolve imediatamente |
+| 2 | Adicionar fallback automático para Gemini | Média | Garante análise mesmo sem Ollama |
+| 3 | Adicionar check prévio na UI | Baixa | Melhora UX |
 
 ---
 
@@ -79,114 +88,65 @@ KNOWN_TEAMS = [
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `video-processor/ai_services.py` | Relaxar lógica de contaminação, adicionar variantes de times |
-| `src/pages/Events.tsx` | Adicionar state `forceAnalysis` e passar para `analyzeMatch` |
-| `src/pages/Events.tsx` | Adicionar opção de menu "Forçar Análise" |
+| `video-processor/ai_services.py` | Adicionar fallback automático em `call_ai()` quando Ollama falhar |
+| `video-processor/ai_services.py` | Adicionar fallback em `_analyze_events_with_ollama()` para usar Gemini se Ollama offline |
+| `src/pages/Events.tsx` | Verificar status do Ollama antes de processar e mostrar aviso |
+| `src/lib/apiClient.ts` | Adicionar método `checkOllamaStatus()` |
 
 ---
 
-## Implementação Detalhada
+## Implementação Técnica
 
-### ai_services.py - Relaxar Validação
+### 1. Fallback em `_analyze_events_with_ollama()`:
 
 ```python
-def validate_transcription_teams(
-    transcription: str, 
-    home_team: str, 
-    away_team: str
-) -> Dict[str, Any]:
-    text_lower = transcription.lower()
-    home_lower = home_team.lower()
-    away_lower = away_team.lower()
+def _analyze_events_with_ollama(...) -> List[Dict[str, Any]]:
+    # ... código existente ...
     
-    # Melhorar busca: incluir variantes e apelidos
-    home_variants = [home_lower] + home_lower.split()
-    away_variants = [away_lower] + away_lower.split()
+    result = call_ollama(messages=[...], format="json")
     
-    # Adicionar apelidos conhecidos
-    TEAM_ALIASES = {
-        'sport': ['sport recife', 'leão', 'rubro-negro'],
-        'novorizontino': ['novo horizontino', 'tigre', 'novori'],
-        # ... outros
-    }
+    if not result:
+        # FALLBACK: Se Ollama falhar, tentar Gemini
+        if GOOGLE_API_KEY and GEMINI_ENABLED:
+            print(f"[Ollama] ⚠ Offline! Usando fallback: Gemini")
+            result = call_google_gemini(
+                messages=[{'role': 'user', 'content': prompt}],
+                temperature=0.1,
+                max_tokens=4096
+            )
+            
+        # FALLBACK 2: Detecção por keywords (sempre funciona)
+        if not result:
+            print(f"[Ollama] ⚠ Sem IA disponível! Usando detecção por keywords")
+            return detect_events_by_keywords_from_text(
+                transcription, home_team, away_team, match_half, game_start_minute
+            )
     
-    home_variants.extend(TEAM_ALIASES.get(home_lower, []))
-    away_variants.extend(TEAM_ALIASES.get(away_lower, []))
-    
-    home_found = any(
-        variant in text_lower 
-        for variant in home_variants 
-        if len(variant) > 3
-    )
-    away_found = any(
-        variant in text_lower 
-        for variant in away_variants 
-        if len(variant) > 3
-    )
-    
-    detected_teams, _ = detect_teams_in_transcription(transcription)
-    
-    unexpected_teams = [
-        t for t in detected_teams 
-        if not any(v in t or t in v for v in home_variants + away_variants)
-    ]
-    
-    is_valid = home_found or away_found
-    
-    # RELAXADO: Só contamina se MUITOS times estranhos e NENHUM esperado
-    has_contamination = not is_valid and len(unexpected_teams) > 5
-    
-    return {
-        'isValid': is_valid,
-        'homeFound': home_found,
-        'awayFound': away_found,
-        'detectedTeams': detected_teams,
-        'unexpectedTeams': unexpected_teams,
-        'hasContamination': has_contamination,
-        'warning': None if is_valid else f"Times esperados não encontrados"
-    }
+    # ... resto do parsing ...
 ```
 
-### Events.tsx - Adicionar Bypass
+### 2. Verificação na UI:
 
 ```typescript
-// Novo state
-const [forceAnalysis, setForceAnalysis] = useState(false);
-
-// Em handleProcessMatch
-await apiClient.analyzeMatch({
-  matchId: currentMatchId,
-  transcription: transcription.text,
-  homeTeam,
-  awayTeam,
-  gameStartMinute: startMinute,
-  gameEndMinute: endMinute,
-  halfType: halfType as 'first' | 'second',
-  autoClip: false,
-  includeSubtitles: true,
-  skipValidation: forceAnalysis  // NOVO
-});
-
-// No menu dropdown
-<DropdownMenuCheckboxItem 
-  checked={forceAnalysis}
-  onCheckedChange={setForceAnalysis}
->
-  Ignorar validação de times
-</DropdownMenuCheckboxItem>
+// Em Events.tsx
+const handleProcessMatch = async () => {
+  // Verificar status do Ollama primeiro
+  try {
+    const aiStatus = await apiClient.get('/api/ai-status');
+    if (!aiStatus.ollama?.configured) {
+      toast.warning('Ollama offline. Será usado fallback (Gemini ou Keywords).');
+    }
+  } catch { /* ignore */ }
+  
+  // Continuar processamento...
+};
 ```
 
 ---
 
-## Alternativa Rápida (Hotfix)
+## Benefícios Esperados
 
-Se quiser uma correção imediata sem mudar a UI, podemos simplesmente mudar o threshold de contaminação de `len(unexpected_teams) > 0` para `len(unexpected_teams) > 5` no backend.
-
----
-
-## Benefícios
-
-- Narradores podem mencionar outros times em comentários sem bloquear análise
-- Usuário tem opção de forçar análise quando necessário
-- Reduz falsos positivos de contaminação
-- Mantém proteção contra transcrições completamente erradas (muitos times diferentes)
+- **Resiliência**: Análise funciona mesmo com Ollama offline
+- **UX Melhorada**: Usuário sabe quando há problemas antes de processar
+- **Flexibilidade**: Múltiplos caminhos para completar análise
+- **Cobertura Mínima**: Fallback para keywords garante detecção básica sempre
