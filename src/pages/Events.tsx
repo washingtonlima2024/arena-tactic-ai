@@ -260,6 +260,7 @@ export default function Events() {
   const [matchSyncStatus, setMatchSyncStatus] = useState<'unknown' | 'synced' | 'local_only' | 'error'>('unknown');
   const [isDiagnosingClips, setIsDiagnosingClips] = useState(false);
   const [clipDiagnosis, setClipDiagnosis] = useState<any>(null);
+  const [forceAnalysis, setForceAnalysis] = useState(false);
   const [showDiagnosisDialog, setShowDiagnosisDialog] = useState(false);
   const [isAnalyzingTranscription, setIsAnalyzingTranscription] = useState(false);
   
@@ -349,7 +350,8 @@ export default function Events() {
         gameEndMinute: endMinute,
         halfType,
         autoClip: true,
-        includeSubtitles: true
+        includeSubtitles: true,
+        skipValidation: forceAnalysis
       });
       
       if (result?.success) {
@@ -814,7 +816,8 @@ export default function Events() {
           gameEndMinute: endMinute,
           halfType: halfType as 'first' | 'second',
           autoClip: false,
-          includeSubtitles: true
+          includeSubtitles: true,
+          skipValidation: forceAnalysis
         });
         
         console.log(`[ProcessMatch] Analysis complete for ${videoType}`);
@@ -1096,23 +1099,52 @@ export default function Events() {
 
             {/* Process Match Button - only when no events */}
             {events.length === 0 && matchVideos && matchVideos.length > 0 && (
-              <Button 
-                variant="arena" 
-                onClick={handleProcessMatch}
-                disabled={isProcessingMatch}
-              >
-                {isProcessingMatch ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    {processingStep || 'Processando...'}
-                  </>
-                ) : (
-                  <>
-                    <Cog className="mr-2 h-4 w-4" />
-                    Processar Partida
-                  </>
-                )}
-              </Button>
+              <div className="flex items-center gap-2">
+                <Button 
+                  variant="arena" 
+                  onClick={handleProcessMatch}
+                  disabled={isProcessingMatch}
+                >
+                  {isProcessingMatch ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      {processingStep || 'Processando...'}
+                    </>
+                  ) : (
+                    <>
+                      <Cog className="mr-2 h-4 w-4" />
+                      Processar Partida
+                    </>
+                  )}
+                </Button>
+                
+                {/* Force Analysis Toggle */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button 
+                      variant={forceAnalysis ? "secondary" : "ghost"} 
+                      size="icon"
+                      className={forceAnalysis ? "bg-yellow-500/20 border-yellow-500/50" : ""}
+                      title="Opções de análise"
+                    >
+                      <AlertCircle className={`h-4 w-4 ${forceAnalysis ? "text-yellow-500" : ""}`} />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    <DropdownMenuItem 
+                      onClick={() => setForceAnalysis(!forceAnalysis)}
+                      className="gap-2"
+                    >
+                      {forceAnalysis ? (
+                        <CheckCircle className="h-4 w-4 text-yellow-500" />
+                      ) : (
+                        <AlertCircle className="h-4 w-4 text-muted-foreground" />
+                      )}
+                      <span>Ignorar validação de times</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             )}
 
             {/* New Event Button */}
