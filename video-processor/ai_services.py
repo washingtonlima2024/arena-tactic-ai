@@ -1107,6 +1107,7 @@ def call_ai(
     print(f"[AI] Priority order: {' → '.join(priority_order)}")
     
     last_error = None
+    result = None
     
     for provider in priority_order:
         try:
@@ -1143,7 +1144,46 @@ def call_ai(
             print(f"[AI] ✗ {provider} failed: {e}")
             continue
     
-    raise ValueError(f"All AI providers failed. Last error: {last_error}")
+    # ═══════════════════════════════════════════════════════════════════════════
+    # FALLBACK AUTOMÁTICO: Se todos os provedores priorizados falharem,
+    # tentar outros provedores configurados que não estavam na lista
+    # ═══════════════════════════════════════════════════════════════════════════
+    print(f"[AI] ⚠ All priority providers failed, trying automatic fallback...")
+    
+    # Fallback 1: Lovable AI (sempre disponível no Cloud)
+    if 'lovable' not in priority_order and LOVABLE_API_KEY:
+        try:
+            print(f"[AI] Fallback: Trying Lovable AI...")
+            result = call_lovable_ai(messages, model, temperature, max_tokens)
+            if result:
+                print(f"[AI] ✓ Fallback success with Lovable AI")
+                return result
+        except Exception as e:
+            print(f"[AI] ✗ Fallback Lovable AI failed: {e}")
+    
+    # Fallback 2: Gemini (se API key configurada)
+    if 'gemini' not in priority_order and GOOGLE_API_KEY:
+        try:
+            print(f"[AI] Fallback: Trying Gemini...")
+            result = call_google_gemini(messages, model, temperature, max_tokens)
+            if result:
+                print(f"[AI] ✓ Fallback success with Gemini")
+                return result
+        except Exception as e:
+            print(f"[AI] ✗ Fallback Gemini failed: {e}")
+    
+    # Fallback 3: OpenAI (se API key configurada)
+    if 'openai' not in priority_order and OPENAI_API_KEY:
+        try:
+            print(f"[AI] Fallback: Trying OpenAI...")
+            result = call_openai(messages, 'gpt-4o-mini', temperature, max_tokens)
+            if result:
+                print(f"[AI] ✓ Fallback success with OpenAI")
+                return result
+        except Exception as e:
+            print(f"[AI] ✗ Fallback OpenAI failed: {e}")
+    
+    raise ValueError(f"All AI providers failed (including fallbacks). Last error: {last_error}")
 
 
 def call_lovable_ai(
@@ -2966,9 +3006,59 @@ Formato obrigatório:
             format="json"     # Força JSON válido (elimina parsing errors)
         )
         
+        # ═══════════════════════════════════════════════════════════════════════════
+        # FALLBACK: Se Ollama falhou, tentar outros provedores de IA
+        # ═══════════════════════════════════════════════════════════════════════════
         if not result:
-            print(f"[Ollama] Resposta vazia")
-            return []
+            print(f"[Ollama] ⚠ Offline ou sem resposta, tentando fallback...")
+            
+            # Fallback 1: Lovable AI (sempre disponível se LOVABLE_API_KEY configurada)
+            if LOVABLE_API_KEY:
+                print(f"[Ollama] Fallback: Tentando Lovable AI...")
+                result = call_lovable_ai(
+                    messages=[{'role': 'user', 'content': prompt}],
+                    model='google/gemini-2.5-flash',
+                    temperature=0.1,
+                    max_tokens=4096
+                )
+                if result:
+                    print(f"[Ollama] ✓ Fallback Lovable AI funcionou!")
+            
+            # Fallback 2: Gemini direto (se API key configurada)
+            if not result and GOOGLE_API_KEY and GEMINI_ENABLED:
+                print(f"[Ollama] Fallback: Tentando Gemini direto...")
+                result = call_google_gemini(
+                    messages=[{'role': 'user', 'content': prompt}],
+                    model='gemini-2.5-flash',
+                    temperature=0.1,
+                    max_tokens=4096
+                )
+                if result:
+                    print(f"[Ollama] ✓ Fallback Gemini funcionou!")
+            
+            # Fallback 3: OpenAI (se API key configurada)
+            if not result and OPENAI_API_KEY and OPENAI_ENABLED:
+                print(f"[Ollama] Fallback: Tentando OpenAI...")
+                result = call_openai(
+                    messages=[{'role': 'user', 'content': prompt}],
+                    model='gpt-4o-mini',
+                    temperature=0.1,
+                    max_tokens=4096
+                )
+                if result:
+                    print(f"[Ollama] ✓ Fallback OpenAI funcionou!")
+            
+            # Fallback final: Detecção por keywords (sempre funciona, 0% IA)
+            if not result:
+                print(f"[Ollama] ⚠ Sem IA disponível! Usando detecção por keywords (100% determinístico)...")
+                keyword_events = detect_events_by_keywords(
+                    transcription=transcription,
+                    home_team=home_team,
+                    away_team=away_team,
+                    game_start_minute=game_start_minute
+                )
+                print(f"[Ollama] Detecção por keywords: {len(keyword_events)} eventos encontrados")
+                return keyword_events
         
         # LOG: Mostrar resposta bruta para debug
         print(f"[Ollama] === RESPOSTA BRUTA (primeiros 800 chars) ===")
