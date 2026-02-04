@@ -4,8 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { FootballField } from '@/components/tactical/FootballField';
-import { AnimatedTacticalPlay } from '@/components/tactical/AnimatedTacticalPlay';
+// Removed: FootballField and AnimatedTacticalPlay (fictitious data)
 import { Heatmap2D } from '@/components/tactical/Heatmap2D';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
@@ -75,7 +74,6 @@ export default function Analysis() {
   // Centralized match selection
   const { currentMatchId, selectedMatch, matches, isLoading: matchesLoading, setSelectedMatch } = useMatchSelection();
   
-  const [selectedEventForPlay, setSelectedEventForPlay] = useState<string | null>(null);
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [playingEventId, setPlayingEventId] = useState<string | null>(null);
   const [reimportDialogOpen, setReimportDialogOpen] = useState(false);
@@ -529,120 +527,7 @@ export default function Analysis() {
               </CardContent>
             </Card>
 
-            {/* Formation Overview 2D */}
-            <div className="grid gap-6 lg:grid-cols-2">
-              <Card variant="tactical">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle>{selectedMatch?.home_team?.name || 'Time Casa'}</CardTitle>
-                    <Badge variant="arena">{tacticalAnalysis?.formation?.home || '4-3-3'}</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <FootballField 
-                    players={[
-                      { x: 5, y: 50, number: 1, team: 'home' },
-                      { x: 20, y: 20, number: 4, team: 'home' },
-                      { x: 20, y: 40, number: 3, team: 'home' },
-                      { x: 20, y: 60, number: 15, team: 'home' },
-                      { x: 20, y: 80, number: 2, team: 'home' },
-                      { x: 45, y: 30, number: 8, team: 'home' },
-                      { x: 45, y: 50, number: 5, team: 'home' },
-                      { x: 45, y: 70, number: 17, team: 'home' },
-                      { x: 70, y: 20, number: 19, team: 'home' },
-                      { x: 75, y: 50, number: 9, team: 'home' },
-                      { x: 70, y: 80, number: 11, team: 'home' },
-                    ]}
-                  />
-                </CardContent>
-              </Card>
-
-              <Card variant="tactical">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle>{selectedMatch?.away_team?.name || 'Time Visitante'}</CardTitle>
-                    <Badge variant="arena">{tacticalAnalysis?.formation?.away || '4-4-2'}</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <FootballField 
-                    players={[
-                      { x: 95, y: 50, number: 1, team: 'away' },
-                      { x: 80, y: 20, number: 2, team: 'away' },
-                      { x: 80, y: 40, number: 4, team: 'away' },
-                      { x: 80, y: 60, number: 5, team: 'away' },
-                      { x: 80, y: 80, number: 23, team: 'away' },
-                      { x: 60, y: 25, number: 8, team: 'away' },
-                      { x: 60, y: 50, number: 10, team: 'away' },
-                      { x: 60, y: 75, number: 15, team: 'away' },
-                      { x: 35, y: 30, number: 11, team: 'away' },
-                      { x: 30, y: 50, number: 9, team: 'away' },
-                      { x: 35, y: 70, number: 7, team: 'away' },
-                    ]}
-                  />
-                </CardContent>
-              </Card>
-            </div>
-
-            {/* Animated Tactical Plays - Key Events */}
-            {importantEvents.length > 0 && (
-              <Card variant="glow">
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="flex items-center gap-2">
-                      <Play className="h-5 w-5 text-primary" />
-                      Jogadas Táticas Animadas
-                    </CardTitle>
-                    <Badge variant="outline">{importantEvents.length} momentos-chave</Badge>
-                  </div>
-                </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* Event selector */}
-                  <div className="flex flex-wrap gap-2">
-                    {importantEvents.map((event) => {
-                      const isSelected = selectedEventForPlay === event.id;
-                      return (
-                        <Button
-                          key={event.id}
-                          variant={isSelected ? "arena" : "outline"}
-                          size="sm"
-                          onClick={() => setSelectedEventForPlay(isSelected ? null : event.id)}
-                          className="gap-2"
-                        >
-                          <Badge variant={event.event_type === 'goal' ? 'success' : 'secondary'} className="h-5 font-mono">
-                            {formatTimestamp(getEventTime(event.id).totalSeconds)}
-                          </Badge>
-                          {getEventLabel(event.event_type)}
-                          {getThumbnail(event.id) && <Image className="h-3 w-3" />}
-                          {matchVideo && <Video className="h-3 w-3" />}
-                        </Button>
-                      );
-                    })}
-                  </div>
-
-                  {/* Animated Play */}
-                  {selectedEventForPlay ? (
-                    <AnimatedTacticalPlay
-                      event={importantEvents.find(e => e.id === selectedEventForPlay)!}
-                      homeTeam={selectedMatch?.home_team?.name || 'Time Casa'}
-                      awayTeam={selectedMatch?.away_team?.name || 'Time Visitante'}
-                      thumbnail={getThumbnail(selectedEventForPlay)?.imageUrl}
-                      hasVideo={!!matchVideo}
-                      onViewThumbnail={(id) => {
-                        const thumb = getThumbnail(id);
-                        if (thumb) window.open(thumb.imageUrl, '_blank');
-                      }}
-                      onPlayVideo={handlePlayVideo}
-                    />
-                  ) : (
-                    <div className="text-center py-8 text-muted-foreground">
-                      <Play className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                      <p>Selecione um evento acima para ver a jogada animada</p>
-                    </div>
-                  )}
-                </CardContent>
-              </Card>
-            )}
+            {/* Formation Overview and Animated Tactical Plays removed - were using fictitious data */}
 
             {/* Stats Comparison */}
             <Card variant="glass">
