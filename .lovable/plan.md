@@ -1,87 +1,104 @@
 
-# Correção do Placar: Suporte a Gol Contra
+
+# Correção da Detecção de Gol Contra
 
 ## Problema Identificado
 
-O placar entre **Botafogo e Novorizontino** está incorreto porque houve um **gol contra** que não está sendo contabilizado corretamente. O sistema:
+Após analisar o arquivo `ai_services-3.py` enviado e comparar com o código do frontend, identifiquei uma **inconsistência** na lógica de detecção de gol contra:
 
-1. **Detecta** gols contra corretamente via palavras-chave ("contra", "próprio gol") durante a análise
-2. **Calcula** o placar corretamente quando `metadata.isOwnGoal = true`  
-3. **Mas não permite** editar/corrigir esse campo manualmente no diálogo de edição
+| Local | Lógica Atual | Problema |
+|-------|--------------|----------|
+| Backend (linha 1444) | `'contra' in window_text` | Muito simples - detecta "contra-ataque" como gol contra |
+| Backend (linha 4602) | Lista completa de keywords | Correta, mas só aplica no auto-fix posterior |
+| Frontend (`useDynamicMatchStats`) | `metadata?.isOwnGoal === true` | Correta, mas depende do backend ter salvado |
+| Frontend (`scoreSync.ts`) | Verifica metadata + descrição | Correta e robusta |
 
-Quando a detecção automática falha em marcar `isOwnGoal`, o gol é atribuído ao time errado e **não há forma de corrigir via interface**.
+O gol do **Sport x Novorizontino** não está sendo calculado corretamente porque:
+1. O backend não salvou `isOwnGoal: true` no metadata do evento
+2. A descrição do evento pode não conter as keywords esperadas ("gol contra", "próprio gol")
 
----
+## Solução em Duas Frentes
 
-## Solução Proposta
+### 1. Melhorar Keywords de Detecção no Frontend
 
-### Adicionar Checkbox "Gol Contra" no Diálogo de Edição
+Atualizar `useDynamicMatchStats.ts` e `scoreSync.ts` para usar as **mesmas keywords** do backend:
 
-Modificar o componente `EventEditDialog.tsx` para incluir uma opção visível de "Gol Contra" que:
-- Aparece apenas quando o tipo de evento for "goal"
-- Salva o campo `metadata.isOwnGoal = true`
-- Permite corrigir manualmente gols que foram detectados incorretamente
+```typescript
+const own_goal_keywords = [
+  'gol contra', 
+  'próprio gol', 
+  'mandou contra', 
+  'own goal', 
+  'autogol',
+  'contra o próprio'  // adicional
+];
 
----
+const isOwnGoal = 
+  metadata?.isOwnGoal === true ||
+  own_goal_keywords.some(kw => description.includes(kw));
+```
 
-## Detalhes Técnicos
+### 2. Sincronizar com o Backend (já implementado)
 
-### Arquivo: `src/components/events/EventEditDialog.tsx`
+O checkbox "Gol Contra" no `EventEditDialog` já funciona corretamente. Ao marcar:
+- Salva `metadata.isOwnGoal = true`
+- Chama `syncMatchScoreFromEvents()` que recalcula o placar
 
-**Alterações:**
-
-1. **Novo estado** para controlar o checkbox:
-   ```typescript
-   const [isOwnGoal, setIsOwnGoal] = useState(false);
-   ```
-
-2. **Carregar valor existente** no `useEffect`:
-   ```typescript
-   setIsOwnGoal(event.metadata?.isOwnGoal || false);
-   ```
-
-3. **Novo campo de UI** (após seletor de Time, somente para gols):
-   ```text
-   ┌─────────────────────────────────────────────────┐
-   │ ☑ Gol Contra                                    │
-   │   Marque se foi gol contra (beneficia o outro   │
-   │   time)                                         │
-   └─────────────────────────────────────────────────┘
-   ```
-
-4. **Salvar no metadata** ao criar/editar:
-   ```typescript
-   metadata: { 
-     team, 
-     player: playerName || undefined,
-     isOwnGoal,  // ← Novo campo
-     // ... outros
-   }
-   ```
-
----
-
-## Fluxo de Correção
-
-1. Usuário abre a página de Eventos
-2. Clica no gol incorreto para editar
-3. Marca a checkbox "Gol Contra"
-4. Salva → O placar é recalculado automaticamente via `syncMatchScoreFromEvents`
-5. O placar no header reflete a correção
-
----
-
-## Arquivos Afetados
+## Arquivos a Modificar
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `src/components/events/EventEditDialog.tsx` | Adicionar checkbox para `isOwnGoal` |
+| `src/hooks/useDynamicMatchStats.ts` | Usar lista expandida de keywords para detectar own goal |
+| `src/lib/scoreSync.ts` | Usar mesma lista de keywords para consistência |
 
----
+## Detalhes Técnicos
+
+### useDynamicMatchStats.ts - Linha 100-104
+
+**Antes:**
+```typescript
+const isOwnGoal = 
+  metadata?.isOwnGoal === true ||
+  description.includes('contra') ||
+  description.includes('own goal') ||
+  description.includes('gol contra');
+```
+
+**Depois:**
+```typescript
+// Keywords alinhadas com backend (ai_services.py linha 4602)
+const ownGoalKeywords = [
+  'gol contra', 
+  'próprio gol', 
+  'mandou contra', 
+  'own goal', 
+  'autogol',
+  'contra o próprio',
+  'próprio patrimônio'  // expressão regional
+];
+
+const isOwnGoal = 
+  metadata?.isOwnGoal === true ||
+  ownGoalKeywords.some(kw => description.includes(kw));
+```
+
+### scoreSync.ts - Linha 90-94
+
+Aplicar a mesma correção para manter paridade.
+
+## Fluxo de Correção do Placar
+
+1. Usuário vai em Eventos do jogo Sport x Novorizontino
+2. Clica no gol incorretamente atribuído
+3. Marca o checkbox "Gol Contra"
+4. Salva
+5. Sistema recalcula: `Sport` marcou gol contra → ponto vai para `Novorizontino`
+6. Placar atualiza automaticamente
 
 ## Benefícios
 
-- Correção manual de gols contra mal detectados
-- Interface intuitiva para o usuário
-- Placar atualiza automaticamente após salvar
-- Sem impacto em outras funcionalidades
+- Keywords de gol contra sincronizadas entre backend e frontend
+- Menos falsos positivos (não detecta "contra-ataque")
+- Correção manual permanece disponível via checkbox
+- Retrocompatibilidade mantida
+
