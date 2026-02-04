@@ -114,54 +114,51 @@ export function Heatmap2D({
           showMeasurements={false}
           showGrid={false}
         >
-          {/* Heat zones layer (blurred circles) */}
+          {/* Heat zones layer (blurred circles) - based on real events only */}
           <g className="heat-zones" style={{ mixBlendMode: 'screen' }}>
             {heatOverlay}
           </g>
           
-          {/* Players layer */}
-          <g className="players">
-            {renderPlayers(homePlayers, homeTeamColor, 'home')}
-            {renderPlayers(awayPlayers, awayTeamColor, 'away')}
-          </g>
-          
-          {/* Ball placeholder (center) */}
+          {/* Players are only rendered if real tracking data exists */}
           {(homePlayers.length > 0 || awayPlayers.length > 0) && (
-            <circle
-              cx={metersToSvg(52.5)}
-              cy={metersToSvg(34)}
-              r={8}
-              fill="#ffffff"
-              stroke="#000000"
-              strokeWidth={1}
-            />
+            <g className="players">
+              {renderPlayers(homePlayers, homeTeamColor, 'home')}
+              {renderPlayers(awayPlayers, awayTeamColor, 'away')}
+            </g>
           )}
         </OfficialFootballField>
       </div>
 
-      {/* Legend */}
-      {showLegend && (homePlayers.length > 0 || awayPlayers.length > 0 || heatZones.length > 0) && (
+      {/* Legend - only shows heat zones info since players require real tracking */}
+      {showLegend && heatZones.length > 0 && (
         <div className="absolute bottom-3 left-1/2 transform -translate-x-1/2 flex items-center gap-6 bg-background/80 backdrop-blur px-4 py-2 rounded-lg text-sm">
           <div className="flex items-center gap-2">
             <div 
-              className="w-4 h-4 rounded-full border-2 border-white" 
+              className="w-4 h-4 rounded-full opacity-60" 
               style={{ backgroundColor: homeTeamColor }}
             />
             <span className="text-foreground">{homeTeamName}</span>
           </div>
           <div className="flex items-center gap-2">
             <div 
-              className="w-4 h-4 rounded-full border-2 border-white" 
+              className="w-4 h-4 rounded-full opacity-60" 
               style={{ backgroundColor: awayTeamColor }}
             />
             <span className="text-foreground">{awayTeamName}</span>
           </div>
-          {heatZones.length > 0 && (
-            <div className="flex items-center gap-2 text-muted-foreground">
-              <div className="w-4 h-4 rounded-full bg-gradient-to-r from-yellow-500/50 to-red-500/50" />
-              <span>Zonas de calor</span>
-            </div>
-          )}
+          <div className="flex items-center gap-2 text-muted-foreground">
+            <div className="w-4 h-4 rounded-full bg-gradient-to-r from-yellow-500/50 to-red-500/50" />
+            <span>Zonas de atividade</span>
+          </div>
+        </div>
+      )}
+      
+      {/* Empty state when no heat zones */}
+      {heatZones.length === 0 && (
+        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+          <div className="bg-background/60 backdrop-blur-sm rounded-lg px-4 py-2 text-sm text-muted-foreground">
+            Sem dados de eventos para exibir
+          </div>
         </div>
       )}
     </div>

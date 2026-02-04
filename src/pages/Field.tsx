@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from 'react';
+import { useState, useRef } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Switch } from '@/components/ui/switch';
@@ -7,78 +7,25 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Ruler, Grid3X3, Play, Target, AlertCircle, Camera, Loader2, Upload } from 'lucide-react';
+import { Ruler, Grid3X3, Target, Camera, Loader2, Upload } from 'lucide-react';
 import { OfficialFootballField } from '@/components/tactical/OfficialFootballField';
 import { FieldMeasurementsOverlay } from '@/components/tactical/FieldMeasurementsOverlay';
-import { GoalPlayAnimation, generateMockGoalPlay } from '@/components/tactical/GoalPlayAnimation';
 import { FIFA_FIELD, metersToSvg } from '@/constants/fieldDimensions';
-import { apiClient } from '@/lib/apiClient';
-import { useQuery } from '@tanstack/react-query';
 import { usePlayerDetection } from '@/hooks/usePlayerDetection';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { AppLayout } from '@/components/layout/AppLayout';
 
-interface GoalEvent {
-  id: string;
-  minute: number;
-  second: number;
-  description: string;
-  team: 'home' | 'away';
-  matchId: string;
-  homeTeam: string;
-  awayTeam: string;
-  homeColor: string;
-  awayColor: string;
-}
-
 const Field = () => {
-  const { currentMatchId, selectedMatch } = useMatchSelection();
+  const { currentMatchId } = useMatchSelection();
   
   const [showMeasurements, setShowMeasurements] = useState(true);
   const [showGrid, setShowGrid] = useState(false);
   const [theme2D, setTheme2D] = useState<'grass' | 'tactical' | 'minimal'>('grass');
-  const [selectedGoal, setSelectedGoal] = useState<GoalEvent | null>(null);
   
   // YOLO detection state
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [uploadedImage, setUploadedImage] = useState<string | null>(null);
   const { detectFromImage, isDetecting, lastResult } = usePlayerDetection();
-
-  // Fetch goal events from the selected match
-  const { data: goalEvents = [], isLoading } = useQuery({
-    queryKey: ['goal-events', currentMatchId],
-    queryFn: async () => {
-      if (!currentMatchId || !selectedMatch) return [];
-      
-      try {
-        const events = await apiClient.getMatchEvents(currentMatchId);
-        const goals = events.filter((e: any) => e.event_type === 'goal');
-        
-        return goals.map((e: any) => ({
-          id: e.id,
-          minute: e.minute || 0,
-          second: e.second || 0,
-          description: e.description || 'Gol',
-          team: (e.metadata?.team === 'away' ? 'away' : 'home') as 'home' | 'away',
-          matchId: currentMatchId,
-          homeTeam: selectedMatch.home_team?.name || 'Time Casa',
-          awayTeam: selectedMatch.away_team?.name || 'Time Fora',
-          homeColor: selectedMatch.home_team?.primary_color || '#10b981',
-          awayColor: selectedMatch.away_team?.primary_color || '#ef4444',
-        }));
-      } catch (error) {
-        console.error('Erro ao buscar gols:', error);
-        return [];
-      }
-    },
-    enabled: !!currentMatchId
-  });
-
-  // Generate animation frames for selected goal
-  const animationFrames = useMemo(() => {
-    if (!selectedGoal) return generateMockGoalPlay('home');
-    return generateMockGoalPlay(selectedGoal.team);
-  }, [selectedGoal]);
 
   // Handle image upload for YOLO detection
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -187,7 +134,7 @@ const Field = () => {
           </div>
 
           <Tabs defaultValue="2d" className="space-y-4">
-            <TabsList className="grid w-full max-w-2xl grid-cols-4">
+            <TabsList className="grid w-full max-w-xl grid-cols-3">
               <TabsTrigger value="2d" className="flex items-center gap-2">
                 <Grid3X3 className="h-4 w-4" />
                 Campo 2D
@@ -195,10 +142,6 @@ const Field = () => {
               <TabsTrigger value="detection" className="flex items-center gap-2">
                 <Camera className="h-4 w-4" />
                 Detecção YOLO
-              </TabsTrigger>
-              <TabsTrigger value="animation" className="flex items-center gap-2">
-                <Play className="h-4 w-4" />
-                Animação Gol
               </TabsTrigger>
               <TabsTrigger value="measures" className="flex items-center gap-2">
                 <Ruler className="h-4 w-4" />
@@ -379,121 +322,6 @@ const Field = () => {
                     )}
                   </CardContent>
                 </Card>
-              </div>
-            </TabsContent>
-
-            {/* Goal Animation Tab */}
-            <TabsContent value="animation" className="space-y-4">
-              <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-                {/* Goal Selector */}
-                <Card className="bg-card/50 backdrop-blur border-border/50">
-                  <CardHeader>
-                    <CardTitle className="flex items-center gap-2 text-lg">
-                      <Target className="h-5 w-5 text-primary" />
-                      Gols Detectados
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent>
-                    {isLoading ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                        Carregando gols...
-                      </div>
-                    ) : goalEvents.length === 0 ? (
-                      <div className="text-center py-8 space-y-3">
-                        <AlertCircle className="h-12 w-12 mx-auto text-muted-foreground/50" />
-                        <p className="text-muted-foreground text-sm">
-                          Nenhum gol detectado ainda
-                        </p>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setSelectedGoal({
-                            id: 'demo',
-                            minute: 45,
-                            second: 0,
-                            description: 'Gol de demonstração',
-                            team: 'home',
-                            matchId: 'demo',
-                            homeTeam: 'Time Casa',
-                            awayTeam: 'Time Visitante',
-                            homeColor: '#10b981',
-                            awayColor: '#ef4444'
-                          })}
-                        >
-                          <Play className="mr-2 h-4 w-4" />
-                          Ver Demo
-                        </Button>
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {goalEvents.map((goal) => (
-                          <Button
-                            key={goal.id}
-                            variant={selectedGoal?.id === goal.id ? "default" : "outline"}
-                            className="w-full justify-start text-left h-auto py-3"
-                            onClick={() => setSelectedGoal(goal)}
-                          >
-                            <div className="flex items-center gap-3 w-full">
-                              <Badge 
-                                variant="secondary"
-                                style={{ 
-                                  backgroundColor: goal.team === 'home' ? goal.homeColor : goal.awayColor,
-                                  color: '#fff'
-                                }}
-                              >
-                                {goal.minute}'
-                              </Badge>
-                              <div className="flex-1 min-w-0">
-                                <p className="font-medium truncate text-sm">
-                                  {goal.team === 'home' ? goal.homeTeam : goal.awayTeam}
-                                </p>
-                                <p className="text-xs text-muted-foreground truncate">
-                                  vs {goal.team === 'home' ? goal.awayTeam : goal.homeTeam}
-                                </p>
-                              </div>
-                            </div>
-                          </Button>
-                        ))}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-
-                {/* Animation Player */}
-                <div className="lg:col-span-3">
-                  <Card className="bg-card/50 backdrop-blur border-border/50">
-                    <CardHeader className="pb-2">
-                      <div className="flex items-center justify-between">
-                        <CardTitle className="text-lg flex items-center gap-2">
-                          <Play className="h-5 w-5 text-primary" />
-                          Animação da Jogada
-                        </CardTitle>
-                        <Badge variant="outline" className="font-mono">
-                          SVG Animado
-                        </Badge>
-                      </div>
-                    </CardHeader>
-                    <CardContent>
-                      {selectedGoal ? (
-                        <GoalPlayAnimation
-                          frames={animationFrames}
-                          homeTeamColor={selectedGoal.homeColor}
-                          awayTeamColor={selectedGoal.awayColor}
-                          goalMinute={selectedGoal.minute}
-                          goalTeam={selectedGoal.team}
-                          description={`${selectedGoal.team === 'home' ? selectedGoal.homeTeam : selectedGoal.awayTeam} - ${selectedGoal.description}`}
-                        />
-                      ) : (
-                        <div className="flex flex-col items-center justify-center py-20 text-center">
-                          <Play className="h-16 w-16 text-muted-foreground/30 mb-4" />
-                          <p className="text-muted-foreground">
-                            Selecione um gol para visualizar a animação da jogada
-                          </p>
-                        </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                </div>
               </div>
             </TabsContent>
 
