@@ -1,58 +1,87 @@
 
-## Plano: Remover Visualizações Fictícias da Página de Análise
+# Correção do Placar: Suporte a Gol Contra
 
-### Problema Identificado
+## Problema Identificado
 
-A página de Análise contém **três seções** que exibem dados fictícios não derivados do jogo real:
+O placar entre **Botafogo e Novorizontino** está incorreto porque houve um **gol contra** que não está sendo contabilizado corretamente. O sistema:
 
-1. **Cards de Formação (linhas 532-585)**: Dois cards "Formation Overview 2D" com jogadores em posições hardcoded (4-3-3 e 4-4-2 fixas)
-2. **Animações Táticas (linhas 587-644)**: O componente `AnimatedTacticalPlay` que gera sequências de movimentação pré-definidas para cada tipo de evento (o que você vê na screenshot com "Construção do Ataque")
+1. **Detecta** gols contra corretamente via palavras-chave ("contra", "próprio gol") durante a análise
+2. **Calcula** o placar corretamente quando `metadata.isOwnGoal = true`  
+3. **Mas não permite** editar/corrigir esse campo manualmente no diálogo de edição
 
-Nenhuma dessas informações vem da análise do vídeo ou dos eventos detectados.
-
----
-
-### Solução Proposta
-
-Remover completamente essas seções da página de Análise, mantendo apenas dados reais:
-
-| O que fica | Fonte |
-|------------|-------|
-| Mapa de Calor 2D | Zonas derivadas dos eventos detectados ✅ |
-| Comparativo de Estatísticas | Calculado a partir dos eventos ✅ |
-| Lista de Eventos | Banco de dados (detecção de IA) ✅ |
-| Insights e Resumo | Gerado a partir dos eventos ✅ |
-
-| O que será removido | Motivo |
-|---------------------|--------|
-| Cards "Formation Overview 2D" | Posições de jogadores são hardcoded |
-| "Jogadas Táticas Animadas" | Animações são genéricas pré-definidas |
+Quando a detecção automática falha em marcar `isOwnGoal`, o gol é atribuído ao time errado e **não há forma de corrigir via interface**.
 
 ---
 
-### Alterações Técnicas
+## Solução Proposta
 
-#### 1. Arquivo: `src/pages/Analysis.tsx`
+### Adicionar Checkbox "Gol Contra" no Diálogo de Edição
 
-Remover:
-- **Linhas 532-585**: Bloco dos dois cards de formação com `FootballField` e jogadores hardcoded
-- **Linhas 587-644**: Bloco do card "Jogadas Táticas Animadas" com `AnimatedTacticalPlay`
-- **Linhas 8**: Importação do `AnimatedTacticalPlay`
-- **Linha 7**: Importação do `FootballField`
-- **Linhas 78-79**: States `selectedEventForPlay` e `videoDialogOpen` relacionados às animações
-
-#### 2. Limpeza (opcional futuro)
-
-Os arquivos `AnimatedTacticalPlay.tsx` e `FootballField.tsx` podem ser mantidos para uso futuro caso existam dados reais de rastreamento (YOLO), mas não serão usados na página de Análise.
+Modificar o componente `EventEditDialog.tsx` para incluir uma opção visível de "Gol Contra" que:
+- Aparece apenas quando o tipo de evento for "goal"
+- Salva o campo `metadata.isOwnGoal = true`
+- Permite corrigir manualmente gols que foram detectados incorretamente
 
 ---
 
-### Resultado Esperado
+## Detalhes Técnicos
 
-A página de Análise exibirá apenas:
-1. **Mapa de Calor 2D** - Zonas de atividade baseadas em eventos reais detectados
-2. **Comparativo de Estatísticas** - Dados calculados dos eventos (passes, chutes, etc.)
-3. **Lista de Eventos Importantes** - Eventos detectados pela IA com thumbnails reais
-4. **Insights** - Análise textual gerada a partir dos eventos
+### Arquivo: `src/components/events/EventEditDialog.tsx`
 
-Nenhuma visualização fictícia será exibida em produção.
+**Alterações:**
+
+1. **Novo estado** para controlar o checkbox:
+   ```typescript
+   const [isOwnGoal, setIsOwnGoal] = useState(false);
+   ```
+
+2. **Carregar valor existente** no `useEffect`:
+   ```typescript
+   setIsOwnGoal(event.metadata?.isOwnGoal || false);
+   ```
+
+3. **Novo campo de UI** (após seletor de Time, somente para gols):
+   ```text
+   ┌─────────────────────────────────────────────────┐
+   │ ☑ Gol Contra                                    │
+   │   Marque se foi gol contra (beneficia o outro   │
+   │   time)                                         │
+   └─────────────────────────────────────────────────┘
+   ```
+
+4. **Salvar no metadata** ao criar/editar:
+   ```typescript
+   metadata: { 
+     team, 
+     player: playerName || undefined,
+     isOwnGoal,  // ← Novo campo
+     // ... outros
+   }
+   ```
+
+---
+
+## Fluxo de Correção
+
+1. Usuário abre a página de Eventos
+2. Clica no gol incorreto para editar
+3. Marca a checkbox "Gol Contra"
+4. Salva → O placar é recalculado automaticamente via `syncMatchScoreFromEvents`
+5. O placar no header reflete a correção
+
+---
+
+## Arquivos Afetados
+
+| Arquivo | Alteração |
+|---------|-----------|
+| `src/components/events/EventEditDialog.tsx` | Adicionar checkbox para `isOwnGoal` |
+
+---
+
+## Benefícios
+
+- Correção manual de gols contra mal detectados
+- Interface intuitiva para o usuário
+- Placar atualiza automaticamente após salvar
+- Sem impacto em outras funcionalidades
