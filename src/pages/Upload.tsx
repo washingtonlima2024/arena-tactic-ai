@@ -2334,6 +2334,7 @@ export default function VideoUpload() {
                         onClick={() => {
                           setUserWantsChoice(false); // Reset flag when selecting a match
                           setSelectedExistingMatch(match.id);
+                          setCurrentStep('videos'); // Navegar diretamente para vídeos
                           navigate(`/upload?match=${match.id}`);
                         }}
                         className="w-full flex items-center justify-between p-4 rounded-lg border border-border/50 bg-background/50 hover:border-primary/50 hover:bg-primary/5 transition-all"
