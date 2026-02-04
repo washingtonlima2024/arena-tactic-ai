@@ -1,58 +1,89 @@
 
-# Plano: Correção das Funções de Detecção de Eventos
 
-## ✅ Status: IMPLEMENTADO
+# Plano: Alinhar Tempos de Clip para 20s Antes / 10s Depois
 
----
+## Contexto
 
-## Problemas Identificados e Corrigidos
+Quando uma palavra-chave é detectada no SRT/transcrição, o **evento já aconteceu** - o narrador está descrevendo algo que ocorreu segundos antes. A lógica correta é:
 
-### ✅ Correção 1: Função `detect_events_by_keywords_from_text` criada
+```text
+  ← 20 segundos →  🎯  ← 10 segundos →
+       ANTES      EVENTO    DEPOIS
+```
 
-A função foi implementada com:
-- Mapeamento de todos os timestamps antes de procurar keywords
-- Suporte a formatos HH:MM:SS e MM:SS
-- Associação de keywords ao timestamp mais próximo (proximidade bidirecional)
-- Uso de `detect_goal_author` para atribuição precisa de times em gols
-- Chamada a `validate_event_timestamps` para filtrar zeros inválidos
-- Metadado `timestampSource: 'proximity_map'` para debug
+- **20s antes**: Capturar o contexto e o lance que levou ao evento
+- **10s depois**: Capturar a comemoração/resultado
 
-### ✅ Correção 2: Função duplicada removida
+## Estado Atual
 
-A segunda definição de `detect_events_by_keywords` (linhas 3666-3868) foi substituída pela nova função `detect_events_by_keywords_from_text`.
+| Local | `pre_buffer` | `post_buffer` | Total |
+|-------|--------------|---------------|-------|
+| `ai_services.py` (`ensure_clip_window`) | 20s | 10s | 30s ✅ |
+| `server.py` (`EVENT_CLIP_CONFIG`) | 15s | 15s | 30s ❌ |
 
-### ✅ Correção 3: `validate_event_timestamps` integrada
+O problema: `EVENT_CLIP_CONFIG` no `server.py` (que é realmente usado para extrair os clips) está com valores simétricos.
 
-A função de validação agora é chamada dentro de `detect_events_by_keywords_from_text`.
+## Mudanças Necessárias
 
----
+### Arquivo: `video-processor/server.py`
 
-## Arquivos Modificados
+Atualizar `EVENT_CLIP_CONFIG` (linhas 444-487) de:
+```python
+'goal': {
+    'pre_buffer': 15,         # ← Mudar
+    'post_buffer': 15,        # ← Mudar
+    ...
+}
+```
+
+Para:
+```python
+'goal': {
+    'pre_buffer': 20,         # 20s antes (captura o lance)
+    'post_buffer': 10,        # 10s depois (comemoração)
+    ...
+}
+```
+
+### Configuração Final
+
+| Tipo de Evento | Antes | Depois | Total | Justificativa |
+|----------------|-------|--------|-------|---------------|
+| `goal` | 20s | 10s | 30s | Capturar jogada completa |
+| `penalty` | 20s | 10s | 30s | Falta + cobrança |
+| `red_card` | 20s | 10s | 30s | Falta + expulsão |
+| `shot_on_target` | 15s | 10s | 25s | Jogada + defesa |
+| `save` | 15s | 10s | 25s | Finalização + defesa |
+| `yellow_card` | 15s | 10s | 25s | Falta + cartão |
+| `default` | 20s | 10s | 30s | Padrão assimétrico |
+
+**Importante**: Para manter clips de ~30s, gols usam 20+10. Para eventos menores, 15+10=25s é suficiente.
+
+## Fluxo de Extração (Confirmado)
+
+```text
+1. Evento detectado → minute=5, second=30, event_type='goal'
+2. get_event_clip_timings('goal') retorna:
+   - pre_buffer: 20
+   - post_buffer: 10
+3. total_seconds = 330 (5*60 + 30)
+4. start_seconds = 330 - 20 = 310
+5. duration = 20 + 10 = 30
+6. FFmpeg extrai de 310s a 340s ✅
+```
+
+## Arquivos a Modificar
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `video-processor/ai_services.py` | Função duplicada substituída por `detect_events_by_keywords_from_text()` |
+| `video-processor/server.py` | Atualizar `EVENT_CLIP_CONFIG` com novos valores |
 
----
-
-## Resultado
+## Resultado Esperado
 
 | Aspecto | Antes | Depois |
 |---------|-------|--------|
-| Fallback de keywords | ❌ `NameError` | ✅ Funciona com mapa de proximidade |
-| Funções duplicadas | ⚠️ 2 definições | ✅ Cada função com nome único |
-| Validação de timestamps | ❌ Não chamada no fallback | ✅ Integrada na função |
-| Clips com tempo zero | ❌ Gerados errados | ✅ Rejeitados ou distribuídos |
+| Janela de gol | Simétrica (15+15) | Assimétrica (20+10) |
+| Início do clip | Perde contexto do lance | Captura jogada completa |
+| Final do clip | Muito pós-evento | Termina após comemoração |
+| Sincronia narrador | Inconsistente | Compensada |
 
----
-
-## Detalhes da Implementação
-
-A função `detect_events_by_keywords_from_text`:
-
-1. **Mapeia todos os timestamps** encontrados no texto (HH:MM:SS ou MM:SS)
-2. **Associa cada keyword** ao timestamp mais próximo (antes OU depois)
-3. **Usa `detect_goal_author`** para atribuição precisa de times em gols
-4. **Aplica `ensure_clip_window`** para definir janela de corte (20s antes, 10s depois)
-5. **Valida timestamps** para rejeitar zeros inválidos
-6. **Deduplica eventos** com threshold de 30 segundos
