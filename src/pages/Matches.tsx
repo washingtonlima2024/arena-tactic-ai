@@ -210,7 +210,7 @@ export default function Matches() {
       if (!aiStatus.anyConfigured) {
         toast({
           title: "Nenhum provedor de IA configurado",
-          description: "Configure uma chave de API (Lovable, Gemini, OpenAI ou Ollama) em Configurações > API antes de analisar.",
+          description: "Configure uma chave de API (kakttus Cloud, kakttus Pro, kakttus Vision ou kakttus.ai Local) em Configurações > API antes de analisar.",
           variant: "destructive"
         });
         return;
@@ -218,10 +218,10 @@ export default function Matches() {
       
       // Log quais provedores estão disponíveis
       const availableProviders = [];
-      if (aiStatus.lovable) availableProviders.push('Lovable');
-      if (aiStatus.gemini) availableProviders.push('Gemini');
-      if (aiStatus.openai) availableProviders.push('OpenAI');
-      if (aiStatus.ollama) availableProviders.push('Ollama');
+      if (aiStatus.lovable) availableProviders.push('kakttus Cloud');
+      if (aiStatus.gemini) availableProviders.push('kakttus Pro');
+      if (aiStatus.openai) availableProviders.push('kakttus Vision');
+      if (aiStatus.ollama) availableProviders.push('kakttus.ai Local');
       console.log('[Reprocess] Provedores de IA disponíveis:', availableProviders.join(', '));
     } catch (aiCheckError) {
       console.warn('[Reprocess] Não foi possível verificar status de IA:', aiCheckError);
