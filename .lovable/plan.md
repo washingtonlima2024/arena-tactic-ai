@@ -1,170 +1,156 @@
 
 
-# Plano: Simplificar Extração de Contexto (Palavra-chave no Centro + Janela 40s)
+# Plano: Corrigir Importação Incremental do Segundo Tempo
 
-## Problema Atual
+## Problema Identificado
 
-A função `_extract_context_around_timestamp` tenta localizar contexto baseado no timestamp do evento:
+Quando o usuário importa apenas o segundo tempo de uma partida (que já tinha o primeiro tempo analisado), **nenhum evento do 2º tempo é gerado**. 
 
-```python
-# Linha 513 - Busca padrões de timestamp
-time_patterns = [
-    rf'{minute:02d}:{second:02d}',  # ← Falha se formato diferente
-    rf'{minute}:{second:02d}',
-    rf'{minute}\s*minuto',
-]
+## Diagnóstico
+
+Após análise detalhada do código:
+
+| Componente | Problema |
+|------------|----------|
+| **Upload.tsx** (linhas 1504-1528) | A transcrição do 2º tempo só é coletada de `secondHalfSrt` OU do segmento. Se o SRT foi arrastado mas não associado, fica vazio |
+| **Upload.tsx** (linhas 1517-1519) | O filtro de segmentos do 2º tempo depende de `s.half === 'second'` que pode não estar setado |
+| **Upload.tsx** (linhas 1543-1552) | O pipeline assíncrono envia `secondHalfTranscription` mas não valida se está vazio antes |
+| **server.py** (linhas 7772-7790) | O backend só processa se `len(second_half_transcription.strip()) > 100`. Se estiver vazio, ignora silenciosamente |
+
+### Fluxo Atual (Problema)
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  IMPORTAÇÃO DO 2º TEMPO (modo local)                                         │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  1. Usuário vincula vídeo do 2º tempo (LocalFileBrowser)                     │
+│     └── Segmento criado com half: 'second', videoType: 'second_half' ✓       │
+│                                                                              │
+│  2. Usuário arrasta SRT do 2º tempo (HalfDropzone)                           │
+│     └── secondHalfSrt setado ✓                                               │
+│     └── handleSrtDrop tenta associar ao segmento...                          │
+│         └── ⚠️ Filtro usa (s.half === 'second')                              │
+│         └── ⚠️ Se half não estiver setado, SRT não é associado!              │
+│                                                                              │
+│  3. handleStartAnalysis() inicia pipeline assíncrono                         │
+│     └── Lê secondHalfSrt → secondHalfTranscription ✓ (se tiver)              │
+│     └── ⚠️ Mas também tenta ler do segmento.transcription (backup)           │
+│     └── ⚠️ Se nenhum dos dois tem, secondHalfTranscription = ''              │
+│                                                                              │
+│  4. Backend recebe secondHalfTranscription                                   │
+│     └── ⚠️ Se vazio ou < 100 chars → IGNORA SILENCIOSAMENTE                  │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Problema**: Se o padrão não for encontrado, o fallback usa uma estimativa imprecisa baseada na posição proporcional no texto. Isso resulta em contexto errado → validação falha → eventos falsos passam.
+---
 
 ## Solução Proposta
 
-Mudar a abordagem para:
+### Mudança 1: Melhorar associação SRT ao segmento (Upload.tsx)
 
-1. **Palavra-chave no centro**: Quando o Ollama detecta um evento em determinado minuto, buscar a palavra-chave do evento no texto e centralizar ali
-2. **Janela expandida**: 20 segundos para cada lado (~40s total = ~1000-1200 caracteres)
-3. **Fallback simples**: Se não encontrar palavra-chave, usar janela de caracteres ao redor da posição estimada
+Atualizar `handleSrtDrop` para ser mais robusto na associação:
 
----
+**Arquivo**: `src/pages/Upload.tsx` (linhas 1057-1065)
 
-## Mudanças Necessárias
+```typescript
+// ANTES:
+if ((half === 'first' && (s.half === 'first' || s.videoType === 'first_half' || s.videoType === 'full')) ||
+    (half === 'second' && (s.half === 'second' || s.videoType === 'second_half'))) {
 
-### Arquivo: `video-processor/ai_services.py`
+// DEPOIS:
+// 🔧 Melhorar matching: incluir segmentos sem half definido mas com videoType correto
+const isFirstHalfSegment = s.half === 'first' || s.videoType === 'first_half' || s.videoType === 'full';
+const isSecondHalfSegment = s.half === 'second' || s.videoType === 'second_half' || 
+                            // Fallback: se não tem half e o nome sugere segundo tempo
+                            (!s.half && s.name.toLowerCase().includes('segundo'));
 
-#### Mudança 1: Reescrever `_extract_context_around_timestamp()` (linha 513)
-
-**Lógica Nova:**
-```python
-def _extract_context_around_timestamp(
-    transcription: str, 
-    minute: int, 
-    second: int, 
-    event_type: str = None,
-    window_chars: int = 1000  # ~40 segundos = 20s cada lado
-) -> str:
-    """
-    Extrai contexto centrado na palavra-chave do evento.
-    
-    Estratégia:
-    1. Buscar palavra-chave do tipo de evento no texto
-    2. Centralizar janela de 1000 chars (500 antes, 500 depois)
-    3. Fallback: posição estimada se não encontrar keyword
-    """
-    
-    # Mapa de keywords por tipo de evento
-    event_keywords = {
-        'goal': ['gol', 'golaço', 'bola na rede', 'abre o placar'],
-        'red_card': ['vermelho', 'expuls', 'cartão vermelho'],
-        'yellow_card': ['amarelo', 'cartão amarelo', 'amarelou'],
-        'penalty': ['pênalti', 'penalidade'],
-        'save': ['defesa', 'salvou', 'espalmou'],
-    }
-    
-    # 1. Tentar encontrar keyword do evento
-    keywords = event_keywords.get(event_type, [])
-    
-    for keyword in keywords:
-        # Buscar todas as ocorrências
-        pattern = re.escape(keyword)
-        matches = list(re.finditer(pattern, transcription.lower()))
-        
-        if matches:
-            # Usar a primeira ocorrência (ou a mais próxima do timestamp estimado)
-            best_match = matches[0]
-            center_pos = best_match.start()
-            
-            # Extrair janela centrada na keyword
-            half_window = window_chars // 2
-            start = max(0, center_pos - half_window)
-            end = min(len(transcription), center_pos + half_window)
-            
-            return transcription[start:end]
-    
-    # 2. Fallback: posição estimada baseada no timestamp
-    total_seconds = minute * 60 + second
-    estimated_pos = int(len(transcription) * (total_seconds / (45 * 60)))
-    
-    half_window = window_chars // 2
-    start = max(0, estimated_pos - half_window)
-    end = min(len(transcription), estimated_pos + half_window)
-    
-    return transcription[start:end]
+if ((half === 'first' && isFirstHalfSegment) || (half === 'second' && isSecondHalfSegment)) {
 ```
 
-#### Mudança 2: Atualizar chamada em `_validate_all_events_with_context()` (linha 561)
+### Mudança 2: Garantir que vídeo local tem `half` setado (Upload.tsx)
 
-**Antes:**
-```python
-context = _extract_context_around_timestamp(transcription, minute, second)
+Atualizar `handleLocalFileSelect` para sempre setar `half`:
+
+**Arquivo**: `src/pages/Upload.tsx` (linha 940)
+
+```typescript
+// ANTES:
+half: localBrowserHalf || undefined,
+
+// DEPOIS:
+// 🔧 Garantir half baseado em videoType se não especificado
+half: localBrowserHalf || (videoType === 'second_half' ? 'second' : videoType === 'first_half' ? 'first' : undefined),
 ```
 
-**Depois:**
-```python
-context = _extract_context_around_timestamp(
-    transcription, minute, second, 
-    event_type=event_type,  # Passar tipo para buscar keyword correta
-    window_chars=1000       # 40 segundos = ~1000 chars
-)
+### Mudança 3: Adicionar validação antes de chamar pipeline assíncrono (Upload.tsx)
+
+Adicionar verificação e toast de erro se transcrição do 2º tempo estiver vazia quando há vídeo:
+
+**Arquivo**: `src/pages/Upload.tsx` (após linha 1527)
+
+```typescript
+// 🆕 Validar que segundo tempo tem transcrição se tem vídeo
+if (secondHalfSegments.length > 0 && !secondHalfTranscription) {
+  console.error('[ASYNC] ⚠️ Vídeo do 2º tempo SEM transcrição! Abortando pipeline async.');
+  toast({
+    title: "⚠️ Transcrição do 2º tempo não encontrada",
+    description: "Arraste o arquivo SRT do 2º tempo antes de iniciar a análise.",
+    variant: "destructive"
+  });
+  setProcessingStage('idle');
+  return;
+}
 ```
 
-#### Mudança 3: Remover função duplicada (linha 4175)
+### Mudança 4: Log detalhado no backend (server.py)
 
-A segunda definição de `_extract_context_around_timestamp` (linha 4175-4207) **sobrescreve a primeira** e deve ser **removida** para evitar conflito.
+Adicionar logs para diagnóstico quando transcrição é ignorada:
 
-#### Mudança 4: Atualizar chamada em `_validate_goals_with_context()` (linha 4147)
+**Arquivo**: `video-processor/server.py` (após linha 7774)
 
-**Antes:**
 ```python
-context = _extract_context_around_timestamp(transcription, minute, second)
+# 🆕 Log quando transcrição do 2º tempo é ignorada
+if not has_preloaded_second and second_half_transcription:
+    print(f"[ASYNC-PIPELINE] ⚠️ 2nd half transcription too short ({len(second_half_transcription)} chars < 100) - IGNORED")
+elif not second_half_transcription:
+    print(f"[ASYNC-PIPELINE] ⚠️ 2nd half transcription EMPTY - will need Whisper or existing SRT file")
 ```
 
-**Depois:**
+### Mudança 5: Buscar SRT do storage se não fornecido (server.py)
+
+Adicionar fallback para buscar SRT salvo anteriormente:
+
+**Arquivo**: `video-processor/server.py` (após linha 7790, dentro do bloco de transcrições pré-carregadas)
+
 ```python
-context = _extract_context_around_timestamp(
-    transcription, minute, second,
-    event_type='goal',
-    window_chars=1000
-)
-```
-
----
-
-## Fluxo Corrigido
-
-```text
-┌───────────────────────────────────────────────────────────────────────────┐
-│                      EXTRAÇÃO DE CONTEXTO (NOVO)                          │
-├───────────────────────────────────────────────────────────────────────────┤
-│                                                                           │
-│  Evento: red_card em 15'                                                  │
-│                    │                                                      │
-│                    ▼                                                      │
-│  Buscar keywords: ['vermelho', 'expuls', 'cartão vermelho']               │
-│                    │                                                      │
-│                    ▼                                                      │
-│  Encontrou "vermelho" na posição 12340?                                   │
-│       ├── SIM → Extrair [11840...12840] (keyword no centro)               │
-│       └── NÃO → Fallback: posição estimada                                │
-│                    │                                                      │
-│                    ▼                                                      │
-│  Validar: contexto contém 'expuls'?                                       │
-│       ├── SIM → Evento VÁLIDO ✓                                           │
-│       └── NÃO → Evento REJEITADO ✗                                        │
-│                                                                           │
-└───────────────────────────────────────────────────────────────────────────┘
+# 🆕 Fallback: Se não tem transcrição do 2º tempo, tentar ler do storage
+if not has_preloaded_second:
+    existing_srt_path = get_subfolder_path(match_id, 'srt') / 'second_half.srt'
+    existing_txt_path = get_subfolder_path(match_id, 'texts') / 'second_half_transcription.txt'
+    
+    if existing_srt_path.exists():
+        with open(existing_srt_path, 'r', encoding='utf-8') as f:
+            second_half_text = f.read()
+        print(f"[ASYNC-PIPELINE] ✓ 2nd half transcription loaded from storage: {len(second_half_text)} chars")
+    elif existing_txt_path.exists():
+        with open(existing_txt_path, 'r', encoding='utf-8') as f:
+            second_half_text = f.read()
+        print(f"[ASYNC-PIPELINE] ✓ 2nd half TXT loaded from storage: {len(second_half_text)} chars")
 ```
 
 ---
 
 ## Resultado Esperado
 
-| Aspecto | Antes | Depois |
+| Cenário | Antes | Depois |
 |---------|-------|--------|
-| Método | Busca timestamp exato | Busca keyword do evento |
-| Janela | 30s (400 chars) | 40s (1000 chars) |
-| Centro | Timestamp (impreciso) | Keyword (preciso) |
-| Fallback | 500 chars iniciais | Posição proporcional |
-| Funções duplicadas | 2 definições | 1 definição consolidada |
+| SRT arrastado no 2º tempo | Pode não associar ao segmento | Sempre associa corretamente |
+| Vídeo local do 2º tempo | Pode ficar sem `half` | Sempre tem `half: 'second'` |
+| Pipeline async sem SRT | Ignora silenciosamente | Mostra erro claro e aborta |
+| SRT já salvo no storage | Não usa | Usado como fallback automático |
+| Placar após análise | Não atualizado | Sincronizado via `syncMatchScoreFromEvents` |
 
 ---
 
@@ -172,8 +158,33 @@ context = _extract_context_around_timestamp(
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `video-processor/ai_services.py` | Reescrever `_extract_context_around_timestamp` (linha 513) |
-| `video-processor/ai_services.py` | Atualizar chamada em `_validate_all_events_with_context` (linha 561) |
-| `video-processor/ai_services.py` | **Remover** função duplicada (linhas 4175-4207) |
-| `video-processor/ai_services.py` | Atualizar chamada em `_validate_goals_with_context` (linha 4147) |
+| `src/pages/Upload.tsx` | Melhorar associação SRT, garantir `half` no segmento, validação antes do async |
+| `video-processor/server.py` | Logs de diagnóstico, fallback para SRT do storage |
+
+---
+
+## Diagrama do Fluxo Corrigido
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────┐
+│  IMPORTAÇÃO INCREMENTAL DO 2º TEMPO (CORRIGIDO)                              │
+├──────────────────────────────────────────────────────────────────────────────┤
+│                                                                              │
+│  1. Vídeo vinculado → half: 'second' GARANTIDO ✓                             │
+│                                                                              │
+│  2. SRT arrastado → Matching robusto (half OU videoType OU nome) ✓           │
+│                                                                              │
+│  3. handleStartAnalysis()                                                    │
+│     ├── Lê secondHalfSrt → transcription                                     │
+│     ├── Valida: tem vídeo + sem transcrição? → ERRO + ABORT                  │
+│     └── Envia para backend com transcrição ✓                                 │
+│                                                                              │
+│  4. Backend processa                                                         │
+│     ├── Usa transcrição enviada OU                                           │
+│     ├── Busca SRT/TXT do storage (fallback)                                  │
+│     ├── Analisa eventos do 2º tempo                                          │
+│     └── Gera clips + atualiza placar ✓                                       │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
 
