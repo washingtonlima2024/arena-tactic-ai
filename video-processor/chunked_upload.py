@@ -13,6 +13,7 @@ from typing import Optional, Dict, Any, List
 from threading import Thread
 from queue import Queue, Empty
 import uuid
+from sqlalchemy.orm.attributes import flag_modified
 
 from database import get_db_session
 from models import generate_uuid
@@ -110,12 +111,16 @@ def init_upload(
             status='uploading',
             stage='receiving_chunks',
             progress=0,
-            events_log=[{
-                'timestamp': datetime.utcnow().isoformat(),
-                'message': f'Upload iniciado: {filename} ({file_size / (1024*1024):.1f} MB)'
-            }],
-            created_at=datetime.utcnow()
+            events_log=[]
         )
+        # Add initial event after creation
+        initial_events = [{
+            'timestamp': datetime.utcnow().isoformat(),
+            'message': f'Upload iniciado: {filename} ({file_size / (1024*1024):.1f} MB)'
+        }]
+        job.events_log = initial_events
+        job.created_at = datetime.utcnow()
+        flag_modified(job, 'events_log')
         session.add(job)
         session.commit()
         
@@ -164,11 +169,12 @@ def receive_chunk(
         chunk_path.write_bytes(chunk_data)
         
         # Update received chunks list
-        received = job.received_chunks or []
+        received = list(job.received_chunks or [])  # Create copy
         if chunk_index not in received:
             received.append(chunk_index)
             received.sort()
         job.received_chunks = received
+        flag_modified(job, 'received_chunks')  # Force dirty detection
         
         # Calculate progress
         progress = int((len(received) / job.total_chunks) * 100)
@@ -178,12 +184,13 @@ def receive_chunk(
         milestones = [25, 50, 75, 100]
         for m in milestones:
             if progress >= m and (progress - (100 / job.total_chunks)) < m:
-                events = job.events_log or []
+                events = list(job.events_log or [])  # Create copy
                 events.append({
                     'timestamp': datetime.utcnow().isoformat(),
                     'message': f'{progress}% enviado ({len(received)}/{job.total_chunks} partes)'
                 })
                 job.events_log = events
+                flag_modified(job, 'events_log')  # Force dirty detection
                 break
         
         session.commit()
@@ -260,12 +267,13 @@ def assemble_chunks(upload_id: str) -> Dict[str, Any]:
         # Update status
         job.status = 'assembling'
         job.stage = 'assembling'
-        events = job.events_log or []
+        events = list(job.events_log or [])  # Create copy
         events.append({
             'timestamp': datetime.utcnow().isoformat(),
             'message': 'Montando arquivo a partir das partes...'
         })
         job.events_log = events
+        flag_modified(job, 'events_log')  # Force dirty detection
         session.commit()
     
     try:
@@ -293,12 +301,13 @@ def assemble_chunks(upload_id: str) -> Dict[str, Any]:
                 return {'success': False, 'error': job.error_message}
             
             job.output_path = str(output_path)
-            events = job.events_log or []
+            events = list(job.events_log or [])  # Create copy
             events.append({
                 'timestamp': datetime.utcnow().isoformat(),
                 'message': f'Arquivo montado com sucesso ({assembled_size / (1024*1024):.1f} MB)'
             })
             job.events_log = events
+            flag_modified(job, 'events_log')  # Force dirty detection
             session.commit()
         
         # Clean up chunks
@@ -393,12 +402,13 @@ def pause_upload(upload_id: str) -> Dict[str, Any]:
         
         job.status = 'paused'
         job.paused_at = datetime.utcnow()
-        events = job.events_log or []
+        events = list(job.events_log or [])  # Create copy
         events.append({
             'timestamp': datetime.utcnow().isoformat(),
             'message': 'Upload pausado'
         })
         job.events_log = events
+        flag_modified(job, 'events_log')  # Force dirty detection
         session.commit()
         
         return {'success': True, 'status': 'paused'}
@@ -418,12 +428,13 @@ def resume_upload(upload_id: str) -> Dict[str, Any]:
         
         job.status = 'uploading'
         job.paused_at = None
-        events = job.events_log or []
+        events = list(job.events_log or [])  # Create copy
         events.append({
             'timestamp': datetime.utcnow().isoformat(),
             'message': 'Upload retomado'
         })
         job.events_log = events
+        flag_modified(job, 'events_log')  # Force dirty detection
         session.commit()
         
         return {
@@ -444,12 +455,13 @@ def cancel_upload(upload_id: str) -> Dict[str, Any]:
             return {'success': False, 'error': 'Upload não encontrado'}
         
         job.status = 'cancelled'
-        events = job.events_log or []
+        events = list(job.events_log or [])  # Create copy
         events.append({
             'timestamp': datetime.utcnow().isoformat(),
             'message': 'Upload cancelado'
         })
         job.events_log = events
+        flag_modified(job, 'events_log')  # Force dirty detection
         session.commit()
     
     # Clean up files
