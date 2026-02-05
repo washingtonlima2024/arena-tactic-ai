@@ -1,203 +1,101 @@
 
 
-# Plano: Corrigir Detecção de Timestamps no Pipeline Kakttus
+# Plano: Usar TXT como Fonte Primária de Timestamps (Não SRT)
 
-## Diagnóstico do Problema
+## Problema Identificado
 
-A análise da partida Brasil x Argentina gerou apenas **2 eventos com timestamps zerados** porque:
-
-1. **Prompt simplificado demais**: A função `analyze_with_kakttus` não solicita `minute`, `second` ou `videoSecond` no prompt da IA
-2. **Transcrição sem timestamps**: O texto TXT enviado pelo frontend não contém marcas de tempo
-3. **Fallback ausente**: O pipeline Kakttus não aciona a detecção por keywords SRT após a análise
-4. **`_enrich_events` usa fallback**: Define `minute: game_start_minute (0)` quando não há timestamp
+O fluxo atual prioriza **SRT** para enriquecer timestamps, usando TXT apenas como fallback. Você quer que a **análise seja feita diretamente no TXT**.
 
 ### Fluxo Atual (Problemático)
 
 ```text
-Frontend envia TXT
-       ↓
-analyze_with_kakttus()
-       ↓
-IA retorna: { event_type, team, detail, confidence }
-       ↓
-_enrich_events() define minute: 0, second: 0, videoSecond: 0
-       ↓
-Eventos com timestamps zerados 😞
+Kakttus analisa TXT → Eventos sem timestamp
+           ↓
+    Busca arquivo SRT?
+        ↓ SIM              ↓ NÃO
+    Enriquece via SRT    Fallback: TXT keywords
+```
+
+### Fluxo Desejado
+
+```text
+Kakttus analisa TXT → Eventos sem timestamp
+           ↓
+    Enriquece via TXT keywords (sempre)
+           ↓
+    (SRT opcional como backup)
 ```
 
 ## Solução Proposta
 
-Modificar o prompt do Kakttus para incluir timestamps **E** enriquecer eventos com dados do SRT quando disponível.
+Inverter a lógica: usar **TXT como fonte primária** de timestamps e **SRT como backup**.
 
-### Fluxo Corrigido
-
-```text
-Frontend envia TXT
-       ↓
-analyze_with_kakttus() → solicita timestamps no JSON
-       ↓
-Se SRT disponível: detect_events_by_keywords()
-       ↓
-Merge: eventos da IA + timestamps do SRT
-       ↓
-Eventos com timestamps precisos ✓
-```
-
-## Alterações Necessárias
+## Alteração Necessária
 
 | Arquivo | Alteração |
 |---------|-----------|
-| `video-processor/ai_services.py` | Atualizar prompt do Kakttus para solicitar timestamps |
-| `video-processor/ai_services.py` | Adicionar pós-processamento com SRT no fluxo Kakttus |
-
----
+| `video-processor/ai_services.py` | Inverter prioridade: TXT primeiro, SRT como fallback |
 
 ## Detalhes Técnicos
 
-### Alteração 1: Atualizar Prompt do Kakttus (Linhas 580-600)
+### Alteração no Fluxo de Enriquecimento (Linhas 5048-5145)
 
-O prompt atual não solicita campos de timestamp. Vamos adicionar:
-
-**Antes:**
+**Antes (SRT primeiro):**
 ```python
-user_prompt = f"""
-Times:
-home = {home_team}
-away = {away_team}
-
-Transcrição:
-{transcript_truncated}
-
-Retorne neste formato:
-{{
-  "events": [
-    {{
-      "event_type": "goal" ou outro,
-      "team": "home" ou "away" ou "unknown",
-      "detail": "descrição curta",
-      "confidence": número entre 0 e 1
-    }}
-  ],
-  ...
-}}
-"""
+if target_srt:
+    # Usa SRT
+else:
+    # Fallback: usa TXT
 ```
 
-**Depois:**
+**Depois (TXT primeiro):**
 ```python
-user_prompt = f"""
-Times:
-home = {home_team}
-away = {away_team}
+# 1. SEMPRE tentar TXT primeiro (fonte primária)
+print(f"[Kakttus] 📄 Buscando timestamps no TXT...")
+keyword_events = detect_events_by_keywords_from_text(
+    transcription=transcription,
+    home_team=home_team,
+    away_team=away_team,
+    game_start_minute=game_start_minute
+)
 
-Transcrição:
-{transcript_truncated}
+keyword_goals = [e for e in keyword_events if e.get('event_type') == 'goal']
 
-IMPORTANTE: Extraia o minuto do jogo de cada evento baseado no contexto da narração.
-Se a transcrição mencionar timestamps como [00:15:30] ou "aos 23 minutos", use-os.
-
-Retorne neste formato:
-{{
-  "events": [
-    {{
-      "event_type": "goal" ou outro,
-      "team": "home" ou "away" ou "unknown",
-      "minute": número do minuto do jogo (0-90),
-      "second": segundos (0-59),
-      "detail": "descrição curta",
-      "confidence": número entre 0 e 1
-    }}
-  ],
-  ...
-}}
-"""
+if keyword_goals:
+    print(f"[Kakttus] ✓ TXT encontrou {len(keyword_goals)} gols com timestamps")
+    # Associar timestamps do TXT aos eventos
+    for event in final_events:
+        if event.get('event_type') == 'goal' and event.get('minute', 0) == 0:
+            team = event.get('team', 'unknown')
+            for ke in keyword_goals:
+                if ke.get('team') == team:
+                    event['minute'] = ke.get('minute', 0)
+                    event['second'] = ke.get('second', 0)
+                    event['videoSecond'] = ke.get('videoSecond', 0)
+                    event['metadata'] = event.get('metadata', {})
+                    event['metadata']['timestampSource'] = 'txt_keyword'
+                    keyword_goals.remove(ke)
+                    break
+else:
+    # 2. Fallback: usar SRT se TXT não tiver timestamps
+    print(f"[Kakttus] ⚠ TXT sem timestamps, tentando SRT...")
+    if target_srt:
+        # Código atual de enriquecimento via SRT
 ```
 
-### Alteração 2: Pós-processamento com SRT (Após Linha 5040)
+## Verificação Importante
 
-No fluxo Kakttus em `analyze_match_events`, após receber eventos da IA, verificar se há SRT disponível e usar `detect_events_by_keywords_from_text` para associar timestamps precisos:
+Para que o TXT funcione, ele **precisa ter timestamps** no formato:
+- `[00:15:30]` ou `[15:30]`
+- `00:15:30` ou `15:30`
+- `aos 23 minutos`
 
-```python
-# Após linha 5040: final_events = deduplicate_goal_events(enriched_events)
-
-# NOVO: Se temos match_id, tentar enriquecer com timestamps do SRT
-if match_id:
-    try:
-        from storage import get_subfolder_path
-        srt_folder = get_subfolder_path(match_id, 'srt')
-        
-        # Buscar SRT do tempo correspondente
-        srt_candidates = [
-            srt_folder / f'{match_half}_transcription.srt',
-            srt_folder / f'{match_half}_half.srt',
-            srt_folder / f'{match_half}.srt',
-        ]
-        
-        target_srt = None
-        for candidate in srt_candidates:
-            if candidate.exists():
-                target_srt = candidate
-                break
-        
-        if target_srt:
-            print(f"[Kakttus] 🔄 Enriquecendo timestamps via SRT: {target_srt.name}")
-            
-            # Detectar eventos por keywords para obter timestamps
-            keyword_events = detect_events_by_keywords(
-                srt_path=str(target_srt),
-                home_team=home_team,
-                away_team=away_team,
-                half=match_half,
-                segment_start_minute=game_start_minute
-            )
-            
-            # Associar timestamps dos keyword_events aos eventos do Kakttus
-            for event in final_events:
-                if event.get('event_type') == 'goal' and event.get('minute', 0) == 0:
-                    # Buscar gol correspondente nos keyword_events
-                    for ke in keyword_events:
-                        if ke.get('event_type') == 'goal' and ke.get('team') == event.get('team'):
-                            event['minute'] = ke.get('minute', 0)
-                            event['second'] = ke.get('second', 0)
-                            event['videoSecond'] = ke.get('videoSecond', 0)
-                            event['timestampSource'] = 'srt_enriched'
-                            print(f"[Kakttus] ✓ Timestamp atribuído: {event['minute']}:{event['second']:02d}")
-                            break
-        else:
-            # Fallback: usar detect_events_by_keywords_from_text no próprio texto
-            print(f"[Kakttus] ⚠ SRT não encontrado, tentando extração de texto...")
-            keyword_events = detect_events_by_keywords_from_text(
-                transcription=transcription,
-                home_team=home_team,
-                away_team=away_team,
-                game_start_minute=game_start_minute
-            )
-            
-            for event in final_events:
-                if event.get('event_type') == 'goal' and event.get('minute', 0) == 0:
-                    for ke in keyword_events:
-                        if ke.get('event_type') == 'goal' and ke.get('team') == event.get('team'):
-                            event['minute'] = ke.get('minute', 0)
-                            event['second'] = ke.get('second', 0)
-                            event['videoSecond'] = ke.get('videoSecond', 0)
-                            event['timestampSource'] = 'text_keyword_enriched'
-                            break
-                            
-    except Exception as enrich_err:
-        print(f"[Kakttus] ⚠ Erro ao enriquecer timestamps: {enrich_err}")
-```
+Se o TXT enviado **não tem nenhum marcador de tempo**, nenhum método vai funcionar - nem TXT, nem SRT.
 
 ## Resultado Esperado
 
 Após a correção:
-- Gols detectados com **timestamps precisos** do SRT
-- Clips gerados na **posição correta** do vídeo
-- Timeline de eventos **ordenada corretamente**
-- Fallback inteligente quando SRT não está disponível
-
-## Hierarquia de Timestamps
-
-1. **SRT direto** (mais preciso)
-2. **Keywords no texto** (extrai de padrões como `[00:15:30]` ou `23:45`)
-3. **Estimativa proporcional** (último recurso)
+1. TXT é analisado primeiro para extrair timestamps
+2. Se TXT não tiver timestamps, usa SRT como backup
+3. Se nenhum dos dois tiver, usa estimativa proporcional
 
