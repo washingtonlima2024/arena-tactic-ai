@@ -585,12 +585,18 @@ away = {away_team}
 Transcrição:
 {transcript_truncated}
 
+IMPORTANTE: Para cada evento, extraia o minuto do jogo baseado no contexto da narração.
+Se a transcrição mencionar timestamps como [00:15:30], [MM:SS] ou "aos 23 minutos", use-os.
+Se não houver timestamp explícito, estime baseado na sequência da narrativa.
+
 Retorne neste formato:
 {{
   "events": [
     {{
       "event_type": "goal" ou outro,
       "team": "home" ou "away" ou "unknown",
+      "minute": número do minuto do jogo (0-90),
+      "second": segundos (0-59),
       "detail": "descrição curta",
       "confidence": número entre 0 e 1
     }}
@@ -5038,6 +5044,104 @@ def analyze_match_events(
                 # Enrich and deduplicate
                 enriched_events = _enrich_events(events, game_start_minute, game_end_minute)
                 final_events = deduplicate_goal_events(enriched_events)
+                
+                # ═══════════════════════════════════════════════════════════
+                # ENRIQUECIMENTO DE TIMESTAMPS VIA SRT
+                # Se eventos têm minute=0, tentar obter timestamps do SRT
+                # ═══════════════════════════════════════════════════════════
+                if match_id:
+                    try:
+                        from storage import get_subfolder_path
+                        srt_folder = get_subfolder_path(match_id, 'srt')
+                        
+                        # Buscar SRT do tempo correspondente
+                        srt_candidates = [
+                            srt_folder / f'{match_half}_transcription.srt',
+                            srt_folder / f'{match_half}_half.srt',
+                            srt_folder / f'{match_half}.srt',
+                            srt_folder / 'first_transcription.srt' if match_half == 'first' else srt_folder / 'second_transcription.srt',
+                            srt_folder / 'full_transcription.srt',
+                        ]
+                        
+                        target_srt = None
+                        for candidate in srt_candidates:
+                            if candidate.exists():
+                                target_srt = candidate
+                                break
+                        
+                        # Contar eventos com timestamp zerado
+                        events_needing_timestamps = [
+                            e for e in final_events 
+                            if e.get('event_type') == 'goal' and e.get('minute', 0) == 0 and e.get('videoSecond', 0) == 0
+                        ]
+                        
+                        if events_needing_timestamps:
+                            print(f"[Kakttus] 🔄 {len(events_needing_timestamps)} eventos precisam de timestamps...")
+                            
+                            if target_srt:
+                                print(f"[Kakttus] 📄 Enriquecendo timestamps via SRT: {target_srt.name}")
+                                
+                                # Detectar eventos por keywords para obter timestamps
+                                keyword_events = detect_events_by_keywords(
+                                    srt_path=str(target_srt),
+                                    home_team=home_team,
+                                    away_team=away_team,
+                                    half=match_half,
+                                    segment_start_minute=game_start_minute
+                                )
+                                
+                                keyword_goals = [e for e in keyword_events if e.get('event_type') == 'goal']
+                                print(f"[Kakttus] 📍 SRT detectou {len(keyword_goals)} gols com timestamps")
+                                
+                                # Associar timestamps dos keyword_events aos eventos do Kakttus
+                                for event in final_events:
+                                    if event.get('event_type') == 'goal' and event.get('minute', 0) == 0:
+                                        team = event.get('team', 'unknown')
+                                        # Buscar gol correspondente nos keyword_events
+                                        for ke in keyword_goals:
+                                            if ke.get('team') == team:
+                                                event['minute'] = ke.get('minute', 0)
+                                                event['second'] = ke.get('second', 0)
+                                                event['videoSecond'] = ke.get('videoSecond', 0)
+                                                event['metadata'] = event.get('metadata', {})
+                                                event['metadata']['timestampSource'] = 'srt_enriched'
+                                                event['metadata']['srt_file'] = target_srt.name
+                                                print(f"[Kakttus] ✓ Timestamp atribuído ({team}): {event['minute']}:{event['second']:02d} → videoSecond={event['videoSecond']}")
+                                                keyword_goals.remove(ke)  # Evitar reusar mesmo timestamp
+                                                break
+                            else:
+                                # Fallback: usar detect_events_by_keywords_from_text no próprio texto
+                                print(f"[Kakttus] ⚠ SRT não encontrado, tentando extração de texto...")
+                                keyword_events = detect_events_by_keywords_from_text(
+                                    transcription=transcription,
+                                    home_team=home_team,
+                                    away_team=away_team,
+                                    game_start_minute=game_start_minute
+                                )
+                                
+                                keyword_goals = [e for e in keyword_events if e.get('event_type') == 'goal']
+                                print(f"[Kakttus] 📍 Texto detectou {len(keyword_goals)} gols com timestamps")
+                                
+                                for event in final_events:
+                                    if event.get('event_type') == 'goal' and event.get('minute', 0) == 0:
+                                        team = event.get('team', 'unknown')
+                                        for ke in keyword_goals:
+                                            if ke.get('team') == team:
+                                                event['minute'] = ke.get('minute', 0)
+                                                event['second'] = ke.get('second', 0)
+                                                event['videoSecond'] = ke.get('videoSecond', 0)
+                                                event['metadata'] = event.get('metadata', {})
+                                                event['metadata']['timestampSource'] = 'text_keyword_enriched'
+                                                print(f"[Kakttus] ✓ Timestamp atribuído ({team}): {event['minute']}:{event['second']:02d}")
+                                                keyword_goals.remove(ke)
+                                                break
+                        else:
+                            print(f"[Kakttus] ✓ Todos os eventos já possuem timestamps válidos")
+                                
+                    except Exception as enrich_err:
+                        print(f"[Kakttus] ⚠ Erro ao enriquecer timestamps: {enrich_err}")
+                        import traceback
+                        traceback.print_exc()
                 
                 goals_count = len([e for e in final_events if e.get('event_type') == 'goal'])
                 print(f"[AI] ✓ ANÁLISE COMPLETA (Pipeline Kakttus)")
