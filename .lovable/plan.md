@@ -1,51 +1,50 @@
 
-# Plano: Resolver ImportError do database.py
+
+# Plano: Corrigir models.py Truncado
 
 ## Problema Identificado
 
-O erro `ImportError: cannot import name 'init_db' from 'database'` ocorre mesmo com o arquivo `database.py` contendo a funcao `init_db` corretamente.
+O arquivo `video-processor/models.py` está incompleto. A classe `UploadJob` termina na linha 996 com o dicionário de retorno do método `to_dict()`, mas o arquivo parece estar truncado.
 
-## Causa Provavel
+## Analise do Codigo Atual
 
-Cache Python corrompido ou arquivos `.pyc` desatualizados que nao refletem as mudancas recentes.
-
-## Solucao Recomendada
-
-Execute os seguintes comandos no diretorio `video-processor`:
-
-```text
-cd C:\projetos\arena-tactic-ai\video-processor
+```python
+# Linha 964-996 (final do arquivo)
+def to_dict(self):
+    return {
+        'id': self.id,
+        ...
+        'paused_at': self.paused_at.isoformat() if self.paused_at else None
+    }  # <-- Arquivo termina aqui, sem nova linha
 ```
 
-**Passo 1 - Limpar cache Python:**
-```text
-rmdir /s /q __pycache__
-del *.pyc
+## Causa do Erro
+
+Quando Python tenta importar `models.py`, se o arquivo estiver truncado ou sem nova linha final, o interpretador pode falhar ao parsear. Isso faz com que `Base` não seja definido corretamente, e consequentemente o `database.py` falha ao importar `Base` de `models`.
+
+## Solucao
+
+Adicionar uma linha em branco no final do arquivo `models.py` para garantir que o Python possa parsear corretamente.
+
+## Alteracao Necessaria
+
+| Arquivo | Alteracao |
+|---------|-----------|
+| `video-processor/models.py` | Adicionar linha em branco no final do arquivo (linha 997) |
+
+## Codigo a Adicionar
+
+```python
+# No final do arquivo models.py (apos linha 996)
+        }
+# <- adicionar linha em branco aqui
 ```
 
-**Passo 2 - Reiniciar o servidor:**
-```text
-python server.py
-```
+## Resultado Esperado
 
-## Verificacao Alternativa
+Apos a correcao:
+1. `models.py` sera parseado corretamente pelo Python
+2. `Base` sera importado sem erros em `database.py`
+3. `init_db` estara disponivel para import no `server.py`
+4. O servidor iniciara normalmente
 
-Se o problema persistir, pode testar se o `database.py` carrega corretamente isolado:
-
-```text
-python -c "from database import init_db; print('OK')"
-```
-
-Se isso falhar, o problema esta no `models.py` que e importado pelo `database.py`.
-
-## Detalhes Tecnicos
-
-| Arquivo | Status |
-|---------|--------|
-| `database.py` | Correto - contem `init_db()` na linha 32 |
-| `models.py` | Correto - 996 linhas sem erros de sintaxe |
-| Cache | Possivelmente corrompido |
-
-## Acao que NAO Requer Codigo
-
-Este problema e resolvido apenas com limpeza de cache - nao ha alteracao de codigo necessaria.
