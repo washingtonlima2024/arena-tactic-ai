@@ -54,7 +54,7 @@ export function Header({ onMenuClick }: HeaderProps) {
     return `${mins}:${secs.toString().padStart(2, '0')}`;
   };
 
-  const displayName = user?.user_metadata?.display_name || user?.email?.split('@')[0] || 'Usuário';
+  const displayName = user?.display_name || user?.email?.split('@')[0] || 'Usuário';
 
   return (
     <header className="sticky top-0 z-30 flex h-14 md:h-16 items-center justify-between border-b border-border bg-background/80 px-4 md:px-6 backdrop-blur-xl">
