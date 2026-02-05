@@ -476,7 +476,6 @@ def is_other_game_commentary(
     return False
 
 
-def validate_card_event(
 # ═══════════════════════════════════════════════════════════════════════════
 # KAKTTUS AI - Funções principais de análise
 # ═══════════════════════════════════════════════════════════════════════════
