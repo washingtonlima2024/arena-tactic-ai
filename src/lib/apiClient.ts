@@ -452,7 +452,7 @@ export const apiClient = {
   delete: <T = any>(endpoint: string) => apiRequest<T>(endpoint, { method: 'DELETE' }),
 
   // ============== Configuration ==============
-  setApiUrl: (url: string) => localStorage.setItem('arenaApiUrl', url),
+  setApiUrl: (url: string) => localStorage.setItem('arena_api_base', url),
   getApiUrl: () => getApiBase(),
   isServerAvailable: isLocalServerAvailable,
   resetServerCache: resetServerAvailability,

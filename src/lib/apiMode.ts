@@ -16,7 +16,7 @@ const LOCAL_ENDPOINTS = [
 ];
 
 const DEFAULT_LOCAL_URL = 'http://10.0.0.20:5000';
-const CLOUDFLARE_STORAGE_KEY = 'arena_cloudflare_url';
+const CLOUDFLARE_STORAGE_KEY = 'arena_api_base';
 const DISCOVERED_SERVER_KEY = 'arena_discovered_server';
 
 export type ApiMode = 'local' | 'cloudflare' | 'production' | 'nginx';
