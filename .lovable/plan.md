@@ -1,50 +1,63 @@
 
 
-# Plano: Corrigir models.py Truncado
+# Plano: Diagnosticar e Resolver ImportError
 
-## Problema Identificado
+## Diagnóstico
 
-O arquivo `video-processor/models.py` está incompleto. A classe `UploadJob` termina na linha 996 com o dicionário de retorno do método `to_dict()`, mas o arquivo parece estar truncado.
+Os arquivos no repositório estão corretos:
+- `models.py` - 997 linhas, sintaxe OK, `Base` definido na linha 11
+- `database.py` - 84 linhas, sintaxe OK, `init_db` definido na linha 32
 
-## Analise do Codigo Atual
+O erro indica que o **arquivo local pode estar diferente** do repositório ou há **cache Python corrompido**.
 
-```python
-# Linha 964-996 (final do arquivo)
-def to_dict(self):
-    return {
-        'id': self.id,
-        ...
-        'paused_at': self.paused_at.isoformat() if self.paused_at else None
-    }  # <-- Arquivo termina aqui, sem nova linha
+## Passos de Resolução
+
+### Passo 1 - Testar imports isoladamente
+
+Execute no terminal:
+```text
+cd C:\projetos\arena-tactic-ai\video-processor
+python -c "from models import Base; print('models OK')"
 ```
 
-## Causa do Erro
+Se falhar, o problema está no `models.py` local.
 
-Quando Python tenta importar `models.py`, se o arquivo estiver truncado ou sem nova linha final, o interpretador pode falhar ao parsear. Isso faz com que `Base` não seja definido corretamente, e consequentemente o `database.py` falha ao importar `Base` de `models`.
+### Passo 2 - Limpar cache Python completamente
 
-## Solucao
-
-Adicionar uma linha em branco no final do arquivo `models.py` para garantir que o Python possa parsear corretamente.
-
-## Alteracao Necessaria
-
-| Arquivo | Alteracao |
-|---------|-----------|
-| `video-processor/models.py` | Adicionar linha em branco no final do arquivo (linha 997) |
-
-## Codigo a Adicionar
-
-```python
-# No final do arquivo models.py (apos linha 996)
-        }
-# <- adicionar linha em branco aqui
+```text
+cd C:\projetos\arena-tactic-ai\video-processor
+rmdir /s /q __pycache__
+del /s /q *.pyc
 ```
 
-## Resultado Esperado
+### Passo 3 - Verificar se há outro arquivo `database.py`
 
-Apos a correcao:
-1. `models.py` sera parseado corretamente pelo Python
-2. `Base` sera importado sem erros em `database.py`
-3. `init_db` estara disponivel para import no `server.py`
-4. O servidor iniciara normalmente
+Pode haver conflito com outro módulo `database`:
+```text
+python -c "import database; print(database.__file__)"
+```
+
+Se mostrar um caminho diferente de `video-processor\database.py`, há conflito.
+
+### Passo 4 - Sincronizar com repositório
+
+Se o arquivo local estiver diferente, sincronize:
+```text
+git checkout video-processor/models.py
+git checkout video-processor/database.py
+```
+
+### Passo 5 - Executar servidor
+
+```text
+python server.py
+```
+
+## Causa Mais Provável
+
+O cache Python (`__pycache__`) está mantendo uma versão antiga do módulo compilado que não reflete o código atual.
+
+## Nenhuma Alteração de Código Necessária
+
+Este é um problema de ambiente local, não de código.
 
