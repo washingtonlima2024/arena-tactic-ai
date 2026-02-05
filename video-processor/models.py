@@ -27,6 +27,7 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     display_name = Column(String(255))
     is_active = Column(Boolean, default=True)
+    is_approved = Column(Boolean, default=False)  # Requires SuperAdmin approval
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -40,6 +41,7 @@ class User(Base):
             'id': self.id,
             'display_name': self.display_name,
             'is_active': self.is_active,
+            'is_approved': self.is_approved,
             'created_at': self.created_at.isoformat() if self.created_at else None,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None
         }

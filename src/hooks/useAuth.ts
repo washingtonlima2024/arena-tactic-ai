@@ -1,16 +1,38 @@
 /**
- * useAuth - Autenticação com Supabase real
+ * useAuth - Autenticação 100% Local (JWT + SQLite)
  * Sistema de roles: superadmin, org_admin, manager, uploader, viewer
+ * Sem dependência do Supabase para autenticação
  */
 import { useState, useEffect, useCallback } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 
 export type AppRole = 'superadmin' | 'org_admin' | 'manager' | 'uploader' | 'viewer' | 'admin' | 'user';
 
+interface LocalUser {
+  id: string;
+  email: string;
+  display_name?: string;
+  is_active: boolean;
+  is_approved: boolean;
+  role: AppRole;
+  profile?: {
+    phone?: string;
+    cpf_cnpj?: string;
+    address_cep?: string;
+    address_street?: string;
+    address_number?: string;
+    address_complement?: string;
+    address_neighborhood?: string;
+    address_city?: string;
+    address_state?: string;
+    credits_balance?: number;
+    organization_id?: string;
+  };
+}
+
 interface AuthState {
-  user: User | null;
-  session: Session | null;
+  user: LocalUser | null;
+  token: string | null;
   isLoading: boolean;
   role: AppRole | null;
   // Hierarquia de permissões
@@ -39,7 +61,10 @@ const ROLE_HIERARCHY: Record<AppRole, number> = {
   user: 20, // legacy
 };
 
-function getPermissionsFromRole(role: AppRole | null): Omit<AuthState, 'user' | 'session' | 'isLoading' | 'role'> {
+const TOKEN_KEY = 'arena_auth_token';
+const USER_KEY = 'arena_auth_user';
+
+function getPermissionsFromRole(role: AppRole | null): Omit<AuthState, 'user' | 'token' | 'isLoading' | 'role'> {
   const roleLevel = role ? ROLE_HIERARCHY[role] || 0 : 0;
   
   return {
@@ -59,90 +84,90 @@ function getPermissionsFromRole(role: AppRole | null): Omit<AuthState, 'user' | 
 }
 
 export function useAuth() {
-  const [authState, setAuthState] = useState<AuthState>({
-    user: null,
-    session: null,
-    isLoading: true,
-    role: null,
-    ...getPermissionsFromRole(null),
+  const [authState, setAuthState] = useState<AuthState>(() => {
+    // Inicializar do localStorage se disponível
+    const storedToken = localStorage.getItem(TOKEN_KEY);
+    const storedUser = localStorage.getItem(USER_KEY);
+    
+    if (storedToken && storedUser) {
+      try {
+        const user = JSON.parse(storedUser) as LocalUser;
+        return {
+          user,
+          token: storedToken,
+          isLoading: true, // Will verify token
+          role: user.role,
+          ...getPermissionsFromRole(user.role),
+        };
+      } catch {
+        localStorage.removeItem(TOKEN_KEY);
+        localStorage.removeItem(USER_KEY);
+      }
+    }
+    
+    return {
+      user: null,
+      token: null,
+      isLoading: true,
+      role: null,
+      ...getPermissionsFromRole(null),
+    };
   });
 
-  const fetchUserRole = useCallback(async (userId: string) => {
-    try {
-      const { data, error } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', userId)
-        .single();
-
-      if (error) {
-        console.error('Erro ao buscar role do usuário:', error);
-        return 'viewer' as AppRole;
-      }
-
-      return (data?.role as AppRole) || 'viewer';
-    } catch (err) {
-      console.error('Exceção ao buscar role:', err);
-      return 'viewer' as AppRole;
-    }
-  }, []);
-
+  // Verificar token ao inicializar
   useEffect(() => {
-    // 1. Configurar listener de mudanças de auth PRIMEIRO
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        // Update session state synchronously
-        setAuthState(prev => ({
-          ...prev,
-          user: session?.user ?? null,
-          session: session,
-          isLoading: false,
-        }));
-
-        // Fetch role asynchronously with setTimeout to avoid deadlock
-        if (session?.user) {
-          setTimeout(async () => {
-            const role = await fetchUserRole(session.user.id);
-            setAuthState(prev => ({
-              ...prev,
-              role,
-              ...getPermissionsFromRole(role),
-            }));
-          }, 0);
+    const verifyAuth = async () => {
+      const token = localStorage.getItem(TOKEN_KEY);
+      
+      if (!token) {
+        setAuthState(prev => ({ ...prev, isLoading: false }));
+        return;
+      }
+      
+      try {
+        // Verificar se o token ainda é válido chamando /api/auth/me
+        const response = await fetch(`${getApiBaseUrl()}/api/auth/me`, {
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+          },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          const user = data.user as LocalUser;
+          
+          localStorage.setItem(USER_KEY, JSON.stringify(user));
+          
+          setAuthState({
+            user,
+            token,
+            isLoading: false,
+            role: user.role,
+            ...getPermissionsFromRole(user.role),
+          });
         } else {
-          setAuthState(prev => ({
-            ...prev,
+          // Token inválido, limpar storage
+          localStorage.removeItem(TOKEN_KEY);
+          localStorage.removeItem(USER_KEY);
+          
+          setAuthState({
+            user: null,
+            token: null,
+            isLoading: false,
             role: null,
             ...getPermissionsFromRole(null),
-          }));
+          });
         }
+      } catch (error) {
+        console.error('[Auth] Error verifying token:', error);
+        // Manter usuário do localStorage se offline, mas marcar como loading false
+        setAuthState(prev => ({ ...prev, isLoading: false }));
       }
-    );
-
-    // 2. DEPOIS verificar sessão existente
-    supabase.auth.getSession().then(async ({ data: { session } }) => {
-      if (session?.user) {
-        const role = await fetchUserRole(session.user.id);
-        setAuthState({
-          user: session.user,
-          session: session,
-          isLoading: false,
-          role,
-          ...getPermissionsFromRole(role),
-        });
-      } else {
-        setAuthState({
-          user: null,
-          session: null,
-          isLoading: false,
-          role: null,
-          ...getPermissionsFromRole(null),
-        });
-      }
-    });
-
-    return () => subscription.unsubscribe();
-  }, [fetchUserRole]);
+    };
+    
+    verifyAuth();
+  }, []);
 
   const signUp = useCallback(async (
     email: string, 
@@ -159,49 +184,147 @@ export function useAuth() {
       address_city?: string;
       address_state?: string;
     }
-  ) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: `${window.location.origin}/dashboard`,
-        data: { 
-          display_name: displayName || email.split('@')[0],
-          ...profileData
-        }
+  ): Promise<{ data: any; error: { message: string } | null }> => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/auth/register`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({
+          email,
+          password,
+          display_name: displayName,
+          ...profileData,
+        }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        return { data: null, error: { message: data.error || 'Erro no cadastro' } };
       }
-    });
-    return { data, error };
+      
+      // Se usuário foi aprovado automaticamente (primeiro usuário), fazer login
+      if (data.user?.is_approved) {
+        const loginResult = await signIn(email, password);
+        return loginResult;
+      }
+      
+      return { data, error: null };
+    } catch (error: any) {
+      console.error('[Auth] Signup error:', error);
+      return { data: null, error: { message: error.message || 'Erro de conexão' } };
+    }
   }, []);
 
-  const signIn = useCallback(async (email: string, password: string) => {
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    return { data, error };
+  const signIn = useCallback(async (
+    email: string, 
+    password: string
+  ): Promise<{ data: any; error: { message: string } | null }> => {
+    try {
+      const response = await fetch(`${getApiBaseUrl()}/api/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify({ email, password }),
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        return { data: null, error: { message: data.error || 'Email ou senha incorretos' } };
+      }
+      
+      const user = data.user as LocalUser;
+      const token = data.token;
+      
+      // Salvar no localStorage
+      localStorage.setItem(TOKEN_KEY, token);
+      localStorage.setItem(USER_KEY, JSON.stringify(user));
+      
+      // Atualizar estado
+      setAuthState({
+        user,
+        token,
+        isLoading: false,
+        role: user.role,
+        ...getPermissionsFromRole(user.role),
+      });
+      
+      return { data, error: null };
+    } catch (error: any) {
+      console.error('[Auth] Login error:', error);
+      return { data: null, error: { message: error.message || 'Erro de conexão' } };
+    }
   }, []);
 
-  const signOut = useCallback(async () => {
-    const { error } = await supabase.auth.signOut();
-    return { error };
+  const signOut = useCallback(async (): Promise<{ error: { message: string } | null }> => {
+    try {
+      const token = localStorage.getItem(TOKEN_KEY);
+      
+      if (token) {
+        // Tentar invalidar sessão no servidor
+        await fetch(`${getApiBaseUrl()}/api/auth/logout`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${token}`,
+            'Accept': 'application/json',
+          },
+        }).catch(() => {}); // Ignorar erros de logout
+      }
+    } finally {
+      // Sempre limpar localStorage
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(USER_KEY);
+      
+      // Atualizar estado
+      setAuthState({
+        user: null,
+        token: null,
+        isLoading: false,
+        role: null,
+        ...getPermissionsFromRole(null),
+      });
+    }
+    
+    return { error: null };
   }, []);
 
-  const resetPassword = useCallback(async (email: string) => {
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth?mode=reset`,
-    });
-    return { error };
+  // Funções não implementadas no backend local (placeholder para compatibilidade)
+  const resetPassword = useCallback(async (_email: string): Promise<{ error: { message: string } | null }> => {
+    return { error: { message: 'Recuperação de senha não disponível no modo local. Contate o administrador.' } };
   }, []);
 
-  const updatePassword = useCallback(async (newPassword: string) => {
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-    return { error };
+  const updatePassword = useCallback(async (_newPassword: string): Promise<{ error: { message: string } | null }> => {
+    return { error: { message: 'Alteração de senha não disponível. Contate o administrador.' } };
   }, []);
 
   return {
     ...authState,
+    // Compatibility with old interface
+    session: authState.token ? { access_token: authState.token } : null,
     signUp,
     signIn,
     signOut,
     resetPassword,
     updatePassword,
   };
+}
+
+// Helper to get API base URL
+function getApiBaseUrl(): string {
+  // Import dinamicamente para evitar dependência circular
+  const stored = localStorage.getItem('arenaApiUrl');
+  if (stored) return stored;
+  
+  // Check for production env variable
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  if (envUrl) return envUrl;
+  
+  // Default para desenvolvimento local
+  return 'http://localhost:5000';
 }

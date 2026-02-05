@@ -10300,24 +10300,204 @@ def update_subscription_plan(plan_id):
         session.close()
 
 
+# ============== Auth Endpoints (100% Local) ==============
+import auth_local
+
+@app.route('/api/auth/register', methods=['POST', 'OPTIONS'])
+def auth_register():
+    """Register a new user. First user is auto-approved and becomes superadmin."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    session = get_session()
+    try:
+        data = request.get_json()
+        
+        if not data.get('email') or not data.get('password'):
+            return jsonify({'error': 'Email e senha são obrigatórios'}), 400
+        
+        user, error = auth_local.register_user(
+            session,
+            email=data['email'],
+            password=data['password'],
+            display_name=data.get('display_name'),
+            phone=data.get('phone'),
+            cpf_cnpj=data.get('cpf_cnpj'),
+            address_cep=data.get('address_cep'),
+            address_street=data.get('address_street'),
+            address_number=data.get('address_number'),
+            address_complement=data.get('address_complement'),
+            address_neighborhood=data.get('address_neighborhood'),
+            address_city=data.get('address_city'),
+            address_state=data.get('address_state')
+        )
+        
+        if error:
+            return jsonify({'error': error}), 400
+        
+        return jsonify({
+            'success': True,
+            'user': user,
+            'message': 'Cadastro realizado com sucesso!' if user.get('is_approved') else 'Cadastro realizado! Aguarde aprovação do administrador.'
+        }), 201
+    except Exception as e:
+        session.rollback()
+        print(f"[Auth] Registration error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/auth/login', methods=['POST', 'OPTIONS'])
+def auth_login():
+    """Authenticate user and return JWT token."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    session = get_session()
+    try:
+        data = request.get_json()
+        
+        if not data.get('email') or not data.get('password'):
+            return jsonify({'error': 'Email e senha são obrigatórios'}), 400
+        
+        user, token, error = auth_local.authenticate_user(
+            session,
+            email=data['email'],
+            password=data['password']
+        )
+        
+        if error:
+            return jsonify({'error': error}), 401
+        
+        return jsonify({
+            'success': True,
+            'user': user,
+            'token': token,
+            'role': user.get('role', 'viewer')
+        })
+    except Exception as e:
+        print(f"[Auth] Login error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/auth/logout', methods=['POST', 'OPTIONS'])
+def auth_logout():
+    """Invalidate user session."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    session = get_session()
+    try:
+        token = auth_local.get_token_from_request()
+        if token:
+            auth_local.logout_user(session, token)
+        
+        return jsonify({'success': True})
+    except Exception as e:
+        print(f"[Auth] Logout error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/auth/me', methods=['GET', 'OPTIONS'])
+def auth_me():
+    """Get current authenticated user."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    session = get_session()
+    try:
+        current_user = auth_local.get_current_user()
+        if not current_user:
+            return jsonify({'error': 'Not authenticated'}), 401
+        
+        user = auth_local.get_user_by_id(session, current_user['sub'])
+        if not user:
+            return jsonify({'error': 'User not found'}), 404
+        
+        return jsonify({
+            'success': True,
+            'user': user
+        })
+    except Exception as e:
+        print(f"[Auth] Get me error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/admin/users/<user_id>/approve', methods=['POST', 'OPTIONS'])
+def approve_user(user_id):
+    """Approve a pending user (SuperAdmin only)."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    session = get_session()
+    try:
+        success, error = auth_local.approve_user(session, user_id)
+        
+        if error:
+            return jsonify({'error': error}), 400
+        
+        return jsonify({'success': True, 'user_id': user_id})
+    except Exception as e:
+        session.rollback()
+        print(f"[Auth] Approve user error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/admin/users/<user_id>/reject', methods=['POST', 'OPTIONS'])
+def reject_user(user_id):
+    """Reject/deactivate a pending user (SuperAdmin only)."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    session = get_session()
+    try:
+        success, error = auth_local.reject_user(session, user_id)
+        
+        if error:
+            return jsonify({'error': error}), 400
+        
+        return jsonify({'success': True, 'user_id': user_id})
+    except Exception as e:
+        session.rollback()
+        print(f"[Auth] Reject user error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/admin/users/pending', methods=['GET', 'OPTIONS'])
+def get_pending_users():
+    """Get all users pending approval."""
+    if request.method == 'OPTIONS':
+        return '', 204
+    
+    session = get_session()
+    try:
+        users = auth_local.get_pending_users(session)
+        return jsonify(users)
+    except Exception as e:
+        print(f"[Auth] Get pending users error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
 # ============== Admin Users ==============
 @app.route('/api/admin/users', methods=['GET'])
 def get_admin_users():
     """List all users with their profiles and roles."""
     session = get_session()
     try:
-        profiles = session.query(Profile).order_by(Profile.created_at.desc()).all()
-        roles = session.query(UserRole).all()
-        
-        # Create role lookup
-        role_map = {r.user_id: r.role for r in roles}
-        
-        users = []
-        for profile in profiles:
-            user_dict = profile.to_dict()
-            user_dict['role'] = role_map.get(profile.user_id, 'user')
-            users.append(user_dict)
-        
+        users = auth_local.get_all_users(session)
         return jsonify(users)
     finally:
         session.close()
