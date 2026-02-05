@@ -67,6 +67,13 @@ MIGRATIONS = [
         'type': 'BOOLEAN',
         'default': '0'
     },
+    # User - approval system
+    {
+        'table': 'users',
+        'column': 'is_approved',
+        'type': 'BOOLEAN',
+        'default': '0'
+    },
     # Profile - new fields for complete registration
     {
         'table': 'profiles',
