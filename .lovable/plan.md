@@ -1,52 +1,58 @@
 
+## Plano: Trocar "Visualizador" por "Espectador"
 
-# Plano: Corrigir Inconsistência nas Chaves do localStorage
+### Problema
+A palavra "Visualizador" é usada para descrever o role de menor permissão (apenas leitura). O usuário quer trocar por "Espectador".
 
-## Problema Identificado
+### Localização das Alterações
 
-Existe uma **inconsistência fatal** nas chaves do localStorage entre dois arquivos:
+Encontrei 4 ocorrências de "Visualizador" em 3 arquivos:
 
-| Arquivo | O que faz | Chave que usa |
-|---------|-----------|---------------|
-| `src/pages/Landing.tsx` | Salva URL do servidor | `arena_api_base` |
-| `src/hooks/useAuth.ts` | Lê URL para fazer login | `arenaApiUrl` |
+| Arquivo | Linha | Contexto |
+|---------|-------|----------|
+| `src/components/admin/UsersManager.tsx` | 26 | `ROLE_LABELS` - dicionário de labels dos roles |
+| `src/components/admin/UsersManager.tsx` | 31 | `ROLE_OPTIONS` - opção de role com label e descrição |
+| `src/components/auth/RoleBadge.tsx` | 45 | `ROLE_CONFIG` - configuração de badge do role |
+| `src/components/auth/RequireAuth.tsx` | 26 | `ROLE_LABELS` - dicionário de labels dos roles |
 
-**Resultado**: Você configura a URL do Cloudflare na Landing, ela é salva em `arena_api_base`, mas quando tenta fazer login, o hook lê de `arenaApiUrl` (que está vazio) e usa o fallback `http://localhost:5000`.
-
-Por isso as requisições mostram:
-```
-POST http://localhost:5000/api/auth/login
-Error: Failed to fetch
-```
-
-## Solução
-
-Unificar para usar **uma única chave**: `arena_api_base` (a mais usada no projeto).
-
-## Alterações Necessárias
-
-| Arquivo | Alteração |
-|---------|-----------|
-| `src/hooks/useAuth.ts` | Mudar de `arenaApiUrl` para `arena_api_base` |
-
-## Código a Alterar
+### Alterações Necessárias
 
 ```typescript
-// src/hooks/useAuth.ts - função getApiBaseUrl()
+// src/components/admin/UsersManager.tsx
+const ROLE_LABELS: Record<string, string> = {
+  // ... outros roles ...
+  viewer: 'Espectador',  // Era 'Visualizador'
+};
 
-// ANTES (linha 321):
-const stored = localStorage.getItem('arenaApiUrl');
+const ROLE_OPTIONS = [
+  { value: 'viewer', label: 'Espectador', description: 'Apenas visualização' },
+  // ... outros roles ...
+];
 
-// DEPOIS:
-const stored = localStorage.getItem('arena_api_base');
+// src/components/auth/RoleBadge.tsx
+const ROLE_CONFIG: Record<AppRole, { ... }> = {
+  // ... outros roles ...
+  viewer: {
+    label: 'Espectador',  // Era 'Visualizador'
+    variant: 'outline',
+    icon: Eye,
+    color: '',
+  },
+};
+
+// src/components/auth/RequireAuth.tsx
+const ROLE_LABELS: Record<string, string> = {
+  // ... outros roles ...
+  viewer: 'Espectador',  // Era 'Visualizador'
+};
 ```
 
-## Resultado Esperado
+### Impacto
+- **Afeta a interface**: Labels e badges dos usuários com role `viewer` mostrarão "Espectador"
+- **Sem mudanças de backend**: O valor da role (`viewer`) permanece o mesmo
+- **Compatibilidade**: Usuários existentes com role `viewer` funcionarão normalmente
 
-Após a correção:
-1. Você configura a URL na Landing: `https://euro-rocky-surround-regularly.trycloudflare.com`
-2. A URL é salva em `arena_api_base`
-3. O hook `useAuth` lê a mesma chave
-4. Login faz requisição para `https://euro-rocky-surround-regularly.trycloudflare.com/api/auth/login`
-5. Login funciona com `washington@kakttus.com` / `arena2025`
-
+### Ordem de Execução
+1. Atualizar `src/components/admin/UsersManager.tsx` (2 linhas)
+2. Atualizar `src/components/auth/RoleBadge.tsx` (1 linha)
+3. Atualizar `src/components/auth/RequireAuth.tsx` (1 linha)
