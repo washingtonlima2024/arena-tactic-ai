@@ -14,6 +14,16 @@ from typing import Optional, List, Dict, Any, Tuple
 from pathlib import Path
 from datetime import datetime
 
+# ═══════════════════════════════════════════════════════════════════════════
+# KAKTTUS AI - Modelo local especializado em futebol brasileiro
+# ═══════════════════════════════════════════════════════════════════════════
+
+KAKTTUS_SYSTEM_PROMPT = (
+    "Você é a IA Kakttus, especialista em futebol brasileiro. "
+    "Use raciocínio tático e contextual para analisar transcrições de partidas. "
+    "Retorne SOMENTE JSON válido, sem texto adicional."
+)
+
 # Carregar variáveis de ambiente do .env
 from dotenv import load_dotenv
 load_dotenv()
@@ -464,6 +474,305 @@ def is_other_game_commentary(
             return True
     
     return False
+
+
+def validate_card_event(
+# ═══════════════════════════════════════════════════════════════════════════
+# KAKTTUS AI - Funções principais de análise
+# ═══════════════════════════════════════════════════════════════════════════
+
+def ask_kakttus(system: str, user: str, timeout: int = 120) -> str:
+    """
+    Chama Ollama com modelo Kakttus (washingtonlima/kakttus).
+    
+    Args:
+        system: System prompt
+        user: User prompt
+        timeout: Timeout em segundos
+    
+    Returns:
+        Resposta da IA como string
+    """
+    payload = {
+        "model": OLLAMA_MODEL,  # washingtonlima/kakttus
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "stream": False,
+        "options": {
+            "temperature": 0.1,
+            "num_predict": 4096
+        }
+    }
+    
+    try:
+        print(f"[Kakttus] Chamando {OLLAMA_MODEL} em {OLLAMA_URL}...")
+        r = requests.post(f"{OLLAMA_URL}/api/chat", json=payload, timeout=timeout)
+        r.raise_for_status()
+        data = r.json()
+        content = (data.get("message") or {}).get("content", "").strip()
+        print(f"[Kakttus] Resposta: {len(content)} chars")
+        return content
+    except requests.exceptions.Timeout:
+        print(f"[Kakttus] ⚠ Timeout após {timeout}s")
+        return ""
+    except Exception as e:
+        print(f"[Kakttus] ❌ Erro: {e}")
+        return ""
+
+
+def extract_json_from_kakttus(txt: str) -> Optional[Dict]:
+    """
+    Extrai JSON de uma resposta que pode conter texto extra.
+    Suporta JSON wrapped em markdown code blocks.
+    """
+    if not txt:
+        return None
+    
+    # Remover markdown code blocks
+    if '```' in txt:
+        match = re.search(r'```(?:json)?\s*([\s\S]*?)```', txt)
+        if match:
+            txt = match.group(1).strip()
+    
+    # Tentar encontrar objeto JSON {...}
+    obj_match = re.search(r'\{.*\}', txt, flags=re.DOTALL)
+    if obj_match:
+        try:
+            return json.loads(obj_match.group(0))
+        except json.JSONDecodeError:
+            pass
+    
+    # Tentar encontrar array JSON [...]
+    arr_match = re.search(r'\[.*\]', txt, flags=re.DOTALL)
+    if arr_match:
+        try:
+            arr = json.loads(arr_match.group(0))
+            return {"events": arr}
+        except json.JSONDecodeError:
+            pass
+    
+    return None
+
+
+def analyze_with_kakttus(
+    transcript: str,
+    home_team: str,
+    away_team: str,
+    match_half: str = "first"
+) -> Dict[str, Any]:
+    """
+    Analisa transcrição com modelo Kakttus.
+    Retorna eventos detectados, resumo do tempo e análise tática.
+    
+    Args:
+        transcript: Texto da transcrição (SRT ou TXT)
+        home_team: Nome do time da casa
+        away_team: Nome do time visitante
+        match_half: 'first' ou 'second'
+    
+    Returns:
+        {"events": [...], "summary": "...", "tactical": "..."}
+    """
+    half_desc = "1º Tempo" if match_half == "first" else "2º Tempo"
+    
+    max_chars = 25000
+    transcript_truncated = transcript[:max_chars] if len(transcript) > max_chars else transcript
+    if len(transcript) > max_chars:
+        print(f"[Kakttus] Transcrição truncada: {len(transcript)} → {max_chars} chars")
+    
+    user_prompt = f"""Analise esta transcrição de {half_desc}:
+
+Times:
+home = {home_team}
+away = {away_team}
+
+Transcrição:
+{transcript_truncated}
+
+Retorne neste formato JSON:
+{{
+  "events": [
+    {{
+      "event_type": "goal",
+      "team": "home" ou "away",
+      "minute": 23,
+      "second": 45,
+      "detail": "Gol de cabeça após escanteio",
+      "confidence": 0.95,
+      "isOwnGoal": false
+    }}
+  ],
+  "summary": "Resumo do {half_desc} em 1-2 frases",
+  "tactical": "Análise tática: formação, pressão, transições, destaques"
+}}
+
+Tipos de evento: goal, penalty, save, chance, foul, corner, shot, yellow_card, red_card
+
+REGRAS CRÍTICAS:
+1. Use o timestamp do bloco SRT (00:MM:SS), NÃO o minuto falado pelo narrador
+2. Detecte "gol contra" (own goal) quando o narrador mencionar
+3. Seja conservador: só registre eventos com evidência clara no texto
+4. Para gols, identifique o time que MARCOU (não o que sofreu)
+"""
+    
+    raw = ask_kakttus(KAKTTUS_SYSTEM_PROMPT, user_prompt)
+    
+    if not raw:
+        print(f"[Kakttus] ⚠ Sem resposta, retornando vazio")
+        return {"events": [], "summary": "", "tactical": ""}
+    
+    print(f"[Kakttus] === RESPOSTA BRUTA (primeiros 500 chars) ===")
+    print(raw[:500])
+    print(f"[Kakttus] === FIM (total: {len(raw)} chars) ===")
+    
+    result = extract_json_from_kakttus(raw)
+    
+    if not result:
+        print(f"[Kakttus] ⚠ Falha ao parsear JSON")
+        return {"events": [], "summary": "", "tactical": ""}
+    
+    events = result.get("events", [])
+    summary = result.get("summary", "")
+    tactical = result.get("tactical", "")
+    
+    goals = [e for e in events if e.get('event_type') == 'goal']
+    print(f"[Kakttus] ✓ Detectados: {len(events)} eventos, {len(goals)} gols")
+    for g in goals:
+        own_goal = " (GOL CONTRA)" if g.get('isOwnGoal') else ""
+        print(f"[Kakttus] ⚽ GOL: {g.get('minute', 0)}'{g.get('second', 0):02d}\" - {g.get('team', 'unknown')}{own_goal}")
+    
+    return {"events": events, "summary": summary, "tactical": tactical}
+
+
+def consolidate_match_analysis(
+    first_half_analysis: Dict,
+    second_half_analysis: Dict,
+    home_team: str,
+    away_team: str
+) -> Dict[str, Any]:
+    """
+    Consolida análises de 1º e 2º tempo em uma análise completa.
+    Usa Kakttus para gerar visão tática unificada.
+    """
+    all_events = (
+        first_half_analysis.get('events', []) + 
+        second_half_analysis.get('events', [])
+    )
+    
+    home_score = 0
+    away_score = 0
+    for event in all_events:
+        if event.get('event_type') == 'goal':
+            team = event.get('team', 'unknown')
+            is_own_goal = event.get('isOwnGoal', False)
+            
+            if is_own_goal:
+                if team == 'home':
+                    away_score += 1
+                else:
+                    home_score += 1
+            else:
+                if team == 'home':
+                    home_score += 1
+                else:
+                    away_score += 1
+    
+    if not second_half_analysis or not second_half_analysis.get('events'):
+        print(f"[Consolidate] Apenas 1º tempo disponível")
+        return {
+            "events": all_events,
+            "first_half": first_half_analysis,
+            "second_half": {},
+            "consolidated": {
+                "match_summary": first_half_analysis.get('summary', ''),
+                "tactical_full": first_half_analysis.get('tactical', ''),
+                "key_moments": [],
+                "performance": {"home": "", "away": ""}
+            },
+            "score": {"home": home_score, "away": away_score},
+            "consolidated_at": datetime.utcnow().isoformat() + "Z"
+        }
+    
+    combined_prompt = f"""Com base nestas análises parciais, gere uma análise tática COMPLETA:
+
+PARTIDA: {home_team} {home_score} x {away_score} {away_team}
+
+1º TEMPO:
+Resumo: {first_half_analysis.get('summary', 'N/A')}
+Tática: {first_half_analysis.get('tactical', 'N/A')}
+
+2º TEMPO:  
+Resumo: {second_half_analysis.get('summary', 'N/A')}
+Tática: {second_half_analysis.get('tactical', 'N/A')}
+
+Retorne JSON:
+{{
+  "match_summary": "Resumo completo da partida (3-4 frases)",
+  "tactical_full": "Análise tática completa da partida",
+  "key_moments": ["Momento 1", "Momento 2"],
+  "performance": {{
+    "home": "Avaliação do time da casa",
+    "away": "Avaliação do time visitante"
+  }}
+}}
+"""
+    
+    print(f"[Consolidate] Gerando análise consolidada com Kakttus...")
+    raw = ask_kakttus(KAKTTUS_SYSTEM_PROMPT, combined_prompt)
+    consolidated = extract_json_from_kakttus(raw) or {}
+    
+    if consolidated:
+        print(f"[Consolidate] ✓ Análise consolidada gerada")
+    else:
+        print(f"[Consolidate] ⚠ Fallback para dados parciais")
+        consolidated = {
+            "match_summary": f"{home_team} {home_score} x {away_score} {away_team}",
+            "tactical_full": "",
+            "key_moments": [],
+            "performance": {"home": "", "away": ""}
+        }
+    
+    return {
+        "events": all_events,
+        "first_half": first_half_analysis,
+        "second_half": second_half_analysis,
+        "consolidated": consolidated,
+        "score": {"home": home_score, "away": away_score},
+        "consolidated_at": datetime.utcnow().isoformat() + "Z"
+    }
+
+
+def save_half_analysis(match_id: str, match_half: str, analysis: Dict) -> bool:
+    """
+    Salva análise de um tempo em arquivo JSON.
+    """
+    try:
+        from storage import get_subfolder_path
+        json_path = get_subfolder_path(match_id, 'json')
+        
+        filename = f"analysis_{match_half}_half.json"
+        filepath = json_path / filename
+        
+        analysis['match_id'] = match_id
+        analysis['half'] = match_half
+        analysis['analyzed_at'] = datetime.utcnow().isoformat() + "Z"
+        
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(analysis, f, ensure_ascii=False, indent=2)
+        
+        print(f"[Kakttus] ✓ Análise salva: json/{filename}")
+        return True
+        
+    except Exception as e:
+        print(f"[Kakttus] ❌ Erro ao salvar análise: {e}")
+        return False
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# FIM - Funções Kakttus
+# ═══════════════════════════════════════════════════════════════════════════
 
 
 def validate_card_event(
