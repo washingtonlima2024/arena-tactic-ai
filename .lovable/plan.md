@@ -1,81 +1,120 @@
 
-
-# Plano: Corrigir Persistência de Chunks no Upload
+# Plano: Conectar o Pipeline Kakttus ao Fluxo Principal
 
 ## Problema Identificado
 
-O upload de arquivos grandes está falhando com o erro:
+As novas funcoes foram criadas, mas NAO estao sendo usadas:
+
+```text
+FLUXO ATUAL (QUEBRADO):
+analyze_match_events()
+    ↓
+_analyze_events_with_ollama()
+    ↓
+Salva: detected_events_first.json
+       validated_events_first.json
+    ↓
+[CONSOLIDACAO ESPERA]: analysis_first_half.json ❌ NAO EXISTE!
 ```
-Partes faltando: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]...
-```
 
-### Causa Raiz
-O SQLAlchemy não detecta automaticamente mutações em colunas JSON/Lista. Quando `received_chunks` é modificado via `append()` e `sort()`, o SQLAlchemy não marca o campo como "dirty" e não salva as alterações no banco de dados.
+## Solucao
 
-O mesmo problema afeta `events_log`.
+Modificar `analyze_match_events()` para usar o novo pipeline Kakttus e salvar os arquivos corretos.
 
-## Alteração Necessária
+## Alteracoes no ai_services.py
 
-### Arquivo: `video-processor/chunked_upload.py`
+### Linha 5038-5120: Substituir chamada antiga por nova
 
-Adicionar `flag_modified()` após modificar campos JSON para forçar o SQLAlchemy a persistir as alterações.
-
-### Código Atual (Linha 166-171):
+**Codigo Atual:**
 ```python
-received = job.received_chunks or []
-if chunk_index not in received:
-    received.append(chunk_index)
-    received.sort()
-job.received_chunks = received
+if use_ollama_flow:
+    try:
+        events = _analyze_events_with_ollama(
+            transcription=transcription,
+            home_team=home_team,
+            away_team=away_team,
+            ...
+        )
 ```
 
-### Código Corrigido:
+**Codigo Novo:**
 ```python
-from sqlalchemy.orm.attributes import flag_modified
-
-received = list(job.received_chunks or [])  # Criar cópia
-if chunk_index not in received:
-    received.append(chunk_index)
-    received.sort()
-job.received_chunks = received
-flag_modified(job, 'received_chunks')  # Forçar detecção de mudança
+if use_ollama_flow:
+    try:
+        # NOVO PIPELINE KAKTTUS
+        print(f"[AI] Usando pipeline Kakttus para {match_half} tempo...")
+        
+        # 1. Analise com Kakttus (retorna events + summary + tactical)
+        kakttus_result = analyze_with_kakttus(
+            transcript=transcription,
+            home_team=home_team,
+            away_team=away_team,
+            match_half=match_half
+        )
+        
+        events = kakttus_result.get('events', [])
+        
+        # 2. Salvar analise do tempo (JSON que o consolidador espera)
+        if match_id:
+            save_half_analysis(match_id, match_half, {
+                'events': events,
+                'summary': kakttus_result.get('summary', ''),
+                'tactical': kakttus_result.get('tactical', ''),
+                'analyzed_at': datetime.utcnow().isoformat() + "Z",
+                'home_team': home_team,
+                'away_team': away_team
+            })
+        
+        # 3. Continua com enriquecimento e deduplicacao...
 ```
 
-### Também corrigir `events_log` (Linha 181-186):
-```python
-events = list(job.events_log or [])  # Criar cópia
-events.append({
-    'timestamp': datetime.utcnow().isoformat(),
-    'message': f'{progress}% enviado ({len(received)}/{job.total_chunks} partes)'
-})
-job.events_log = events
-flag_modified(job, 'events_log')  # Forçar detecção de mudança
+## Arquivos que Serao Gerados Apos Correcao
+
+| Arquivo | Conteudo |
+|---------|----------|
+| `analysis_first_half.json` | Events + Summary + Tactical do 1o tempo |
+| `analysis_second_half.json` | Events + Summary + Tactical do 2o tempo |
+| `match_analysis_full.json` | Consolidacao automatica (quando ambos existem) |
+
+## Fluxo Corrigido
+
+```text
+NOVO FLUXO:
+analyze_match_events()
+    ↓
+analyze_with_kakttus()  ← NOVO
+    ↓
+save_half_analysis()    ← NOVO  
+    ↓
+Salva: analysis_first_half.json ✓
+    ↓
+[2o tempo processado]
+    ↓
+Salva: analysis_second_half.json ✓
+    ↓
+[CONSOLIDACAO AUTOMATICA]
+    ↓
+Gera: match_analysis_full.json ✓
 ```
 
-## Outras Funções a Corrigir
+## Detalhes Tecnicos
 
-O mesmo problema existe em outras funções do `chunked_upload.py`:
+### Arquivo: video-processor/ai_services.py
 
-| Função | Campo Afetado | Linha |
-|--------|---------------|-------|
-| `init_upload()` | `events_log` | 113-117 |
-| `receive_chunk()` | `received_chunks`, `events_log` | 166-186 |
-| `assemble_chunks()` | `events_log` | 263-268, 296-301 |
-| `pause_upload()` | `events_log` | 396-401 |
-| `resume_upload()` | `events_log` | 421-426 |
-| `cancel_upload()` | `events_log` | 447-452 |
+Alteracoes necessarias:
+- Linhas 5038-5120: Substituir bloco `if use_ollama_flow` para chamar `analyze_with_kakttus` e `save_half_analysis`
+- Manter deduplicacao e enriquecimento de eventos apos a analise
 
-## Resumo da Correção
+### Funcoes que Serao Usadas (ja existem)
 
-1. Importar `flag_modified` no topo do arquivo
-2. Sempre criar uma **cópia** da lista antes de modificar (evita referência compartilhada)
-3. Chamar `flag_modified(job, 'campo')` após atribuir o novo valor
-4. Garantir que o `session.commit()` persista as alterações
+| Funcao | Linha | Proposito |
+|--------|-------|-----------|
+| `analyze_with_kakttus()` | 559 | Analisa transcricao e retorna events/summary/tactical |
+| `save_half_analysis()` | 747 | Salva JSON do tempo analisado |
+| `consolidate_match_analysis()` | 649 | Combina tempos em analise completa |
 
 ## Resultado Esperado
 
-Após a correção:
-- Todos os chunks enviados serão registrados corretamente no banco
-- O progresso do upload será calculado e exibido corretamente
-- A montagem do arquivo final funcionará sem erros de "partes faltando"
-
+1. Cada tempo analisado gera seu arquivo `analysis_{half}_half.json`
+2. Quando ambos existem, consolidacao automatica cria `match_analysis_full.json`
+3. Chatbot Arena pode usar os 3 arquivos para responder perguntas sobre a partida
