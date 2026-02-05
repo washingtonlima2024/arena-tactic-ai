@@ -736,11 +736,12 @@ export const apiClient = {
       throw new LocalServerOfflineError();
     }
 
-    // Usar timeout longo (10 minutos) com retry para análise de IA
+    // Usar timeout longo (30 minutos) com retry para análise de IA
+    // Ollama local pode demorar bastante dependendo do modelo
     return await apiRequestLongRunningWithRetry<any>('/api/analyze-match', { 
       method: 'POST', 
       body: JSON.stringify(body)
-    }, 600000, 2); // 10 minutos, 2 tentativas
+    }, 1800000, 2); // 30 minutos, 2 tentativas
   },
   
   // Edge Function fallback for analysis
