@@ -23,7 +23,7 @@ const ROLE_LABELS: Record<AppRole, string> = {
   admin: 'Administrador',
   manager: 'Gerente',
   uploader: 'Operador',
-  viewer: 'Visualizador',
+  viewer: 'Espectador',
   user: 'Usuário',
 };
 

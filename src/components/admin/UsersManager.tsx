@@ -23,12 +23,12 @@ const ROLE_LABELS: Record<string, string> = {
   admin: 'Admin',
   manager: 'Gerente',
   uploader: 'Operador',
-  viewer: 'Visualizador',
+  viewer: 'Espectador',
   user: 'Usuário',
 };
 
 const ROLE_OPTIONS = [
-  { value: 'viewer', label: 'Visualizador', description: 'Apenas visualização' },
+  { value: 'viewer', label: 'Espectador', description: 'Apenas visualização' },
   { value: 'uploader', label: 'Operador', description: 'Upload e importação' },
   { value: 'manager', label: 'Gerente', description: 'Edição e gerenciamento' },
   { value: 'org_admin', label: 'Admin Empresa', description: 'Administração da empresa' },
