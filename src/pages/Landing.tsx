@@ -15,7 +15,11 @@ import {
   Mail,
   Loader2,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  Server,
+  Check,
+  AlertCircle,
+  Settings2
 } from 'lucide-react';
 import logoKakttus from '@/assets/logo-kakttus.png';
 import soccerBall from '@/assets/soccer-ball.png';
@@ -23,6 +27,7 @@ import arenaIcon from '@/assets/arena-play-icon.png';
 import arenaWordmark from '@/assets/arena-play-wordmark.png';
 import heroBg from '@/assets/hero-bg.jpg';
 import { useAuth } from '@/hooks/useAuth';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 
 // Animated counter component
 function AnimatedCounter({ 
@@ -89,6 +94,75 @@ export default function Landing() {
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  
+  // Server connection state
+  const [serverUrl, setServerUrl] = useState('');
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [serverStatus, setServerStatus] = useState<'disconnected' | 'connected' | 'error'>('disconnected');
+  const [showServerConfig, setShowServerConfig] = useState(false);
+
+  // Load saved server URL on mount
+  useEffect(() => {
+    const savedUrl = localStorage.getItem('arena_api_base');
+    if (savedUrl) {
+      setServerUrl(savedUrl);
+      // Auto-check connection
+      checkServerConnection(savedUrl);
+    }
+  }, []);
+
+  const checkServerConnection = async (url: string) => {
+    if (!url.trim()) {
+      setServerStatus('disconnected');
+      return;
+    }
+
+    setIsConnecting(true);
+    const cleanUrl = url.trim().replace(/\/+$/, '');
+    
+    try {
+      // Try /api/health first, then /health
+      const endpoints = [`${cleanUrl}/api/health`, `${cleanUrl}/health`];
+      
+      for (const endpoint of endpoints) {
+        try {
+          const response = await fetch(endpoint, {
+            method: 'GET',
+            headers: { 'Accept': 'application/json' },
+            signal: AbortSignal.timeout(10000)
+          });
+          
+          if (response.ok) {
+            setServerStatus('connected');
+            localStorage.setItem('arena_api_base', cleanUrl);
+            // Dispatch event for other components
+            window.dispatchEvent(new CustomEvent('server-reconnected'));
+            toast.success('Servidor conectado!', {
+              description: 'Agora você pode fazer login.'
+            });
+            setIsConnecting(false);
+            return;
+          }
+        } catch {
+          // Try next endpoint
+        }
+      }
+      
+      setServerStatus('error');
+      toast.error('Não foi possível conectar ao servidor');
+    } catch (error) {
+      setServerStatus('error');
+      toast.error('Erro ao conectar', {
+        description: 'Verifique a URL e tente novamente.'
+      });
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  const handleConnectServer = () => {
+    checkServerConnection(serverUrl);
+  };
 
   // Redirecionar se já estiver logado
   useEffect(() => {
@@ -437,6 +511,69 @@ export default function Landing() {
                 <Sparkles className="w-4 h-4 mr-2 text-primary" />
                 Criar Nova Conta
               </Button>
+
+              {/* Server Connection - Collapsible */}
+              <Collapsible open={showServerConfig} onOpenChange={setShowServerConfig} className="mt-4">
+                <CollapsibleTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="w-full text-xs text-muted-foreground hover:text-foreground gap-2"
+                  >
+                    <Settings2 className="w-3 h-3" />
+                    Configurar Servidor
+                    {serverStatus === 'connected' && (
+                      <span className="ml-auto flex items-center gap-1 text-green-500">
+                        <Check className="w-3 h-3" />
+                        Conectado
+                      </span>
+                    )}
+                    {serverStatus === 'error' && (
+                      <span className="ml-auto flex items-center gap-1 text-destructive">
+                        <AlertCircle className="w-3 h-3" />
+                        Erro
+                      </span>
+                    )}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-3 space-y-3">
+                  <div className="p-3 rounded-lg bg-background/50 border border-border/50 space-y-3">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="serverUrl" className="text-xs text-muted-foreground flex items-center gap-2">
+                        <Server className="w-3 h-3" />
+                        URL do Servidor (Cloudflare Tunnel)
+                      </Label>
+                      <div className="flex gap-2">
+                        <Input
+                          id="serverUrl"
+                          type="url"
+                          value={serverUrl}
+                          onChange={(e) => setServerUrl(e.target.value)}
+                          placeholder="https://seu-tunel.trycloudflare.com"
+                          className="flex-1 h-9 text-sm bg-background/50 border-border/50"
+                        />
+                        <Button
+                          type="button"
+                          size="sm"
+                          onClick={handleConnectServer}
+                          disabled={isConnecting || !serverUrl.trim()}
+                          className="h-9 px-3"
+                        >
+                          {isConnecting ? (
+                            <Loader2 className="w-4 h-4 animate-spin" />
+                          ) : (
+                            'Conectar'
+                          )}
+                        </Button>
+                      </div>
+                    </div>
+                    <p className="text-[10px] text-muted-foreground/70 leading-relaxed">
+                      Cole a URL do túnel Cloudflare do seu servidor local para habilitar o backend.
+                    </p>
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
 
             </div>
           </div>
