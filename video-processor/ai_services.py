@@ -564,25 +564,20 @@ def analyze_with_kakttus(
     """
     Analisa transcrição com modelo Kakttus.
     Retorna eventos detectados, resumo do tempo e análise tática.
-    
-    Args:
-        transcript: Texto da transcrição (SRT ou TXT)
-        home_team: Nome do time da casa
-        away_team: Nome do time visitante
-        match_half: 'first' ou 'second'
-    
-    Returns:
-        {"events": [...], "summary": "...", "tactical": "..."}
     """
-    half_desc = "1º Tempo" if match_half == "first" else "2º Tempo"
-    
     max_chars = 25000
     transcript_truncated = transcript[:max_chars] if len(transcript) > max_chars else transcript
     if len(transcript) > max_chars:
         print(f"[Kakttus] Transcrição truncada: {len(transcript)} → {max_chars} chars")
     
-    user_prompt = f"""Analise esta transcrição de {half_desc}:
+    # System prompt simples igual ao script
+    system_prompt = (
+        "Você é a IA Kakttus, especialista em futebol, usando raciocínio tático e contextual. "
+        "Interprete a transcrição e retorne SOMENTE JSON."
+    )
 
+    # User prompt exatamente igual ao script
+    user_prompt = f"""
 Times:
 home = {home_team}
 away = {away_team}
@@ -590,33 +585,22 @@ away = {away_team}
 Transcrição:
 {transcript_truncated}
 
-Retorne neste formato JSON:
+Retorne neste formato:
 {{
   "events": [
     {{
-      "event_type": "goal",
-      "team": "home" ou "away",
-      "minute": 23,
-      "second": 45,
-      "detail": "Gol de cabeça após escanteio",
-      "confidence": 0.95,
-      "isOwnGoal": false
+      "event_type": "goal" ou outro,
+      "team": "home" ou "away" ou "unknown",
+      "detail": "descrição curta",
+      "confidence": número entre 0 e 1
     }}
   ],
-  "summary": "Resumo do {half_desc} em 1-2 frases",
-  "tactical": "Análise tática: formação, pressão, transições, destaques"
+  "summary": "resumo do jogo",
+  "tactical": "análise tática resumida"
 }}
-
-Tipos de evento: goal, penalty, save, chance, foul, corner, shot, yellow_card, red_card
-
-REGRAS CRÍTICAS:
-1. Use o timestamp do bloco SRT (00:MM:SS), NÃO o minuto falado pelo narrador
-2. Detecte "gol contra" (own goal) quando o narrador mencionar
-3. Seja conservador: só registre eventos com evidência clara no texto
-4. Para gols, identifique o time que MARCOU (não o que sofreu)
-"""
+""".strip()
     
-    raw = ask_kakttus(KAKTTUS_SYSTEM_PROMPT, user_prompt)
+    raw = ask_kakttus(system_prompt, user_prompt)
     
     if not raw:
         print(f"[Kakttus] ⚠ Sem resposta, retornando vazio")
@@ -638,9 +622,8 @@ REGRAS CRÍTICAS:
     
     goals = [e for e in events if e.get('event_type') == 'goal']
     print(f"[Kakttus] ✓ Detectados: {len(events)} eventos, {len(goals)} gols")
-    for g in goals:
-        own_goal = " (GOL CONTRA)" if g.get('isOwnGoal') else ""
-        print(f"[Kakttus] ⚽ GOL: {g.get('minute', 0)}'{g.get('second', 0):02d}\" - {g.get('team', 'unknown')}{own_goal}")
+    for g in goals[:5]:  # Limitar log
+        print(f"[Kakttus] ⚽ GOL: {g.get('team', 'unknown')} - {g.get('detail', '')[:50]}")
     
     return {"events": events, "summary": summary, "tactical": tactical}
 
