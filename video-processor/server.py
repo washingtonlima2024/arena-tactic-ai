@@ -5643,6 +5643,45 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
             results['cloud_sync'] = {'success': False, 'disabled': True, 'message': 'Cloud sync disabled - local mode'}
             print(f"[PIPELINE] ℹ Cloud sync disabled - data saved locally only")
             
+            # ════════════════════════════════════════════════════════════════
+            # CONSOLIDAÇÃO AUTOMÁTICA (quando ambos os tempos estão analisados)
+            # ════════════════════════════════════════════════════════════════
+            try:
+                json_folder = get_subfolder_path(match_id, 'json')
+                has_first = (json_folder / 'analysis_first_half.json').exists()
+                has_second = (json_folder / 'analysis_second_half.json').exists()
+                
+                if has_first and has_second:
+                    print(f"\n[PIPELINE] ═══ CONSOLIDAÇÃO AUTOMÁTICA ═══")
+                    print(f"[PIPELINE] Ambos os tempos analisados, consolidando...")
+                    
+                    # Carregar análises
+                    with open(json_folder / 'analysis_first_half.json', 'r', encoding='utf-8') as f:
+                        first_half_data = json_module.load(f)
+                    with open(json_folder / 'analysis_second_half.json', 'r', encoding='utf-8') as f:
+                        second_half_data = json_module.load(f)
+                    
+                    # Consolidar
+                    full_analysis = ai_services.consolidate_match_analysis(
+                        first_half_data, second_half_data, home_team, away_team
+                    )
+                    
+                    # Salvar
+                    with open(json_folder / 'match_analysis_full.json', 'w', encoding='utf-8') as f:
+                        json_module.dump(full_analysis, f, ensure_ascii=False, indent=2)
+                    
+                    results['consolidated'] = True
+                    results['files']['json'].append('match_analysis_full.json')
+                    print(f"[PIPELINE] ✓ Análise consolidada salva: match_analysis_full.json")
+                elif has_first:
+                    print(f"[PIPELINE] ℹ Apenas 1º tempo analisado, consolidação pendente")
+                    results['consolidated'] = False
+                else:
+                    results['consolidated'] = False
+            except Exception as consol_error:
+                print(f"[PIPELINE] ⚠ Erro na consolidação: {consol_error}")
+                results['consolidated'] = False
+            
             return jsonify(results)
             
     except Exception as e:
@@ -5655,6 +5694,112 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
         results['phases']['organization']['status'] = 'error'
         
         return jsonify(results), 500
+
+
+@app.route('/api/matches/<match_id>/consolidate', methods=['POST', 'OPTIONS'])
+def consolidate_match(match_id: str):
+    """
+    Consolida análises de 1º e 2º tempo em análise completa.
+    Deve ser chamado após análise de ambos os tempos.
+    
+    Gera o arquivo match_analysis_full.json com:
+    - Todos os eventos
+    - Resumo do 1º tempo
+    - Resumo do 2º tempo
+    - Análise tática consolidada
+    - Placar final calculado
+    """
+    if request.method == 'OPTIONS':
+        response = app.make_default_options_response()
+        return response
+    
+    json_path = get_subfolder_path(match_id, 'json')
+    
+    # Carregar análises parciais
+    first_path = json_path / 'analysis_first_half.json'
+    second_path = json_path / 'analysis_second_half.json'
+    
+    if not first_path.exists():
+        return jsonify({
+            'error': 'Análise do 1º tempo não encontrada',
+            'hint': 'Execute o pipeline de análise para o 1º tempo primeiro'
+        }), 400
+    
+    try:
+        with open(first_path, 'r', encoding='utf-8') as f:
+            first_half = json_module.load(f)
+        print(f"[Consolidate] ✓ Carregado 1º tempo: {len(first_half.get('events', []))} eventos")
+    except Exception as e:
+        return jsonify({'error': f'Erro ao ler análise do 1º tempo: {e}'}), 500
+    
+    # 2º tempo é opcional (jogo pode ter sido interrompido)
+    second_half = {}
+    if second_path.exists():
+        try:
+            with open(second_path, 'r', encoding='utf-8') as f:
+                second_half = json_module.load(f)
+            print(f"[Consolidate] ✓ Carregado 2º tempo: {len(second_half.get('events', []))} eventos")
+        except Exception as e:
+            print(f"[Consolidate] ⚠ Erro ao ler 2º tempo: {e}")
+    else:
+        print(f"[Consolidate] ℹ 2º tempo não encontrado, usando apenas 1º tempo")
+    
+    # Buscar nomes dos times
+    session = get_session()
+    try:
+        match = session.query(Match).filter_by(id=match_id).first()
+        if match:
+            home_team_obj = session.query(Team).filter_by(id=match.home_team_id).first()
+            away_team_obj = session.query(Team).filter_by(id=match.away_team_id).first()
+            home_team = home_team_obj.name if home_team_obj else 'Casa'
+            away_team = away_team_obj.name if away_team_obj else 'Visitante'
+        else:
+            home_team = 'Casa'
+            away_team = 'Visitante'
+    finally:
+        session.close()
+    
+    # Consolidar usando Kakttus AI
+    full_analysis = ai_services.consolidate_match_analysis(
+        first_half, second_half, home_team, away_team
+    )
+    
+    # Salvar análise completa
+    full_path = json_path / 'match_analysis_full.json'
+    try:
+        with open(full_path, 'w', encoding='utf-8') as f:
+            json_module.dump(full_analysis, f, ensure_ascii=False, indent=2)
+        print(f"[Consolidate] ✓ Análise completa salva: match_analysis_full.json")
+    except Exception as e:
+        return jsonify({'error': f'Erro ao salvar análise: {e}'}), 500
+    
+    # Atualizar placar no banco
+    score = full_analysis.get('score', {})
+    session = get_session()
+    try:
+        match = session.query(Match).filter_by(id=match_id).first()
+        if match:
+            match.home_score = score.get('home', 0)
+            match.away_score = score.get('away', 0)
+            match.status = 'analyzed'
+            session.commit()
+            print(f"[Consolidate] ✓ Placar atualizado: {match.home_score} x {match.away_score}")
+    except Exception as e:
+        session.rollback()
+        print(f"[Consolidate] ⚠ Erro ao atualizar placar: {e}")
+    finally:
+        session.close()
+    
+    return jsonify({
+        'success': True,
+        'matchId': match_id,
+        'score': score,
+        'eventsCount': len(full_analysis.get('events', [])),
+        'hasFirstHalf': bool(first_half.get('events')),
+        'hasSecondHalf': bool(second_half.get('events')),
+        'consolidatedAt': full_analysis.get('consolidated_at'),
+        'summary': full_analysis.get('consolidated', {}).get('match_summary', '')
+    })
 
 
 @app.route('/api/matches/<match_id>/files', methods=['GET'])
