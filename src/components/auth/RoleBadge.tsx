@@ -42,7 +42,7 @@ const ROLE_CONFIG: Record<AppRole, { label: string; variant: 'default' | 'second
     color: 'bg-emerald-500 text-white',
   },
   viewer: {
-    label: 'Visualizador',
+    label: 'Espectador',
     variant: 'outline',
     icon: Eye,
     color: '',
