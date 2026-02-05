@@ -5037,15 +5037,20 @@ def analyze_match_events(
     # ═══════════════════════════════════════════════════════════════
     if use_ollama_flow:
         try:
-            events = _analyze_events_with_ollama(
-                transcription=transcription,
+            # ═══════════════════════════════════════════════════════════
+            # PIPELINE KAKTTUS: Análise + Summary + Tático em uma chamada
+            # ═══════════════════════════════════════════════════════════
+            print(f"[AI] 🚀 Usando Pipeline Kakttus para {match_half} tempo...")
+            
+            # 1. Análise com Kakttus (retorna events + summary + tactical)
+            kakttus_result = analyze_with_kakttus(
+                transcript=transcription,
                 home_team=home_team,
                 away_team=away_team,
-                game_start_minute=game_start_minute,
-                game_end_minute=game_end_minute,
-                match_half=match_half,
-                match_id=match_id
+                match_half=match_half
             )
+            
+            events = kakttus_result.get('events', [])
             
             if events:
                 # Enrich and deduplicate
@@ -5053,22 +5058,33 @@ def analyze_match_events(
                 final_events = deduplicate_goal_events(enriched_events)
                 
                 goals_count = len([e for e in final_events if e.get('event_type') == 'goal'])
-                print(f"[AI] ✓ ANÁLISE COMPLETA (Ollama Local)")
+                print(f"[AI] ✓ ANÁLISE COMPLETA (Pipeline Kakttus)")
                 print(f"[AI]   Detectados: {len(events)} eventos")
                 print(f"[AI]   Gols: {goals_count}")
                 
-                # NOVO: Salvar JSONs como o pipeline GPT faz
+                # 2. Salvar análise do tempo (analysis_first_half.json ou analysis_second_half.json)
                 if match_id:
                     try:
                         from datetime import datetime
                         from storage import get_subfolder_path
                         json_path = get_subfolder_path(match_id, 'json')
                         
-                        # 1. detected_events_{half}.json - eventos brutos
+                        # 2a. Salvar analysis_{half}_half.json (formato que o consolidador espera)
+                        save_half_analysis(match_id, match_half, {
+                            'events': final_events,
+                            'summary': kakttus_result.get('summary', ''),
+                            'tactical': kakttus_result.get('tactical', ''),
+                            'home_team': home_team,
+                            'away_team': away_team,
+                            'analyzer': 'kakttus_pipeline',
+                            'model': OLLAMA_MODEL
+                        })
+                        
+                        # 2b. detected_events_{half}.json - eventos brutos (retrocompat)
                         detected_result = {
                             "match_id": match_id,
                             "detected_at": datetime.utcnow().isoformat() + "Z",
-                            "detector": "ollama_local",
+                            "detector": "kakttus_pipeline",
                             "model": OLLAMA_MODEL,
                             "half": match_half,
                             "home_team": home_team,
@@ -5084,11 +5100,11 @@ def analyze_match_events(
                             json.dump(detected_result, f, ensure_ascii=False, indent=2)
                         print(f"[AI] ✓ Detectados salvos: json/{detected_filename}")
                         
-                        # 2. validated_events_{half}.json - eventos finais
+                        # 2c. validated_events_{half}.json - eventos finais (retrocompat)
                         validated_result = {
                             "match_id": match_id,
                             "validated_at": datetime.utcnow().isoformat() + "Z",
-                            "validator": "ollama_local",
+                            "validator": "kakttus_pipeline",
                             "half": match_half,
                             "home_team": home_team,
                             "away_team": away_team,
@@ -5104,7 +5120,7 @@ def analyze_match_events(
                             json.dump(validated_result, f, ensure_ascii=False, indent=2)
                         print(f"[AI] ✓ Validados salvos: json/{validated_filename}")
                         
-                        # 3. rejected_events_{half}.json - eventos descartados na dedup
+                        # 2d. rejected_events_{half}.json - eventos descartados na dedup
                         rejected_events = [e for e in enriched_events if e not in final_events]
                         rejected_result = {
                             "match_id": match_id,
@@ -5118,13 +5134,43 @@ def analyze_match_events(
                             json.dump(rejected_result, f, ensure_ascii=False, indent=2)
                         print(f"[AI] ✓ Rejeitados salvos: json/{rejected_filename}")
                         
+                        # 3. Verificar se ambos os tempos foram analisados e consolidar
+                        first_path = json_path / "analysis_first_half.json"
+                        second_path = json_path / "analysis_second_half.json"
+                        
+                        if first_path.exists() and second_path.exists():
+                            print(f"[AI] 📊 Ambos tempos detectados, iniciando consolidação...")
+                            try:
+                                with open(first_path, 'r', encoding='utf-8') as f:
+                                    first_analysis = json.load(f)
+                                with open(second_path, 'r', encoding='utf-8') as f:
+                                    second_analysis = json.load(f)
+                                
+                                full_analysis = consolidate_match_analysis(
+                                    first_half_analysis=first_analysis,
+                                    second_half_analysis=second_analysis,
+                                    home_team=home_team,
+                                    away_team=away_team
+                                )
+                                
+                                full_path = json_path / "match_analysis_full.json"
+                                with open(full_path, 'w', encoding='utf-8') as f:
+                                    json.dump(full_analysis, f, ensure_ascii=False, indent=2)
+                                
+                                score = full_analysis.get('score', {})
+                                print(f"[AI] ✓ Consolidação completa: {home_team} {score.get('home', 0)} x {score.get('away', 0)} {away_team}")
+                                print(f"[AI] ✓ Arquivo gerado: json/match_analysis_full.json")
+                                
+                            except Exception as e:
+                                print(f"[AI] ⚠ Erro na consolidação: {e}")
+                        
                     except Exception as e:
-                        print(f"[AI] ⚠ Erro ao salvar JSONs do Ollama: {e}")
+                        print(f"[AI] ⚠ Erro ao salvar JSONs: {e}")
                 
                 return final_events
                 
         except Exception as e:
-            print(f"[AI] ⚠ Ollama falhou: {e}")
+            print(f"[AI] ⚠ Pipeline Kakttus falhou: {e}")
             print(f"[AI] Tentando fallback...")
     
     # ═══════════════════════════════════════════════════════════════
