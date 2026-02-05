@@ -318,7 +318,7 @@ export function useAuth() {
 // Helper to get API base URL
 function getApiBaseUrl(): string {
   // Import dinamicamente para evitar dependência circular
-  const stored = localStorage.getItem('arenaApiUrl');
+  const stored = localStorage.getItem('arena_api_base');
   if (stored) return stored;
   
   // Check for production env variable
