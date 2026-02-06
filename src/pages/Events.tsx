@@ -985,13 +985,13 @@ export default function Events() {
             <h1 className="font-display text-xl sm:text-3xl font-bold">Eventos da Partida</h1>
             {/* Data origin indicator */}
             {events.length > 0 && (
-              <Badge variant="outline" className="gap-1 text-xs">
+              <Badge variant="outline" className="gap-1 text-xs hidden sm:flex">
                 <Server className="h-3 w-3" />
                 Servidor Local
               </Badge>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="hidden sm:flex items-center gap-2">
             {/* Sync to Cloud button */}
             <SyncToCloudButton matchId={currentMatchId} eventsCount={events.length} />
             <Button
@@ -1071,9 +1071,9 @@ export default function Events() {
           </Card>
         )}
 
-        {/* Action Buttons - Clean and organized */}
+        {/* Action Buttons - Hidden on mobile for clean view */}
         {isAdmin && currentMatchId && (
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="hidden sm:flex flex-wrap items-center gap-2">
             {/* Sync Status Indicator & Button */}
             {matchSyncStatus === 'local_only' || matchSyncStatus === 'error' ? (
               <Button 
@@ -1406,8 +1406,8 @@ export default function Events() {
         )}
 
 
-        {/* Stats Overview - Compact */}
-        <div className="grid grid-cols-3 gap-3 md:grid-cols-6">
+        {/* Stats Overview - Compact, hidden on mobile */}
+        <div className="hidden sm:grid grid-cols-3 gap-3 md:grid-cols-6">
           <Card variant="glow" className="py-2">
             <CardContent className="flex items-center gap-3 py-2 px-3">
               <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-green-500/10">
@@ -1517,15 +1517,15 @@ export default function Events() {
         )}
 
         <div className="grid gap-6 lg:grid-cols-3">
-          {/* Timeline */}
-          <div className="lg:col-span-2">
+          {/* Timeline - full width on mobile */}
+          <div className="col-span-full lg:col-span-2">
             <Card variant="glass">
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>Timeline de Eventos ({filteredEvents.length})</CardTitle>
-                <div className="flex gap-2">
+              <CardHeader className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+                <CardTitle className="text-base sm:text-lg">Timeline ({filteredEvents.length})</CardTitle>
+                <div className="flex gap-2 w-full sm:w-auto">
                   <Select value={typeFilter} onValueChange={setTypeFilter}>
-                    <SelectTrigger className="w-36">
-                      <Filter className="mr-2 h-4 w-4" />
+                    <SelectTrigger className="w-full sm:w-36 h-8 text-xs sm:text-sm">
+                      <Filter className="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
                       <SelectValue placeholder="Tipo" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1538,8 +1538,8 @@ export default function Events() {
                   </Select>
                   {isAdmin && (
                     <Select value={approvalFilter} onValueChange={setApprovalFilter}>
-                      <SelectTrigger className="w-36">
-                        <CheckCircle className="mr-2 h-4 w-4" />
+                      <SelectTrigger className="w-full sm:w-36 h-8 text-xs sm:text-sm">
+                        <CheckCircle className="mr-1 h-3 w-3 sm:mr-2 sm:h-4 sm:w-4" />
                         <SelectValue placeholder="Status" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1577,7 +1577,7 @@ export default function Events() {
                             <Button 
                               variant="ghost" 
                               size="sm" 
-                              className="h-7 text-xs"
+                              className="h-7 text-xs hidden sm:flex"
                               onClick={() => setReanalyzeHalf('first')}
                             >
                               <RefreshCw className="h-3 w-3 mr-1" />
@@ -1627,7 +1627,7 @@ export default function Events() {
                             <Button 
                               variant="ghost" 
                               size="sm" 
-                              className="h-7 text-xs"
+                              className="h-7 text-xs hidden sm:flex"
                               onClick={() => setReanalyzeHalf('second')}
                             >
                               <RefreshCw className="h-3 w-3 mr-1" />
@@ -1666,8 +1666,8 @@ export default function Events() {
             </Card>
           </div>
 
-          {/* Quick Stats */}
-          <div className="space-y-6">
+          {/* Quick Stats - Desktop only */}
+          <div className="hidden lg:block space-y-6">
             <Card variant="glass">
               <CardHeader>
                 <CardTitle>Por Tempo</CardTitle>
