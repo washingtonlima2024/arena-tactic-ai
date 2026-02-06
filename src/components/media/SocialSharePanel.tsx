@@ -182,6 +182,10 @@ export function SocialSharePanel({
     setIsSharing(true);
 
     try {
+      // Get Supabase user ID (social connections are linked to Supabase auth)
+      const { data: { user: supabaseUser } } = await supabase.auth.getUser();
+      const socialUserId = supabaseUser?.id || user.id;
+
       const networkNames = Array.from(selectedNetworks)
         .map(id => SOCIAL_NETWORKS.find(n => n.id === id)?.name)
         .filter(Boolean)
@@ -200,7 +204,7 @@ export function SocialSharePanel({
         scheduledAt.setHours(hours, minutes, 0, 0);
 
         const posts = Array.from(selectedNetworks).map(platform => ({
-          user_id: user.id,
+          user_id: socialUserId,
           platform,
           content: caption || `⚽ Melhores momentos: ${matchTitle}`,
           media_url: clipUrl || null,
@@ -228,7 +232,7 @@ export function SocialSharePanel({
                 platform,
                 content: caption || `⚽ Melhores momentos: ${matchTitle}`,
                 mediaUrl: clipUrl || null,
-                userId: user.id,
+                userId: socialUserId,
               }
             });
 
