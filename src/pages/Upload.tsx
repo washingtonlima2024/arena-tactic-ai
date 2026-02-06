@@ -1343,7 +1343,7 @@ export default function VideoUpload() {
                   ? "⚠️ Chave de API não configurada"
                   : "⚠️ Transcrição falhou",
             description: isDependencyError 
-              ? "Se quiser usar Whisper Local offline, execute: pip install faster-whisper==1.1.0"
+              ? "Se quiser usar kakttus Transcrição offline, execute: pip install faster-whisper==1.1.0"
               : isApiKeyError
                 ? "Configure sua chave Google/Lovable em Configurações > APIs para transcrição."
                 : errorMessage.length > 150 

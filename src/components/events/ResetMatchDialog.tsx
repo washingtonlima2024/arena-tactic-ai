@@ -261,7 +261,7 @@ export function ResetMatchDialog({
                   Transcrição dos Vídeos
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Gere a transcrição automaticamente com Whisper ou faça upload de arquivos SRT:
+                  Gere a transcrição automaticamente com kakttus Transcrição ou faça upload de arquivos SRT:
                 </p>
                 
                 <div className="space-y-2">
@@ -322,7 +322,7 @@ export function ResetMatchDialog({
                                   disabled={isTranscribing || isResetting}
                                 >
                                   <Mic className="h-3 w-3 mr-1" />
-                                  Whisper
+                                  Transcrever
                                 </Button>
                                 <input
                                   type="file"
