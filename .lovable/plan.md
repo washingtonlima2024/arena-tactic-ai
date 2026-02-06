@@ -1,83 +1,104 @@
 
+# Implementar Download de Video do YouTube no Pipeline de Processamento
 
-# Adicionar Prompts de Eventos na Configuracao Admin
+## Resumo
 
-## Situacao Atual
+Atualmente, quando o usuario cola um link do YouTube na aba "Link/Embed", o sistema apenas salva a URL como referencia mas **nao baixa o video**. O `download_video_with_progress` no backend usa `requests.get()`, que so funciona para links diretos (MP4, Google Drive, Dropbox). Para YouTube, ele recebe HTML em vez do video.
 
-A tabela `ai_prompts` ja funciona com 4 prompts configurados:
-- `chatbot_system` (Chatbot)
-- `report_system` (Relatorio)
-- `report_user_template` (Relatorio)
-- `transcription_engine` (Transcricao)
+O plano e adicionar suporte a download de videos do YouTube usando a biblioteca `yt-dlp` no backend Python, integrando com o pipeline existente para que o video baixado passe pelo mesmo processo de transcricao e analise que qualquer arquivo enviado.
 
-Porem, os **3 prompts de geracao de eventos** estao hardcoded no `video-processor` Python (que roda 100% local, sem conexao com o banco Cloud). Eles precisam ser adicionados na tabela para ficarem visiveis e editaveis na tela Admin > Config.
+## Fluxo Proposto
 
-## O Que Sera Feito
+```text
+Usuario cola link YouTube
+        |
+        v
+Frontend detecta plataforma "YouTube"
+        |
+        v
+Ao clicar "Iniciar Analise":
+  - Se servidor Python online:
+      Frontend chama POST /api/storage/{matchId}/videos/download-url
+      com flag youtube=true
+        |
+        v
+  Backend detecta URL YouTube
+        |
+        v
+  yt-dlp baixa o video (melhor qualidade ate 720p)
+  com progresso via download_jobs
+        |
+        v
+  Arquivo salvo em storage/videos/{matchId}/
+        |
+        v
+  Registro criado na tabela videos (SQLite)
+        |
+        v
+  Segmento atualizado no frontend com file_url local
+        |
+        v
+  Pipeline normal de transcricao + analise continua
+```
 
-### 1. Inserir 3 novos prompts na tabela ai_prompts
+## Alteracoes Necessarias
 
-Adicionar via migracao SQL os prompts do video-processor:
+### 1. Backend: `video-processor/requirements.txt`
+- Adicionar `yt-dlp>=2024.1.0` as dependencias
 
-| prompt_key | prompt_name | category | modelo padrao |
-|---|---|---|---|
-| `event_detection_gpt` | Deteccao de Eventos (GPT) | events | openai/gpt-5 |
-| `event_analysis_kakttus` | Analise de Eventos (Kakttus Local) | events | washingtonlima/kakttus |
-| `event_consolidation` | Consolidacao Tatica | events | washingtonlima/kakttus |
+### 2. Backend: `video-processor/server.py`
 
-Cada prompt tera:
-- O texto completo (system + user) copiado do `ai_services.py`
-- O modelo padrao pre-selecionado
-- `is_default = true`
-- `default_value` e `default_model` iguais ao valor inicial (para restaurar)
+**Funcao `download_video_with_progress`** (linhas ~8537-8620):
+- Adicionar deteccao de URLs YouTube (`youtube.com`, `youtu.be`)
+- Quando for YouTube, usar `yt-dlp` como subprocesso em vez de `requests.get`
+- Comando: `yt-dlp -f "bestvideo[height<=720]+bestaudio/best[height<=720]" --merge-output-format mp4 -o {output_path} {url}`
+- Capturar progresso via stdout parsing do yt-dlp (linhas `[download] XX.X%`)
+- Atualizar `download_jobs[job_id]` com progresso em tempo real
+- Manter o restante do fluxo igual (detectar duracao com ffprobe, registrar no banco)
 
-### 2. Atualizar o AdminPromptsManager
+**Funcao `convert_to_direct_url`** (linhas ~8515-8534):
+- Adicionar early return para URLs YouTube (nao tentar converter, pois serao tratadas pelo yt-dlp)
 
-- Adicionar a categoria "events" no mapeamento de labels e icones:
-  - Label: "Geracao de Eventos"
-  - Icone: `Zap` (lucide-react)
-- Os novos prompts aparecerao automaticamente na interface (ja agrupados por categoria)
-- O seletor de modelo ja mostra todas as opcoes (Local/Ollama, Gemini, GPT) com o padrao marcado
+### 3. Frontend: `src/pages/Upload.tsx`
 
-### 3. Criar endpoint no video-processor para ler prompts
+**Funcao `addVideoLink`** (~linha 666):
+- Quando a plataforma for "YouTube", mostrar aviso de que o download sera feito pelo servidor Python
+- Verificar se o servidor Python esta online; se nao, mostrar toast explicando que YouTube requer servidor local
 
-O video-processor roda 100% local (SQLite, sem Supabase). Para que ele use os prompts configurados no Admin, sera necessario:
+**Funcao `handleStartAnalysis`** (~linha 1364):
+- Antes de iniciar transcricao, verificar se algum segmento e `isLink: true` e de plataforma YouTube
+- Para esses segmentos: chamar endpoint `POST /api/storage/{matchId}/videos/download-url` e aguardar conclusao via polling em `GET /api/storage/download-status/{jobId}`
+- Ao completar download, atualizar segmento com `url` local, `isLink: false`, e `status: 'complete'`
+- Entao continuar com o pipeline normal de transcricao/analise
 
-- Criar um endpoint na API Flask: `GET /api/ai-prompts/<prompt_key>`
-- Esse endpoint faz uma chamada HTTP ao Supabase REST API para buscar o prompt
-- Se o Supabase nao estiver acessivel (modo offline), usa o prompt hardcoded como fallback
-- As funcoes `detect_events_with_gpt()`, `analyze_with_kakttus()` e `consolidate_match_analysis()` verificam se ha prompt customizado antes de usar o hardcoded
+### 4. Frontend: `src/lib/apiClient.ts`
 
-**Alternativa mais simples**: Como o video-processor nao tem conexao direta com o Supabase (100% local), os prompts de eventos ficam visiveis e editaveis na Admin para referencia e futuro uso, mas o video-processor continua usando os hardcoded ate que uma sincronizacao seja implementada. Isso ja e util para:
-- Documentar os prompts que o sistema usa
-- Permitir ao admin copiar/colar manualmente para testar variantes
-- Preparar a infraestrutura para quando o video-processor ganhar conexao Cloud
-
----
+- Adicionar metodo `downloadVideoFromUrl(matchId, url, videoType, filename?)` que chama `POST /api/storage/{matchId}/videos/download-url`
+- Adicionar metodo `getDownloadStatus(jobId)` que chama `GET /api/storage/download-status/{jobId}`
+- (O endpoint no backend ja existe mas o apiClient nao tem wrapper para ele)
 
 ## Detalhes Tecnicos
 
-### Arquivos a criar/modificar:
+### yt-dlp no Backend
+- Usar como subprocesso (`subprocess.Popen`) para capturar progresso em tempo real
+- Formato de saida forcado para MP4 (`--merge-output-format mp4`)
+- Limitar qualidade a 720p para balancear tamanho/qualidade
+- Timeout de 30 minutos para downloads longos
+- Validar arquivo pos-download com ffprobe
 
-1. **Migracao SQL** - INSERT dos 3 novos prompts com textos completos copiados de `ai_services.py`
-2. **src/components/admin/AdminPromptsManager.tsx** - Adicionar categoria "events" nos labels e icones
+### Polling de Progresso no Frontend
+- O endpoint `GET /api/storage/download-status/{jobId}` ja existe no backend
+- Frontend fara polling a cada 2 segundos durante download
+- Mostrar barra de progresso no `ProcessingProgress` component existente
+- Fases: "Baixando do YouTube (XX%)" -> "Registrando video" -> "Transcrevendo..."
 
-### Conteudo dos prompts a inserir:
+### Tratamento de Erros
+- YouTube video privado/indisponivel: mostrar mensagem clara
+- yt-dlp nao instalado: fallback com mensagem "Execute: pip install yt-dlp"
+- Servidor offline: mostrar toast "Download do YouTube requer servidor Python local"
 
-**event_detection_gpt** (System prompt ~47 linhas):
-- Prompt do `detect_events_with_gpt()` com regras de deteccao de gols, timestamps SRT, tipos de eventos
-- Modelo padrao: `openai/gpt-5` (kakttus Vision Ultra)
-
-**event_analysis_kakttus** (System + User prompt):
-- Prompt do `analyze_with_kakttus()` com formato JSON simplificado (events, summary, tactical)
-- Modelo padrao: `washingtonlima/kakttus` (kakttus.ai Local)
-
-**event_consolidation** (System prompt):
-- Prompt do `consolidate_match_analysis()` que gera visao tatica unificada dos 2 tempos
-- Modelo padrao: `washingtonlima/kakttus` (kakttus.ai Local)
-
-### Variaveis nos templates de eventos:
-- `{home_team}`, `{away_team}` - nomes dos times
-- `{half_desc}` - descricao do periodo (1o/2o tempo)
-- `{game_start_minute}`, `{game_end_minute}` - intervalo de minutos
-- `{transcription}` - texto da transcricao
-
+## Arquivos Afetados
+1. `video-processor/requirements.txt` - adicionar yt-dlp
+2. `video-processor/server.py` - logica de download YouTube
+3. `src/pages/Upload.tsx` - fluxo de download pre-analise
+4. `src/lib/apiClient.ts` - wrappers para endpoints de download
