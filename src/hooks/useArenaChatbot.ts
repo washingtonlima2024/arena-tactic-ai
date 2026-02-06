@@ -148,8 +148,13 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
       }
 
       if (responseText) {
-        // Strip emojis from response before displaying
+        // Strip emojis and markdown formatting from response
         const cleanResponse = responseText
+          .replace(/\*\*([^*]+)\*\*/g, '$1')   // **bold** → bold
+          .replace(/\*([^*]+)\*/g, '$1')        // *italic* → italic
+          .replace(/__([^_]+)__/g, '$1')        // __bold__ → bold
+          .replace(/_([^_]+)_/g, '$1')          // _italic_ → italic
+          .replace(/#{1,6}\s?/g, '')            // ### headers → text
           .replace(/[\u{1F600}-\u{1F64F}]/gu, '')
           .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')
           .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')
