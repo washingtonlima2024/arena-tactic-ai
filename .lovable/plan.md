@@ -1,145 +1,156 @@
 
-# Redesign Mobile-First dos Cards de Clip na pagina Media
 
-## Problema Atual
+# Correcao de Overflow Mobile - Layout 100% Responsivo
 
-Os botoes de acao no card de clip ("Reproduzir", "Preview", "Compartilhar" + Excluir) estao todos em uma unica linha horizontal com `flex-1`, causando:
-- Texto cortado/comprimido em telas pequenas
-- Botoes muito estreitos que dificultam o toque
-- Layout desconfortavel no mobile
+## Problema
 
-Alem disso, o card inteiro precisa de ajustes para ser mais moderno e otimizado para mobile.
+Varias telas estao estourando a largura no mobile, causando scroll horizontal indesejado. Isso ocorre por uso de larguras fixas em pixels (`w-[200px]`, `max-w-[200px]`), grids rigidos, textos grandes sem reducao, e elementos flex sem controle de overflow.
 
-## Solucao Proposta
+## Diagnostico Detalhado
 
-### 1. Botoes de Acao Responsivos no Card de Clip
+### 1. Layout Global (AppLayout.tsx)
+- **Falta `overflow-x-hidden`** no container raiz -- qualquer filho que estoure cria scroll horizontal na pagina inteira.
 
-**Mobile (< 768px):**
-- Usar apenas icones nos botoes (sem texto), organizados em uma barra de acoes compacta e elegante
-- Tooltip ou titulo acessivel para identificar cada acao
-- Botoes com alvos de toque maiores (min 44x44px)
-- Layout em grid 2x2 ou barra horizontal com icones uniformes
+### 2. Pagina Analysis (`Analysis.tsx`)
+- **Header com badges em linha (L378)**: `flex items-center gap-3` com titulo `text-3xl` + 2 badges na mesma linha -- estoura no mobile.
+- **Botoes de acao (L396-450)**: `flex gap-2` com 3 botoes ("Reimportar Videos", "Gerar Clips", "Exportar Relatorio") -- texto completo nao cabe no mobile.
+- **Grid de estatisticas (L546)**: `grid-cols-[1fr,2fr,1fr] gap-4` -- o gap de 16px + texto `text-lg` estoura.
+- **Audio controls (L662)**: `max-w-[200px]` fixo no elemento `<audio>` pode nao caber ao lado de outros elementos.
+- **Narration card (L644)**: Layout `flex items-center gap-4` com 4 elementos em linha (icone + texto + audio + botao) estoura facilmente.
+- **Tab triggers (L678-683)**: Texto "Insights (X)", "Padroes Taticos (X)", "Eventos (X)" - trunca ou estoura em mobile.
+- **Dialog de video (L905)**: `max-w-4xl` sem ajuste mobile.
 
-**Desktop (>= 768px):**
-- Manter texto + icone como esta hoje
-- Layout em linha horizontal com `flex-1`
+### 3. Pagina Events (`Events.tsx`)
+- **Event row (L112)**: `flex items-center gap-3 p-3` com thumbnail + avatar + badge + texto + badges + botao -- muitos elementos em linha.
+- **Scoreboard (L1031)**: Score `text-5xl font-black w-14` -- largura fixa.
+- **Action buttons (L1076)**: `flex flex-wrap gap-2` com multiplos botoes com texto completo.
+- **Selects com largura fixa (L1020, L1035)**: `w-[140px]` -- pode conflitar em telas estreitas.
 
-### 2. Melhorias no Card de Clip (Mobile-First)
+### 4. Pagina Audio (`Audio.tsx`)
+- **Header (L369)**: Titulo `text-3xl` sem reducao mobile.
+- **Tab list (L403)**: `grid-cols-4` com texto + icone em cada tab -- 4 colunas podem ficar muito estreitas.
+- **Grid de stats (L524)**: `grid grid-cols-3` com texto `text-2xl` -- pode estourar.
 
-- Titulo (`h3`) com `truncate` em vez de cortar palavras -- nunca quebrar palavras no meio
-- Descricao com `line-clamp-2` (ja existente, manter)
-- Badges no topo do card menores em mobile
-- Remover `mr-1` do icone nos botoes mobile (apenas icone, sem espaco desperdicado)
+### 5. Pagina Admin (`Admin.tsx`)
+- **Tab list (L54)**: `grid-cols-6` -- 6 colunas e extremamente apertado no mobile.
 
-### 3. Barra de Acoes Moderna para Mobile
+### 6. Pagina Social (`Social.tsx`)
+- **Tab list (L365)**: `grid-cols-4` com texto + icone.
 
-Criar uma barra de acoes estilizada:
+### 7. Pagina MatchDashboard (`MatchDashboard.tsx`)
+- **Selects (L1020, L1035)**: `w-[140px]` fixo.
 
-```text
-Mobile:
-+---+---+---+---+---+
-| > | [] | <> | x  |  (icones grandes, sem texto)
-+---+---+---+---+---+
+### 8. Pagina Index (`Index.tsx`)
+- **Select de gol (L302)**: `w-[180px]` fixo.
 
-Desktop:
-[> Reproduzir] [[] Preview] [<> Compartilhar] [x]
-```
+## Plano de Correcao
 
-## Detalhes Tecnicos
+### Etapa 1: Protecao Global contra Overflow
 
-### Arquivo: `src/pages/Media.tsx` (linhas 1054-1123)
+Adicionar `overflow-x-hidden` e `max-w-full` no `AppLayout.tsx` e `index.css` para evitar que qualquer overflow filho cause scroll horizontal.
 
-Substituir a div de botoes (linha 1061-1123) por um layout responsivo:
+**Arquivo: `src/components/layout/AppLayout.tsx`**
+- Adicionar `overflow-x-hidden` na div raiz e no container principal.
 
-```typescript
-{/* Barra de acoes - Mobile: icones | Desktop: icones + texto */}
-<div className="mt-3 flex items-center gap-1.5 sm:gap-2">
-  {/* Gerar Capa - condicional */}
-  {!thumbnail?.imageUrl && !isExtractingFrame && clip.clipUrl && (
-    <Button variant="outline" size="sm" className="flex-1 sm:flex-initial" onClick={handleExtractFrame} title="Gerar Capa">
-      <Film className="h-4 w-4 sm:mr-1.5 sm:h-3 sm:w-3" />
-      <span className="hidden sm:inline">Capa</span>
-    </Button>
-  )}
-  
-  {/* Reproduzir */}
-  {(clip.clipUrl || matchVideo) && (
-    <Button variant="outline" size="sm" className="flex-1" onClick={handlePlayClip} title="Reproduzir">
-      <Play className="h-4 w-4 sm:mr-1.5 sm:h-3 sm:w-3" />
-      <span className="hidden sm:inline">Reproduzir</span>
-    </Button>
-  )}
-  
-  {/* Preview/Editor */}
-  {(clip.clipUrl || clip.canExtract) && (
-    <Button variant="outline" size="sm" className="flex-1" onClick={() => setPreviewClipId(clip.id)} title="Preview">
-      <Smartphone className="h-4 w-4 sm:mr-1.5 sm:h-3 sm:w-3" />
-      <span className="hidden sm:inline">{clip.clipUrl ? 'Preview' : 'Editor'}</span>
-    </Button>
-  )}
-  
-  {/* Compartilhar */}
-  <Button variant="outline" size="sm" className="flex-1" onClick={() => setShareClipId(clip.id)} disabled={!clip.clipUrl} title="Compartilhar">
-    <Share2 className="h-4 w-4 sm:mr-1.5 sm:h-3 sm:w-3" />
-    <span className="hidden sm:inline">Compartilhar</span>
-  </Button>
-  
-  {/* Excluir */}
-  <Button variant="ghost" size="icon-sm" className="shrink-0 text-destructive" onClick={() => handleDeleteClip(clip.id, clip.title)} title="Excluir">
-    <Trash2 className="h-4 w-4" />
-  </Button>
-</div>
-```
+**Arquivo: `src/index.css`**
+- Adicionar regra global `html, body { overflow-x: hidden; max-width: 100vw; }`.
 
-### Ajustes no titulo do card
+### Etapa 2: Pagina Analysis
 
-```typescript
-<CardContent className="pt-3 pb-3 px-3 sm:pt-4 sm:px-4">
-  <h3 className="font-medium text-sm sm:text-base truncate">{clip.title}</h3>
-  {clip.description && (
-    <p className="mt-0.5 text-xs sm:text-sm text-muted-foreground line-clamp-1 sm:line-clamp-2">
-      {clip.description}
-    </p>
-  )}
-  ...
-</CardContent>
-```
+**Arquivo: `src/pages/Analysis.tsx`**
 
-### Ajuste no grid de cards
+| Linha | Problema | Correcao |
+|-------|----------|----------|
+| 378-390 | Titulo + badges em 1 linha | `flex flex-wrap gap-2`, titulo `text-xl sm:text-3xl`, badges em linha separada no mobile |
+| 396-450 | 3 botoes com texto | Mobile: icon-only. Desktop: icon + texto |
+| 546 | Grid `gap-4` | Reduzir para `gap-2 sm:gap-4` |
+| 644-669 | Audio card 4 itens em linha | Mobile: stack vertical. Desktop: horizontal |
+| 662 | Audio `max-w-[200px]` | `w-full sm:max-w-[200px]` |
+| 678-683 | Tab labels longos | Mobile: apenas contagem. Desktop: texto completo |
+| 905 | Dialog `max-w-4xl` | `max-w-[95vw] sm:max-w-4xl` |
 
-O grid atual `grid-cols-1 md:grid-cols-2 lg:grid-cols-3` esta bom, mas o gap pode ser reduzido em mobile:
+### Etapa 3: Pagina Events
 
-```typescript
-<div className="grid gap-3 sm:gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
-```
+**Arquivo: `src/pages/Events.tsx`**
 
-### Ajustes na area de badges do card (topo da thumbnail)
+| Linha | Problema | Correcao |
+|-------|----------|----------|
+| 112 | Event row muitos itens em flex | Esconder elementos menos importantes no mobile (`hidden sm:flex`) |
+| 1031 | Score `text-5xl w-14` | `text-3xl sm:text-5xl w-10 sm:w-14` |
+| 1020/1035 | Select `w-[140px]` | `w-full sm:w-[140px]` dentro de container flex-wrap |
+| 1076 | Botoes com texto longo | Mobile: icon-only |
 
-Reduzir tamanho dos badges em mobile para nao cobrir a thumbnail:
+### Etapa 4: Pagina Audio
 
-```typescript
-<div className="absolute left-1.5 top-1.5 sm:left-2 sm:top-2 flex gap-1 flex-wrap max-w-[80%]">
-  <Badge variant="arena" className="text-[10px] sm:text-xs">{clip.type}</Badge>
-  ...
-</div>
-```
+**Arquivo: `src/pages/Audio.tsx`**
 
-### Ajustes na area de info inferior do header da pagina
+| Linha | Problema | Correcao |
+|-------|----------|----------|
+| 369 | `text-3xl` | `text-xl sm:text-3xl` |
+| 403 | TabsList `grid-cols-4` | `grid-cols-2 sm:grid-cols-4` (2 linhas no mobile) |
+| 524 | Grid stats `text-2xl` | `text-lg sm:text-2xl` |
 
-O header "Cortes & Midia" com contadores e botoes tambem precisa de ajuste mobile:
-- Esconder contadores detalhados em mobile
-- Manter apenas o essencial
+### Etapa 5: Pagina Admin
 
-## Resumo dos Arquivos a Modificar
+**Arquivo: `src/pages/Admin.tsx`**
 
-| Arquivo | O que muda |
-|---------|-----------|
-| `src/pages/Media.tsx` | Botoes responsivos (icone-only em mobile), titulo truncado, badges menores, grid gap ajustado |
+| Linha | Problema | Correcao |
+|-------|----------|----------|
+| 54 | `grid-cols-6` | `grid-cols-3 sm:grid-cols-6` (2 linhas no mobile) |
+
+### Etapa 6: Pagina Social
+
+**Arquivo: `src/pages/Social.tsx`**
+
+| Linha | Problema | Correcao |
+|-------|----------|----------|
+| 365 | `grid-cols-4` | `grid-cols-2 sm:grid-cols-4` |
+
+### Etapa 7: Pagina MatchDashboard
+
+**Arquivo: `src/pages/MatchDashboard.tsx`**
+
+| Linha | Problema | Correcao |
+|-------|----------|----------|
+| 1020/1035 | Select `w-[140px]` | `w-full sm:w-[140px]` |
+
+### Etapa 8: Pagina Index
+
+**Arquivo: `src/pages/Index.tsx`**
+
+| Linha | Problema | Correcao |
+|-------|----------|----------|
+| 302 | Select `w-[180px]` | `w-full sm:w-[180px]` |
 
 ## Principios Aplicados
 
-1. **Mobile-First**: Tudo projetado primeiro para mobile, expandido para desktop
-2. **Nunca cortar palavras**: Usar `truncate` (elipsis) em vez de quebrar no meio
-3. **Alvos de toque**: Minimo 44px para areas tocaveis em mobile
-4. **Icones sem texto em mobile**: Quando nao ha espaco, apenas icone com `title` acessivel
-5. **Layout moderno**: Espacamento consistente, feedback visual de toque
+1. **Nunca largura fixa sem fallback**: Todo `w-[Xpx]` vira `w-full sm:w-[Xpx]`
+2. **Tipografia responsiva**: `text-xl sm:text-3xl` em vez de `text-3xl` fixo
+3. **Icone-only no mobile**: Botoes com texto longo usam `hidden sm:inline` no label
+4. **Tabs empilhados**: TabsLists com 4+ colunas usam `grid-cols-2 sm:grid-cols-4`
+5. **Overflow global**: Protecao `overflow-x-hidden` em html/body/layout raiz
+6. **Gap responsivo**: `gap-2 sm:gap-4` em vez de `gap-4` fixo
+7. **Percentual sobre pixel**: Usar `%` e `w-full` como base, pixel como refinamento desktop
+
+## Arquivos a Modificar
+
+| Arquivo | Prioridade |
+|---------|-----------|
+| `src/index.css` | Alta - protecao global |
+| `src/components/layout/AppLayout.tsx` | Alta - container raiz |
+| `src/pages/Analysis.tsx` | Alta - pagina atual do usuario |
+| `src/pages/Events.tsx` | Alta - pagina frequente |
+| `src/pages/Audio.tsx` | Media |
+| `src/pages/Admin.tsx` | Media |
+| `src/pages/Social.tsx` | Media |
+| `src/pages/MatchDashboard.tsx` | Media |
+| `src/pages/Index.tsx` | Baixa |
+
+## Ordem de Execucao
+
+1. `index.css` + `AppLayout.tsx` -- protecao global
+2. `Analysis.tsx` -- pagina com mais problemas e a atual do usuario
+3. `Events.tsx` -- segunda pagina mais critica
+4. `Audio.tsx`, `Admin.tsx`, `Social.tsx` -- ajustes de tabs e tipografia
+5. `MatchDashboard.tsx`, `Index.tsx` -- larguras fixas em selects
+
