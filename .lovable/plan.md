@@ -1,155 +1,155 @@
 
-# Reformulacao Completa da Pagina de Analise Tatica
 
-## Visao Geral
+# Reestruturacao Completa da Pagina de Analise Tatica
 
-A pagina de Analise sera reestruturada para oferecer uma experiencia profissional de analise de jogo, com dados reais extraidos dos eventos da partida. A proposta inclui: resumo executivo do jogo, comparativo detalhado entre os dois times, melhor jogador em campo, mapa de calor funcional com animacao de leitura do jogo, e estatisticas completas organizadas de forma visual.
+## Objetivo
+
+Transformar a pagina de Analise em um relatorio tatico profissional e detalhado, com 7 secoes distintas que cobrem todos os aspectos do jogo. A principal novidade e a geracao de um relatorio completo pela IA com analise por tempo, avaliacao individual dos times, analise tatica profunda e resumo final com recomendacoes.
 
 ---
 
-## Estrutura da Nova Pagina
-
-A pagina sera organizada em secoes verticais claras, substituindo a estrutura de abas atual por um layout de "relatorio completo":
+## Estrutura Final da Pagina
 
 ```text
 +------------------------------------------+
-|  CABECALHO (Placar + Info da Partida)    |
+|  1. VISAO GERAL DA PARTIDA               |
+|  (Placar, competicao, cenario inicial)    |
 +------------------------------------------+
-|  RESUMO EXECUTIVO DO JOGO                |
-|  (Texto narrativo gerado dos eventos)    |
+|  2. LINHA DO TEMPO DE EVENTOS             |
+|  (Momentos principais com clips e         |
+|   analise curta de cada evento)           |
 +------------------------------------------+
-|  COMPARATIVO DE TIMES (lado a lado)      |
-|  Gols | Chutes | Defesas | Faltas | etc  |
+|  3. PRIMEIRO TEMPO                        |
+|  (Posicionamento, construcao, erros,      |
+|   intensidade, transicoes)                |
 +------------------------------------------+
-|  MELHOR JOGADOR EM CAMPO                 |
-|  (Card destacado com estatisticas)       |
+|  4. SEGUNDO TEMPO                         |
+|  (Ajustes taticos, mudancas de ritmo,     |
+|   momentos decisivos)                     |
 +------------------------------------------+
-|  MAPA DE CALOR ANIMADO                   |
-|  (Replay dos eventos no campo com timer) |
+|  5. ANALISE INDIVIDUAL DOS TIMES          |
+|  (Bloco casa + bloco visitante:           |
+|   fortalezas, fragilidades, sincronia)    |
 +------------------------------------------+
-|  RESUMO TATICO                           |
-|  (Formacao, posse, padroes)              |
+|  6. ANALISE TATICA COMPLETA               |
+|  (Fases do jogo, padronizacoes,           |
+|   bola parada, marcacao, sequencias)      |
 +------------------------------------------+
-|  ESTATISTICAS DETALHADAS                 |
-|  (Grid completo de todas as metricas)    |
+|  7. RESUMO FINAL                          |
+|  (Melhores pontos, falhas, correcoes,     |
+|   fatores que influenciaram o placar)     |
 +------------------------------------------+
-|  TIMELINE DE EVENTOS PRINCIPAIS          |
-|  (Com clips reais do jogo)               |
+|  COMPARATIVO DE ESTATISTICAS              |
+|  (Barras visuais lado a lado)             |
++------------------------------------------+
+|  MELHOR JOGADOR EM CAMPO                  |
++------------------------------------------+
+|  MAPA DE CALOR - REPLAY DO JOGO           |
++------------------------------------------+
+|  ESTATISTICAS DETALHADAS (Grid)           |
 +------------------------------------------+
 ```
 
 ---
 
-## Detalhamento das Secoes
+## O Que Sera Feito
 
-### 1. Cabecalho Reformulado
-- Escudos dos times (logos) com cores primarias
-- Placar grande e centralizado
-- Competicao, data, local
-- Total de eventos detectados
-- Status do jogo (ao vivo/finalizado/analisado)
+### 1. Nova Edge Function: generate-match-report
 
-### 2. Resumo Executivo
-- Texto narrativo completo gerado a partir dos eventos reais
-- Menciona resultado, destaques, momentos decisivos
-- Sem emojis, sem markdown - texto limpo e profissional
-- Extraido do `eventAnalysis.matchSummary` ja existente, porem enriquecido com mais detalhes dos eventos
+Funcao backend que recebe todos os eventos e estatisticas da partida e envia para a IA (google/gemini-2.5-flash via Lovable AI gateway) com um prompt detalhado pedindo:
 
-### 3. Comparativo de Times (Reformulado)
-- Layout visual lado a lado com barras proporcionais
-- Metricas incluidas:
-  - Gols
-  - Finalizacoes (total e no alvo)
-  - Posse de Bola estimada
-  - Defesas
-  - Faltas
-  - Cartoes Amarelos
-  - Cartoes Vermelhos  
-  - Escanteios
-  - Impedimentos
-  - Recuperacoes de Bola
-  - Jogadas Taticas (transicoes, pressing)
-- Todas calculadas via `useDynamicMatchStats` (dados reais)
+- Secao 1: Visao geral da partida (contexto, adversario, competicao, cenario inicial)
+- Secao 2: Resumo dos eventos principais com analise curta de cada momento
+- Secao 3: Analise do primeiro tempo (posicionamento, construcao desde a defesa, ocupacao de espaco, intensidade com e sem bola, transicoes, erros recorrentes)
+- Secao 4: Analise do segundo tempo (ajustes taticos, entrada de novos jogadores, mudanca de ritmo, padroes de ataque e recomposicao, momentos de pressao, situacoes que decidiram o resultado)
+- Secao 5: Analise individual dos times (time principal: comportamento coletivo, sincronia entre setores, fortalezas, fragilidades, melhorias entre tempos; adversario: como marcou, como atacou, pontos de dificuldade, movimentos repetidos)
+- Secao 6: Analise tatica completa (fases do jogo, padronizacoes, modelo de jogo, bola parada, marcacao, sequencias repetitivas)
+- Secao 7: Resumo final (melhores pontos, maiores falhas, o que corrigir no proximo treino, o que funcionou, fatores que influenciaram o placar)
 
-### 4. Melhor Jogador em Campo
-- Card destacado com gradiente
-- Selecao automatica baseada em eventos: jogador com mais participacoes em gols, assistencias, defesas decisivas
-- Extraido da analise de `standoutPlayers` e enriquecido com contagem de eventos por jogador
-- Se nenhum jogador identificado nos metadados, a secao nao aparece (sem dados ficticios)
+O formato de resposta sera JSON com cada secao separada, permitindo renderizar cada uma individualmente na interface.
 
-### 5. Mapa de Calor com Animacao de Leitura do Jogo
-- Usa o `Heatmap2D` ja existente como base
-- Adiciona um "modo replay": os eventos aparecem sequencialmente no campo conforme um timer avanca
-- Cada evento pisca no campo na posicao correspondente
-- Controles de play/pause/velocidade
-- Timer mostrando o minuto atual da partida
-- Os eventos que tem `clip_url` mostram um indicador clicavel para ver o video real
-- Legenda indicando cor de cada time
+Modelo: google/gemini-2.5-flash (bom equilibrio entre custo e qualidade)
+Max tokens: 4096 (relatorio detalhado)
+Temperatura: 0.7
 
-### 6. Resumo Tatico
-- Formacoes dos times (badges)
-- Posse de bola com barra visual
-- Padroes taticos identificados (pressing, transicoes, esquemas defensivos/ofensivos)
-- Texto de overview tatico do `eventAnalysis.tacticalOverview`
+### 2. Novo Hook: useMatchReport
 
-### 7. Estatisticas Detalhadas
-- Grid responsivo com cards pequenos
-- Cada card mostra: icone + label + valor Casa vs Visitante
-- Inclui TODAS as metricas disponiveis:
-  - Gols, Chutes, Chutes no alvo, Defesas
-  - Faltas, Cartoes amarelos, Cartoes vermelhos
-  - Escanteios, Impedimentos, Substituicoes
-  - Recuperacoes, Jogadas taticas
-  - Eventos totais, aprovados, pendentes
+Hook React que gerencia:
+- Chamada a edge function generate-match-report
+- Estado de loading enquanto a IA processa
+- Cache do resultado com React Query
+- Funcao para gerar/regenerar o relatorio
+- Armazena o relatorio gerado em estado local
 
-### 8. Timeline de Eventos com Clips Reais
-- Lista cronologica dos eventos principais
-- Cada evento mostra: minuto, tipo (badge colorido), descricao, time
-- Se tem thumbnail, exibe a miniatura
-- Se tem clip_url, botao para assistir o video real da jogada
-- Filtro por tipo de evento e por time
+### 3. Novo Componente: TacticalReportSection
+
+Componente que renderiza cada secao do relatorio da IA como um card estilizado com:
+- Titulo da secao (ex: "Primeiro Tempo", "Analise Tatica Completa")
+- Icone correspondente
+- Texto do relatorio em paragrafos limpos
+- Animacao de fade-in
+- Se a secao nao tem conteudo, nao aparece
+
+### 4. Pagina Analysis.tsx Reformulada
+
+A pagina sera reorganizada para seguir a estrutura de 7 secoes do relatorio:
+- Cabecalho com placar e info (ja existe, manter)
+- Botao "Gerar Relatorio Tatico com IA" que dispara a geracao
+- As 7 secoes do relatorio IA aparecem em sequencia
+- Abaixo do relatorio, mantem os componentes existentes: comparativo, melhor jogador, mapa de calor, grid de stats, timeline
+- Se o relatorio ainda nao foi gerado, mostra o resumo local como fallback
+
+### 5. Enriquecimento do useEventBasedAnalysis
+
+O hook local sera expandido para gerar summaries mais detalhados por tempo (primeiro e segundo tempo), servindo como fallback quando o relatorio IA nao foi gerado.
 
 ---
 
 ## Detalhes Tecnicos
 
 ### Arquivos a criar:
-1. **`src/components/analysis/MatchReplayHeatmap.tsx`** - Componente do mapa de calor com animacao de replay dos eventos (timer, play/pause, eventos sequenciais no campo)
-2. **`src/components/analysis/TeamComparisonPanel.tsx`** - Painel comparativo detalhado dos dois times
-3. **`src/components/analysis/BestPlayerCard.tsx`** - Card do melhor jogador baseado em eventos reais
-4. **`src/components/analysis/MatchStatsGrid.tsx`** - Grid completo de estatisticas detalhadas
-5. **`src/components/analysis/EventTimeline.tsx`** - Timeline cronologica com clips reais
+1. `supabase/functions/generate-match-report/index.ts` - Edge function com prompt detalhado para as 7 secoes
+2. `src/hooks/useMatchReport.ts` - Hook para gerenciar a geracao do relatorio
+3. `src/components/analysis/TacticalReportSection.tsx` - Componente para renderizar cada secao do relatorio
 
 ### Arquivos a modificar:
-1. **`src/pages/Analysis.tsx`** - Reestruturacao completa do layout para usar os novos componentes
-2. **`src/hooks/useEventBasedAnalysis.ts`** - Enriquecer com calculo do melhor jogador e mais metricas detalhadas
+1. `src/pages/Analysis.tsx` - Adicionar botao de gerar relatorio e renderizar as 7 secoes
+2. `src/hooks/useEventBasedAnalysis.ts` - Expandir summaries locais com analise por tempo
+3. `supabase/config.toml` - Adicionar configuracao da nova edge function
 
-### Fontes de dados (todas reais):
-- `useMatchEvents(matchId)` - eventos reais da partida
-- `useDynamicMatchStats(events)` - estatisticas calculadas dos eventos
-- `useEventBasedAnalysis(events)` - analise tatica e insights
-- `useEventHeatZones(events)` - zonas de calor baseadas em eventos
-- `useMatchAnalysis(matchId)` - analise de IA (resumo, formacoes)
+### Formato do JSON retornado pela IA:
+```text
+{
+  "visaoGeral": "texto...",
+  "linhaDoTempo": "texto...",
+  "primeiroTempo": "texto...",
+  "segundoTempo": "texto...",
+  "analiseIndividual": {
+    "timePrincipal": "texto...",
+    "adversario": "texto..."
+  },
+  "analiseTatica": "texto...",
+  "resumoFinal": "texto..."
+}
+```
 
-### Regras importantes:
-- Zero dados ficticios - tudo vem dos eventos reais
-- Se uma secao nao tem dados, ela nao aparece (sem placeholders com dados inventados)
-- Textos sem emojis, sem asteriscos, sem markdown
-- Layout responsivo (mobile e desktop)
-- Animacoes suaves com as classes ja existentes (animate-fade-in, etc)
+### Dados enviados para a IA:
+- Nomes dos times, placar, competicao, data, local
+- Lista completa de eventos (tipo, minuto, descricao, time, jogador)
+- Estatisticas calculadas (finalizacoes, faltas, cartoes, escanteios, posse, defesas, etc.)
+- Melhor jogador calculado
+- Padroes taticos identificados
+- Eventos separados por tempo (primeiro e segundo)
 
----
+### Regras do texto:
+- Sem emojis, sem asteriscos, sem markdown
+- Portugues brasileiro com terminologia de futebol
+- Detalhado mas objetivo
+- Paragrafos claros por tema
+- Baseado exclusivamente nos dados reais dos eventos
 
-## Animacao do Mapa de Calor (Replay)
+### Dependencias:
+- Usa LOVABLE_API_KEY ja configurada
+- Usa o mesmo gateway de IA do arena-chatbot (ai.gateway.lovable.dev)
+- Nenhuma dependencia nova necessaria
 
-O componente `MatchReplayHeatmap` tera:
-
-- Um slider de tempo (0 a 90 minutos)
-- Botoes de Play/Pause e velocidade (1x, 2x, 4x)
-- Ao dar play, o timer avanca e os eventos aparecem no campo SVG na posicao correspondente
-- Cada evento aparece como um circulo pulsante com a cor do time
-- Eventos antigos ficam como manchas de calor (opacity reduzida)
-- O tipo do evento e mostrado como tooltip ou badge junto ao ponto
-- Eventos com clip_url mostram um icone de video clicavel
-
-Isso cria a sensacao de "assistir o jogo no campo tatico" baseado nos eventos reais detectados pela IA.
