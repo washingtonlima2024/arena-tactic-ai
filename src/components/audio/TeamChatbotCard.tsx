@@ -53,6 +53,7 @@ export function TeamChatbotCard({
     playAudio,
     stopAudio,
     clearMessages,
+    speakWithBrowserTTS,
   } = useTeamChatbot(teamName, teamType, matchId);
 
   const handleSend = async () => {
@@ -148,13 +149,21 @@ export function TeamChatbotCard({
                       ? 'bg-muted' 
                       : bgLightClass
                   )}>
-                    <p className="text-sm">{msg.content}</p>
-                    {msg.role === 'assistant' && msg.audioContent && (
+                    <p className="text-sm leading-relaxed">{msg.content}</p>
+                    {msg.role === 'assistant' && (
                       <Button 
                         variant="ghost" 
                         size="sm" 
                         className="mt-2 h-6 text-xs"
-                        onClick={() => isPlayingAudio ? stopAudio() : playAudio(msg.audioContent!)}
+                        onClick={() => {
+                          if (isPlayingAudio) {
+                            stopAudio();
+                          } else if (msg.audioContent) {
+                            playAudio(msg.audioContent);
+                          } else {
+                            speakWithBrowserTTS(msg.content);
+                          }
+                        }}
                       >
                         {isPlayingAudio ? (
                           <>
