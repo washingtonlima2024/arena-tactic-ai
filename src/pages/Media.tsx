@@ -882,7 +882,7 @@ export default function Media() {
                   </TabsList>
                 </Tabs>
 
-                <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                <div className="grid gap-3 sm:gap-4 grid-cols-1 md:grid-cols-2 lg:grid-cols-3">
                 {clips
                   .filter(clip => {
                     if (activeHalfTab === 'all') return true;
@@ -959,7 +959,7 @@ export default function Media() {
                     });
                   };
                   return (
-                    <Card key={clip.id} variant="glow" className={`overflow-hidden ${!canExtractClip ? 'opacity-75' : ''}`}>
+                    <Card key={clip.id} variant="glow" className={`overflow-hidden group ${!canExtractClip ? 'opacity-75' : ''}`}>
                       <div className="relative aspect-video bg-muted">
                         {thumbnail?.imageUrl ? (
                           <img 
@@ -1026,99 +1026,99 @@ export default function Media() {
                             </Badge>
                           )}
                         </div>
-                        <div className="absolute left-2 top-2 flex gap-1 flex-wrap max-w-[80%]">
-                          <Badge variant="arena">{clip.type}</Badge>
+                        <div className="absolute left-1.5 top-1.5 sm:left-2 sm:top-2 flex gap-1 flex-wrap max-w-[80%]">
+                          <Badge variant="arena" className="text-[10px] sm:text-xs">{clip.type}</Badge>
                           {clip.matchHalf && (
-                            <Badge variant="outline" className="backdrop-blur text-xs">
+                            <Badge variant="outline" className="backdrop-blur text-[10px] sm:text-xs">
                               {clip.matchHalf === 'first_half' || clip.matchHalf === 'first' ? '1º T' : clip.matchHalf === 'second_half' || clip.matchHalf === 'second' ? '2º T' : clip.matchHalf}
                             </Badge>
                           )}
                           {clip.isManual && (
-                            <Badge variant="outline" className="backdrop-blur text-xs bg-blue-500/20 border-blue-500/50 text-blue-200">
+                            <Badge variant="outline" className="backdrop-blur text-[10px] sm:text-xs bg-blue-500/20 border-blue-500/50 text-blue-200">
                               Manual
                             </Badge>
                           )}
                           {clip.clipPending && clip.canExtract && !clip.clipUrl && (
-                            <Badge variant="warning" className="backdrop-blur text-xs gap-1">
-                              <Clock className="h-3 w-3" />
-                              Clip Pendente
+                            <Badge variant="warning" className="backdrop-blur text-[10px] sm:text-xs gap-1">
+                              <Clock className="h-2.5 w-2.5 sm:h-3 sm:w-3" />
+                              Pendente
                             </Badge>
                           )}
                         </div>
-                        <div className="absolute left-2 bottom-2">
-                          <Badge variant="outline" className="backdrop-blur font-mono">
+                        <div className="absolute left-1.5 bottom-1.5 sm:left-2 sm:bottom-2">
+                          <Badge variant="outline" className="backdrop-blur font-mono text-[10px] sm:text-xs">
                             {formatTimestamp(clip.totalSeconds)}
                           </Badge>
                         </div>
                       </div>
-                      <CardContent className="pt-4">
-                        <h3 className="font-medium">{clip.title}</h3>
+                      <CardContent className="pt-3 pb-3 px-3 sm:pt-4 sm:pb-4 sm:px-4">
+                        <h3 className="font-medium text-sm sm:text-base truncate">{clip.title}</h3>
                         {clip.description && (
-                          <p className="mt-1 text-sm text-muted-foreground line-clamp-2">
+                          <p className="mt-0.5 text-xs sm:text-sm text-muted-foreground line-clamp-1 sm:line-clamp-2 break-words">
                             {clip.description}
                           </p>
                         )}
-                        <div className="mt-4 flex gap-2">
+                        {/* Barra de ações - Mobile: ícones | Desktop: ícones + texto */}
+                        <div className="mt-2.5 sm:mt-3 flex items-center gap-1.5 sm:gap-2">
                           {!thumbnail?.imageUrl && !isExtractingFrame && clip.clipUrl && (
                             <Button 
                               variant="outline" 
                               size="sm" 
-                              className="flex-1"
+                              className="h-9 w-9 p-0 sm:h-auto sm:w-auto sm:px-3 sm:py-1.5 shrink-0"
                               onClick={handleExtractFrame}
+                              title="Gerar Capa"
                             >
-                              <Film className="mr-1 h-3 w-3" />
-                              Gerar Capa
+                              <Film className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                              <span className="hidden sm:inline sm:ml-1.5">Capa</span>
                             </Button>
                           )}
-                          {/* Botão Reproduzir */}
                           {(clip.clipUrl || matchVideo) && (
                             <Button 
                               variant="outline" 
                               size="sm" 
-                              className="flex-1"
+                              className="h-9 w-9 p-0 sm:h-auto sm:w-auto sm:px-3 sm:py-1.5 sm:flex-1"
                               onClick={handlePlayClip}
+                              title={isPlaying ? "Pausar" : "Reproduzir"}
                             >
                               {isPlaying ? (
-                                <>
-                                  <Pause className="mr-1 h-3 w-3" />
-                                  Pausar
-                                </>
+                                <Pause className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                               ) : (
-                                <>
-                                  <Play className="mr-1 h-3 w-3" />
-                                  Reproduzir
-                                </>
+                                <Play className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                               )}
+                              <span className="hidden sm:inline sm:ml-1.5">{isPlaying ? 'Pausar' : 'Reproduzir'}</span>
                             </Button>
                           )}
                           {(clip.clipUrl || clip.canExtract) && (
                             <Button 
                               variant="outline" 
                               size="sm" 
-                              className="flex-1"
+                              className="h-9 w-9 p-0 sm:h-auto sm:w-auto sm:px-3 sm:py-1.5 sm:flex-1"
                               onClick={() => setPreviewClipId(clip.id)}
+                              title={clip.clipUrl ? 'Preview' : 'Editor'}
                             >
-                              <Smartphone className="mr-1 h-3 w-3" />
-                              {clip.clipUrl ? 'Preview' : 'Editor'}
+                              <Smartphone className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                              <span className="hidden sm:inline sm:ml-1.5">{clip.clipUrl ? 'Preview' : 'Editor'}</span>
                             </Button>
                           )}
                           <Button 
                             variant="outline" 
                             size="sm" 
-                            className="flex-1"
+                            className="h-9 w-9 p-0 sm:h-auto sm:w-auto sm:px-3 sm:py-1.5 sm:flex-1"
                             onClick={() => setShareClipId(clip.id)}
                             disabled={!clip.clipUrl}
+                            title="Compartilhar"
                           >
-                            <Share2 className="mr-1 h-3 w-3" />
-                            Compartilhar
+                            <Share2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
+                            <span className="hidden sm:inline sm:ml-1.5">Compartilhar</span>
                           </Button>
                           <Button 
                             variant="ghost" 
                             size="sm"
-                            className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                            className="h-9 w-9 p-0 shrink-0 text-destructive hover:text-destructive hover:bg-destructive/10"
                             onClick={() => handleDeleteClip(clip.id, clip.title)}
+                            title="Excluir"
                           >
-                            <Trash2 className="h-3 w-3" />
+                            <Trash2 className="h-4 w-4 sm:h-3.5 sm:w-3.5" />
                           </Button>
                         </div>
                       </CardContent>
