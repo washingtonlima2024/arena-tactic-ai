@@ -10,7 +10,7 @@ export function ClipSyncIndicator() {
   if (pendingCount === 0) return null;
   
   return (
-    <Card className="fixed bottom-4 right-4 z-50 px-4 py-3 shadow-lg border-primary/20 bg-background/95 backdrop-blur">
+    <Card className="fixed bottom-20 right-4 z-40 px-4 py-3 shadow-lg border-primary/20 bg-background/95 backdrop-blur">
       <div className="flex items-center gap-3">
         <Film className="h-4 w-4 text-primary" />
         
