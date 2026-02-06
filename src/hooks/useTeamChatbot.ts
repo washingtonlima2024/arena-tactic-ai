@@ -98,9 +98,11 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away', matc
       const finalMessages = [...updatedMessages, assistantMessage];
       setMessages(finalMessages);
 
-      // Auto-play audio response
+      // Auto-play audio: try server audio first, then browser TTS fallback
       if (data.audioContent) {
         playAudio(data.audioContent);
+      } else if (cleanText && 'speechSynthesis' in window) {
+        speakWithBrowserTTS(cleanText);
       }
 
       return data;
@@ -178,7 +180,36 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away', matc
     });
   }, [toast]);
 
-  const playAudio = (audioContent: string) => {
+  const speakWithBrowserTTS = useCallback((text: string) => {
+    if (!('speechSynthesis' in window) || !text) return;
+    
+    window.speechSynthesis.cancel();
+    
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'pt-BR';
+    utterance.rate = 1.05;
+    
+    const voices = window.speechSynthesis.getVoices();
+    const ptVoice = voices.find(v => v.lang.startsWith('pt'));
+    if (ptVoice) utterance.voice = ptVoice;
+    
+    utterance.onstart = () => setIsPlayingAudio(true);
+    utterance.onend = () => setIsPlayingAudio(false);
+    utterance.onerror = () => setIsPlayingAudio(false);
+    
+    // Chrome workaround: onend sometimes doesn't fire
+    const checkInterval = setInterval(() => {
+      if (!window.speechSynthesis.speaking) {
+        clearInterval(checkInterval);
+        setIsPlayingAudio(false);
+      }
+    }, 500);
+    
+    setIsPlayingAudio(true);
+    window.speechSynthesis.speak(utterance);
+  }, []);
+
+  const playAudio = useCallback((audioContent: string) => {
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
       currentAudioRef.current = null;
@@ -189,19 +220,29 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away', matc
     
     audio.onplay = () => setIsPlayingAudio(true);
     audio.onended = () => setIsPlayingAudio(false);
-    audio.onerror = () => setIsPlayingAudio(false);
+    audio.onerror = () => {
+      // If base64 audio fails, don't set error - just stop
+      setIsPlayingAudio(false);
+    };
     
     currentAudioRef.current = audio;
-    audio.play();
-  };
+    audio.play().catch(() => {
+      // If audio play fails, silently stop
+      setIsPlayingAudio(false);
+    });
+  }, []);
 
-  const stopAudio = () => {
+  const stopAudio = useCallback(() => {
     if (currentAudioRef.current) {
       currentAudioRef.current.pause();
       currentAudioRef.current = null;
-      setIsPlayingAudio(false);
     }
-  };
+    // Also stop browser TTS
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.cancel();
+    }
+    setIsPlayingAudio(false);
+  }, []);
 
   const clearMessages = async () => {
     setMessages([]);
@@ -219,6 +260,7 @@ export function useTeamChatbot(teamName: string, teamType: 'home' | 'away', matc
     playAudio,
     stopAudio,
     clearMessages,
+    speakWithBrowserTTS,
     reloadConversation: loadConversation,
   };
 }
