@@ -15,6 +15,7 @@ import {
   Download, Loader2, Video, Play, FileText, Volume2,
   Star, User, Trash2, Scissors, Film,
   StopCircle, Clock, Calendar, MapPin,
+  Eye, Timer, Users, Crosshair, BookOpen, CheckCircle, Sparkles, RefreshCw,
 } from 'lucide-react';
 import { useDynamicMatchStats } from '@/hooks/useDynamicMatchStats';
 import { useMatchAnalysis, useMatchEvents, ExtendedTacticalAnalysis } from '@/hooks/useMatchDetails';
@@ -31,13 +32,15 @@ import { toast } from '@/hooks/use-toast';
 import { ReimportMatchDialog } from '@/components/events/ReimportMatchDialog';
 import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
 import { getEventLabel } from '@/lib/eventLabels';
+import { useMatchReport } from '@/hooks/useMatchReport';
 
-// New analysis components
+// Analysis components
 import { TeamComparisonPanel } from '@/components/analysis/TeamComparisonPanel';
 import { BestPlayerCard } from '@/components/analysis/BestPlayerCard';
 import { MatchStatsGrid } from '@/components/analysis/MatchStatsGrid';
 import { AnalysisEventTimeline } from '@/components/analysis/AnalysisEventTimeline';
 import { MatchReplayHeatmap } from '@/components/analysis/MatchReplayHeatmap';
+import { TacticalReportSection } from '@/components/analysis/TacticalReportSection';
 
 export default function Analysis() {
   const queryClient = useQueryClient();
@@ -120,6 +123,50 @@ export default function Analysis() {
 
   const eventAnalysis = useEventBasedAnalysis(events, selectedMatch?.home_team, selectedMatch?.away_team);
   const tacticalAnalysis = analysis?.tacticalAnalysis as ExtendedTacticalAnalysis | null;
+  const { report, isGenerating: isGeneratingReport, generateReport, clearReport } = useMatchReport();
+
+  const handleGenerateReport = async () => {
+    if (!events.length) {
+      toast({ title: 'Sem eventos', description: 'Nenhum evento disponivel para gerar o relatorio.', variant: 'destructive' });
+      return;
+    }
+    await generateReport({
+      homeTeam: homeTeamName,
+      awayTeam: awayTeamName,
+      homeScore: dynamicStats.score.home,
+      awayScore: dynamicStats.score.away,
+      competition: selectedMatch?.competition || undefined,
+      matchDate: selectedMatch?.match_date || undefined,
+      venue: selectedMatch?.venue || undefined,
+      events: events.map(e => ({
+        event_type: e.event_type,
+        minute: e.minute,
+        second: e.second,
+        description: e.description,
+        match_half: e.match_half,
+        metadata: e.metadata as Record<string, any> | null,
+      })),
+      stats: {
+        homeShots: eventAnalysis.homeStats.shots,
+        awayShots: eventAnalysis.awayStats.shots,
+        homeSaves: eventAnalysis.homeStats.saves,
+        awaySaves: eventAnalysis.awayStats.saves,
+        homeFouls: eventAnalysis.homeStats.fouls,
+        awayFouls: eventAnalysis.awayStats.fouls,
+        homeCards: eventAnalysis.homeStats.cards,
+        awayCards: eventAnalysis.awayStats.cards,
+        homeCorners: eventAnalysis.homeStats.corners,
+        awayCorners: eventAnalysis.awayStats.corners,
+        homeOffsides: eventAnalysis.homeStats.offsides,
+        awayOffsides: eventAnalysis.awayStats.offsides,
+        homeRecoveries: eventAnalysis.homeStats.recoveries,
+        awayRecoveries: eventAnalysis.awayStats.recoveries,
+      },
+      bestPlayer: eventAnalysis.bestPlayer,
+      patterns: eventAnalysis.patterns.map(p => ({ type: p.type, description: p.description })),
+      possession: eventAnalysis.possession,
+    });
+  };
 
   const { heatZones: eventHeatZones } = useEventHeatZones(
     events, selectedMatch?.home_team?.name, selectedMatch?.away_team?.name
@@ -375,33 +422,124 @@ export default function Analysis() {
         ) : (
           <>
             {/* ============================================================ */}
-            {/* SECTION 2: EXECUTIVE SUMMARY                                  */}
+            {/* AI REPORT GENERATION BUTTON                                    */}
             {/* ============================================================ */}
-            {(eventAnalysis.matchSummary || eventAnalysis.tacticalOverview) && (
-              <Card variant="glow" className="animate-fade-in">
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2">
-                    <FileText className="h-5 w-5 text-primary" />
-                    Resumo Executivo
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {eventAnalysis.matchSummary && (
-                    <p className="text-sm leading-relaxed bg-muted/30 p-4 rounded-lg">
-                      {eventAnalysis.matchSummary}
-                    </p>
+            {events.length > 0 && (
+              <div className="flex items-center gap-3 animate-fade-in">
+                <Button
+                  variant="arena"
+                  size="lg"
+                  onClick={handleGenerateReport}
+                  disabled={isGeneratingReport}
+                  className="w-full sm:w-auto"
+                >
+                  {isGeneratingReport ? (
+                    <>
+                      <Loader2 className="h-5 w-5 animate-spin mr-2" />
+                      Gerando Relatorio Tatico...
+                    </>
+                  ) : report ? (
+                    <>
+                      <RefreshCw className="h-5 w-5 mr-2" />
+                      Regenerar Relatorio com IA
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-5 w-5 mr-2" />
+                      Gerar Relatorio Tatico com IA
+                    </>
                   )}
-                  {eventAnalysis.tacticalOverview && (
-                    <p className="text-sm leading-relaxed bg-muted/30 p-4 rounded-lg">
-                      {eventAnalysis.tacticalOverview}
-                    </p>
-                  )}
-                </CardContent>
-              </Card>
+                </Button>
+                {report && (
+                  <Badge variant="arena" className="gap-1">
+                    <CheckCircle className="h-3 w-3" />
+                    Relatorio gerado
+                  </Badge>
+                )}
+              </div>
             )}
 
             {/* ============================================================ */}
-            {/* SECTION 3: TEAM COMPARISON                                    */}
+            {/* AI REPORT: 7 SECTIONS                                          */}
+            {/* ============================================================ */}
+            {report ? (
+              <div className="space-y-4">
+                <TacticalReportSection
+                  title="1. Visao Geral da Partida"
+                  icon={Eye}
+                  content={report.visaoGeral}
+                  delay={0}
+                />
+                <TacticalReportSection
+                  title="2. Linha do Tempo de Eventos"
+                  icon={Timer}
+                  content={report.linhaDoTempo}
+                  delay={50}
+                />
+                <TacticalReportSection
+                  title="3. Primeiro Tempo"
+                  icon={Clock}
+                  content={report.primeiroTempo}
+                  delay={100}
+                />
+                <TacticalReportSection
+                  title="4. Segundo Tempo"
+                  icon={Clock}
+                  content={report.segundoTempo}
+                  delay={150}
+                />
+                <TacticalReportSection
+                  title="5. Analise Individual dos Times"
+                  icon={Users}
+                  content={report.analiseIndividual?.timePrincipal || ''}
+                  secondaryTitle={`Analise do Adversario (${awayTeamName})`}
+                  secondaryContent={report.analiseIndividual?.adversario || ''}
+                  delay={200}
+                />
+                <TacticalReportSection
+                  title="6. Analise Tatica Completa"
+                  icon={Crosshair}
+                  content={report.analiseTatica}
+                  delay={250}
+                />
+                <TacticalReportSection
+                  title="7. Resumo Final"
+                  icon={BookOpen}
+                  content={report.resumoFinal}
+                  delay={300}
+                />
+              </div>
+            ) : (
+              /* FALLBACK: Local executive summary when no AI report */
+              (eventAnalysis.matchSummary || eventAnalysis.tacticalOverview) && (
+                <Card variant="glow" className="animate-fade-in">
+                  <CardHeader>
+                    <CardTitle className="flex items-center gap-2">
+                      <FileText className="h-5 w-5 text-primary" />
+                      Resumo Executivo
+                    </CardTitle>
+                    <CardDescription>
+                      Clique em "Gerar Relatorio Tatico com IA" para uma analise completa e detalhada
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {eventAnalysis.matchSummary && (
+                      <p className="text-sm leading-relaxed bg-muted/30 p-4 rounded-lg">
+                        {eventAnalysis.matchSummary}
+                      </p>
+                    )}
+                    {eventAnalysis.tacticalOverview && (
+                      <p className="text-sm leading-relaxed bg-muted/30 p-4 rounded-lg">
+                        {eventAnalysis.tacticalOverview}
+                      </p>
+                    )}
+                  </CardContent>
+                </Card>
+              )
+            )}
+
+            {/* ============================================================ */}
+            {/* TEAM COMPARISON                                                */}
             {/* ============================================================ */}
             <TeamComparisonPanel
               homeTeamName={homeTeamName}
@@ -413,7 +551,7 @@ export default function Analysis() {
             />
 
             {/* ============================================================ */}
-            {/* SECTION 4: BEST PLAYER                                        */}
+            {/* BEST PLAYER                                                    */}
             {/* ============================================================ */}
             <BestPlayerCard
               player={eventAnalysis.bestPlayer}
@@ -424,7 +562,7 @@ export default function Analysis() {
             />
 
             {/* ============================================================ */}
-            {/* SECTION 5: REPLAY HEATMAP                                     */}
+            {/* REPLAY HEATMAP                                                 */}
             {/* ============================================================ */}
             <MatchReplayHeatmap
               events={events}
@@ -436,7 +574,7 @@ export default function Analysis() {
             />
 
             {/* ============================================================ */}
-            {/* SECTION 6: TACTICAL SUMMARY                                   */}
+            {/* TACTICAL SUMMARY                                               */}
             {/* ============================================================ */}
             {(eventAnalysis.patterns.length > 0 || tacticalAnalysis) && (
               <Card variant="glass" className="animate-fade-in">
