@@ -185,11 +185,6 @@ export default function VideoUpload() {
   
   // Link input state
   const [newLinkInput, setNewLinkInput] = useState('');
-  const [newLinkType, setNewLinkType] = useState<VideoType>('full');
-  const [newLinkTitle, setNewLinkTitle] = useState('');
-  const [newStartMinute, setNewStartMinute] = useState('');
-  const [newEndMinute, setNewEndMinute] = useState('');
-  const [newDuration, setNewDuration] = useState('');
   const [isValidatingLink, setIsValidatingLink] = useState(false);
   const [linkValidationTime, setLinkValidationTime] = useState(0);
 
@@ -718,6 +713,9 @@ export default function VideoUpload() {
       setIsValidatingLink(false);
       setLinkValidationTime(0);
 
+      // Auto-detect video type from URL
+      const autoType: VideoType = 'full';
+      
       const defaultConfig = {
         full: { start: 0, end: 90 },
         first_half: { start: 0, end: 45 },
@@ -732,23 +730,22 @@ export default function VideoUpload() {
         clip: 'Trecho'
       };
 
-      const startMinute = newStartMinute ? parseInt(newStartMinute) : defaultConfig[newLinkType].start;
-      const endMinute = newEndMinute ? parseInt(newEndMinute) : defaultConfig[newLinkType].end;
-      const durationSeconds = newDuration ? parseInt(newDuration) : null;
+      const startMinute = defaultConfig[autoType].start;
+      const endMinute = defaultConfig[autoType].end;
 
       const newSegment: VideoSegment = {
         id: generateUUID(),
         name: `${validation.platform}: ${embedUrl.slice(0, 40)}...`,
         url: embedUrl,
-        videoType: newLinkType,
-        title: newLinkTitle || typeLabels[newLinkType],
-        durationSeconds,
+        videoType: autoType,
+        title: typeLabels[autoType],
+        durationSeconds: null,
         startMinute,
         endMinute,
         progress: 100,
         status: 'ready',
         isLink: true,
-        half: newLinkType === 'first_half' ? 'first' : newLinkType === 'second_half' ? 'second' : undefined,
+        half: undefined,
       };
 
       // Verificar duplicatas antes de adicionar
@@ -766,14 +763,10 @@ export default function VideoUpload() {
         return [...prev, newSegment];
       });
       setNewLinkInput('');
-      setNewLinkTitle('');
-      setNewStartMinute('');
-      setNewEndMinute('');
-      setNewDuration('');
       
       toast({
         title: `✓ ${validation.platform} adicionado`,
-        description: `${newSegment.title} (${startMinute}'-${endMinute}')`
+        description: `${newSegment.title}`
       });
     } catch (error) {
       clearInterval(timerInterval);
@@ -2876,85 +2869,18 @@ export default function VideoUpload() {
                         <LinkIcon className="h-5 w-5" />
                         Adicionar Vídeo por Link
                       </CardTitle>
+                      <CardDescription>
+                        Cole o link do YouTube, Google Drive, Dropbox ou URL direta — tipo, duração e minutos serão detectados automaticamente.
+                      </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
                       <div className="space-y-2">
-                        <Label>Link ou Código Embed</Label>
                         <Textarea
-                          placeholder='Cole o link ou código embed'
+                          placeholder='Cole o link do vídeo (YouTube, Google Drive, Dropbox, URL direta...)'
                           value={newLinkInput}
                           onChange={(e) => setNewLinkInput(e.target.value)}
                           rows={2}
                         />
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <Label>Tipo do Vídeo</Label>
-                          <Select value={newLinkType} onValueChange={(v) => setNewLinkType(v as VideoType)}>
-                            <SelectTrigger>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="full">Partida Completa</SelectItem>
-                              <SelectItem value="first_half">1º Tempo</SelectItem>
-                              <SelectItem value="second_half">2º Tempo</SelectItem>
-                              <SelectItem value="clip">Trecho</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <Label>Título</Label>
-                          <Input
-                            placeholder="Ex: 1º Tempo"
-                            value={newLinkTitle}
-                            onChange={(e) => setNewLinkTitle(e.target.value)}
-                          />
-                        </div>
-                      </div>
-
-                      <div className="p-3 rounded-lg bg-primary/5 border border-primary/20 space-y-3">
-                        <div className="flex items-center gap-2 text-sm font-medium text-primary">
-                          <Clock className="h-4 w-4" />
-                          Duração e Sincronização
-                        </div>
-                        
-                        <div className="space-y-2">
-                          <Label className="text-xs">Duração do Vídeo (segundos)</Label>
-                          <Input
-                            type="number"
-                            placeholder="Ex: 77 para 1:17"
-                            min={1}
-                            value={newDuration}
-                            onChange={(e) => setNewDuration(e.target.value)}
-                          />
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-2">
-                            <Label className="text-xs">Minuto Inicial</Label>
-                            <Input
-                              type="number"
-                              placeholder={newLinkType === 'second_half' ? '45' : '0'}
-                              min={0}
-                              max={120}
-                              value={newStartMinute}
-                              onChange={(e) => setNewStartMinute(e.target.value)}
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-xs">Minuto Final</Label>
-                            <Input
-                              type="number"
-                              placeholder="90"
-                              min={0}
-                              max={120}
-                              value={newEndMinute}
-                              onChange={(e) => setNewEndMinute(e.target.value)}
-                            />
-                          </div>
-                        </div>
                       </div>
                       
                       <Button 
