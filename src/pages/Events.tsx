@@ -109,7 +109,7 @@ const EventRow = ({
 
   return (
     <div 
-      className={`flex items-center gap-3 rounded-lg border p-3 transition-colors group cursor-pointer ${
+      className={`flex items-center gap-2 sm:gap-3 rounded-lg border p-2 sm:p-3 transition-colors group cursor-pointer overflow-hidden ${
         event.approval_status === 'pending' || !event.approval_status
           ? 'border-yellow-500/30 bg-yellow-500/5 hover:bg-yellow-500/10'
           : event.approval_status === 'approved'
@@ -120,27 +120,27 @@ const EventRow = ({
     >
       {/* Thumbnail do evento */}
       {thumbnailUrl ? (
-        <div className="relative w-16 h-10 rounded overflow-hidden shrink-0 group-hover:ring-2 ring-primary/50 transition-all">
+        <div className="relative w-12 h-8 sm:w-16 sm:h-10 rounded overflow-hidden shrink-0 group-hover:ring-2 ring-primary/50 transition-all">
           <img 
             src={thumbnailUrl} 
             alt={`${event.event_type} ${event.minute}'`}
             className="w-full h-full object-cover"
           />
           <div className="absolute inset-0 bg-black/30 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <Play className="h-4 w-4 text-white" />
+            <Play className="h-3 w-3 sm:h-4 sm:w-4 text-white" />
           </div>
         </div>
       ) : (matchVideo || event.clip_url) ? (
-        <div className="flex h-10 w-16 items-center justify-center rounded bg-muted/50 text-muted-foreground group-hover:bg-primary/20 group-hover:text-primary transition-colors shrink-0">
-          <Play className="h-5 w-5" />
+        <div className="flex h-8 w-12 sm:h-10 sm:w-16 items-center justify-center rounded bg-muted/50 text-muted-foreground group-hover:bg-primary/20 group-hover:text-primary transition-colors shrink-0">
+          <Play className="h-4 w-4 sm:h-5 sm:w-5" />
         </div>
       ) : null}
 
       {/* Team logo */}
       {teamLogo ? (
-        <Avatar className="h-7 w-7 shrink-0">
+        <Avatar className="h-6 w-6 sm:h-7 sm:w-7 shrink-0">
           <AvatarImage src={teamLogo} alt={teamName} className="object-contain" />
-          <AvatarFallback className="text-xs">{teamName?.slice(0, 2)}</AvatarFallback>
+          <AvatarFallback className="text-[10px] sm:text-xs">{teamName?.slice(0, 2)}</AvatarFallback>
         </Avatar>
       ) : (
         getApprovalIcon(event.approval_status)
@@ -152,30 +152,30 @@ const EventRow = ({
           event.event_type.includes('card') ? 'destructive' :
           event.event_type === 'foul' ? 'warning' : 'outline'
         }
-        className="min-w-[50px] justify-center font-mono text-xs shrink-0"
+        className="min-w-[40px] sm:min-w-[50px] justify-center font-mono text-[11px] sm:text-xs shrink-0 px-1.5 sm:px-2"
       >
         {event.minute || 0}'
       </Badge>
-      <div className="flex-1 min-w-0">
-        <p className="font-medium capitalize truncate text-sm">
+      <div className="flex-1 min-w-0 overflow-hidden">
+        <p className="font-medium capitalize truncate text-xs sm:text-sm">
           {getEventLabel(event.event_type)}
         </p>
         {event.description && (
-          <p className="text-xs text-muted-foreground truncate">
+          <p className="text-[11px] sm:text-xs text-muted-foreground truncate">
             {event.description}
           </p>
         )}
       </div>
       {event.metadata?.edited && (
-        <Badge variant="secondary" className="shrink-0 text-xs">
+        <Badge variant="secondary" className="shrink-0 text-[10px] sm:text-xs hidden sm:flex">
           Editado
         </Badge>
       )}
       {/* Clip badge */}
       {event.clip_url && (
-        <Badge variant="secondary" className="shrink-0 text-xs gap-1 bg-primary/20 text-primary border-primary/30">
+        <Badge variant="secondary" className="shrink-0 text-[10px] sm:text-xs gap-1 bg-primary/20 text-primary border-primary/30">
           <Film className="h-3 w-3" />
-          Clip
+          <span className="hidden sm:inline">Clip</span>
         </Badge>
       )}
       {/* Video indicator - only show if no clip */}
@@ -190,10 +190,10 @@ const EventRow = ({
         <Button
           variant="ghost"
           size="icon"
-          className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 h-7 w-7"
+          className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 h-6 w-6 sm:h-7 sm:w-7"
           onClick={(e) => handleEditClick(e, event)}
         >
-          <Pencil className="h-3.5 w-3.5" />
+          <Pencil className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
         </Button>
       )}
     </div>
