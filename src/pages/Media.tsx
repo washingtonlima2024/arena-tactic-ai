@@ -39,6 +39,7 @@ import {
 } from "@/components/ui/select";
 import { useThumbnailGeneration } from '@/hooks/useThumbnailGeneration';
 import { useClipGeneration } from '@/hooks/useClipGeneration';
+import { getEventLabel, getEventIcon } from '@/lib/eventLabels';
 
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ClipVignette } from '@/components/media/ClipVignette';
@@ -1027,7 +1028,10 @@ export default function Media() {
                           )}
                         </div>
                         <div className="absolute left-1.5 top-1.5 sm:left-2 sm:top-2 flex gap-1 flex-wrap max-w-[80%]">
-                          <Badge variant="arena" className="text-[10px] sm:text-xs">{clip.type}</Badge>
+                          <Badge variant="arena" className="text-[10px] sm:text-xs gap-1">
+                            <span>{getEventIcon(clip.type)}</span>
+                            {getEventLabel(clip.type)}
+                          </Badge>
                           {clip.matchHalf && (
                             <Badge variant="outline" className="backdrop-blur text-[10px] sm:text-xs">
                               {clip.matchHalf === 'first_half' || clip.matchHalf === 'first' ? '1º T' : clip.matchHalf === 'second_half' || clip.matchHalf === 'second' ? '2º T' : clip.matchHalf}
@@ -1052,12 +1056,17 @@ export default function Media() {
                         </div>
                       </div>
                       <CardContent className="pt-3 pb-3 px-3 sm:pt-4 sm:pb-4 sm:px-4">
-                        <h3 className="font-medium text-sm sm:text-base truncate">{clip.title}</h3>
-                        {clip.description && (
-                          <p className="mt-0.5 text-xs sm:text-sm text-muted-foreground line-clamp-1 sm:line-clamp-2 break-words">
-                            {clip.description}
-                          </p>
-                        )}
+                        <div className="flex items-start gap-2">
+                          <span className="text-lg leading-none mt-0.5">{getEventIcon(clip.type)}</span>
+                          <div className="flex-1 min-w-0">
+                            <h3 className="font-medium text-sm sm:text-base truncate">{getEventLabel(clip.type)} — {formatTimestamp(clip.totalSeconds)}</h3>
+                            {clip.title && (
+                              <p className="mt-0.5 text-xs sm:text-sm text-primary/80 line-clamp-2 break-words italic">
+                                "{clip.title}"
+                              </p>
+                            )}
+                          </div>
+                        </div>
                         {/* Barra de ações - Mobile: ícones | Desktop: ícones + texto */}
                         <div className="mt-2.5 sm:mt-3 flex items-center gap-1.5 sm:gap-2">
                           {!thumbnail?.imageUrl && !isExtractingFrame && clip.clipUrl && (
