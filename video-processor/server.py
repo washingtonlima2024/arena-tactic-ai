@@ -8694,9 +8694,9 @@ def download_video_with_progress(url: str, output_path: str, job_id: str, match_
         # Registrar vídeo no banco
         session = get_session()
         try:
-            # Gerar URL de acesso usando request do Flask
+            # Gerar URL relativa (sem host fixo) para compatibilidade com túneis
             filename = os.path.basename(output_path)
-            file_url = f"http://localhost:5000/api/storage/{match_id}/videos/{filename}"
+            file_url = f"/api/storage/{match_id}/videos/{filename}"
             
             video = Video(
                 match_id=match_id,
@@ -8759,8 +8759,9 @@ def download_video_from_url_endpoint(match_id: str):
     if not any(filename.lower().endswith(ext) for ext in valid_extensions):
         filename += '.mp4'
     
-    # Caminho de destino
-    videos_folder = get_video_subfolder_path(match_id, 'videos')
+    # Caminho de destino - usar get_subfolder_path para salvar direto em storage/{match_id}/videos/
+    from storage import get_subfolder_path
+    videos_folder = get_subfolder_path(match_id, 'videos')
     output_path = str(videos_folder / filename)
     
     # Inicializar job de download
