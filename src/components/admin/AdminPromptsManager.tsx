@@ -586,13 +586,18 @@ function ModelSelector({
   defaultModel: string;
   ollamaModels: Array<{ value: string; label: string }>;
 }) {
+  // Determinar o provedor baseado no modelo padrão do prompt
+  const providerType = getModelType(defaultModel);
+  const isOllama = !defaultModel.startsWith('google/') && !defaultModel.startsWith('openai/') && !defaultModel.startsWith('whisper-local/');
+
   return (
     <Select value={value} onValueChange={onChange}>
       <SelectTrigger>
         <SelectValue placeholder="Selecione o modelo" />
       </SelectTrigger>
       <SelectContent>
-        {category === 'transcription' ? (
+        {/* Whisper - apenas para transcrição */}
+        {category === 'transcription' && (
           <SelectGroup>
             <SelectLabel className="flex items-center gap-2">
               <Mic className="h-3 w-3" />
@@ -609,59 +614,66 @@ function ModelSelector({
               </SelectItem>
             ))}
           </SelectGroup>
-        ) : (
-          <>
-            {ollamaModels.length > 0 && (
-              <SelectGroup>
-                <SelectLabel className="flex items-center gap-2">
-                  <Server className="h-3 w-3" />
-                  Ollama Local
-                </SelectLabel>
-                {ollamaModels.map(m => (
-                  <SelectItem key={m.value} value={m.value}>
-                    <span className="flex items-center gap-2">
-                      {m.label}
-                      {m.value === defaultModel && (
-                        <Badge variant="outline" className="text-[10px] px-1 py-0">Padrão</Badge>
-                      )}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectGroup>
-            )}
-            <SelectGroup>
-              <SelectLabel className="flex items-center gap-2">
-                <Cloud className="h-3 w-3" />
-                Google Gemini
-              </SelectLabel>
-              {GEMINI_MODELS.map(m => (
-                <SelectItem key={m.value} value={m.value}>
-                  <span className="flex items-center gap-2">
-                    {m.label}
-                    {m.value === defaultModel && (
-                      <Badge variant="outline" className="text-[10px] px-1 py-0">Padrão</Badge>
-                    )}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectGroup>
-            <SelectGroup>
-              <SelectLabel className="flex items-center gap-2">
-                <Cloud className="h-3 w-3" />
-                OpenAI GPT
-              </SelectLabel>
-              {GPT_MODELS.map(m => (
-                <SelectItem key={m.value} value={m.value}>
-                  <span className="flex items-center gap-2">
-                    {m.label}
-                    {m.value === defaultModel && (
-                      <Badge variant="outline" className="text-[10px] px-1 py-0">Padrão</Badge>
-                    )}
-                  </span>
-                </SelectItem>
-              ))}
-            </SelectGroup>
-          </>
+        )}
+
+        {/* Ollama Local - apenas se o modelo padrão é Ollama */}
+        {isOllama && ollamaModels.length > 0 && (
+          <SelectGroup>
+            <SelectLabel className="flex items-center gap-2">
+              <Server className="h-3 w-3" />
+              Ollama Local
+            </SelectLabel>
+            {ollamaModels.map(m => (
+              <SelectItem key={m.value} value={m.value}>
+                <span className="flex items-center gap-2">
+                  {m.label}
+                  {m.value === defaultModel && (
+                    <Badge variant="outline" className="text-[10px] px-1 py-0">Padrão</Badge>
+                  )}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        )}
+
+        {/* Gemini - apenas se o modelo padrão é Gemini */}
+        {defaultModel.startsWith('google/') && (
+          <SelectGroup>
+            <SelectLabel className="flex items-center gap-2">
+              <Cloud className="h-3 w-3" />
+              Google Gemini
+            </SelectLabel>
+            {GEMINI_MODELS.map(m => (
+              <SelectItem key={m.value} value={m.value}>
+                <span className="flex items-center gap-2">
+                  {m.label}
+                  {m.value === defaultModel && (
+                    <Badge variant="outline" className="text-[10px] px-1 py-0">Padrão</Badge>
+                  )}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectGroup>
+        )}
+
+        {/* GPT - apenas se o modelo padrão é GPT */}
+        {defaultModel.startsWith('openai/') && (
+          <SelectGroup>
+            <SelectLabel className="flex items-center gap-2">
+              <Cloud className="h-3 w-3" />
+              OpenAI GPT
+            </SelectLabel>
+            {GPT_MODELS.map(m => (
+              <SelectItem key={m.value} value={m.value}>
+                <span className="flex items-center gap-2">
+                  {m.label}
+                  {m.value === defaultModel && (
+                    <Badge variant="outline" className="text-[10px] px-1 py-0">Padrão</Badge>
+                  )}
+                </span>
+              </SelectItem>
+            ))}
+          </SelectGroup>
         )}
       </SelectContent>
     </Select>
