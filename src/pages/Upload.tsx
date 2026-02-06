@@ -1600,7 +1600,9 @@ export default function VideoUpload() {
       // Check if we should use async processing (local server available + large files or local mode)
       const hasLargeVideos = currentSegments.some(s => (s.size || 0) > 300 * 1024 * 1024); // 300MB+
       const isUsingLocalMode = uploadMode === 'local';
-      const shouldUseAsyncPipeline = isLocalServerOnline && (hasLargeVideos || isUsingLocalMode);
+      const hadYoutubeDownload = youtubeSegments.length > 0;
+      // Force async pipeline if YouTube videos were downloaded (server is confirmed online, files are local)
+      const shouldUseAsyncPipeline = isLocalServerOnline && (hasLargeVideos || isUsingLocalMode || hadYoutubeDownload);
       
       console.log('=== PIPELINE SELECTION ===');
       console.log('Local server online:', isLocalServerOnline);
