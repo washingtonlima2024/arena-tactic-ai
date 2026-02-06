@@ -1,104 +1,65 @@
 
-# Implementar Download de Video do YouTube no Pipeline de Processamento
+# Correção: Reprocessamento de vídeos importados do YouTube
 
-## Resumo
+## Problema Identificado
 
-Atualmente, quando o usuario cola um link do YouTube na aba "Link/Embed", o sistema apenas salva a URL como referencia mas **nao baixa o video**. O `download_video_with_progress` no backend usa `requests.get()`, que so funciona para links diretos (MP4, Google Drive, Dropbox). Para YouTube, ele recebe HTML em vez do video.
+Ao clicar em "Processar Partida" na página de Eventos, o sistema tenta transcrever **todos os vídeos registrados** para a partida -- incluindo clips, vídeos duplicados e registros pendentes. No caso da partida Barcelona vs Real Madrid, existem **5 registros de vídeo**:
 
-O plano e adicionar suporte a download de videos do YouTube usando a biblioteca `yt-dlp` no backend Python, integrando com o pipeline existente para que o video baixado passe pelo mesmo processo de transcricao e analise que qualquer arquivo enviado.
+- `video_e8194543.mp4` - tipo `clip`, status `completed` (arquivo pode não existir)
+- `video_049eca64.mp4` - tipo `full`, status `pending` (registro duplicado de importação)
+- `video_049eca64.mp4` - tipo `full`, status `completed` (arquivo real)
+- `video_56d3093d.mp4` - tipo `full`, status `pending` (registro duplicado de importação)
+- `video_56d3093d.mp4` - tipo `full`, status `completed` (arquivo real)
 
-## Fluxo Proposto
+O loop em `handleProcessMatch` itera TODOS eles sem filtro, e ao tentar transcrever o clip `video_e8194543.mp4` (que não existe no disco), o backend retorna o erro "Local file not found".
 
-```text
-Usuario cola link YouTube
-        |
-        v
-Frontend detecta plataforma "YouTube"
-        |
-        v
-Ao clicar "Iniciar Analise":
-  - Se servidor Python online:
-      Frontend chama POST /api/storage/{matchId}/videos/download-url
-      com flag youtube=true
-        |
-        v
-  Backend detecta URL YouTube
-        |
-        v
-  yt-dlp baixa o video (melhor qualidade ate 720p)
-  com progresso via download_jobs
-        |
-        v
-  Arquivo salvo em storage/videos/{matchId}/
-        |
-        v
-  Registro criado na tabela videos (SQLite)
-        |
-        v
-  Segmento atualizado no frontend com file_url local
-        |
-        v
-  Pipeline normal de transcricao + analise continua
+## Solução
+
+### 1. Filtrar vídeos antes de processar (frontend)
+
+No `handleProcessMatch` em `src/pages/Events.tsx`, filtrar os vídeos para:
+- Excluir vídeos do tipo `clip` (não fazem sentido para transcrição completa)
+- Excluir vídeos com status `pending` (são registros de importação duplicados)
+- Remover duplicatas baseado no `file_url` (manter apenas um registro por arquivo físico)
+
+### 2. Normalizar a URL do vídeo antes de enviar ao backend
+
+Atualmente o `handleProcessMatch` envia `video.file_url` diretamente (ex: `http://localhost:5000/api/storage/...`). Como o backend já lida com isso, o problema é menor, mas idealmente devemos enviar o caminho relativo (`/api/storage/...`) para consistência.
+
+## Detalhes Técnicos
+
+### Arquivo: `src/pages/Events.tsx` (linhas ~778-793)
+
+Antes:
+```typescript
+for (const video of matchVideos) {
+  const videoType = video.video_type || 'full';
+  // ... processa todos os vídeos
+}
 ```
 
-## Alteracoes Necessarias
+Depois:
+```typescript
+// Filtrar vídeos processáveis: excluir clips, pendentes e duplicatas
+const processableVideos = matchVideos
+  .filter(v => v.video_type !== 'clip')           // Excluir clips
+  .filter(v => v.status === 'completed' || v.status === 'ready' || v.status === 'analyzed')  // Apenas vídeos com arquivo real
+  .filter((v, i, arr) => {                          // Remover duplicatas por file_url
+    const normalizedUrl = v.file_url?.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '');
+    return arr.findIndex(x => {
+      const xUrl = x.file_url?.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '');
+      return xUrl === normalizedUrl;
+    }) === i;
+  });
 
-### 1. Backend: `video-processor/requirements.txt`
-- Adicionar `yt-dlp>=2024.1.0` as dependencias
+if (processableVideos.length === 0) {
+  toast.error('Nenhum vídeo válido para processar (apenas clips ou pendentes encontrados)');
+  return;
+}
 
-### 2. Backend: `video-processor/server.py`
+for (const video of processableVideos) {
+  // ... processar normalmente
+}
+```
 
-**Funcao `download_video_with_progress`** (linhas ~8537-8620):
-- Adicionar deteccao de URLs YouTube (`youtube.com`, `youtu.be`)
-- Quando for YouTube, usar `yt-dlp` como subprocesso em vez de `requests.get`
-- Comando: `yt-dlp -f "bestvideo[height<=720]+bestaudio/best[height<=720]" --merge-output-format mp4 -o {output_path} {url}`
-- Capturar progresso via stdout parsing do yt-dlp (linhas `[download] XX.X%`)
-- Atualizar `download_jobs[job_id]` com progresso em tempo real
-- Manter o restante do fluxo igual (detectar duracao com ffprobe, registrar no banco)
-
-**Funcao `convert_to_direct_url`** (linhas ~8515-8534):
-- Adicionar early return para URLs YouTube (nao tentar converter, pois serao tratadas pelo yt-dlp)
-
-### 3. Frontend: `src/pages/Upload.tsx`
-
-**Funcao `addVideoLink`** (~linha 666):
-- Quando a plataforma for "YouTube", mostrar aviso de que o download sera feito pelo servidor Python
-- Verificar se o servidor Python esta online; se nao, mostrar toast explicando que YouTube requer servidor local
-
-**Funcao `handleStartAnalysis`** (~linha 1364):
-- Antes de iniciar transcricao, verificar se algum segmento e `isLink: true` e de plataforma YouTube
-- Para esses segmentos: chamar endpoint `POST /api/storage/{matchId}/videos/download-url` e aguardar conclusao via polling em `GET /api/storage/download-status/{jobId}`
-- Ao completar download, atualizar segmento com `url` local, `isLink: false`, e `status: 'complete'`
-- Entao continuar com o pipeline normal de transcricao/analise
-
-### 4. Frontend: `src/lib/apiClient.ts`
-
-- Adicionar metodo `downloadVideoFromUrl(matchId, url, videoType, filename?)` que chama `POST /api/storage/{matchId}/videos/download-url`
-- Adicionar metodo `getDownloadStatus(jobId)` que chama `GET /api/storage/download-status/{jobId}`
-- (O endpoint no backend ja existe mas o apiClient nao tem wrapper para ele)
-
-## Detalhes Tecnicos
-
-### yt-dlp no Backend
-- Usar como subprocesso (`subprocess.Popen`) para capturar progresso em tempo real
-- Formato de saida forcado para MP4 (`--merge-output-format mp4`)
-- Limitar qualidade a 720p para balancear tamanho/qualidade
-- Timeout de 30 minutos para downloads longos
-- Validar arquivo pos-download com ffprobe
-
-### Polling de Progresso no Frontend
-- O endpoint `GET /api/storage/download-status/{jobId}` ja existe no backend
-- Frontend fara polling a cada 2 segundos durante download
-- Mostrar barra de progresso no `ProcessingProgress` component existente
-- Fases: "Baixando do YouTube (XX%)" -> "Registrando video" -> "Transcrevendo..."
-
-### Tratamento de Erros
-- YouTube video privado/indisponivel: mostrar mensagem clara
-- yt-dlp nao instalado: fallback com mensagem "Execute: pip install yt-dlp"
-- Servidor offline: mostrar toast "Download do YouTube requer servidor Python local"
-
-## Arquivos Afetados
-1. `video-processor/requirements.txt` - adicionar yt-dlp
-2. `video-processor/server.py` - logica de download YouTube
-3. `src/pages/Upload.tsx` - fluxo de download pre-analise
-4. `src/lib/apiClient.ts` - wrappers para endpoints de download
+Isso garante que apenas vídeos reais e completos sejam enviados para transcrição, evitando erros de "arquivo não encontrado".
