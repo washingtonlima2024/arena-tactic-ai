@@ -3,18 +3,7 @@ import { AppLayout } from '@/components/layout/AppLayout';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-// Removed: FootballField and AnimatedTacticalPlay (fictitious data)
-import { Heatmap2D } from '@/components/tactical/Heatmap2D';
-import { ScrollArea } from '@/components/ui/scroll-area';
 import { Progress } from '@/components/ui/progress';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from '@/components/ui/select';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,32 +11,10 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { 
-  BarChart3, 
-  Users, 
-  Target, 
-  TrendingUp,
-  Swords,
-  Shield,
-  Zap,
-  Download,
-  Loader2,
-  Video,
-  Play,
-  Image,
-  FileText,
-  Volume2,
-  Star,
-  Clock,
-  User,
-  Trash2,
-  Radio,
-  Scissors,
-  Film,
-  ExternalLink,
-  Share2,
-  StopCircle,
-  Copy,
-  Twitter
+  BarChart3, Target, Swords, Shield, Zap,
+  Download, Loader2, Video, Play, FileText, Volume2,
+  Star, User, Trash2, Scissors, Film,
+  StopCircle, Clock, Calendar, MapPin,
 } from 'lucide-react';
 import { useDynamicMatchStats } from '@/hooks/useDynamicMatchStats';
 import { useMatchAnalysis, useMatchEvents, ExtendedTacticalAnalysis } from '@/hooks/useMatchDetails';
@@ -65,13 +32,17 @@ import { ReimportMatchDialog } from '@/components/events/ReimportMatchDialog';
 import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
 import { getEventLabel } from '@/lib/eventLabels';
 
+// New analysis components
+import { TeamComparisonPanel } from '@/components/analysis/TeamComparisonPanel';
+import { BestPlayerCard } from '@/components/analysis/BestPlayerCard';
+import { MatchStatsGrid } from '@/components/analysis/MatchStatsGrid';
+import { AnalysisEventTimeline } from '@/components/analysis/AnalysisEventTimeline';
+import { MatchReplayHeatmap } from '@/components/analysis/MatchReplayHeatmap';
+
 export default function Analysis() {
   const queryClient = useQueryClient();
   
-  // Live broadcast context for realtime updates
   const { isRecording, currentMatchId: liveMatchId } = useLiveBroadcastContext();
-  
-  // Centralized match selection
   const { currentMatchId, selectedMatch, matches, isLoading: matchesLoading, setSelectedMatch } = useMatchSelection();
   
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
@@ -83,14 +54,12 @@ export default function Analysis() {
   const { data: events = [], refetch: refetchEvents } = useMatchEvents(currentMatchId);
   const { thumbnails, getThumbnail } = useThumbnailGeneration(currentMatchId || undefined);
   
-  // Dynamic stats calculated from events
   const dynamicStats = useDynamicMatchStats(
     events,
     selectedMatch?.home_team?.name || '',
     selectedMatch?.away_team?.name || ''
   );
   
-  // Clip generation
   const { 
     isGenerating: isGeneratingClips, 
     progress: clipProgress, 
@@ -98,241 +67,127 @@ export default function Analysis() {
     cancel: cancelClipGeneration 
   } = useClipGeneration();
 
-  // Check if this is a live match
   const isLiveMatch = selectedMatch?.status === 'live' || (isRecording && liveMatchId === currentMatchId);
 
-  // Polling every 10 seconds for live matches
+  // Polling for live matches
   useEffect(() => {
     if (!currentMatchId || !isLiveMatch) return;
-    
-    console.log('Starting live match polling for:', currentMatchId);
-    
     const pollInterval = setInterval(() => {
-      console.log('Polling live match events...');
       refetchEvents();
       queryClient.invalidateQueries({ queryKey: ['match-video', currentMatchId] });
     }, 10000);
-
-    return () => {
-      console.log('Stopping live match polling');
-      clearInterval(pollInterval);
-    };
+    return () => clearInterval(pollInterval);
   }, [currentMatchId, isLiveMatch, refetchEvents, queryClient]);
 
-  // Real-time subscription for live match analysis updates
+  // Realtime subscription
   useEffect(() => {
     if (!currentMatchId) return;
-    
     const channel = supabase
       .channel(`analysis-realtime-${currentMatchId}`)
       .on('postgres_changes', {
-        event: '*',
-        schema: 'public',
-        table: 'match_events',
+        event: '*', schema: 'public', table: 'match_events',
         filter: `match_id=eq.${currentMatchId}`
       }, (payload) => {
-        console.log('Analysis: Event change received:', payload);
-        // Refetch events to update analysis
         refetchEvents();
         queryClient.invalidateQueries({ queryKey: ['match-events', currentMatchId] });
-        
         if (isLiveMatch && payload.eventType === 'INSERT') {
-          toast({
-            title: "Análise atualizada",
-            description: "Novo evento adicionado à análise tática",
-          });
+          toast({ title: "Analise atualizada", description: "Novo evento adicionado a analise tatica" });
         }
       })
       .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
+    return () => { supabase.removeChannel(channel); };
   }, [currentMatchId, refetchEvents, queryClient, isLiveMatch]);
 
-  // Fetch video for the match
   const { data: matchVideo } = useQuery({
     queryKey: ['match-video', currentMatchId],
     queryFn: async () => {
       if (!currentMatchId) return null;
-      const { data, error } = await supabase
-        .from('videos')
-        .select('*')
-        .eq('match_id', currentMatchId)
-        .maybeSingle();
-      if (error) return null;
+      const { data } = await supabase.from('videos').select('*').eq('match_id', currentMatchId).maybeSingle();
       return data;
     },
     enabled: !!currentMatchId
   });
 
-  // Fetch generated audio for the match
   const { data: generatedAudio } = useQuery({
     queryKey: ['generated-audio', currentMatchId],
     queryFn: async () => {
       if (!currentMatchId) return [];
-      const { data, error } = await supabase
-        .from('generated_audio')
-        .select('*')
-        .eq('match_id', currentMatchId)
-        .order('created_at', { ascending: false });
-      if (error) return [];
+      const { data } = await supabase.from('generated_audio').select('*').eq('match_id', currentMatchId).order('created_at', { ascending: false });
       return data || [];
     },
     enabled: !!currentMatchId
   });
 
-  // Generate analysis from real events
-  const eventAnalysis = useEventBasedAnalysis(
-    events,
-    selectedMatch?.home_team,
-    selectedMatch?.away_team
-  );
-
-  // Use event-based analysis as primary, fallback to stored tactical analysis
+  const eventAnalysis = useEventBasedAnalysis(events, selectedMatch?.home_team, selectedMatch?.away_team);
   const tacticalAnalysis = analysis?.tacticalAnalysis as ExtendedTacticalAnalysis | null;
 
-  // Generate real heat zones and players based on events using the hook
-  const { heatZones: eventHeatZones, homePlayers: eventHomePlayers, awayPlayers: eventAwayPlayers } = useEventHeatZones(
-    events,
-    selectedMatch?.home_team?.name,
-    selectedMatch?.away_team?.name
+  const { heatZones: eventHeatZones } = useEventHeatZones(
+    events, selectedMatch?.home_team?.name, selectedMatch?.away_team?.name
   );
-
-  // Get important events (goals, shots, key moments, tactical events) - excluding cards to avoid repetition
-  const importantEvents = events.filter(e => 
-    ['goal', 'shot', 'shot_on_target', 'penalty', 'corner', 'foul', 'free_kick', 'cross', 
-     'save', 'offside', 'high_press', 'transition', 'ball_recovery'].includes(e.event_type)
-  ).slice(0, 10);
 
   const handlePlayVideo = (eventId: string) => {
     if (matchVideo) {
       setPlayingEventId(eventId);
       setVideoDialogOpen(true);
     } else {
-      toast({
-        title: "Vídeo não disponível",
-        description: "Faça upload do vídeo da partida na página de Upload para visualizar os cortes.",
-        variant: "destructive"
-      });
+      toast({ title: "Video nao disponivel", description: "Faca upload do video na pagina de Upload.", variant: "destructive" });
     }
   };
 
-  // Get event time from metadata.eventMs (milliseconds) as primary source
   const getEventTime = (eventId: string) => {
     const event = events.find(e => e.id === eventId);
     if (!event) return { minute: 0, second: 0, totalSeconds: 0, totalMs: 0 };
-    
     const metadata = event.metadata as { eventMs?: number; videoSecond?: number } | null;
-    
-    // Priority: eventMs (ms) > videoSecond (s) > minute+second
     let totalMs: number;
-    if (metadata?.eventMs !== undefined) {
-      totalMs = metadata.eventMs;
-    } else if (metadata?.videoSecond !== undefined) {
-      totalMs = metadata.videoSecond * 1000;
-    } else {
-      totalMs = ((event.minute || 0) * 60 + (event.second || 0)) * 1000;
-    }
-    
+    if (metadata?.eventMs !== undefined) totalMs = metadata.eventMs;
+    else if (metadata?.videoSecond !== undefined) totalMs = metadata.videoSecond * 1000;
+    else totalMs = ((event.minute || 0) * 60 + (event.second || 0)) * 1000;
     const totalSeconds = Math.floor(totalMs / 1000);
-    return { 
-      minute: Math.floor(totalSeconds / 60), 
-      second: totalSeconds % 60, 
-      totalSeconds,
-      totalMs
-    };
-  };
-  
-  // Format timestamp helper
-  const formatTimestamp = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+    return { minute: Math.floor(totalSeconds / 60), second: totalSeconds % 60, totalSeconds, totalMs };
   };
 
-  // Clip generation helpers
+  // Clip generation
   const eventsWithClips = events.filter(e => e.clip_url).length;
   const eventsWithoutClips = events.filter(e => !e.clip_url).length;
   const canGenerateClips = matchVideo && !matchVideo.file_url.includes('embed') && eventsWithoutClips > 0;
 
   const handleGenerateClips = async (mode: 'highlights' | 'all', limit: number = 20) => {
     if (!currentMatchId || !matchVideo) {
-      toast({
-        title: "Erro",
-        description: "Nenhum vídeo disponível para esta partida",
-        variant: "destructive"
-      });
+      toast({ title: "Erro", description: "Nenhum video disponivel", variant: "destructive" });
       return;
     }
-
     if (matchVideo.file_url.includes('embed') || matchVideo.file_url.includes('xtream.tech')) {
-      toast({
-        title: "Erro",
-        description: "Extração de clips só funciona com vídeos MP4 diretos, não com embeds",
-        variant: "destructive"
-      });
+      toast({ title: "Erro", description: "Extracao de clips so funciona com videos MP4 diretos", variant: "destructive" });
       return;
     }
-
     let eventsToProcess: typeof events;
-    
     if (mode === 'highlights') {
       const priorityTypes = ['goal', 'red_card', 'penalty', 'yellow_card'];
       eventsToProcess = events
         .filter(e => priorityTypes.includes(e.event_type) && !e.clip_url)
-        .sort((a, b) => {
-          const priorityA = priorityTypes.indexOf(a.event_type);
-          const priorityB = priorityTypes.indexOf(b.event_type);
-          return priorityA - priorityB;
-        });
+        .sort((a, b) => priorityTypes.indexOf(a.event_type) - priorityTypes.indexOf(b.event_type));
     } else {
       eventsToProcess = events.filter(e => !e.clip_url);
     }
-
     if (eventsToProcess.length === 0) {
-      toast({
-        title: "Info",
-        description: "Todos os eventos já possuem clips extraídos"
-      });
+      toast({ title: "Info", description: "Todos os eventos ja possuem clips" });
       return;
     }
-
     const clipsCount = Math.min(eventsToProcess.length, limit);
-    toast({
-      title: "Gerando clips",
-      description: `Iniciando extração de ${clipsCount} clips...`
-    });
-
+    toast({ title: "Gerando clips", description: `Iniciando extracao de ${clipsCount} clips...` });
     const videoStartMinute = matchVideo.start_minute ?? 0;
-
-    await generateAllClips(
-      eventsToProcess.slice(0, limit),
-      matchVideo.file_url,
-      currentMatchId,
-      {
-        limit,
-        videoStartMinute,
-        videoDurationSeconds: matchVideo.duration_seconds ?? undefined
-      }
-    );
-
-    refetchEvents();
-    toast({
-      title: "Concluído",
-      description: "Extração de clips concluída!"
+    await generateAllClips(eventsToProcess.slice(0, limit), matchVideo.file_url, currentMatchId, {
+      limit, videoStartMinute, videoDurationSeconds: matchVideo.duration_seconds ?? undefined
     });
+    refetchEvents();
+    toast({ title: "Concluido", description: "Extracao de clips concluida!" });
   };
 
-  const handleCopyClipLink = (clipUrl: string) => {
-    navigator.clipboard.writeText(clipUrl);
-    toast({ title: "Link copiado!" });
-  };
-
-  const handleShareTwitter = (clipUrl: string, eventType: string) => {
-    const text = encodeURIComponent(`Confira este momento: ${eventType} 🎥`);
-    window.open(`https://twitter.com/intent/tweet?text=${text}&url=${encodeURIComponent(clipUrl)}`, '_blank');
-  };
+  // Team colors/names
+  const homeTeamName = selectedMatch?.home_team?.name || 'Time Casa';
+  const awayTeamName = selectedMatch?.away_team?.name || 'Time Visitante';
+  const homeTeamColor = selectedMatch?.home_team?.primary_color || '#10b981';
+  const awayTeamColor = selectedMatch?.away_team?.primary_color || '#3b82f6';
 
   if (matchesLoading) {
     return (
@@ -349,15 +204,15 @@ export default function Analysis() {
       <AppLayout>
         <div className="space-y-6">
           <div>
-            <h1 className="font-display text-3xl font-bold">Análise Tática</h1>
-            <p className="text-muted-foreground">Visualize a análise tática das partidas</p>
+            <h1 className="font-display text-3xl font-bold">Analise Tatica</h1>
+            <p className="text-muted-foreground">Visualize a analise tatica das partidas</p>
           </div>
           <Card variant="glass">
             <CardContent className="flex flex-col items-center justify-center py-12">
               <Video className="h-12 w-12 text-muted-foreground mb-4" />
-              <h3 className="text-lg font-semibold mb-2">Nenhuma análise disponível</h3>
+              <h3 className="text-lg font-semibold mb-2">Nenhuma analise disponivel</h3>
               <p className="text-muted-foreground text-center mb-4">
-                Importe e analise um vídeo para ver os resultados
+                Importe e analise um video para ver os resultados
               </p>
               <Button variant="arena" asChild>
                 <Link to="/upload?mode=new">Importar Partida</Link>
@@ -371,83 +226,112 @@ export default function Analysis() {
 
   return (
     <AppLayout key={currentMatchId}>
-      <div className="space-y-6">
-        {/* Header */}
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-              <h1 className="font-display text-xl sm:text-3xl font-bold">Análise Tática</h1>
-              {selectedMatch && (
-                <>
-                  <Badge variant="arena" className="text-xs sm:text-sm">
-                    {selectedMatch.home_team?.short_name || 'Casa'} vs {selectedMatch.away_team?.short_name || 'Visitante'}
-                  </Badge>
-                  <Badge variant="outline" className="text-sm sm:text-lg font-bold px-2 sm:px-3 py-0.5 sm:py-1 text-primary">
-                    {dynamicStats.score.home} x {dynamicStats.score.away}
-                  </Badge>
-                </>
-              )}
-            </div>
-            <p className="text-sm text-muted-foreground">
-              {selectedMatch?.competition || 'Amistoso'} • {selectedMatch?.match_date ? new Date(selectedMatch.match_date).toLocaleDateString('pt-BR') : 'Data não definida'}
-              {events.length > 0 && ` • ${events.length} eventos detectados`}
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <Button 
-              variant="destructive" 
-              size="sm"
-              onClick={() => setReimportDialogOpen(true)}
-              disabled={!currentMatchId}
-            >
-              <Trash2 className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">Reimportar Vídeos</span>
-            </Button>
-            
-            {/* Clip Generation Dropdown */}
-            {canGenerateClips && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button 
-                    variant="secondary" 
-                    size="sm"
-                    disabled={isGeneratingClips}
-                  >
-                    {isGeneratingClips ? (
-                      <Loader2 className="h-4 w-4 animate-spin sm:mr-2" />
+      <div className="space-y-6 max-w-5xl mx-auto">
+
+        {/* ============================================================ */}
+        {/* SECTION 1: HEADER - Score, Teams, Match Info                  */}
+        {/* ============================================================ */}
+        <div className="animate-fade-in">
+          <Card variant="glow" className="overflow-hidden">
+            <CardContent className="pt-6 pb-4">
+              <div className="flex flex-col items-center gap-4">
+                {/* Teams + Score */}
+                <div className="flex items-center justify-center gap-4 sm:gap-8 w-full">
+                  {/* Home team */}
+                  <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
+                    {selectedMatch?.home_team?.logo_url ? (
+                      <img src={selectedMatch.home_team.logo_url} alt="" className="w-12 h-12 sm:w-16 sm:h-16 rounded-full object-cover border-2" style={{ borderColor: homeTeamColor }} />
                     ) : (
-                      <Scissors className="h-4 w-4 sm:mr-2" />
+                      <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full flex items-center justify-center text-xl font-bold" style={{ backgroundColor: `${homeTeamColor}20`, color: homeTeamColor }}>
+                        {homeTeamName.charAt(0)}
+                      </div>
                     )}
-                    <span className="hidden sm:inline">Gerar Clips</span>
-                    {eventsWithClips > 0 && (
-                      <Badge variant="outline" className="ml-1 sm:ml-2 text-xs">
-                        {eventsWithClips}/{events.length}
-                      </Badge>
+                    <span className="text-sm sm:text-base font-semibold text-center truncate max-w-[120px]">
+                      {selectedMatch?.home_team?.short_name || homeTeamName}
+                    </span>
+                  </div>
+
+                  {/* Score */}
+                  <div className="flex items-center gap-3">
+                    <span className="text-4xl sm:text-5xl font-bold tabular-nums" style={{ color: homeTeamColor }}>
+                      {dynamicStats.score.home}
+                    </span>
+                    <span className="text-2xl text-muted-foreground font-light">x</span>
+                    <span className="text-4xl sm:text-5xl font-bold tabular-nums" style={{ color: awayTeamColor }}>
+                      {dynamicStats.score.away}
+                    </span>
+                  </div>
+
+                  {/* Away team */}
+                  <div className="flex flex-col items-center gap-2 flex-1 min-w-0">
+                    {selectedMatch?.away_team?.logo_url ? (
+                      <img src={selectedMatch.away_team.logo_url} alt="" className="w-12 h-12 sm:w-16 sm:h-16 rounded-full object-cover border-2" style={{ borderColor: awayTeamColor }} />
+                    ) : (
+                      <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full flex items-center justify-center text-xl font-bold" style={{ backgroundColor: `${awayTeamColor}20`, color: awayTeamColor }}>
+                        {awayTeamName.charAt(0)}
+                      </div>
                     )}
+                    <span className="text-sm sm:text-base font-semibold text-center truncate max-w-[120px]">
+                      {selectedMatch?.away_team?.short_name || awayTeamName}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Match info badges */}
+                <div className="flex flex-wrap items-center justify-center gap-2 text-xs text-muted-foreground">
+                  {selectedMatch?.competition && (
+                    <Badge variant="outline" className="gap-1"><Swords className="h-3 w-3" />{selectedMatch.competition}</Badge>
+                  )}
+                  {selectedMatch?.match_date && (
+                    <Badge variant="outline" className="gap-1"><Calendar className="h-3 w-3" />{new Date(selectedMatch.match_date).toLocaleDateString('pt-BR')}</Badge>
+                  )}
+                  {selectedMatch?.venue && (
+                    <Badge variant="outline" className="gap-1"><MapPin className="h-3 w-3" />{selectedMatch.venue}</Badge>
+                  )}
+                  {events.length > 0 && (
+                    <Badge variant="arena" className="gap-1">{events.length} eventos</Badge>
+                  )}
+                  {isLiveMatch && (
+                    <Badge variant="destructive" className="gap-1 animate-pulse">AO VIVO</Badge>
+                  )}
+                </div>
+
+                {/* Action buttons */}
+                <div className="flex flex-wrap gap-2 justify-center">
+                  <Button variant="destructive" size="sm" onClick={() => setReimportDialogOpen(true)} disabled={!currentMatchId}>
+                    <Trash2 className="h-4 w-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Reimportar</span>
                   </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => handleGenerateClips('highlights', 10)}>
-                    <Target className="mr-2 h-4 w-4" />
-                    Gerar Highlights (gols, cartões)
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleGenerateClips('all', 20)}>
-                    <Film className="mr-2 h-4 w-4" />
-                    Gerar Todos (máx 20)
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => handleGenerateClips('all', 50)}>
-                    <Video className="mr-2 h-4 w-4" />
-                    Gerar Todos (máx 50)
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
-            
-            <Button variant="arena-outline" size="sm">
-              <Download className="h-4 w-4 sm:mr-2" />
-              <span className="hidden sm:inline">Exportar Relatório</span>
-            </Button>
-          </div>
+                  {canGenerateClips && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="secondary" size="sm" disabled={isGeneratingClips}>
+                          {isGeneratingClips ? <Loader2 className="h-4 w-4 animate-spin sm:mr-2" /> : <Scissors className="h-4 w-4 sm:mr-2" />}
+                          <span className="hidden sm:inline">Gerar Clips</span>
+                          {eventsWithClips > 0 && <Badge variant="outline" className="ml-1 text-xs">{eventsWithClips}/{events.length}</Badge>}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end">
+                        <DropdownMenuItem onClick={() => handleGenerateClips('highlights', 10)}>
+                          <Target className="mr-2 h-4 w-4" />Highlights (gols, cartoes)
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleGenerateClips('all', 20)}>
+                          <Film className="mr-2 h-4 w-4" />Todos (max 20)
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onClick={() => handleGenerateClips('all', 50)}>
+                          <Video className="mr-2 h-4 w-4" />Todos (max 50)
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                  <Button variant="arena-outline" size="sm">
+                    <Download className="h-4 w-4 sm:mr-2" />
+                    <span className="hidden sm:inline">Exportar</span>
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
         </div>
 
         {/* Reimport Dialog */}
@@ -470,18 +354,10 @@ export default function Analysis() {
                     <span className="text-sm font-medium">{clipProgress.message}</span>
                     <div className="flex items-center gap-2">
                       {clipProgress.completedCount !== undefined && (
-                        <Badge variant="outline">
-                          {clipProgress.completedCount}/{clipProgress.totalCount} clips
-                        </Badge>
+                        <Badge variant="outline">{clipProgress.completedCount}/{clipProgress.totalCount} clips</Badge>
                       )}
-                      <Button 
-                        variant="ghost" 
-                        size="sm" 
-                        onClick={cancelClipGeneration}
-                        className="h-7"
-                      >
-                        <StopCircle className="h-4 w-4 mr-1" />
-                        Cancelar
+                      <Button variant="ghost" size="sm" onClick={cancelClipGeneration} className="h-7">
+                        <StopCircle className="h-4 w-4 mr-1" />Cancelar
                       </Button>
                     </div>
                   </div>
@@ -498,125 +374,136 @@ export default function Analysis() {
           </div>
         ) : (
           <>
-            {/* 2D Heatmap with Player Formations */}
-            <Card variant="glow">
-              <CardHeader>
-                <div className="flex items-center justify-between">
-                  <CardTitle className="flex items-center gap-2">
-                    <BarChart3 className="h-5 w-5 text-primary" />
-                    Mapa de Calor - Formação dos Jogadores
-                  </CardTitle>
-                  <div className="flex items-center gap-2">
-                    <Badge variant="arena">{tacticalAnalysis?.formation?.home || '4-3-3'}</Badge>
-                    <span className="text-muted-foreground">vs</span>
-                    <Badge variant="secondary">{tacticalAnalysis?.formation?.away || '4-4-2'}</Badge>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <Heatmap2D
-                  homeTeamName={selectedMatch?.home_team?.name || 'Time Casa'}
-                  awayTeamName={selectedMatch?.away_team?.name || 'Time Visitante'}
-                  homeTeamColor={selectedMatch?.home_team?.primary_color || '#10b981'}
-                  awayTeamColor={selectedMatch?.away_team?.primary_color || '#3b82f6'}
-                  height={500}
-                  heatZones={eventHeatZones}
-                  homePlayers={eventHomePlayers}
-                  awayPlayers={eventAwayPlayers}
-                />
-              </CardContent>
-            </Card>
-
-            {/* Formation Overview and Animated Tactical Plays removed - were using fictitious data */}
-
-            {/* Stats Comparison */}
-            <Card variant="glass">
-              <CardHeader>
-                <CardTitle>Comparativo de Estatísticas</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {[
-                    { label: 'Posse de Bola', home: eventAnalysis.possession.home, away: eventAnalysis.possession.away, suffix: '%' },
-                    { label: 'Gols', home: selectedMatch?.home_score ?? 0, away: selectedMatch?.away_score ?? 0 },
-                    { label: 'Finalizações', home: eventAnalysis.homeStats.shots, away: eventAnalysis.awayStats.shots },
-                    { label: 'Defesas', home: eventAnalysis.homeStats.saves, away: eventAnalysis.awayStats.saves },
-                    { label: 'Faltas/Cartões', home: eventAnalysis.homeStats.fouls + eventAnalysis.homeStats.cards, away: eventAnalysis.awayStats.fouls + eventAnalysis.awayStats.cards },
-                  ].map((stat, index) => (
-                    <div key={index} className="grid grid-cols-[1fr,2fr,1fr] items-center gap-2 sm:gap-4">
-                      <div className="text-right">
-                        <span className="text-base sm:text-lg font-bold">
-                          {stat.home}{stat.suffix || ''}
-                        </span>
-                      </div>
-                      <div className="space-y-1">
-                        <div className="flex h-2 overflow-hidden rounded-full bg-muted">
-                          <div 
-                            className="bg-gradient-arena transition-all"
-                            style={{ width: `${(stat.home / (stat.home + stat.away || 1)) * 100}%` }}
-                          />
-                        </div>
-                        <p className="text-center text-xs text-muted-foreground">{stat.label}</p>
-                      </div>
-                      <div className="text-left">
-                        <span className="text-base sm:text-lg font-bold">
-                          {stat.away}{stat.suffix || ''}
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Match Summary Section - Generated from events */}
-            {(eventAnalysis.matchSummary || eventAnalysis.tacticalOverview || events.length > 0) && (
-              <Card variant="glow">
+            {/* ============================================================ */}
+            {/* SECTION 2: EXECUTIVE SUMMARY                                  */}
+            {/* ============================================================ */}
+            {(eventAnalysis.matchSummary || eventAnalysis.tacticalOverview) && (
+              <Card variant="glow" className="animate-fade-in">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <FileText className="h-5 w-5 text-primary" />
-                    Resumo da Partida
+                    Resumo Executivo
                   </CardTitle>
                 </CardHeader>
-                <CardContent className="space-y-6">
-                  {/* Complete Analysis */}
+                <CardContent className="space-y-4">
                   {eventAnalysis.matchSummary && (
-                    <div className="space-y-2">
-                      <h4 className="font-semibold text-sm text-muted-foreground flex items-center gap-2">
-                        <BarChart3 className="h-4 w-4" />
-                        Análise Completa
-                      </h4>
-                      <p className="text-sm leading-relaxed bg-muted/30 p-4 rounded-lg">
-                        {eventAnalysis.matchSummary}
-                      </p>
-                    </div>
+                    <p className="text-sm leading-relaxed bg-muted/30 p-4 rounded-lg">
+                      {eventAnalysis.matchSummary}
+                    </p>
                   )}
-                  
-                  {/* Tactical Analysis */}
                   {eventAnalysis.tacticalOverview && (
-                    <div className="space-y-2">
-                      <h4 className="font-semibold text-sm text-muted-foreground flex items-center gap-2">
-                        <Target className="h-4 w-4" />
-                        Análise Tática
-                      </h4>
-                      <p className="text-sm leading-relaxed bg-muted/30 p-4 rounded-lg">
-                        {eventAnalysis.tacticalOverview}
-                      </p>
+                    <p className="text-sm leading-relaxed bg-muted/30 p-4 rounded-lg">
+                      {eventAnalysis.tacticalOverview}
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* ============================================================ */}
+            {/* SECTION 3: TEAM COMPARISON                                    */}
+            {/* ============================================================ */}
+            <TeamComparisonPanel
+              homeTeamName={homeTeamName}
+              awayTeamName={awayTeamName}
+              homeTeamColor={homeTeamColor}
+              awayTeamColor={awayTeamColor}
+              stats={dynamicStats}
+              possession={eventAnalysis.possession}
+            />
+
+            {/* ============================================================ */}
+            {/* SECTION 4: BEST PLAYER                                        */}
+            {/* ============================================================ */}
+            <BestPlayerCard
+              player={eventAnalysis.bestPlayer}
+              homeTeamName={homeTeamName}
+              awayTeamName={awayTeamName}
+              homeTeamColor={homeTeamColor}
+              awayTeamColor={awayTeamColor}
+            />
+
+            {/* ============================================================ */}
+            {/* SECTION 5: REPLAY HEATMAP                                     */}
+            {/* ============================================================ */}
+            <MatchReplayHeatmap
+              events={events}
+              homeTeamName={homeTeamName}
+              awayTeamName={awayTeamName}
+              homeTeamColor={homeTeamColor}
+              awayTeamColor={awayTeamColor}
+              onPlayClip={(clipUrl) => window.open(clipUrl, '_blank')}
+            />
+
+            {/* ============================================================ */}
+            {/* SECTION 6: TACTICAL SUMMARY                                   */}
+            {/* ============================================================ */}
+            {(eventAnalysis.patterns.length > 0 || tacticalAnalysis) && (
+              <Card variant="glass" className="animate-fade-in">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Target className="h-5 w-5 text-primary" />
+                    Resumo Tatico
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Formations */}
+                  {tacticalAnalysis?.formation && (
+                    <div className="flex items-center justify-center gap-4">
+                      <Badge variant="arena" className="text-sm">{tacticalAnalysis.formation.home}</Badge>
+                      <span className="text-muted-foreground text-xs">vs</span>
+                      <Badge variant="secondary" className="text-sm">{tacticalAnalysis.formation.away}</Badge>
                     </div>
                   )}
-                  
-                  {/* Standout Players */}
-                  {eventAnalysis.standoutPlayers && eventAnalysis.standoutPlayers.length > 0 && (
+
+                  {/* Possession bar */}
+                  {events.length >= 10 && (
+                    <div className="space-y-1">
+                      <div className="flex justify-between text-xs text-muted-foreground">
+                        <span>{homeTeamName} {eventAnalysis.possession.home}%</span>
+                        <span>Posse de Bola</span>
+                        <span>{eventAnalysis.possession.away}% {awayTeamName}</span>
+                      </div>
+                      <div className="flex h-3 rounded-full overflow-hidden bg-muted/50">
+                        <div className="transition-all duration-500" style={{ width: `${eventAnalysis.possession.home}%`, backgroundColor: homeTeamColor, opacity: 0.8 }} />
+                        <div className="transition-all duration-500" style={{ width: `${eventAnalysis.possession.away}%`, backgroundColor: awayTeamColor, opacity: 0.8 }} />
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Tactical patterns */}
+                  {eventAnalysis.patterns.length > 0 && (
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {eventAnalysis.patterns.map((pattern, i) => (
+                        <div key={i} className="flex items-start gap-3 rounded-lg bg-muted/20 p-3 border border-border/30">
+                          <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 shrink-0">
+                            {pattern.type === 'defensive_scheme' ? <Shield className="h-4 w-4 text-primary" /> :
+                             pattern.type === 'attacking_scheme' ? <Swords className="h-4 w-4 text-primary" /> :
+                             <Zap className="h-4 w-4 text-primary" />}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-0.5">
+                              <Badge variant="outline" className="text-xs capitalize">{pattern.type.replace(/_/g, ' ')}</Badge>
+                              <span className="text-xs text-primary font-medium">{Math.round(pattern.effectiveness * 100)}%</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground">{pattern.description}</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Standout players */}
+                  {eventAnalysis.standoutPlayers.length > 0 && (
                     <div className="space-y-2">
-                      <h4 className="font-semibold text-sm text-muted-foreground flex items-center gap-2">
+                      <h4 className="text-sm text-muted-foreground flex items-center gap-2">
                         <Star className="h-4 w-4" />
                         Jogadores em Destaque
                       </h4>
                       <div className="flex flex-wrap gap-2">
                         {eventAnalysis.standoutPlayers.map((player, i) => (
                           <Badge key={i} variant="arena" className="gap-1">
-                            <User className="h-3 w-3" />
-                            {player}
+                            <User className="h-3 w-3" />{player}
                           </Badge>
                         ))}
                       </div>
@@ -626,44 +513,46 @@ export default function Analysis() {
               </Card>
             )}
 
-            {/* Audio Player Section */}
+            {/* ============================================================ */}
+            {/* SECTION 7: DETAILED STATS GRID                                */}
+            {/* ============================================================ */}
+            <MatchStatsGrid
+              stats={dynamicStats}
+              homeTeamName={homeTeamName}
+              awayTeamName={awayTeamName}
+            />
+
+            {/* ============================================================ */}
+            {/* SECTION 8: AUDIO                                              */}
+            {/* ============================================================ */}
             {generatedAudio && generatedAudio.length > 0 && (
-              <Card variant="glass">
+              <Card variant="glass" className="animate-fade-in">
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Volume2 className="h-5 w-5 text-primary" />
-                    Narração da Partida
+                    Narracao da Partida
                   </CardTitle>
-                  <CardDescription>
-                    Áudios gerados para esta partida
-                  </CardDescription>
                 </CardHeader>
                 <CardContent>
-                  <div className="space-y-4">
+                  <div className="space-y-3">
                     {generatedAudio.map((audio) => (
-                      <div key={audio.id} className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 rounded-lg bg-muted/30 border border-border/50">
-                        <div className="flex items-center gap-3 sm:gap-4">
-                          <div className="flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-full bg-primary/10 shrink-0">
-                            <Volume2 className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                      <div key={audio.id} className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 rounded-lg bg-muted/30 border border-border/50">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 shrink-0">
+                            <Volume2 className="h-5 w-5 text-primary" />
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="font-medium capitalize text-sm sm:text-base">
-                              {audio.audio_type === 'narration' ? 'Narração' : 
-                               audio.audio_type === 'podcast' ? 'Podcast' : 
-                               audio.audio_type === 'summary' ? 'Resumo' : audio.audio_type}
+                          <div className="min-w-0">
+                            <p className="font-medium capitalize text-sm">
+                              {audio.audio_type === 'narration' ? 'Narracao' : audio.audio_type === 'podcast' ? 'Podcast' : audio.audio_type === 'summary' ? 'Resumo' : audio.audio_type}
                             </p>
-                            <p className="text-xs sm:text-sm text-muted-foreground">
-                              {audio.voice ? `Voz: ${audio.voice}` : 'Locução Padrão'}
-                              {audio.duration_seconds && ` • ${Math.floor(audio.duration_seconds / 60)}:${String(audio.duration_seconds % 60).padStart(2, '0')}`}
+                            <p className="text-xs text-muted-foreground">
+                              {audio.voice ? `Voz: ${audio.voice}` : 'Locucao Padrao'}
+                              {audio.duration_seconds && ` - ${Math.floor(audio.duration_seconds / 60)}:${String(audio.duration_seconds % 60).padStart(2, '0')}`}
                             </p>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2 sm:gap-3">
-                          <audio 
-                            controls 
-                            src={audio.audio_url || ''} 
-                            className="h-10 w-full sm:max-w-[200px]"
-                          />
+                        <div className="flex items-center gap-2 sm:ml-auto">
+                          <audio controls src={audio.audio_url || ''} className="h-10 w-full sm:max-w-[200px]" />
                           <Button variant="outline" size="icon" className="shrink-0" asChild>
                             <a href={audio.audio_url || ''} download target="_blank" rel="noopener noreferrer">
                               <Download className="h-4 w-4" />
@@ -677,238 +566,20 @@ export default function Analysis() {
               </Card>
             )}
 
-            {/* Tactical Patterns */}
-            <Tabs defaultValue="insights" className="space-y-6">
-              <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="insights" className="text-xs sm:text-sm">
-                  <span className="hidden sm:inline">Insights </span>({eventAnalysis.keyMoments.length})
-                </TabsTrigger>
-                <TabsTrigger value="patterns" className="text-xs sm:text-sm">
-                  <span className="hidden sm:inline">Padrões </span>({eventAnalysis.patterns.length})
-                </TabsTrigger>
-                <TabsTrigger value="events" className="text-xs sm:text-sm">
-                  <span className="hidden sm:inline">Eventos </span>({events.length})
-                </TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="insights" className="space-y-4">
-                {eventAnalysis.keyMoments.length > 0 ? (
-                  <ScrollArea className="h-[500px] pr-4">
-                    <div className="space-y-3">
-                      {eventAnalysis.keyMoments.map((moment, index) => {
-                        const typeColors: Record<string, string> = {
-                          goal: 'bg-green-500/20 text-green-400 border-green-500/30',
-                          assist: 'bg-blue-500/20 text-blue-400 border-blue-500/30',
-                          yellowCard: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-                          yellow_card: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/30',
-                          redCard: 'bg-red-500/20 text-red-400 border-red-500/30',
-                          red_card: 'bg-red-500/20 text-red-400 border-red-500/30',
-                          save: 'bg-purple-500/20 text-purple-400 border-purple-500/30',
-                          penalty: 'bg-orange-500/20 text-orange-400 border-orange-500/30'
-                        };
-                        
-                        return (
-                          <Card key={index} variant="glass" className="hover:border-primary/50 transition-colors">
-                            <CardContent className="py-4">
-                              <div className="flex items-start gap-4">
-                                <Badge 
-                                  variant="outline" 
-                                  className={`shrink-0 font-mono ${typeColors[moment.type] || 'bg-muted'}`}
-                                >
-                                  <Clock className="h-3 w-3 mr-1" />
-                                  {moment.timestamp}
-                                </Badge>
-                                <div className="flex-1 min-w-0">
-                                  <div className="flex items-center gap-2 mb-1 flex-wrap">
-                                    {moment.player && (
-                                      <span className="font-semibold text-foreground">{moment.player}</span>
-                                    )}
-                                    <Badge 
-                                      variant="secondary" 
-                                      className={`text-xs ${typeColors[moment.type] || ''}`}
-                                    >
-                                      {getEventLabel(moment.type)}
-                                    </Badge>
-                                  </div>
-                                  <p className="text-sm text-muted-foreground leading-relaxed">
-                                    {moment.description}
-                                  </p>
-                                </div>
-                              </div>
-                            </CardContent>
-                          </Card>
-                        );
-                      })}
-                    </div>
-                  </ScrollArea>
-                ) : eventAnalysis.insights.length > 0 ? (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    {eventAnalysis.insights.map((insight, index) => (
-                      <Card key={index} variant="glow">
-                        <CardContent className="pt-6">
-                          <div className="flex items-start gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 shrink-0">
-                              <Zap className="h-5 w-5 text-primary" />
-                            </div>
-                            <p className="text-sm leading-relaxed">{insight}</p>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : (
-                  <Card variant="glass">
-                    <CardContent className="py-8 text-center text-muted-foreground">
-                      Nenhum insight disponível - analise uma partida para ver os resultados
-                    </CardContent>
-                  </Card>
-                )}
-              </TabsContent>
-
-              <TabsContent value="patterns" className="space-y-4">
-                {eventAnalysis.patterns.length > 0 ? (
-                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                    {eventAnalysis.patterns.map((pattern, index) => (
-                      <Card key={index} variant="glow">
-                        <CardContent className="pt-6">
-                          <div className="mb-4 flex items-center gap-3">
-                            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                              {pattern.type === 'defensive_scheme' ? <Shield className="h-5 w-5 text-primary" /> :
-                               pattern.type === 'attacking_scheme' ? <Swords className="h-5 w-5 text-primary" /> :
-                               <Target className="h-5 w-5 text-primary" />}
-                            </div>
-                            <div>
-                              <Badge variant="outline" className="capitalize">
-                                {pattern.type.replace(/_/g, ' ')}
-                              </Badge>
-                            </div>
-                          </div>
-                          <p className="text-sm">{pattern.description}</p>
-                          <div className="mt-4 flex items-center justify-end text-sm">
-                            <span className="font-medium text-primary">
-                              {Math.round(pattern.effectiveness * 100)}% eficácia
-                            </span>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    ))}
-                  </div>
-                ) : (
-                  <Card variant="glass">
-                    <CardContent className="py-8 text-center text-muted-foreground">
-                      Nenhum padrão tático identificado - mais eventos são necessários
-                    </CardContent>
-                  </Card>
-                )}
-              </TabsContent>
-
-              <TabsContent value="events" className="space-y-4">
-                {events.length > 0 ? (
-                  <div className="space-y-2">
-                    {events.map((event) => {
-                      const thumbnail = getThumbnail(event.id);
-                      return (
-                        <Card key={event.id} variant="glass" className="hover:border-primary/50 transition-colors">
-                          <CardContent className="py-3 px-4">
-                            <div className="flex items-center gap-4">
-                              {/* Play button */}
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="shrink-0 h-12 w-12"
-                                onClick={() => handlePlayVideo(event.id)}
-                                disabled={!matchVideo}
-                              >
-                                <Play className={`h-5 w-5 ${matchVideo ? 'text-primary' : 'text-muted-foreground'}`} />
-                              </Button>
-                              
-                              {/* Thumbnail or placeholder */}
-                              {thumbnail ? (
-                                <img 
-                                  src={thumbnail.imageUrl} 
-                                  alt={event.event_type}
-                                  className="w-16 h-10 object-cover rounded cursor-pointer hover:opacity-80 transition-opacity"
-                                  onClick={() => window.open(thumbnail.imageUrl, '_blank')}
-                                />
-                              ) : (
-                                <div className="w-8 h-8 bg-muted rounded-full flex items-center justify-center">
-                                  <div className={`w-3 h-3 rounded-full ${
-                                    event.event_type === 'goal' ? 'bg-green-500' :
-                                    event.event_type.includes('card') ? 'bg-red-500' :
-                                    event.event_type === 'foul' ? 'bg-yellow-500' : 'bg-muted-foreground'
-                                  }`} />
-                                </div>
-                              )}
-                              
-                              <div className="flex-1 min-w-0">
-                                <p className="font-medium capitalize">{event.event_type.replace(/_/g, ' ')}</p>
-                                {event.description && (
-                                  <p className="text-sm text-muted-foreground truncate">{event.description}</p>
-                                )}
-                              </div>
-                              
-                              <Badge variant={
-                                event.event_type === 'goal' ? 'success' :
-                                event.event_type.includes('card') ? 'destructive' :
-                                event.event_type === 'foul' ? 'warning' : 'outline'
-                              }>
-                                {event.minute ? `${event.minute}'` : '—'}
-                              </Badge>
-
-                              {/* Clip badge and actions */}
-                              {event.clip_url ? (
-                                <DropdownMenu>
-                                  <DropdownMenuTrigger asChild>
-                                    <Button variant="secondary" size="sm" className="gap-1.5">
-                                      <Film className="h-3.5 w-3.5" />
-                                      Clip
-                                    </Button>
-                                  </DropdownMenuTrigger>
-                                  <DropdownMenuContent align="end">
-                                    <DropdownMenuItem onClick={() => window.open(event.clip_url!, '_blank')}>
-                                      <ExternalLink className="mr-2 h-4 w-4" />
-                                      Abrir Clip
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleCopyClipLink(event.clip_url!)}>
-                                      <Copy className="mr-2 h-4 w-4" />
-                                      Copiar Link
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem onClick={() => handleShareTwitter(event.clip_url!, event.event_type)}>
-                                      <Twitter className="mr-2 h-4 w-4" />
-                                      Compartilhar no X
-                                    </DropdownMenuItem>
-                                    <DropdownMenuItem asChild>
-                                      <a href={event.clip_url} download target="_blank" rel="noopener noreferrer">
-                                        <Download className="mr-2 h-4 w-4" />
-                                        Download
-                                      </a>
-                                    </DropdownMenuItem>
-                                  </DropdownMenuContent>
-                                </DropdownMenu>
-                              ) : matchVideo && !matchVideo.file_url.includes('embed') ? (
-                                <Badge variant="outline" className="text-xs text-muted-foreground">
-                                  Sem clip
-                                </Badge>
-                              ) : null}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                ) : (
-                  <Card variant="glass">
-                    <CardContent className="py-8 text-center text-muted-foreground">
-                      Nenhum evento registrado
-                    </CardContent>
-                  </Card>
-                )}
-              </TabsContent>
-            </Tabs>
+            {/* ============================================================ */}
+            {/* SECTION 9: EVENT TIMELINE                                     */}
+            {/* ============================================================ */}
+            <AnalysisEventTimeline
+              events={events}
+              homeTeamName={homeTeamName}
+              awayTeamName={awayTeamName}
+              onPlayEvent={handlePlayVideo}
+              getThumbnail={getThumbnail}
+            />
           </>
         )}
 
-        {/* Video Dialog with Embed - 3s before and 5s after event */}
+        {/* Video Dialog */}
         <Dialog open={videoDialogOpen} onOpenChange={setVideoDialogOpen}>
           <DialogContent className="max-w-[95vw] sm:max-w-4xl">
             <DialogHeader>
@@ -918,26 +589,17 @@ export default function Analysis() {
                     const eventTime = getEventTime(playingEventId || '');
                     return <span>Evento - {eventTime.minute}:{String(eventTime.second).padStart(2, '0')}</span>;
                   })()}
-                  <Badge variant="arena">3s antes • 5s depois</Badge>
+                  <Badge variant="arena">3s antes - 5s depois</Badge>
                 </div>
                 {playingEventId && matchVideo && (
-                  <Button
-                    variant="arena"
-                    size="sm"
-                    onClick={() => {
-                      const eventTime = getEventTime(playingEventId);
-                      const startSeconds = Math.max(0, eventTime.totalSeconds - 3); // 3 seconds before
-                      
-                      if (videoRef.current) {
-                        videoRef.current.currentTime = startSeconds;
-                        videoRef.current.play();
-                        toast({
-                          title: "Navegando para evento",
-                          description: `Indo para ${Math.floor(startSeconds / 60)}:${String(Math.floor(startSeconds % 60)).padStart(2, '0')} (3s antes do evento)`,
-                        });
-                      }
-                    }}
-                  >
+                  <Button variant="arena" size="sm" onClick={() => {
+                    const eventTime = getEventTime(playingEventId);
+                    const startSeconds = Math.max(0, eventTime.totalSeconds - 3);
+                    if (videoRef.current) {
+                      videoRef.current.currentTime = startSeconds;
+                      videoRef.current.play();
+                    }
+                  }}>
                     <Play className="h-4 w-4 mr-1" />
                     Ir para {getEventTime(playingEventId).minute}:{String(getEventTime(playingEventId).second).padStart(2, '0')}
                   </Button>
@@ -946,17 +608,10 @@ export default function Analysis() {
             </DialogHeader>
             {matchVideo && playingEventId && (() => {
               const eventTime = getEventTime(playingEventId);
-              const startSeconds = Math.max(0, eventTime.totalSeconds - 3); // 3 seconds before event
-              
+              const startSeconds = Math.max(0, eventTime.totalSeconds - 3);
               const isEmbed = matchVideo.file_url.includes('/embed/') || matchVideo.file_url.includes('iframe') || matchVideo.file_url.includes('xtream');
               const separator = matchVideo.file_url.includes('?') ? '&' : '?';
               const embedUrl = `${matchVideo.file_url}${separator}t=${Math.round(startSeconds)}&autoplay=1`;
-              
-              console.log('Analysis video sync:', {
-                eventTime,
-                startSeconds,
-                videoUrl: matchVideo.file_url
-              });
               
               return (
                 <div className="space-y-4">
@@ -976,15 +631,10 @@ export default function Analysis() {
                         controls
                         autoPlay
                         className="w-full h-full rounded-lg"
-                        onLoadedMetadata={(e) => {
-                          const video = e.currentTarget;
-                          video.currentTime = startSeconds;
-                        }}
+                        onLoadedMetadata={(e) => { e.currentTarget.currentTime = startSeconds; }}
                       />
                     )}
                   </div>
-                  
-                  {/* Event Info + Confirmation hint */}
                   <div className="flex items-center justify-between rounded-lg border border-primary/20 bg-primary/5 p-3">
                     <div className="flex items-center gap-3">
                       <Badge variant="outline" className="gap-1">
@@ -992,18 +642,17 @@ export default function Analysis() {
                         {eventTime.minute}:{String(eventTime.second).padStart(2, '0')}
                       </Badge>
                       <span className="text-sm text-muted-foreground">
-                        Visualize o vídeo para confirmar se o evento está correto. Use a página de Eventos para editar se necessário.
+                        Use a pagina de Eventos para editar se necessario.
                       </span>
                     </div>
                     <Button variant="outline" size="sm" asChild>
-                      <Link to={`/events?match=${currentMatchId}`}>
-                        Ver Todos Eventos
-                      </Link>
+                      <Link to={`/events?match=${currentMatchId}`}>Ver Eventos</Link>
                     </Button>
                   </div>
                 </div>
               );
-            })()}</DialogContent>
+            })()}
+          </DialogContent>
         </Dialog>
       </div>
     </AppLayout>

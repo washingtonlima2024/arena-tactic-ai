@@ -16,6 +16,16 @@ interface Team {
   short_name?: string | null;
 }
 
+export interface BestPlayer {
+  name: string;
+  team: 'home' | 'away';
+  goals: number;
+  assists: number;
+  saves: number;
+  recoveries: number;
+  totalActions: number;
+}
+
 interface EventAnalysis {
   // Scores
   homeScore: number;
@@ -32,6 +42,9 @@ interface EventAnalysis {
   matchSummary: string;
   tacticalOverview: string;
   standoutPlayers: string[];
+  
+  // Best player
+  bestPlayer: BestPlayer | null;
   
   // Possession estimate
   possession: { home: number; away: number };
@@ -74,18 +87,39 @@ export function useEventBasedAnalysis(
     const homeStats: TeamStats = { goals: 0, shots: 0, fouls: 0, cards: 0, corners: 0, saves: 0, recoveries: 0, offsides: 0 };
     const awayStats: TeamStats = { goals: 0, shots: 0, fouls: 0, cards: 0, corners: 0, saves: 0, recoveries: 0, offsides: 0 };
     
-    // Extract team from event (check metadata or description)
+    // Player action tracking for best player calculation
+    const playerActions: Record<string, { 
+      team: 'home' | 'away'; 
+      goals: number; 
+      assists: number; 
+      saves: number; 
+      recoveries: number; 
+      totalActions: number;
+    }> = {};
+    
+    // Extract team from event
     const getEventTeam = (event: MatchEvent): 'home' | 'away' | null => {
       const meta = event.metadata as { team?: string } | null;
       if (meta?.team === 'home') return 'home';
       if (meta?.team === 'away') return 'away';
       
-      // Check description for team names
       const desc = event.description?.toLowerCase() || '';
       if (desc.includes(homeName.toLowerCase()) || desc.includes(homeTeam?.short_name?.toLowerCase() || '')) return 'home';
       if (desc.includes(awayName.toLowerCase()) || desc.includes(awayTeam?.short_name?.toLowerCase() || '')) return 'away';
       
       return null;
+    };
+    
+    // Track player action
+    const trackPlayer = (name: string, team: 'home' | 'away', action: 'goal' | 'assist' | 'save' | 'recovery' | 'other') => {
+      if (!playerActions[name]) {
+        playerActions[name] = { team, goals: 0, assists: 0, saves: 0, recoveries: 0, totalActions: 0 };
+      }
+      playerActions[name].totalActions++;
+      if (action === 'goal') playerActions[name].goals++;
+      else if (action === 'assist') playerActions[name].assists++;
+      else if (action === 'save') playerActions[name].saves++;
+      else if (action === 'recovery') playerActions[name].recoveries++;
     };
     
     // Process events
@@ -105,69 +139,42 @@ export function useEventBasedAnalysis(
       if (player && !players.includes(player)) players.push(player);
       
       switch (event.event_type) {
-        case 'goal':
+        case 'goal': {
           const isOwnGoal = (event.metadata as { isOwnGoal?: boolean })?.isOwnGoal === true;
           if (isOwnGoal) {
-            // Gol contra: credita ao time ADVERSÁRIO
             const opposingStats = team === 'home' ? awayStats : team === 'away' ? homeStats : null;
             if (opposingStats) opposingStats.goals++;
-            keyMoments.push({
-              timestamp,
-              type: 'ownGoal',
-              description: event.description || `Gol contra aos ${minute}'`,
-              player
-            });
+            keyMoments.push({ timestamp, type: 'ownGoal', description: event.description || `Gol contra aos ${minute}'`, player });
           } else {
             if (stats) stats.goals++;
-            keyMoments.push({
-              timestamp,
-              type: 'goal',
-              description: event.description || `Gol aos ${minute}'`,
-              player
-            });
+            keyMoments.push({ timestamp, type: 'goal', description: event.description || `Gol aos ${minute}'`, player });
+            if (player && team) trackPlayer(player, team, 'goal');
           }
           break;
+        }
         case 'shot':
         case 'shot_on_target':
           if (stats) stats.shots++;
           if (event.is_highlight) {
-            keyMoments.push({
-              timestamp,
-              type: 'shot',
-              description: event.description || `Finalização aos ${minute}'`,
-              player
-            });
+            keyMoments.push({ timestamp, type: 'shot', description: event.description || `Finalizacao aos ${minute}'`, player });
           }
+          if (player && team) trackPlayer(player, team, 'other');
           break;
         case 'save':
           if (stats) stats.saves++;
-          keyMoments.push({
-            timestamp,
-            type: 'save',
-            description: event.description || `Defesa aos ${minute}'`,
-            player
-          });
+          keyMoments.push({ timestamp, type: 'save', description: event.description || `Defesa aos ${minute}'`, player });
+          if (player && team) trackPlayer(player, team, 'save');
           break;
         case 'foul':
           if (stats) stats.fouls++;
           break;
         case 'yellow_card':
           if (stats) { stats.cards++; stats.fouls++; }
-          keyMoments.push({
-            timestamp,
-            type: 'yellowCard',
-            description: event.description || `Cartão amarelo aos ${minute}'`,
-            player
-          });
+          keyMoments.push({ timestamp, type: 'yellowCard', description: event.description || `Cartao amarelo aos ${minute}'`, player });
           break;
         case 'red_card':
           if (stats) { stats.cards += 2; stats.fouls++; }
-          keyMoments.push({
-            timestamp,
-            type: 'redCard',
-            description: event.description || `Cartão vermelho aos ${minute}'`,
-            player
-          });
+          keyMoments.push({ timestamp, type: 'redCard', description: event.description || `Cartao vermelho aos ${minute}'`, player });
           break;
         case 'corner':
           if (stats) stats.corners++;
@@ -178,23 +185,17 @@ export function useEventBasedAnalysis(
         case 'ball_recovery':
         case 'interception':
           if (stats) stats.recoveries++;
+          if (player && team) trackPlayer(player, team, 'recovery');
           break;
         case 'penalty':
-          keyMoments.push({
-            timestamp,
-            type: 'penalty',
-            description: event.description || `Pênalti aos ${minute}'`,
-            player
-          });
+          keyMoments.push({ timestamp, type: 'penalty', description: event.description || `Penalti aos ${minute}'`, player });
           break;
         case 'transition':
         case 'high_press':
-          keyMoments.push({
-            timestamp,
-            type: 'transition',
-            description: event.description || `Jogada tática aos ${minute}'`,
-            player
-          });
+          keyMoments.push({ timestamp, type: 'transition', description: event.description || `Jogada tatica aos ${minute}'`, player });
+          break;
+        case 'assist':
+          if (player && team) trackPlayer(player, team, 'assist');
           break;
       }
     });
@@ -203,16 +204,32 @@ export function useEventBasedAnalysis(
     const homeScore = homeStats.goals;
     const awayScore = awayStats.goals;
     
-    // Estimate possession based on events distribution
+    // Estimate possession
     const homeEvents = events.filter(e => getEventTeam(e) === 'home').length;
     const awayEvents = events.filter(e => getEventTeam(e) === 'away').length;
     const totalEvents = homeEvents + awayEvents;
-    
-    // Com menos de 10 eventos, posse não é confiável - usar 50/50
     const homePossession = totalEvents < 10 ? 50 : Math.round((homeEvents / totalEvents) * 100);
     const awayPossession = 100 - homePossession;
     
-    // Generate insights based on events
+    // Determine best player
+    let bestPlayer: BestPlayer | null = null;
+    const playerEntries = Object.entries(playerActions);
+    if (playerEntries.length > 0) {
+      const scored = playerEntries
+        .map(([name, data]) => ({
+          name,
+          ...data,
+          score: data.goals * 5 + data.assists * 3 + data.saves * 2 + data.recoveries * 1 + data.totalActions * 0.5,
+        }))
+        .sort((a, b) => b.score - a.score);
+      
+      if (scored[0] && scored[0].totalActions >= 2) {
+        const { name, team, goals, assists, saves, recoveries, totalActions } = scored[0];
+        bestPlayer = { name, team, goals, assists, saves, recoveries, totalActions };
+      }
+    }
+    
+    // Generate insights
     const insights: string[] = [];
     
     if (homeStats.goals > awayStats.goals) {
@@ -224,8 +241,7 @@ export function useEventBasedAnalysis(
     }
     
     if (homeStats.shots + awayStats.shots > 0) {
-      const totalShots = homeStats.shots + awayStats.shots;
-      insights.push(`Total de ${totalShots} finalização(ões) na partida.`);
+      insights.push(`Total de ${homeStats.shots + awayStats.shots} finalizacao(oes) na partida.`);
     }
     
     if (homeStats.saves + awayStats.saves > 0) {
@@ -233,7 +249,7 @@ export function useEventBasedAnalysis(
     }
     
     if (homeStats.cards + awayStats.cards > 0) {
-      insights.push(`Partida com ${homeStats.cards + awayStats.cards} cartão(ões) mostrado(s).`);
+      insights.push(`Partida com ${homeStats.cards + awayStats.cards} cartao(oes) mostrado(s).`);
     }
     
     if (homeStats.corners + awayStats.corners > 0) {
@@ -246,7 +262,7 @@ export function useEventBasedAnalysis(
     if (homeStats.recoveries > 3 || awayStats.recoveries > 3) {
       patterns.push({
         type: 'pressing',
-        description: `Pressão alta efetiva com ${homeStats.recoveries + awayStats.recoveries} recuperações de bola.`,
+        description: `Pressao alta efetiva com ${homeStats.recoveries + awayStats.recoveries} recuperacoes de bola.`,
         effectiveness: Math.min(0.9, (homeStats.recoveries + awayStats.recoveries) / 10)
       });
     }
@@ -271,7 +287,7 @@ export function useEventBasedAnalysis(
     if (totalTransitions > 2) {
       patterns.push({
         type: 'transition',
-        description: `${totalTransitions} transições rápidas identificadas, mostrando jogo dinâmico.`,
+        description: `${totalTransitions} transicoes rapidas identificadas, mostrando jogo dinamico.`,
         effectiveness: Math.min(0.88, totalTransitions / 5)
       });
     }
@@ -294,10 +310,14 @@ export function useEventBasedAnalysis(
     matchSummary += `. `;
     
     if (homeStats.shots + awayStats.shots > 0) {
-      matchSummary += `Foram ${homeStats.shots + awayStats.shots} finalização(ões) ao gol. `;
+      matchSummary += `Foram ${homeStats.shots + awayStats.shots} finalizacao(oes) ao gol. `;
     }
     
-    // Generate tactical overview - só mencionar posse se houver eventos suficientes
+    if (bestPlayer) {
+      matchSummary += `Destaque para ${bestPlayer.name} com ${bestPlayer.totalActions} acoes decisivas. `;
+    }
+    
+    // Generate tactical overview
     let tacticalOverview = '';
     if (totalEvents >= 10) {
       if (homePossession > 55) {
@@ -308,20 +328,19 @@ export function useEventBasedAnalysis(
         tacticalOverview = `Partida equilibrada com posse dividida entre as equipes. `;
       }
     } else {
-      tacticalOverview = `Análise baseada em ${events.length} evento(s) detectado(s). `;
+      tacticalOverview = `Analise baseada em ${events.length} evento(s) detectado(s). `;
     }
     
     if (patterns.length > 0) {
-      tacticalOverview += `Padrões táticos identificados: ${patterns.map(p => p.type.replace(/_/g, ' ')).join(', ')}. `;
+      tacticalOverview += `Padroes taticos identificados: ${patterns.map(p => p.type.replace(/_/g, ' ')).join(', ')}. `;
     }
     
-    // Sort key moments by time
+    // Sort key moments
     keyMoments.sort((a, b) => {
       const getMinutes = (ts: string) => parseInt(ts.replace("'", '').split('"')[0]) || 0;
       return getMinutes(a.timestamp) - getMinutes(b.timestamp);
     });
     
-    // Get standout players (first 5)
     const standoutPlayers = players.slice(0, 5);
     
     return {
@@ -335,6 +354,7 @@ export function useEventBasedAnalysis(
       matchSummary,
       tacticalOverview,
       standoutPlayers,
+      bestPlayer,
       possession: { home: homePossession || 50, away: awayPossession || 50 }
     };
   }, [events, homeTeam, awayTeam]);
