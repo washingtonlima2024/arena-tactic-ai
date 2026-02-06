@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 
 export interface SocialConnection {
   id: string;
@@ -24,12 +24,7 @@ export function useSocialConnections() {
   const fetchConnections = useCallback(async () => {
     try {
       setLoading(true);
-      const { data, error: fetchError } = await supabase
-        .from('social_connections')
-        .select('*')
-        .order('platform');
-
-      if (fetchError) throw fetchError;
+      const data = await apiClient.get<SocialConnection[]>('/api/social/connections');
       setConnections(data || []);
       setError(null);
     } catch (err: any) {

@@ -26,7 +26,7 @@ import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { useAuth } from '@/hooks/useAuth';
 
 interface Campaign {
@@ -122,7 +122,7 @@ export function SocialSharePanel({
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string>('none');
 
-  // Fetch active campaigns
+  // Fetch active campaigns from local API
   useEffect(() => {
     if (isOpen && user) {
       fetchActiveCampaigns();
@@ -132,15 +132,8 @@ export function SocialSharePanel({
   const fetchActiveCampaigns = async () => {
     if (!user) return;
     try {
-      const { data, error } = await supabase
-        .from('social_campaigns')
-        .select('id, name, status')
-        .eq('user_id', user.id)
-        .in('status', ['active', 'draft'])
-        .order('created_at', { ascending: false });
-      
-      if (error) throw error;
-      setCampaigns(data || []);
+      const data = await apiClient.get<Campaign[]>('/api/social/campaigns');
+      setCampaigns((data || []).filter(c => c.status === 'active' || c.status === 'draft'));
     } catch (error) {
       console.error('Error fetching campaigns:', error);
     }
@@ -182,10 +175,6 @@ export function SocialSharePanel({
     setIsSharing(true);
 
     try {
-      // Get Supabase user ID (social connections are linked to Supabase auth)
-      const { data: { user: supabaseUser } } = await supabase.auth.getUser();
-      const socialUserId = supabaseUser?.id || user.id;
-
       const networkNames = Array.from(selectedNetworks)
         .map(id => SOCIAL_NETWORKS.find(n => n.id === id)?.name)
         .filter(Boolean)
@@ -198,13 +187,13 @@ export function SocialSharePanel({
           return;
         }
 
-        // Create scheduled posts for each platform
+        // Create scheduled posts via local API
         const [hours, minutes] = scheduleTime.split(':').map(Number);
         const scheduledAt = new Date(scheduleDate);
         scheduledAt.setHours(hours, minutes, 0, 0);
 
         const posts = Array.from(selectedNetworks).map(platform => ({
-          user_id: socialUserId,
+          user_id: user.id,
           platform,
           content: caption || `⚽ Melhores momentos: ${matchTitle}`,
           media_url: clipUrl || null,
@@ -216,28 +205,22 @@ export function SocialSharePanel({
           campaign_id: selectedCampaignId !== 'none' ? selectedCampaignId : null,
         }));
 
-        const { error } = await supabase
-          .from('social_scheduled_posts')
-          .insert(posts);
-
-        if (error) throw error;
+        await apiClient.post('/api/social/scheduled-posts', posts);
 
         toast.success(`${posts.length} publicação(ões) agendada(s) para ${format(scheduledAt, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })} em: ${networkNames}`);
       } else {
-        // Publish immediately via edge function
+        // Publish immediately via local API
         for (const platform of selectedNetworks) {
           try {
-            const { error } = await supabase.functions.invoke('social-publish', {
-              body: {
-                platform,
-                content: caption || `⚽ Melhores momentos: ${matchTitle}`,
-                mediaUrl: clipUrl || null,
-                userId: socialUserId,
-              }
+            const result = await apiClient.post('/api/social/publish', {
+              platform,
+              content: caption || `⚽ Melhores momentos: ${matchTitle}`,
+              mediaUrl: clipUrl || null,
+              userId: user.id,
             });
 
-            if (error) {
-              console.error(`Error publishing to ${platform}:`, error);
+            if (!result.success) {
+              console.error(`Error publishing to ${platform}:`, result.error);
             }
           } catch (e) {
             console.error(`Error publishing to ${platform}:`, e);
@@ -481,72 +464,46 @@ export function SocialSharePanel({
                       type="time"
                       value={scheduleTime}
                       onChange={(e) => setScheduleTime(e.target.value)}
-                      className="pl-10 w-[130px]"
+                      className="pl-9 w-32"
                     />
                   </div>
                 </div>
               )}
             </div>
-
-            {/* Selected Networks Summary */}
-            {selectedNetworks.size > 0 && (
-              <div className="flex flex-wrap gap-2">
-                {Array.from(selectedNetworks).map(id => {
-                  const network = SOCIAL_NETWORKS.find(n => n.id === id);
-                  if (!network) return null;
-                  
-                  return (
-                    <Badge
-                      key={id}
-                      variant="secondary"
-                      className="gap-1.5 pr-1"
-                    >
-                      <span className="text-xs">{network.name}</span>
-                      <button
-                        onClick={() => toggleNetwork(id)}
-                        className="h-4 w-4 rounded-full bg-muted hover:bg-destructive/20 flex items-center justify-center transition-colors"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    </Badge>
-                  );
-                })}
-              </div>
-            )}
           </CardContent>
         </ScrollArea>
 
-        {/* Action Buttons */}
-        <div className="p-4 border-t border-border/50 flex gap-3">
-          <Button
-            variant="outline"
-            className="flex-1"
-            onClick={onClose}
-          >
-            Cancelar
-          </Button>
-          <Button
-            className="flex-1 gap-2"
-            onClick={handleShare}
-            disabled={selectedNetworks.size === 0 || isSharing}
-          >
-            {isSharing ? (
-              <>
-                <div className="h-4 w-4 rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground animate-spin" />
-                {shareMode === 'schedule' ? 'Agendando...' : 'Compartilhando...'}
-              </>
-            ) : shareMode === 'schedule' ? (
-              <>
-                <CalendarIcon className="h-4 w-4" />
-                Agendar Publicação
-              </>
-            ) : (
-              <>
-                <Send className="h-4 w-4" />
-                Compartilhar Agora
-              </>
-            )}
-          </Button>
+        {/* Footer */}
+        <div className="p-4 border-t border-border/50">
+          <div className="flex items-center justify-between">
+            <p className="text-sm text-muted-foreground">
+              {selectedNetworks.size} rede{selectedNetworks.size !== 1 ? 's' : ''} selecionada{selectedNetworks.size !== 1 ? 's' : ''}
+            </p>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={onClose}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleShare}
+                disabled={selectedNetworks.size === 0 || isSharing}
+                className="bg-gradient-to-r from-primary to-primary/80"
+              >
+                {isSharing ? (
+                  <>Compartilhando...</>
+                ) : shareMode === 'schedule' ? (
+                  <>
+                    <CalendarIcon className="h-4 w-4 mr-2" />
+                    Agendar
+                  </>
+                ) : (
+                  <>
+                    <Send className="h-4 w-4 mr-2" />
+                    Compartilhar Agora
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
         </div>
       </Card>
     </div>

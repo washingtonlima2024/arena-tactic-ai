@@ -66,7 +66,7 @@ from models import (
     ChatbotConversation, StreamConfiguration, SmartEditProject,
     SmartEditClip, SmartEditRender, SmartEditSetting,
     Organization, SubscriptionPlan, OrganizationMember, CreditTransaction,
-    UploadJob
+    UploadJob, SocialConnection, SocialCampaign, SocialScheduledPost
 )
 from storage import (
     save_file, save_uploaded_file, get_file_path, file_exists,
@@ -11707,6 +11707,469 @@ def print_startup_status():
     print("  POST /api/analyze-match               - Analisar partida")
     print("  POST /api/analyze-live-match          - Analisar partida ao vivo (pós-gravação)")
     print("=" * 60 + "\n")
+
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# SOCIAL MEDIA API - 100% Local (Connections, Posts, Campaigns, Publishing)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/social/connections', methods=['GET'])
+def get_social_connections():
+    """List all social connections for the authenticated user."""
+    session = get_session()
+    try:
+        connections = session.query(SocialConnection).order_by(SocialConnection.platform).all()
+        return jsonify([c.to_dict() for c in connections])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/social/connections', methods=['POST'])
+def create_social_connection():
+    """Create or update a social connection."""
+    session = get_session()
+    try:
+        data = request.get_json()
+        user_id = data.get('user_id')
+        platform = data.get('platform')
+        
+        if not user_id or not platform:
+            return jsonify({'error': 'user_id e platform são obrigatórios'}), 400
+        
+        # Check if connection already exists
+        existing = session.query(SocialConnection).filter_by(
+            user_id=user_id, platform=platform
+        ).first()
+        
+        if existing:
+            existing.access_token = data.get('access_token', existing.access_token)
+            existing.refresh_token = data.get('refresh_token', existing.refresh_token)
+            existing.account_id = data.get('account_id', existing.account_id)
+            existing.account_name = data.get('account_name', existing.account_name)
+            existing.is_connected = data.get('is_connected', True)
+            existing.last_sync_at = datetime.utcnow()
+            existing.updated_at = datetime.utcnow()
+            if data.get('token_expires_at'):
+                existing.token_expires_at = parse_iso_datetime(data['token_expires_at'])
+            session.commit()
+            return jsonify(existing.to_dict())
+        else:
+            conn = SocialConnection(
+                user_id=user_id,
+                platform=platform,
+                access_token=data.get('access_token'),
+                refresh_token=data.get('refresh_token'),
+                account_id=data.get('account_id'),
+                account_name=data.get('account_name'),
+                is_connected=data.get('is_connected', True),
+                last_sync_at=datetime.utcnow(),
+            )
+            if data.get('token_expires_at'):
+                conn.token_expires_at = parse_iso_datetime(data['token_expires_at'])
+            session.add(conn)
+            session.commit()
+            return jsonify(conn.to_dict()), 201
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/social/connections/<connection_id>', methods=['PUT'])
+def update_social_connection(connection_id):
+    """Update a social connection."""
+    session = get_session()
+    try:
+        conn = session.query(SocialConnection).filter_by(id=connection_id).first()
+        if not conn:
+            return jsonify({'error': 'Conexão não encontrada'}), 404
+        
+        data = request.get_json()
+        for key in ['access_token', 'refresh_token', 'account_id', 'account_name', 'is_connected']:
+            if key in data:
+                setattr(conn, key, data[key])
+        if 'token_expires_at' in data:
+            conn.token_expires_at = parse_iso_datetime(data['token_expires_at']) if data['token_expires_at'] else None
+        conn.updated_at = datetime.utcnow()
+        session.commit()
+        return jsonify(conn.to_dict())
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/social/connections/<connection_id>', methods=['DELETE'])
+def delete_social_connection(connection_id):
+    """Delete a social connection."""
+    session = get_session()
+    try:
+        conn = session.query(SocialConnection).filter_by(id=connection_id).first()
+        if not conn:
+            return jsonify({'error': 'Conexão não encontrada'}), 404
+        session.delete(conn)
+        session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+# ─── Social Campaigns ─────────────────────────────────────────────────────
+
+@app.route('/api/social/campaigns', methods=['GET'])
+def get_social_campaigns():
+    """List all campaigns."""
+    session = get_session()
+    try:
+        campaigns = session.query(SocialCampaign).order_by(SocialCampaign.created_at.desc()).all()
+        result = []
+        for c in campaigns:
+            d = c.to_dict()
+            d['posts_count'] = session.query(SocialScheduledPost).filter_by(campaign_id=c.id).count()
+            result.append(d)
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/social/campaigns', methods=['POST'])
+def create_social_campaign():
+    """Create a new campaign."""
+    session = get_session()
+    try:
+        data = request.get_json()
+        campaign = SocialCampaign(
+            user_id=data['user_id'],
+            name=data['name'],
+            description=data.get('description'),
+            start_date=parse_iso_datetime(data.get('start_date')),
+            end_date=parse_iso_datetime(data.get('end_date')),
+            target_platforms=data.get('target_platforms', []),
+            tags=data.get('tags', []),
+        )
+        session.add(campaign)
+        session.commit()
+        return jsonify(campaign.to_dict()), 201
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/social/campaigns/<campaign_id>', methods=['PUT'])
+def update_social_campaign(campaign_id):
+    """Update a campaign."""
+    session = get_session()
+    try:
+        campaign = session.query(SocialCampaign).filter_by(id=campaign_id).first()
+        if not campaign:
+            return jsonify({'error': 'Campanha não encontrada'}), 404
+        
+        data = request.get_json()
+        for key in ['name', 'description', 'status', 'target_platforms', 'tags']:
+            if key in data:
+                setattr(campaign, key, data[key])
+        if 'start_date' in data:
+            campaign.start_date = parse_iso_datetime(data['start_date'])
+        if 'end_date' in data:
+            campaign.end_date = parse_iso_datetime(data['end_date'])
+        campaign.updated_at = datetime.utcnow()
+        session.commit()
+        return jsonify(campaign.to_dict())
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/social/campaigns/<campaign_id>', methods=['DELETE'])
+def delete_social_campaign(campaign_id):
+    """Delete a campaign."""
+    session = get_session()
+    try:
+        campaign = session.query(SocialCampaign).filter_by(id=campaign_id).first()
+        if not campaign:
+            return jsonify({'error': 'Campanha não encontrada'}), 404
+        session.delete(campaign)
+        session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+# ─── Scheduled Posts ──────────────────────────────────────────────────────
+
+@app.route('/api/social/scheduled-posts', methods=['GET'])
+def get_social_scheduled_posts():
+    """List all scheduled posts."""
+    session = get_session()
+    try:
+        posts = session.query(SocialScheduledPost).order_by(SocialScheduledPost.scheduled_at).all()
+        return jsonify([p.to_dict() for p in posts])
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/social/scheduled-posts', methods=['POST'])
+def create_social_scheduled_post():
+    """Create scheduled post(s). Accepts single object or array."""
+    session = get_session()
+    try:
+        data = request.get_json()
+        
+        # Support both single and array
+        posts_data = data if isinstance(data, list) else [data]
+        created = []
+        
+        for pd in posts_data:
+            post = SocialScheduledPost(
+                user_id=pd['user_id'],
+                platform=pd['platform'],
+                content=pd['content'],
+                media_url=pd.get('media_url'),
+                media_type=pd.get('media_type'),
+                scheduled_at=parse_iso_datetime(pd['scheduled_at']),
+                campaign_id=pd.get('campaign_id'),
+                match_id=pd.get('match_id'),
+                event_id=pd.get('event_id'),
+                status=pd.get('status', 'scheduled'),
+            )
+            session.add(post)
+            created.append(post)
+        
+        session.commit()
+        return jsonify([p.to_dict() for p in created]), 201
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/social/scheduled-posts/<post_id>', methods=['PUT'])
+def update_social_scheduled_post(post_id):
+    """Update a scheduled post."""
+    session = get_session()
+    try:
+        post = session.query(SocialScheduledPost).filter_by(id=post_id).first()
+        if not post:
+            return jsonify({'error': 'Post não encontrado'}), 404
+        
+        data = request.get_json()
+        for key in ['platform', 'content', 'media_url', 'media_type', 'status', 
+                     'error_message', 'external_post_id', 'campaign_id']:
+            if key in data:
+                setattr(post, key, data[key])
+        if 'scheduled_at' in data:
+            post.scheduled_at = parse_iso_datetime(data['scheduled_at'])
+        if 'published_at' in data:
+            post.published_at = parse_iso_datetime(data['published_at'])
+        post.updated_at = datetime.utcnow()
+        session.commit()
+        return jsonify(post.to_dict())
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+@app.route('/api/social/scheduled-posts/<post_id>', methods=['DELETE'])
+def delete_social_scheduled_post(post_id):
+    """Delete a scheduled post."""
+    session = get_session()
+    try:
+        post = session.query(SocialScheduledPost).filter_by(id=post_id).first()
+        if not post:
+            return jsonify({'error': 'Post não encontrado'}), 404
+        session.delete(post)
+        session.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        session.rollback()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
+
+
+# ─── Social Publish (Instagram/Facebook Graph API) ───────────────────────
+
+def _publish_to_instagram(connection, caption, video_url):
+    """Publish video as Instagram Reel (2-step container process)."""
+    access_token = connection.access_token
+    account_id = connection.account_id
+    
+    print(f"[Instagram] Publishing to account {account_id}")
+    
+    if 'localhost' in video_url or '127.0.0.1' in video_url:
+        return {'success': False, 'error': 'URL de mídia deve ser pública. URLs locais não são acessíveis pela Meta.'}
+    
+    try:
+        # Step 1: Create media container
+        container_res = requests.post(
+            f'https://graph.facebook.com/v19.0/{account_id}/media',
+            data={
+                'video_url': video_url,
+                'caption': caption,
+                'media_type': 'REELS',
+                'access_token': access_token,
+            }
+        )
+        container_data = container_res.json()
+        print(f"[Instagram] Container response: {container_data}")
+        
+        if 'error' in container_data:
+            return {'success': False, 'error': f"Erro ao criar container: {container_data['error'].get('message', 'Unknown')}"}
+        
+        creation_id = container_data.get('id')
+        if not creation_id:
+            return {'success': False, 'error': 'Container ID não retornado'}
+        
+        # Step 2: Poll for container readiness
+        import time
+        for attempt in range(30):
+            status_res = requests.get(
+                f'https://graph.facebook.com/v19.0/{creation_id}',
+                params={'fields': 'status_code,status', 'access_token': access_token}
+            )
+            status_data = status_res.json()
+            print(f"[Instagram] Status check {attempt+1}: {status_data}")
+            
+            if status_data.get('status_code') == 'FINISHED':
+                break
+            if status_data.get('status_code') == 'ERROR':
+                return {'success': False, 'error': f"Erro no processamento: {status_data.get('status', 'Unknown')}"}
+            time.sleep(10)
+        else:
+            return {'success': False, 'error': 'Timeout aguardando processamento do vídeo pela Meta'}
+        
+        # Step 3: Publish
+        publish_res = requests.post(
+            f'https://graph.facebook.com/v19.0/{account_id}/media_publish',
+            data={'creation_id': creation_id, 'access_token': access_token}
+        )
+        publish_data = publish_res.json()
+        print(f"[Instagram] Publish response: {publish_data}")
+        
+        if 'error' in publish_data:
+            return {'success': False, 'error': f"Erro ao publicar: {publish_data['error'].get('message', 'Unknown')}"}
+        
+        return {'success': True, 'result': {'mediaId': publish_data.get('id'), 'platform': 'instagram'}}
+    except Exception as e:
+        print(f"[Instagram] Error: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+def _publish_to_facebook(connection, caption, video_url):
+    """Publish video to Facebook page."""
+    access_token = connection.access_token
+    account_id = connection.account_id
+    
+    print(f"[Facebook] Publishing to page {account_id}")
+    
+    try:
+        res = requests.post(
+            f'https://graph.facebook.com/v19.0/{account_id}/videos',
+            data={
+                'file_url': video_url,
+                'description': caption,
+                'access_token': access_token,
+            }
+        )
+        data = res.json()
+        print(f"[Facebook] Response: {data}")
+        
+        if 'error' in data:
+            return {'success': False, 'error': f"Erro Facebook: {data['error'].get('message', 'Unknown')}"}
+        
+        return {'success': True, 'result': {'videoId': data.get('id'), 'platform': 'facebook'}}
+    except Exception as e:
+        print(f"[Facebook] Error: {e}")
+        return {'success': False, 'error': str(e)}
+
+
+@app.route('/api/social/publish', methods=['POST'])
+def social_publish():
+    """Publish content to a social media platform."""
+    session = get_session()
+    try:
+        data = request.get_json()
+        platform = data.get('platform')
+        content = data.get('content', '')
+        media_url = data.get('mediaUrl')
+        user_id = data.get('userId')
+        post_id = data.get('postId')
+        
+        print(f"[social-publish] Request: platform={platform}, userId={user_id}, hasMedia={bool(media_url)}")
+        
+        if not platform or not user_id:
+            return jsonify({'error': 'platform e userId são obrigatórios'}), 400
+        
+        # Find connection
+        connection = session.query(SocialConnection).filter_by(
+            user_id=user_id, platform=platform, is_connected=True
+        ).first()
+        
+        if not connection:
+            return jsonify({'error': f'Conexão {platform} não encontrada ou inativa'}), 404
+        
+        # Check token expiration
+        if connection.token_expires_at and connection.token_expires_at < datetime.utcnow():
+            return jsonify({'error': f'Token {platform} expirado. Reconecte a conta.'}), 401
+        
+        # Platform-specific publish
+        if platform == 'instagram':
+            if not media_url:
+                return jsonify({'error': 'mediaUrl é obrigatório para Instagram'}), 400
+            result = _publish_to_instagram(connection, content, media_url)
+        elif platform == 'facebook':
+            if not media_url:
+                return jsonify({'error': 'mediaUrl é obrigatório para Facebook'}), 400
+            result = _publish_to_facebook(connection, content, media_url)
+        else:
+            return jsonify({'error': f'Plataforma {platform} não suportada ainda'}), 400
+        
+        # Update post status if postId provided
+        if post_id:
+            post = session.query(SocialScheduledPost).filter_by(id=post_id).first()
+            if post:
+                if result['success']:
+                    post.status = 'published'
+                    post.published_at = datetime.utcnow()
+                    post.external_post_id = result.get('result', {}).get('mediaId') or result.get('result', {}).get('videoId')
+                    post.error_message = None
+                else:
+                    post.status = 'failed'
+                    post.error_message = result.get('error')
+                session.commit()
+        
+        if result['success']:
+            return jsonify({'success': True, 'result': result.get('result')})
+        else:
+            return jsonify({'success': False, 'error': result.get('error')}), 400
+    except Exception as e:
+        session.rollback()
+        print(f"[social-publish] Error: {e}")
+        return jsonify({'error': str(e)}), 500
+    finally:
+        session.close()
 
 
 if __name__ == '__main__':

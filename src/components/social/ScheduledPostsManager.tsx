@@ -31,7 +31,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DateTimePicker } from '@/components/ui/datetime-picker';
 import { toast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
+import { useAuth } from '@/hooks/useAuth';
 import { format, isPast, isToday, isTomorrow, addDays, startOfDay } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { MediaSourceSelector } from './MediaSourceSelector';
@@ -61,7 +62,6 @@ interface ScheduledPost {
   status: string;
   error_message: string | null;
   campaign_id: string | null;
-  campaign?: { name: string };
 }
 
 interface Campaign {
@@ -90,6 +90,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }>
 export function ScheduledPostsManager() {
   const [searchParams] = useSearchParams();
   const matchId = searchParams.get('match') || undefined;
+  const { user } = useAuth();
   const [posts, setPosts] = useState<ScheduledPost[]>([]);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
@@ -114,13 +115,7 @@ export function ScheduledPostsManager() {
 
   const fetchPosts = async () => {
     try {
-      let query = supabase
-        .from('social_scheduled_posts')
-        .select('*')
-        .order('scheduled_at', { ascending: true });
-
-      const { data, error } = await query;
-      if (error) throw error;
+      const data = await apiClient.get<ScheduledPost[]>('/api/social/scheduled-posts');
       setPosts(data || []);
     } catch (error) {
       console.error('Error fetching posts:', error);
@@ -131,13 +126,8 @@ export function ScheduledPostsManager() {
 
   const fetchCampaigns = async () => {
     try {
-      const { data, error } = await supabase
-        .from('social_campaigns')
-        .select('id, name')
-        .in('status', ['draft', 'active', 'paused']);
-
-      if (error) throw error;
-      setCampaigns(data || []);
+      const data = await apiClient.get<Campaign[]>('/api/social/campaigns');
+      setCampaigns((data || []).filter((c: any) => ['draft', 'active', 'paused'].includes(c.status)));
     } catch (error) {
       console.error('Error fetching campaigns:', error);
     }
@@ -192,43 +182,32 @@ export function ScheduledPostsManager() {
       return;
     }
 
+    if (!user) {
+      toast({ title: 'Você precisa estar logado', variant: 'destructive' });
+      return;
+    }
+
     try {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toast({ title: 'Você precisa estar logado', variant: 'destructive' });
-        return;
-      }
-
       if (editingPost) {
-        const { error } = await supabase
-          .from('social_scheduled_posts')
-          .update({
-            platform: formData.platform,
-            content: formData.content,
-            media_url: formData.media_url || null,
-            media_type: formData.media_type || null,
-            scheduled_at: formData.scheduled_at.toISOString(),
-            campaign_id: formData.campaign_id || null,
-          })
-          .eq('id', editingPost.id);
-
-        if (error) throw error;
+        await apiClient.put(`/api/social/scheduled-posts/${editingPost.id}`, {
+          platform: formData.platform,
+          content: formData.content,
+          media_url: formData.media_url || null,
+          media_type: formData.media_type || null,
+          scheduled_at: formData.scheduled_at.toISOString(),
+          campaign_id: formData.campaign_id || null,
+        });
         toast({ title: 'Post atualizado!' });
       } else {
-        const { error } = await supabase
-          .from('social_scheduled_posts')
-          .insert({
-            user_id: user.id,
-            platform: formData.platform,
-            content: formData.content,
-            media_url: formData.media_url || null,
-            media_type: formData.media_type || null,
-            scheduled_at: formData.scheduled_at.toISOString(),
-            campaign_id: formData.campaign_id || null,
-          });
-
-        if (error) throw error;
+        await apiClient.post('/api/social/scheduled-posts', {
+          user_id: user.id,
+          platform: formData.platform,
+          content: formData.content,
+          media_url: formData.media_url || null,
+          media_type: formData.media_type || null,
+          scheduled_at: formData.scheduled_at.toISOString(),
+          campaign_id: formData.campaign_id || null,
+        });
         toast({ title: 'Post agendado!' });
       }
 
@@ -240,64 +219,41 @@ export function ScheduledPostsManager() {
   };
 
   const publishNow = async (post: ScheduledPost) => {
-    // Validate media before attempting
     if (platformRequiresMedia(post.platform) && !post.media_url) {
-      toast({ title: 'Mídia obrigatória', description: `${post.platform} exige um vídeo ou imagem. Edite o post e adicione uma URL de mídia.`, variant: 'destructive' });
+      toast({ title: 'Mídia obrigatória', description: `${post.platform} exige um vídeo ou imagem.`, variant: 'destructive' });
+      return;
+    }
+
+    if (!user) {
+      toast({ title: 'Você precisa estar logado', variant: 'destructive' });
       return;
     }
 
     setPublishing(post.id);
     try {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toast({ title: 'Você precisa estar logado', variant: 'destructive' });
-        setPublishing(null);
-        return;
-      }
-
       // Update status to publishing
-      await supabase
-        .from('social_scheduled_posts')
-        .update({ status: 'publishing' })
-        .eq('id', post.id);
+      await apiClient.put(`/api/social/scheduled-posts/${post.id}`, { status: 'publishing' });
 
-      // Call the edge function
-      const { data, error } = await supabase.functions.invoke('social-publish', {
-        body: {
-          platform: post.platform,
-          content: post.content,
-          mediaUrl: post.media_url,
-          mediaType: post.media_type,
-          userId: user.id,
-          postId: post.id,
-        }
+      // Call publish endpoint
+      const data = await apiClient.post<{ success: boolean; result?: any; error?: string }>('/api/social/publish', {
+        platform: post.platform,
+        content: post.content,
+        mediaUrl: post.media_url,
+        mediaType: post.media_type,
+        userId: user.id,
+        postId: post.id,
       });
 
-      if (error) throw error;
-
       if (data.success) {
-        await supabase
-          .from('social_scheduled_posts')
-          .update({ 
-            status: 'published',
-            published_at: new Date().toISOString(),
-            external_post_id: data.result?.id || data.result?.data?.id
-          })
-          .eq('id', post.id);
-
         toast({ title: 'Publicado com sucesso!' });
       } else {
         throw new Error(data.error || 'Falha ao publicar');
       }
     } catch (error: any) {
-      await supabase
-        .from('social_scheduled_posts')
-        .update({ 
-          status: 'failed',
-          error_message: error.message
-        })
-        .eq('id', post.id);
+      await apiClient.put(`/api/social/scheduled-posts/${post.id}`, {
+        status: 'failed',
+        error_message: error.message,
+      }).catch(() => {});
 
       toast({ title: 'Erro ao publicar', description: error.message, variant: 'destructive' });
     } finally {
@@ -308,12 +264,7 @@ export function ScheduledPostsManager() {
 
   const cancelPost = async (postId: string) => {
     try {
-      const { error } = await supabase
-        .from('social_scheduled_posts')
-        .update({ status: 'cancelled' })
-        .eq('id', postId);
-
-      if (error) throw error;
+      await apiClient.put(`/api/social/scheduled-posts/${postId}`, { status: 'cancelled' });
       toast({ title: 'Post cancelado' });
       fetchPosts();
     } catch (error: any) {
@@ -323,14 +274,8 @@ export function ScheduledPostsManager() {
 
   const deletePost = async (postId: string) => {
     if (!confirm('Excluir este post?')) return;
-
     try {
-      const { error } = await supabase
-        .from('social_scheduled_posts')
-        .delete()
-        .eq('id', postId);
-
-      if (error) throw error;
+      await apiClient.delete(`/api/social/scheduled-posts/${postId}`);
       toast({ title: 'Post excluído' });
       fetchPosts();
     } catch (error: any) {
