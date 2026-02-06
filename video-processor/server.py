@@ -8694,10 +8694,9 @@ def download_video_with_progress(url: str, output_path: str, job_id: str, match_
         # Registrar vídeo no banco
         session = get_session()
         try:
-            # Gerar URL de acesso
-            base_url = get_base_url()
+            # Gerar URL de acesso usando request do Flask
             filename = os.path.basename(output_path)
-            file_url = f"{base_url}/api/storage/{match_id}/videos/{filename}"
+            file_url = f"http://localhost:5000/api/storage/{match_id}/videos/{filename}"
             
             video = Video(
                 match_id=match_id,
