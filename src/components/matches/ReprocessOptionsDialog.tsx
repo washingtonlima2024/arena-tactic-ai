@@ -230,7 +230,7 @@ export function ReprocessOptionsDialog({
                   <div className="flex-1">
                     <Label htmlFor="vision" className="font-medium flex items-center gap-2 cursor-pointer">
                       <Eye className="h-4 w-4 text-primary" />
-                      Análise Visual (Gemini Vision)
+                      Análise Visual (kakttus Pro)
                     </Label>
                     <p className="text-xs text-muted-foreground mt-1">
                       Detecta eventos diretamente nos frames do vídeo. Timestamps precisos sem depender da narração.
@@ -361,7 +361,7 @@ export function ReprocessOptionsDialog({
                   <span className="font-medium">Transcrição Automática</span>
                 </div>
                 <p className="text-sm text-muted-foreground">
-                  O sistema irá extrair o áudio e transcrever usando Whisper.
+                  O sistema irá extrair o áudio e transcrever usando kakttus Transcrição.
                   Este processo pode levar <strong>10-30 minutos</strong> dependendo do tamanho do vídeo.
                 </p>
                 

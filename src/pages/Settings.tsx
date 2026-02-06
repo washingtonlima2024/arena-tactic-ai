@@ -50,6 +50,7 @@ import {
   autoDiscoverServer,
   resetDiscoveryCache,
 } from "@/lib/apiMode";
+import { getModelBrandName, formatOllamaModelName } from "@/lib/modelBranding";
 
 export default function Settings() {
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
@@ -963,7 +964,7 @@ export default function Settings() {
                           key: "local_whisper_model",
                           value,
                         });
-                        toast.success(`Modelo alterado para ${value}`);
+                        toast.success(`Modelo alterado para ${getModelBrandName(value)}`);
                       } catch (error) {
                         toast.error("Erro ao salvar modelo");
                       }
@@ -973,11 +974,11 @@ export default function Settings() {
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="tiny">Tiny (~40MB) - Mais rápido, qualidade básica</SelectItem>
-                      <SelectItem value="base">Base (~150MB) - Equilíbrio velocidade/qualidade</SelectItem>
-                      <SelectItem value="small">Small (~500MB) - Boa qualidade</SelectItem>
-                      <SelectItem value="medium">Medium (~1.5GB) - Alta qualidade</SelectItem>
-                      <SelectItem value="large-v3">Large V3 (~3GB) - Qualidade profissional</SelectItem>
+                      <SelectItem value="tiny">kakttus Transcrição Tiny (~40MB) - Mais rápido</SelectItem>
+                      <SelectItem value="base">kakttus Transcrição Base (~150MB) - Balanceado</SelectItem>
+                      <SelectItem value="small">kakttus Transcrição Small (~500MB) - Boa qualidade</SelectItem>
+                      <SelectItem value="medium">kakttus Transcrição Medium (~1.5GB) - Alta qualidade</SelectItem>
+                      <SelectItem value="large-v3">kakttus Transcrição Pro (~3GB) - Profissional</SelectItem>
                     </SelectContent>
                   </Select>
                   <p className="text-xs text-muted-foreground">
@@ -1103,7 +1104,7 @@ export default function Settings() {
                         <SelectContent>
                           {ollamaModels.map((model) => (
                             <SelectItem key={model.name} value={model.name}>
-                              {model.name} ({model.size})
+                              {formatOllamaModelName(model.name, model.size)}
                             </SelectItem>
                           ))}
                         </SelectContent>
