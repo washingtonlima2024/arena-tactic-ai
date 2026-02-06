@@ -21,8 +21,10 @@ export type Database = {
           default_model: string
           default_value: string
           description: string | null
+          event_type_filter: string | null
           id: string
           is_default: boolean
+          parent_prompt_id: string | null
           prompt_key: string
           prompt_name: string
           prompt_value: string
@@ -35,8 +37,10 @@ export type Database = {
           default_model: string
           default_value: string
           description?: string | null
+          event_type_filter?: string | null
           id?: string
           is_default?: boolean
+          parent_prompt_id?: string | null
           prompt_key: string
           prompt_name: string
           prompt_value: string
@@ -49,15 +53,25 @@ export type Database = {
           default_model?: string
           default_value?: string
           description?: string | null
+          event_type_filter?: string | null
           id?: string
           is_default?: boolean
+          parent_prompt_id?: string | null
           prompt_key?: string
           prompt_name?: string
           prompt_value?: string
           updated_at?: string
           updated_by?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "ai_prompts_parent_prompt_id_fkey"
+            columns: ["parent_prompt_id"]
+            isOneToOne: false
+            referencedRelation: "ai_prompts"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       analysis_jobs: {
         Row: {

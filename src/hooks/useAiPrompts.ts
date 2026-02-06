@@ -15,6 +15,8 @@ export interface AiPrompt {
   default_model: string;
   updated_at: string;
   updated_by: string | null;
+  parent_prompt_id: string | null;
+  event_type_filter: string | null;
 }
 
 export function useAiPrompts() {
@@ -85,10 +87,71 @@ export function useAiPrompts() {
     },
   });
 
+  const createSubPrompt = useMutation({
+    mutationFn: async (params: {
+      parent_prompt_id: string;
+      prompt_key: string;
+      prompt_name: string;
+      prompt_value: string;
+      event_type_filter: string;
+      description: string;
+      category: string;
+      ai_model: string;
+    }) => {
+      const { data: { user } } = await supabase.auth.getUser();
+      
+      const { error } = await supabase
+        .from('ai_prompts')
+        .insert({
+          prompt_key: params.prompt_key,
+          prompt_name: params.prompt_name,
+          prompt_value: params.prompt_value,
+          default_value: params.prompt_value,
+          description: params.description,
+          category: params.category,
+          ai_model: params.ai_model,
+          default_model: params.ai_model,
+          is_default: true,
+          parent_prompt_id: params.parent_prompt_id,
+          event_type_filter: params.event_type_filter,
+          updated_by: user?.id || null,
+        });
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ai-prompts'] });
+      toast({ title: 'Sub-prompt criado com sucesso' });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Erro ao criar sub-prompt', description: error.message, variant: 'destructive' });
+    },
+  });
+
+  const deletePrompt = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase
+        .from('ai_prompts')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['ai-prompts'] });
+      toast({ title: 'Sub-prompt removido' });
+    },
+    onError: (error: Error) => {
+      toast({ title: 'Erro ao remover sub-prompt', description: error.message, variant: 'destructive' });
+    },
+  });
+
   return {
     prompts: prompts || [],
     isLoading,
     updatePrompt,
     restoreDefault,
+    createSubPrompt,
+    deletePrompt,
   };
 }
