@@ -1,11 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const SYSTEM_PROMPT = `Você é o Arena Play AI, assistente de futebol e análise tática.
+// Fallback hardcoded (usado se tabela ai_prompts estiver vazia)
+const FALLBACK_SYSTEM_PROMPT = `Você é o Arena Play AI, assistente de futebol e análise tática.
 
 ## Regras de Resposta OBRIGATÓRIAS
 - Respostas CURTAS e DIRETAS (máximo 2-3 frases)
@@ -22,6 +24,8 @@ Arena Play: análise de partidas com IA, detecção de eventos (gols, cartões),
 ## Limitações
 - Não tem acesso à internet em tempo real
 - Só conhece partidas carregadas na plataforma`;
+
+const FALLBACK_MODEL = "google/gemini-3-flash-preview";
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -43,9 +47,36 @@ serve(async (req) => {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
+    // Buscar prompt e modelo do banco de dados
+    let systemPrompt = FALLBACK_SYSTEM_PROMPT;
+    let aiModel = FALLBACK_MODEL;
+
+    try {
+      const supabase = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      );
+
+      const { data } = await supabase
+        .from("ai_prompts")
+        .select("prompt_value, ai_model")
+        .eq("prompt_key", "chatbot_system")
+        .maybeSingle();
+
+      if (data) {
+        systemPrompt = data.prompt_value;
+        aiModel = data.ai_model;
+        console.log(`[arena-chatbot] Using DB prompt with model: ${aiModel}`);
+      } else {
+        console.log("[arena-chatbot] No DB prompt found, using fallback");
+      }
+    } catch (dbError) {
+      console.warn("[arena-chatbot] Failed to fetch prompt from DB, using fallback:", dbError);
+    }
+
     // Build messages array
     const messages: Array<{ role: string; content: string }> = [
-      { role: "system", content: SYSTEM_PROMPT }
+      { role: "system", content: systemPrompt }
     ];
 
     // Add match context if available
@@ -78,7 +109,7 @@ serve(async (req) => {
     // Add current message
     messages.push({ role: "user", content: message });
 
-    console.log(`[arena-chatbot] Processing message: ${message.slice(0, 100)}...`);
+    console.log(`[arena-chatbot] Processing message: ${message.slice(0, 100)}... | model: ${aiModel}`);
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -87,7 +118,7 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-3-flash-preview",
+        model: aiModel,
         messages,
         temperature: 0.6,
         max_tokens: 256,

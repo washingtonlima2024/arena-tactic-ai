@@ -2,10 +2,14 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Settings, CreditCard, Mail, Shield, ExternalLink } from 'lucide-react';
+import AdminPromptsManager from './AdminPromptsManager';
 
 export default function AdminSettings() {
   return (
     <div className="space-y-6">
+      {/* Prompts e Modelos de IA */}
+      <AdminPromptsManager />
+
       {/* Stripe */}
       <Card>
         <CardHeader>

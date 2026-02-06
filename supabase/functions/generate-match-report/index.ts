@@ -1,11 +1,13 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-supabase-client-platform, x-supabase-client-platform-version, x-supabase-client-runtime, x-supabase-client-runtime-version",
 };
 
-const SYSTEM_PROMPT = `Voce e um analista tatico profissional de futebol brasileiro. Sua funcao e gerar relatorios detalhados e completos de partidas de futebol com base nos eventos reais detectados durante o jogo.
+// Fallback hardcoded prompts
+const FALLBACK_SYSTEM_PROMPT = `Voce e um analista tatico profissional de futebol brasileiro. Sua funcao e gerar relatorios detalhados e completos de partidas de futebol com base nos eventos reais detectados durante o jogo.
 
 REGRAS OBRIGATORIAS:
 - Escreva em portugues brasileiro com terminologia tecnica de futebol
@@ -20,7 +22,9 @@ REGRAS OBRIGATORIAS:
 
 Voce recebera os dados da partida e deve retornar um JSON com 7 secoes obrigatorias. Cada secao deve ter no minimo 3-4 paragrafos detalhados.`;
 
-const USER_PROMPT_TEMPLATE = (data: any) => {
+const FALLBACK_MODEL = "google/gemini-2.5-flash";
+
+function buildUserPrompt(template: string, data: any): string {
   const { homeTeam, awayTeam, homeScore, awayScore, competition, matchDate, venue, events, stats, bestPlayer, patterns, possession } = data;
 
   const eventsList = events.map((e: any) => {
@@ -38,34 +42,63 @@ const USER_PROMPT_TEMPLATE = (data: any) => {
     return half === 'second' || half === 'segundo';
   });
 
-  return `DADOS DA PARTIDA:
-
-Times: ${homeTeam} (casa) vs ${awayTeam} (visitante)
-Placar final: ${homeScore} x ${awayScore}
-Competicao: ${competition || 'Nao informada'}
-Data: ${matchDate || 'Nao informada'}
-Local: ${venue || 'Nao informado'}
-
-ESTATISTICAS:
-- Finalizacoes: ${homeTeam} ${stats.homeShots} x ${stats.awayShots} ${awayTeam}
+  const statsBlock = `- Finalizacoes: ${homeTeam} ${stats.homeShots} x ${stats.awayShots} ${awayTeam}
 - Defesas: ${homeTeam} ${stats.homeSaves} x ${stats.awaySaves} ${awayTeam}
 - Faltas: ${homeTeam} ${stats.homeFouls} x ${stats.awayFouls} ${awayTeam}
 - Cartoes: ${homeTeam} ${stats.homeCards} x ${stats.awayCards} ${awayTeam}
 - Escanteios: ${homeTeam} ${stats.homeCorners} x ${stats.awayCorners} ${awayTeam}
 - Impedimentos: ${homeTeam} ${stats.homeOffsides} x ${stats.awayOffsides} ${awayTeam}
 - Recuperacoes: ${homeTeam} ${stats.homeRecoveries} x ${stats.awayRecoveries} ${awayTeam}
-- Posse estimada: ${homeTeam} ${possession.home}% x ${possession.away}% ${awayTeam}
+- Posse estimada: ${homeTeam} ${possession?.home || 50}% x ${possession?.away || 50}% ${awayTeam}`;
 
-MELHOR JOGADOR: ${bestPlayer ? `${bestPlayer.name} (${bestPlayer.team === 'home' ? homeTeam : awayTeam}) - ${bestPlayer.goals} gols, ${bestPlayer.assists} assistencias, ${bestPlayer.saves} defesas, ${bestPlayer.recoveries} recuperacoes` : 'Nao identificado'}
+  const bestPlayerStr = bestPlayer
+    ? `${bestPlayer.name} (${bestPlayer.team === 'home' ? homeTeam : awayTeam}) - ${bestPlayer.goals} gols, ${bestPlayer.assists} assistencias, ${bestPlayer.saves} defesas, ${bestPlayer.recoveries} recuperacoes`
+    : 'Nao identificado';
 
-PADROES TATICOS: ${patterns.length > 0 ? patterns.map((p: any) => `${p.type}: ${p.description}`).join('; ') : 'Nenhum padrao identificado'}
+  const patternsStr = patterns?.length > 0
+    ? patterns.map((p: any) => `${p.type}: ${p.description}`).join('; ')
+    : 'Nenhum padrao identificado';
 
-TOTAL DE EVENTOS: ${events.length}
-Eventos no primeiro tempo: ${firstHalfEvents.length}
-Eventos no segundo tempo: ${secondHalfEvents.length}
+  // Replace template variables
+  return template
+    .replace(/\{homeTeam\}/g, homeTeam || 'Time Casa')
+    .replace(/\{awayTeam\}/g, awayTeam || 'Time Visitante')
+    .replace(/\{homeScore\}/g, String(homeScore ?? 0))
+    .replace(/\{awayScore\}/g, String(awayScore ?? 0))
+    .replace(/\{competition\}/g, competition || 'Nao informada')
+    .replace(/\{matchDate\}/g, matchDate || 'Nao informada')
+    .replace(/\{venue\}/g, venue || 'Nao informado')
+    .replace(/\{stats\}/g, statsBlock)
+    .replace(/\{bestPlayer\}/g, bestPlayerStr)
+    .replace(/\{patterns\}/g, patternsStr)
+    .replace(/\{totalEvents\}/g, String(events.length))
+    .replace(/\{firstHalfCount\}/g, String(firstHalfEvents.length))
+    .replace(/\{secondHalfCount\}/g, String(secondHalfEvents.length))
+    .replace(/\{eventsList\}/g, eventsList);
+}
+
+// Fallback user prompt template (usado quando não há template no banco)
+const FALLBACK_USER_TEMPLATE = `DADOS DA PARTIDA:
+
+Times: {homeTeam} (casa) vs {awayTeam} (visitante)
+Placar final: {homeScore} x {awayScore}
+Competicao: {competition}
+Data: {matchDate}
+Local: {venue}
+
+ESTATISTICAS:
+{stats}
+
+MELHOR JOGADOR: {bestPlayer}
+
+PADROES TATICOS: {patterns}
+
+TOTAL DE EVENTOS: {totalEvents}
+Eventos no primeiro tempo: {firstHalfCount}
+Eventos no segundo tempo: {secondHalfCount}
 
 LISTA COMPLETA DE EVENTOS:
-${eventsList}
+{eventsList}
 
 ---
 
@@ -85,7 +118,6 @@ Com base EXCLUSIVAMENTE nesses dados reais, gere um relatorio tatico completo no
 }
 
 IMPORTANTE: Retorne APENAS o JSON valido, sem nenhum texto antes ou depois. Cada campo deve conter texto corrido em paragrafos, sem marcacao markdown.`;
-};
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -108,9 +140,44 @@ serve(async (req) => {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    console.log(`[generate-match-report] Generating report for ${matchData.homeTeam} vs ${matchData.awayTeam} with ${matchData.events?.length || 0} events`);
+    // Buscar prompts e modelo do banco de dados
+    let systemPrompt = FALLBACK_SYSTEM_PROMPT;
+    let userTemplate = FALLBACK_USER_TEMPLATE;
+    let aiModel = FALLBACK_MODEL;
 
-    const userPrompt = USER_PROMPT_TEMPLATE(matchData);
+    try {
+      const supabase = createClient(
+        Deno.env.get("SUPABASE_URL")!,
+        Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+      );
+
+      const { data: prompts } = await supabase
+        .from("ai_prompts")
+        .select("prompt_key, prompt_value, ai_model")
+        .in("prompt_key", ["report_system", "report_user_template"]);
+
+      if (prompts && prompts.length > 0) {
+        const systemData = prompts.find((p: any) => p.prompt_key === "report_system");
+        const templateData = prompts.find((p: any) => p.prompt_key === "report_user_template");
+
+        if (systemData) {
+          systemPrompt = systemData.prompt_value;
+          aiModel = systemData.ai_model;
+        }
+        if (templateData) {
+          userTemplate = templateData.prompt_value;
+        }
+        console.log(`[generate-match-report] Using DB prompts with model: ${aiModel}`);
+      } else {
+        console.log("[generate-match-report] No DB prompts found, using fallback");
+      }
+    } catch (dbError) {
+      console.warn("[generate-match-report] Failed to fetch prompts from DB, using fallback:", dbError);
+    }
+
+    console.log(`[generate-match-report] Generating report for ${matchData.homeTeam} vs ${matchData.awayTeam} with ${matchData.events?.length || 0} events | model: ${aiModel}`);
+
+    const userPrompt = buildUserPrompt(userTemplate, matchData);
 
     const response = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -119,9 +186,9 @@ serve(async (req) => {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model: "google/gemini-2.5-flash",
+        model: aiModel,
         messages: [
-          { role: "system", content: SYSTEM_PROMPT },
+          { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
         temperature: 0.7,
@@ -155,7 +222,6 @@ serve(async (req) => {
     // Parse the JSON from the response
     let report;
     try {
-      // Try to extract JSON from potential markdown code blocks
       const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
       const jsonStr = jsonMatch ? jsonMatch[1].trim() : rawText.trim();
       report = JSON.parse(jsonStr);
@@ -163,7 +229,6 @@ serve(async (req) => {
       console.error("[generate-match-report] Failed to parse JSON response:", parseError);
       console.error("[generate-match-report] Raw text:", rawText.slice(0, 500));
       
-      // Fallback: try to extract any JSON object from the text
       const jsonObjectMatch = rawText.match(/\{[\s\S]*\}/);
       if (jsonObjectMatch) {
         try {
