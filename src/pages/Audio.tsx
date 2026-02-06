@@ -19,7 +19,8 @@ import {
   Square,
   Settings2,
   VolumeX,
-  Video
+  Video,
+  Zap
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
@@ -28,12 +29,14 @@ import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { usePodcastGeneration, PodcastType } from '@/hooks/usePodcastGeneration';
 import { TeamChatbotCard } from '@/components/audio/TeamChatbotCard';
 import { useWebSpeechTTS } from '@/hooks/useWebSpeechTTS';
+import { useFreeTTSGeneration } from '@/hooks/useFreeTTSGeneration';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
 import { calculateScoreFromEvents } from '@/hooks/useDynamicMatchStats';
 import apiClient, { normalizeStorageUrl } from '@/lib/apiClient';
 import { SyncedTranscription } from '@/components/audio/SyncedTranscription';
+import { useToast } from '@/hooks/use-toast';
 
 export default function Audio() {
   const [isPlaying, setIsPlaying] = useState(false);
@@ -83,8 +86,11 @@ export default function Audio() {
 
   // Web Speech TTS (free, browser-based)
   const webTTS = useWebSpeechTTS();
+  const freeTTS = useFreeTTSGeneration();
+  const { toast } = useToast();
   const [ttsText, setTtsText] = useState('');
   const [activeTab, setActiveTab] = useState('narration');
+  const [freeGeneratingType, setFreeGeneratingType] = useState<PodcastType | null>(null);
 
   // Get highlights from events (goals, saves, etc.)
   const highlights = events?.filter(e => 
@@ -223,6 +229,50 @@ export default function Audio() {
       podcastType,
       analysis?.tacticalAnalysis
     );
+  };
+
+  // Gera podcast usando kakttus Voice (gratuito, browser-based)
+  const handleGenerateFreePodcast = async (podcastType: PodcastType) => {
+    if (!selectedMatch || !events?.length) {
+      toast({
+        title: "Dados insuficientes",
+        description: "É necessário ter eventos da partida para gerar o podcast.",
+        variant: "destructive",
+      });
+      return;
+    }
+    
+    setFreeGeneratingType(podcastType);
+    
+    try {
+      // Gerar o script baseado no tipo
+      const script = freeTTS.generatePodcastScript(
+        events,
+        homeTeamName,
+        awayTeamName,
+        displayScore.home,
+        displayScore.away,
+        podcastType,
+        analysis?.tacticalAnalysis
+      );
+      
+      // Falar usando Web Speech API
+      freeTTS.speak(script);
+      
+      toast({
+        title: "Podcast Iniciado!",
+        description: "Reproduzindo com kakttus Voice (gratuito).",
+      });
+    } catch (error) {
+      console.error('Free TTS error:', error);
+      toast({
+        title: "Erro ao gerar",
+        description: error instanceof Error ? error.message : "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setFreeGeneratingType(null);
+    }
   };
 
   const handlePlayPodcast = async (podcastType: PodcastType) => {
@@ -540,6 +590,7 @@ export default function Audio() {
               ]).map((podcast) => {
                 const podcastData = podcasts[podcast.type];
                 const isThisGenerating = isPodcastGenerating && podcastGeneratingType === podcast.type;
+                const isFreeGenerating = freeGeneratingType === podcast.type;
                 const isReady = !!podcastData?.audioUrl;
                 const isThisPlaying = playingPodcast === podcast.type;
                 
@@ -570,9 +621,9 @@ export default function Audio() {
                         <Clock className="h-4 w-4" />
                         <span>{isReady ? 'Gerado' : '--:--'}</span>
                       </div>
-                      <div className="mt-4 flex gap-2">
+                      <div className="mt-4 space-y-2">
                         {isReady ? (
-                          <>
+                          <div className="flex gap-2">
                             <Button 
                               variant={isThisPlaying ? "outline" : "arena"}
                               size="sm" 
@@ -598,34 +649,49 @@ export default function Audio() {
                             >
                               <Download className="h-4 w-4" />
                             </Button>
-                          </>
+                          </div>
                         ) : (
                           <>
+                            {/* Botão gratuito - kakttus Voice */}
                             <Button 
                               variant="arena" 
                               size="sm" 
-                              className="flex-1"
+                              className="w-full"
+                              disabled={!podcast.hasData || isFreeGenerating || freeTTS.isGenerating}
+                              onClick={() => handleGenerateFreePodcast(podcast.type)}
+                            >
+                              {isFreeGenerating || (freeTTS.isGenerating && freeGeneratingType === podcast.type) ? (
+                                <>
+                                  <Loader2 className="mr-1 h-4 w-4 animate-spin" />
+                                  Reproduzindo...
+                                </>
+                              ) : (
+                                <>
+                                  <Zap className="mr-1 h-4 w-4" />
+                                  Ouvir Grátis
+                                </>
+                              )}
+                            </Button>
+                            
+                            {/* Botão pago - Servidor (se disponível) */}
+                            <Button 
+                              variant="outline" 
+                              size="sm" 
+                              className="w-full"
                               disabled={!podcast.hasData || isThisGenerating}
                               onClick={() => handleGeneratePodcast(podcast.type)}
                             >
                               {isThisGenerating ? (
                                 <>
                                   <Loader2 className="mr-1 h-4 w-4 animate-spin" />
-                                  Gerando...
+                                  Gerando áudio...
                                 </>
                               ) : (
                                 <>
                                   <Sparkles className="mr-1 h-4 w-4" />
-                                  Gerar
+                                  Gerar com IA (servidor)
                                 </>
                               )}
-                            </Button>
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              disabled
-                            >
-                              <Download className="h-4 w-4" />
                             </Button>
                           </>
                         )}
