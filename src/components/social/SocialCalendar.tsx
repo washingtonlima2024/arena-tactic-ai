@@ -12,7 +12,7 @@ import {
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths, isToday } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 import { cn } from '@/lib/utils';
@@ -67,19 +67,18 @@ export function SocialCalendar() {
   }, [currentMonth]);
 
   const fetchPosts = async () => {
-    const start = startOfMonth(currentMonth);
-    const end = endOfMonth(currentMonth);
-
     try {
-      const { data, error } = await supabase
-        .from('social_scheduled_posts')
-        .select('id, platform, content, scheduled_at, status')
-        .gte('scheduled_at', start.toISOString())
-        .lte('scheduled_at', end.toISOString())
-        .order('scheduled_at');
-
-      if (error) throw error;
-      setPosts(data || []);
+      // Fetch all posts and filter client-side by month
+      const data = await apiClient.get<ScheduledPost[]>('/api/social/scheduled-posts');
+      const start = startOfMonth(currentMonth);
+      const end = endOfMonth(currentMonth);
+      
+      const filtered = (data || []).filter(p => {
+        const d = new Date(p.scheduled_at);
+        return d >= start && d <= end;
+      });
+      
+      setPosts(filtered);
     } catch (error) {
       console.error('Error fetching posts:', error);
     } finally {
@@ -90,191 +89,150 @@ export function SocialCalendar() {
   const days = useMemo(() => {
     const start = startOfMonth(currentMonth);
     const end = endOfMonth(currentMonth);
-    return eachDayOfInterval({ start, end });
+    const allDays = eachDayOfInterval({ start, end });
+
+    // Pad start to Monday
+    const startDay = start.getDay();
+    const padStart = startDay === 0 ? 6 : startDay - 1;
+    const paddedDays: (Date | null)[] = Array(padStart).fill(null);
+    
+    return [...paddedDays, ...allDays];
   }, [currentMonth]);
 
-  const postsByDate = useMemo(() => {
-    return posts.reduce((acc, post) => {
-      const dateKey = format(new Date(post.scheduled_at), 'yyyy-MM-dd');
-      if (!acc[dateKey]) acc[dateKey] = [];
-      acc[dateKey].push(post);
-      return acc;
-    }, {} as Record<string, ScheduledPost[]>);
-  }, [posts]);
+  const getPostsForDay = (date: Date) => {
+    return posts.filter(p => isSameDay(new Date(p.scheduled_at), date));
+  };
 
-  const selectedDatePosts = useMemo(() => {
-    if (!selectedDate) return [];
-    const dateKey = format(selectedDate, 'yyyy-MM-dd');
-    return postsByDate[dateKey] || [];
-  }, [selectedDate, postsByDate]);
-
-  // Get day of week for first day to add padding
-  const firstDayOfWeek = startOfMonth(currentMonth).getDay();
+  const selectedDayPosts = selectedDate ? getPostsForDay(selectedDate) : [];
 
   return (
     <div className="space-y-6">
-      {/* Header */}
+      {/* Calendar Header */}
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-semibold flex items-center gap-2">
           <CalendarIcon className="h-5 w-5 text-primary" />
           Calendário de Publicações
         </h2>
         <div className="flex items-center gap-2">
-          <Button 
-            variant="outline" 
-            size="icon"
-            onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
-          >
+          <Button variant="outline" size="icon" onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}>
             <ChevronLeft className="h-4 w-4" />
           </Button>
-          <span className="text-sm font-medium min-w-[150px] text-center">
+          <span className="font-medium min-w-[150px] text-center">
             {format(currentMonth, 'MMMM yyyy', { locale: ptBR })}
           </span>
-          <Button 
-            variant="outline" 
-            size="icon"
-            onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}
-          >
+          <Button variant="outline" size="icon" onClick={() => setCurrentMonth(addMonths(currentMonth, 1))}>
             <ChevronRight className="h-4 w-4" />
           </Button>
         </div>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-[1fr_300px]">
-        {/* Calendar Grid */}
-        <Card>
-          <CardContent className="p-4">
-            {/* Week days header */}
-            <div className="grid grid-cols-7 gap-1 mb-2">
-              {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(day => (
-                <div key={day} className="text-center text-xs font-medium text-muted-foreground py-2">
-                  {day}
-                </div>
-              ))}
-            </div>
+      {/* Calendar Grid */}
+      <Card>
+        <CardContent className="p-4">
+          {/* Weekday headers */}
+          <div className="grid grid-cols-7 gap-1 mb-2">
+            {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map(day => (
+              <div key={day} className="text-center text-xs font-medium text-muted-foreground py-2">
+                {day}
+              </div>
+            ))}
+          </div>
 
-            {/* Calendar days */}
-            <div className="grid grid-cols-7 gap-1">
-              {/* Empty cells for days before the first of the month */}
-              {Array.from({ length: firstDayOfWeek }).map((_, i) => (
-                <div key={`empty-${i}`} className="aspect-square" />
-              ))}
-
-              {days.map(day => {
-                const dateKey = format(day, 'yyyy-MM-dd');
-                const dayPosts = postsByDate[dateKey] || [];
-                const isSelected = selectedDate && isSameDay(day, selectedDate);
-
-                return (
-                  <button
-                    key={dateKey}
-                    onClick={() => setSelectedDate(day)}
-                    className={cn(
-                      "aspect-square p-1 rounded-lg border transition-all relative",
-                      "hover:border-primary hover:bg-primary/5",
-                      isToday(day) && "border-primary bg-primary/10",
-                      isSelected && "border-primary ring-2 ring-primary/20",
-                      !isSameMonth(day, currentMonth) && "opacity-50"
-                    )}
-                  >
-                    <div className="text-xs font-medium mb-1">
-                      {format(day, 'd')}
-                    </div>
-                    
-                    {/* Platform indicators */}
-                    {dayPosts.length > 0 && (
-                      <div className="flex flex-wrap gap-0.5 justify-center">
-                        {dayPosts.slice(0, 3).map((post, idx) => {
-                          const platform = PLATFORMS[post.platform];
-                          const Icon = platform?.icon || CalendarIcon;
-                          return (
-                            <div 
-                              key={idx}
-                              className={cn(
-                                "w-3 h-3 rounded-full flex items-center justify-center",
-                                STATUS_COLORS[post.status] || 'bg-gray-500'
-                              )}
-                            >
-                              <Icon className="h-2 w-2 text-white" />
-                            </div>
-                          );
-                        })}
-                        {dayPosts.length > 3 && (
-                          <span className="text-[10px] text-muted-foreground">
-                            +{dayPosts.length - 3}
-                          </span>
-                        )}
-                      </div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            {/* Legend */}
-            <div className="flex items-center justify-center gap-4 mt-4 pt-4 border-t">
-              {Object.entries(STATUS_COLORS).map(([status, color]) => (
-                <div key={status} className="flex items-center gap-1">
-                  <div className={cn("w-2 h-2 rounded-full", color)} />
-                  <span className="text-xs text-muted-foreground capitalize">{status}</span>
-                </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Selected date details */}
-        <Card>
-          <CardContent className="p-4">
-            <h3 className="font-medium mb-4">
-              {selectedDate 
-                ? format(selectedDate, "d 'de' MMMM", { locale: ptBR })
-                : 'Selecione uma data'
+          {/* Days grid */}
+          <div className="grid grid-cols-7 gap-1">
+            {days.map((day, i) => {
+              if (!day) {
+                return <div key={`empty-${i}`} className="h-20" />;
               }
+
+              const dayPosts = getPostsForDay(day);
+              const isCurrentMonth = isSameMonth(day, currentMonth);
+              const isSelected = selectedDate && isSameDay(day, selectedDate);
+
+              return (
+                <button
+                  key={day.toISOString()}
+                  onClick={() => setSelectedDate(day)}
+                  className={cn(
+                    "h-20 p-1 rounded-lg border text-left transition-all hover:bg-muted/50",
+                    !isCurrentMonth && "opacity-30",
+                    isToday(day) && "border-primary/50 bg-primary/5",
+                    isSelected && "border-primary bg-primary/10 ring-1 ring-primary",
+                    !isSelected && "border-transparent"
+                  )}
+                >
+                  <div className={cn(
+                    "text-xs font-medium mb-1",
+                    isToday(day) && "text-primary"
+                  )}>
+                    {format(day, 'd')}
+                  </div>
+                  
+                  {dayPosts.length > 0 && (
+                    <div className="flex flex-wrap gap-0.5">
+                      {dayPosts.slice(0, 3).map(post => {
+                        const statusColor = STATUS_COLORS[post.status] || 'bg-gray-400';
+                        return (
+                          <div
+                            key={post.id}
+                            className={cn("h-1.5 w-1.5 rounded-full", statusColor)}
+                            title={`${post.platform} - ${post.status}`}
+                          />
+                        );
+                      })}
+                      {dayPosts.length > 3 && (
+                        <span className="text-[9px] text-muted-foreground">+{dayPosts.length - 3}</span>
+                      )}
+                    </div>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Selected Day Details */}
+      {selectedDate && (
+        <Card>
+          <CardContent className="p-4">
+            <h3 className="font-medium mb-3">
+              {format(selectedDate, "dd 'de' MMMM", { locale: ptBR })}
+              <span className="text-muted-foreground ml-2 text-sm">
+                ({selectedDayPosts.length} post{selectedDayPosts.length !== 1 ? 's' : ''})
+              </span>
             </h3>
 
-            {selectedDate && selectedDatePosts.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-8">
-                Nenhum post agendado para esta data
-              </p>
-            )}
+            {selectedDayPosts.length === 0 ? (
+              <p className="text-sm text-muted-foreground">Nenhum post agendado para este dia.</p>
+            ) : (
+              <div className="space-y-2">
+                {selectedDayPosts.map(post => {
+                  const platform = PLATFORMS[post.platform];
+                  const PlatformIcon = platform?.icon || CalendarIcon;
+                  const statusColor = STATUS_COLORS[post.status] || 'bg-gray-400';
 
-            <div className="space-y-3">
-              {selectedDatePosts.map(post => {
-                const platform = PLATFORMS[post.platform];
-                const Icon = platform?.icon || CalendarIcon;
-
-                return (
-                  <div 
-                    key={post.id}
-                    className="p-3 rounded-lg border bg-muted/50 space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <Icon className={cn("h-4 w-4", platform?.color)} />
-                        <span className="text-xs font-medium capitalize">
-                          {post.platform}
-                        </span>
+                  return (
+                    <div key={post.id} className="flex items-center gap-3 p-2 rounded-lg bg-muted/30">
+                      <PlatformIcon className={cn("h-4 w-4", platform?.color)} />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm truncate">{post.content}</p>
                       </div>
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                        <Clock className="h-3 w-3" />
-                        {format(new Date(post.scheduled_at), 'HH:mm')}
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs text-muted-foreground flex items-center gap-1">
+                          <Clock className="h-3 w-3" />
+                          {format(new Date(post.scheduled_at), 'HH:mm')}
+                        </span>
+                        <div className={cn("h-2 w-2 rounded-full", statusColor)} />
                       </div>
                     </div>
-                    <p className="text-sm line-clamp-2">{post.content}</p>
-                    <Badge 
-                      variant="outline" 
-                      className={cn("text-xs", STATUS_COLORS[post.status]?.replace('bg-', 'text-'))}
-                    >
-                      {post.status}
-                    </Badge>
-                  </div>
-                );
-              })}
-            </div>
+                  );
+                })}
+              </div>
+            )}
           </CardContent>
         </Card>
-      </div>
+      )}
     </div>
   );
 }

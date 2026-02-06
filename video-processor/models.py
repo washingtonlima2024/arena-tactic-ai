@@ -914,6 +914,124 @@ class CreditTransaction(Base):
         }
 
 
+# ============================================================================
+# SOCIAL MEDIA MODELS
+# ============================================================================
+
+class SocialConnection(Base):
+    """Social media platform connection credentials."""
+    __tablename__ = 'social_connections'
+    
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey('users.id'), nullable=False)
+    platform = Column(String(50), nullable=False)
+    access_token = Column(Text)
+    refresh_token = Column(Text)
+    token_expires_at = Column(DateTime)
+    account_name = Column(String(255))
+    account_id = Column(String(255))
+    is_connected = Column(Boolean, default=False)
+    last_sync_at = Column(DateTime)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'platform': self.platform,
+            'access_token': self.access_token,
+            'refresh_token': self.refresh_token,
+            'token_expires_at': self.token_expires_at.isoformat() if self.token_expires_at else None,
+            'account_name': self.account_name,
+            'account_id': self.account_id,
+            'is_connected': self.is_connected,
+            'last_sync_at': self.last_sync_at.isoformat() if self.last_sync_at else None,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class SocialCampaign(Base):
+    """Social media marketing campaign."""
+    __tablename__ = 'social_campaigns'
+    
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey('users.id'), nullable=False)
+    name = Column(String(255), nullable=False)
+    description = Column(Text)
+    status = Column(String(50), default='draft')
+    start_date = Column(DateTime)
+    end_date = Column(DateTime)
+    target_platforms = Column(JSON, default=list)
+    tags = Column(JSON, default=list)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    scheduled_posts = relationship('SocialScheduledPost', back_populates='campaign', cascade='all, delete-orphan')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'name': self.name,
+            'description': self.description,
+            'status': self.status,
+            'start_date': self.start_date.isoformat() if self.start_date else None,
+            'end_date': self.end_date.isoformat() if self.end_date else None,
+            'target_platforms': self.target_platforms or [],
+            'tags': self.tags or [],
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
+class SocialScheduledPost(Base):
+    """Scheduled social media post."""
+    __tablename__ = 'social_scheduled_posts'
+    
+    id = Column(String(36), primary_key=True, default=generate_uuid)
+    user_id = Column(String(36), ForeignKey('users.id'), nullable=False)
+    platform = Column(String(50), nullable=False)
+    content = Column(Text, nullable=False)
+    media_url = Column(Text)
+    media_type = Column(String(50))
+    scheduled_at = Column(DateTime, nullable=False)
+    published_at = Column(DateTime)
+    status = Column(String(50), default='scheduled')
+    error_message = Column(Text)
+    external_post_id = Column(String(255))
+    campaign_id = Column(String(36), ForeignKey('social_campaigns.id'))
+    match_id = Column(String(36))
+    event_id = Column(String(36))
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+    # Relationships
+    campaign = relationship('SocialCampaign', back_populates='scheduled_posts')
+    
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'user_id': self.user_id,
+            'platform': self.platform,
+            'content': self.content,
+            'media_url': self.media_url,
+            'media_type': self.media_type,
+            'scheduled_at': self.scheduled_at.isoformat() if self.scheduled_at else None,
+            'published_at': self.published_at.isoformat() if self.published_at else None,
+            'status': self.status,
+            'error_message': self.error_message,
+            'external_post_id': self.external_post_id,
+            'campaign_id': self.campaign_id,
+            'match_id': self.match_id,
+            'event_id': self.event_id,
+            'created_at': self.created_at.isoformat() if self.created_at else None,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+
 class UploadJob(Base):
     """Chunked upload job for large files with resume capability."""
     __tablename__ = 'upload_jobs'

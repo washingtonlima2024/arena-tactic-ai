@@ -28,7 +28,8 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { Calendar as CalendarComponent } from '@/components/ui/calendar';
 import { cn } from '@/lib/utils';
 import { toast } from '@/hooks/use-toast';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
+import { useAuth } from '@/hooks/useAuth';
 import { format } from 'date-fns';
 import { ptBR } from 'date-fns/locale';
 
@@ -64,6 +65,7 @@ const STATUS_CONFIG: Record<string, { label: string; color: string; icon: any }>
 };
 
 export function CampaignsManager() {
+  const { user } = useAuth();
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -83,25 +85,8 @@ export function CampaignsManager() {
 
   const fetchCampaigns = async () => {
     try {
-      const { data: campaignsData, error } = await supabase
-        .from('social_campaigns')
-        .select('*')
-        .order('created_at', { ascending: false });
-
-      if (error) throw error;
-
-      // Get posts count for each campaign
-      const campaignsWithCounts = await Promise.all(
-        (campaignsData || []).map(async (campaign) => {
-          const { count } = await supabase
-            .from('social_scheduled_posts')
-            .select('*', { count: 'exact', head: true })
-            .eq('campaign_id', campaign.id);
-          return { ...campaign, posts_count: count || 0 };
-        })
-      );
-
-      setCampaigns(campaignsWithCounts);
+      const data = await apiClient.get<Campaign[]>('/api/social/campaigns');
+      setCampaigns(data || []);
     } catch (error) {
       console.error('Error fetching campaigns:', error);
     } finally {
@@ -141,45 +126,34 @@ export function CampaignsManager() {
       return;
     }
 
-    try {
-      // Get current user
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toast({ title: 'Usuário não autenticado', variant: 'destructive' });
-        return;
-      }
+    if (!user) {
+      toast({ title: 'Usuário não autenticado', variant: 'destructive' });
+      return;
+    }
 
+    try {
       const tagsArray = formData.tags.split(',').map(t => t.trim()).filter(Boolean);
 
       if (editingCampaign) {
-        const { error } = await supabase
-          .from('social_campaigns')
-          .update({
-            name: formData.name,
-            description: formData.description || null,
-            start_date: formData.start_date?.toISOString() || null,
-            end_date: formData.end_date?.toISOString() || null,
-            target_platforms: formData.target_platforms,
-            tags: tagsArray,
-          })
-          .eq('id', editingCampaign.id);
-
-        if (error) throw error;
+        await apiClient.put(`/api/social/campaigns/${editingCampaign.id}`, {
+          name: formData.name,
+          description: formData.description || null,
+          start_date: formData.start_date?.toISOString() || null,
+          end_date: formData.end_date?.toISOString() || null,
+          target_platforms: formData.target_platforms,
+          tags: tagsArray,
+        });
         toast({ title: 'Campanha atualizada!' });
       } else {
-        const { error } = await supabase
-          .from('social_campaigns')
-          .insert({
-            user_id: user.id,
-            name: formData.name,
-            description: formData.description || null,
-            start_date: formData.start_date?.toISOString() || null,
-            end_date: formData.end_date?.toISOString() || null,
-            target_platforms: formData.target_platforms,
-            tags: tagsArray,
-          });
-
-        if (error) throw error;
+        await apiClient.post('/api/social/campaigns', {
+          user_id: user.id,
+          name: formData.name,
+          description: formData.description || null,
+          start_date: formData.start_date?.toISOString() || null,
+          end_date: formData.end_date?.toISOString() || null,
+          target_platforms: formData.target_platforms,
+          tags: tagsArray,
+        });
         toast({ title: 'Campanha criada!' });
       }
 
@@ -192,12 +166,7 @@ export function CampaignsManager() {
 
   const updateStatus = async (campaignId: string, status: string) => {
     try {
-      const { error } = await supabase
-        .from('social_campaigns')
-        .update({ status })
-        .eq('id', campaignId);
-
-      if (error) throw error;
+      await apiClient.put(`/api/social/campaigns/${campaignId}`, { status });
       toast({ title: `Status atualizado para ${STATUS_CONFIG[status].label}` });
       fetchCampaigns();
     } catch (error: any) {
@@ -207,14 +176,8 @@ export function CampaignsManager() {
 
   const deleteCampaign = async (campaignId: string) => {
     if (!confirm('Tem certeza que deseja excluir esta campanha?')) return;
-
     try {
-      const { error } = await supabase
-        .from('social_campaigns')
-        .delete()
-        .eq('id', campaignId);
-
-      if (error) throw error;
+      await apiClient.delete(`/api/social/campaigns/${campaignId}`);
       toast({ title: 'Campanha excluída' });
       fetchCampaigns();
     } catch (error: any) {
@@ -467,7 +430,6 @@ export function CampaignsManager() {
                       initialFocus
                       className="p-3 pointer-events-auto"
                       locale={ptBR}
-                      disabled={(date) => formData.start_date ? date < formData.start_date : false}
                     />
                   </PopoverContent>
                 </Popover>
@@ -476,23 +438,18 @@ export function CampaignsManager() {
 
             <div className="space-y-2">
               <Label>Plataformas Alvo</Label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="flex flex-wrap gap-2">
                 {PLATFORMS.map(platform => (
-                  <div 
+                  <div
                     key={platform.id}
-                    className="flex items-center space-x-2"
+                    className="flex items-center gap-2 cursor-pointer"
+                    onClick={() => togglePlatform(platform.id)}
                   >
                     <Checkbox
-                      id={platform.id}
                       checked={formData.target_platforms.includes(platform.id)}
                       onCheckedChange={() => togglePlatform(platform.id)}
                     />
-                    <label 
-                      htmlFor={platform.id}
-                      className="text-sm cursor-pointer"
-                    >
-                      {platform.name}
-                    </label>
+                    <span className="text-sm">{platform.name}</span>
                   </div>
                 ))}
               </div>
@@ -502,7 +459,7 @@ export function CampaignsManager() {
               <Label htmlFor="tags">Tags (separadas por vírgula)</Label>
               <Input
                 id="tags"
-                placeholder="futebol, campeonato, destaque"
+                placeholder="Ex: campeonato, lancamento, destaque"
                 value={formData.tags}
                 onChange={(e) => setFormData(prev => ({ ...prev, tags: e.target.value }))}
               />
