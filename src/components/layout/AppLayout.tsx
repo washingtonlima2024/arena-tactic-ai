@@ -17,7 +17,7 @@ export function AppLayout({ children }: AppLayoutProps) {
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background overflow-x-hidden max-w-[100vw]">
       {/* Desktop Sidebar */}
       {!isMobile && <Sidebar />}
       
@@ -26,13 +26,13 @@ export function AppLayout({ children }: AppLayoutProps) {
       
       <div 
         className={cn(
-          "flex min-h-screen flex-col transition-all duration-300",
+          "flex min-h-screen flex-col transition-all duration-300 overflow-x-hidden",
           !isMobile && (collapsed ? "ml-20" : "ml-64")
         )}
       >
         <Header onMenuClick={() => setMobileNavOpen(true)} />
         <main className={cn(
-          "flex-1 p-4 md:p-6",
+          "flex-1 p-4 md:p-6 overflow-x-hidden",
           isMobile && "pb-20" // Space for bottom nav
         )}>
           {children}

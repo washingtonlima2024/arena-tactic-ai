@@ -375,33 +375,33 @@ export default function Analysis() {
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="flex items-center gap-3">
-              <h1 className="font-display text-3xl font-bold">Análise Tática</h1>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <h1 className="font-display text-xl sm:text-3xl font-bold">Análise Tática</h1>
               {selectedMatch && (
                 <>
-                  <Badge variant="arena">
+                  <Badge variant="arena" className="text-xs sm:text-sm">
                     {selectedMatch.home_team?.short_name || 'Casa'} vs {selectedMatch.away_team?.short_name || 'Visitante'}
                   </Badge>
-                  <Badge variant="outline" className="text-lg font-bold px-3 py-1 text-primary">
+                  <Badge variant="outline" className="text-sm sm:text-lg font-bold px-2 sm:px-3 py-0.5 sm:py-1 text-primary">
                     {dynamicStats.score.home} x {dynamicStats.score.away}
                   </Badge>
                 </>
               )}
             </div>
-            <p className="text-muted-foreground">
+            <p className="text-sm text-muted-foreground">
               {selectedMatch?.competition || 'Amistoso'} • {selectedMatch?.match_date ? new Date(selectedMatch.match_date).toLocaleDateString('pt-BR') : 'Data não definida'}
               {events.length > 0 && ` • ${events.length} eventos detectados`}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <Button 
               variant="destructive" 
               size="sm"
               onClick={() => setReimportDialogOpen(true)}
               disabled={!currentMatchId}
             >
-              <Trash2 className="mr-2 h-4 w-4" />
-              Reimportar Vídeos
+              <Trash2 className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Reimportar Vídeos</span>
             </Button>
             
             {/* Clip Generation Dropdown */}
@@ -414,13 +414,13 @@ export default function Analysis() {
                     disabled={isGeneratingClips}
                   >
                     {isGeneratingClips ? (
-                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      <Loader2 className="h-4 w-4 animate-spin sm:mr-2" />
                     ) : (
-                      <Scissors className="mr-2 h-4 w-4" />
+                      <Scissors className="h-4 w-4 sm:mr-2" />
                     )}
-                    Gerar Clips
+                    <span className="hidden sm:inline">Gerar Clips</span>
                     {eventsWithClips > 0 && (
-                      <Badge variant="outline" className="ml-2 text-xs">
+                      <Badge variant="outline" className="ml-1 sm:ml-2 text-xs">
                         {eventsWithClips}/{events.length}
                       </Badge>
                     )}
@@ -444,8 +444,8 @@ export default function Analysis() {
             )}
             
             <Button variant="arena-outline" size="sm">
-              <Download className="mr-2 h-4 w-4" />
-              Exportar Relatório
+              <Download className="h-4 w-4 sm:mr-2" />
+              <span className="hidden sm:inline">Exportar Relatório</span>
             </Button>
           </div>
         </div>
@@ -543,9 +543,9 @@ export default function Analysis() {
                     { label: 'Defesas', home: eventAnalysis.homeStats.saves, away: eventAnalysis.awayStats.saves },
                     { label: 'Faltas/Cartões', home: eventAnalysis.homeStats.fouls + eventAnalysis.homeStats.cards, away: eventAnalysis.awayStats.fouls + eventAnalysis.awayStats.cards },
                   ].map((stat, index) => (
-                    <div key={index} className="grid grid-cols-[1fr,2fr,1fr] items-center gap-4">
+                    <div key={index} className="grid grid-cols-[1fr,2fr,1fr] items-center gap-2 sm:gap-4">
                       <div className="text-right">
-                        <span className="text-lg font-bold">
+                        <span className="text-base sm:text-lg font-bold">
                           {stat.home}{stat.suffix || ''}
                         </span>
                       </div>
@@ -559,7 +559,7 @@ export default function Analysis() {
                         <p className="text-center text-xs text-muted-foreground">{stat.label}</p>
                       </div>
                       <div className="text-left">
-                        <span className="text-lg font-bold">
+                        <span className="text-base sm:text-lg font-bold">
                           {stat.away}{stat.suffix || ''}
                         </span>
                       </div>
@@ -641,31 +641,35 @@ export default function Analysis() {
                 <CardContent>
                   <div className="space-y-4">
                     {generatedAudio.map((audio) => (
-                      <div key={audio.id} className="flex items-center gap-4 p-4 rounded-lg bg-muted/30 border border-border/50">
-                        <div className="flex h-12 w-12 items-center justify-center rounded-full bg-primary/10 shrink-0">
-                          <Volume2 className="h-6 w-6 text-primary" />
+                      <div key={audio.id} className="flex flex-col sm:flex-row sm:items-center gap-3 sm:gap-4 p-4 rounded-lg bg-muted/30 border border-border/50">
+                        <div className="flex items-center gap-3 sm:gap-4">
+                          <div className="flex h-10 w-10 sm:h-12 sm:w-12 items-center justify-center rounded-full bg-primary/10 shrink-0">
+                            <Volume2 className="h-5 w-5 sm:h-6 sm:w-6 text-primary" />
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium capitalize text-sm sm:text-base">
+                              {audio.audio_type === 'narration' ? 'Narração' : 
+                               audio.audio_type === 'podcast' ? 'Podcast' : 
+                               audio.audio_type === 'summary' ? 'Resumo' : audio.audio_type}
+                            </p>
+                            <p className="text-xs sm:text-sm text-muted-foreground">
+                              {audio.voice ? `Voz: ${audio.voice}` : 'Locução Padrão'}
+                              {audio.duration_seconds && ` • ${Math.floor(audio.duration_seconds / 60)}:${String(audio.duration_seconds % 60).padStart(2, '0')}`}
+                            </p>
+                          </div>
                         </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium capitalize">
-                            {audio.audio_type === 'narration' ? 'Narração' : 
-                             audio.audio_type === 'podcast' ? 'Podcast' : 
-                             audio.audio_type === 'summary' ? 'Resumo' : audio.audio_type}
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            {audio.voice ? `Voz: ${audio.voice}` : 'Locução Padrão'}
-                            {audio.duration_seconds && ` • ${Math.floor(audio.duration_seconds / 60)}:${String(audio.duration_seconds % 60).padStart(2, '0')}`}
-                          </p>
+                        <div className="flex items-center gap-2 sm:gap-3">
+                          <audio 
+                            controls 
+                            src={audio.audio_url || ''} 
+                            className="h-10 w-full sm:max-w-[200px]"
+                          />
+                          <Button variant="outline" size="icon" className="shrink-0" asChild>
+                            <a href={audio.audio_url || ''} download target="_blank" rel="noopener noreferrer">
+                              <Download className="h-4 w-4" />
+                            </a>
+                          </Button>
                         </div>
-                        <audio 
-                          controls 
-                          src={audio.audio_url || ''} 
-                          className="h-10 max-w-[200px]"
-                        />
-                        <Button variant="outline" size="icon" asChild>
-                          <a href={audio.audio_url || ''} download target="_blank" rel="noopener noreferrer">
-                            <Download className="h-4 w-4" />
-                          </a>
-                        </Button>
                       </div>
                     ))}
                   </div>
@@ -676,11 +680,15 @@ export default function Analysis() {
             {/* Tactical Patterns */}
             <Tabs defaultValue="insights" className="space-y-6">
               <TabsList className="grid w-full grid-cols-3">
-                <TabsTrigger value="insights">
-                  Insights ({eventAnalysis.keyMoments.length})
+                <TabsTrigger value="insights" className="text-xs sm:text-sm">
+                  <span className="hidden sm:inline">Insights </span>({eventAnalysis.keyMoments.length})
                 </TabsTrigger>
-                <TabsTrigger value="patterns">Padrões Táticos ({eventAnalysis.patterns.length})</TabsTrigger>
-                <TabsTrigger value="events">Eventos ({events.length})</TabsTrigger>
+                <TabsTrigger value="patterns" className="text-xs sm:text-sm">
+                  <span className="hidden sm:inline">Padrões </span>({eventAnalysis.patterns.length})
+                </TabsTrigger>
+                <TabsTrigger value="events" className="text-xs sm:text-sm">
+                  <span className="hidden sm:inline">Eventos </span>({events.length})
+                </TabsTrigger>
               </TabsList>
 
               <TabsContent value="insights" className="space-y-4">
@@ -902,7 +910,7 @@ export default function Analysis() {
 
         {/* Video Dialog with Embed - 3s before and 5s after event */}
         <Dialog open={videoDialogOpen} onOpenChange={setVideoDialogOpen}>
-          <DialogContent className="max-w-4xl">
+          <DialogContent className="max-w-[95vw] sm:max-w-4xl">
             <DialogHeader>
               <DialogTitle className="flex items-center justify-between">
                 <div className="flex items-center gap-3">

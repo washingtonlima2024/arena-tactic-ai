@@ -44,14 +44,14 @@ export default function Admin() {
     <AppLayout>
       <div className="space-y-6">
         <div>
-          <h1 className="text-3xl font-bold tracking-tight">Administração</h1>
+          <h1 className="text-xl sm:text-3xl font-bold tracking-tight">Administração</h1>
           <p className="text-muted-foreground">
             Gerencie empresas, usuários, planos e configurações do sistema.
           </p>
         </div>
 
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
-          <TabsList className="grid w-full grid-cols-6 lg:w-auto lg:inline-grid">
+          <TabsList className="grid w-full grid-cols-3 sm:grid-cols-6 h-auto lg:w-auto lg:inline-grid">
             <TabsTrigger value="dashboard" className="flex items-center gap-2">
               <BarChart3 className="h-4 w-4" />
               <span className="hidden sm:inline">Dashboard</span>

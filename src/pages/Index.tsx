@@ -299,7 +299,7 @@ export default function Dashboard() {
                           value={selectedGoalId || goalEvents[0]?.id} 
                           onValueChange={handleGoalChange}
                         >
-                          <SelectTrigger className="w-[180px]">
+                          <SelectTrigger className="w-full sm:w-[180px]">
                             <SelectValue placeholder="Selecione o gol" />
                           </SelectTrigger>
                           <SelectContent>

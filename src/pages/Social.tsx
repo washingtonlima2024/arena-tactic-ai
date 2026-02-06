@@ -347,8 +347,8 @@ export default function Social() {
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
-              <Share2 className="h-8 w-8 text-primary" />
+            <h1 className="text-xl sm:text-3xl font-bold tracking-tight flex items-center gap-2 sm:gap-3">
+              <Share2 className="h-6 w-6 sm:h-8 sm:w-8 text-primary" />
               Redes Sociais
             </h1>
             <p className="text-muted-foreground mt-1">
@@ -362,7 +362,7 @@ export default function Social() {
 
         {/* Tabs */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full max-w-md grid-cols-4">
+          <TabsList className="grid w-full max-w-md grid-cols-2 sm:grid-cols-4 h-auto">
             <TabsTrigger value="connections" className="flex items-center gap-2">
               <Link2 className="h-4 w-4" />
               <span className="hidden sm:inline">Conexões</span>
