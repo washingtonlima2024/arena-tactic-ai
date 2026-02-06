@@ -14,6 +14,51 @@ export type Database = {
   }
   public: {
     Tables: {
+      ai_prompts: {
+        Row: {
+          ai_model: string
+          category: string
+          default_model: string
+          default_value: string
+          description: string | null
+          id: string
+          is_default: boolean
+          prompt_key: string
+          prompt_name: string
+          prompt_value: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          ai_model: string
+          category?: string
+          default_model: string
+          default_value: string
+          description?: string | null
+          id?: string
+          is_default?: boolean
+          prompt_key: string
+          prompt_name: string
+          prompt_value: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          ai_model?: string
+          category?: string
+          default_model?: string
+          default_value?: string
+          description?: string | null
+          id?: string
+          is_default?: boolean
+          prompt_key?: string
+          prompt_name?: string
+          prompt_value?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: []
+      }
       analysis_jobs: {
         Row: {
           completed_at: string | null
