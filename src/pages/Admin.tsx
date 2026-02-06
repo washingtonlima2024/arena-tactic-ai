@@ -12,7 +12,7 @@ import CreditsManager from '@/components/admin/CreditsManager';
 import AdminSettings from '@/components/admin/AdminSettings';
 
 export default function Admin() {
-  const { isAdmin, isLoading, role } = useAuth();
+  const { isSuperAdmin, isLoading, role } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
 
   // Aguardar até que a role seja carregada
@@ -26,7 +26,7 @@ export default function Admin() {
     );
   }
 
-  if (!isAdmin) {
+  if (!isSuperAdmin) {
     return (
       <AppLayout>
         <div className="flex flex-col items-center justify-center h-96 gap-4">

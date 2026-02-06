@@ -31,22 +31,31 @@ import { useNavigate } from 'react-router-dom';
 
 const MATCH_CONTEXT_PAGES = ['/events', '/analysis', '/media', '/audio', '/field', '/dashboard'];
 
-const navItems = [
+// Itens visíveis para todos (Espectador+)
+const viewerItems = [
   { icon: LayoutDashboard, label: 'Início', path: '/home' },
   { icon: Video, label: 'Partidas', path: '/matches' },
-  { icon: Upload, label: 'Importar Vídeo', path: '/upload?mode=new' },
-  { icon: Radio, label: 'Ao Vivo', path: '/live' },
   { icon: BarChart3, label: 'Análise Tática', path: '/analysis' },
   { icon: Layers, label: 'Dashboard Análise', path: '/dashboard' },
   { icon: Calendar, label: 'Eventos', path: '/events' },
   { icon: Scissors, label: 'Cortes & Mídia', path: '/media' },
   { icon: Mic, label: 'Podcast & Locução', path: '/audio' },
-  { icon: Share2, label: 'Redes Sociais', path: '/social' },
   { icon: Ruler, label: 'Campo FIFA', path: '/field' },
+];
+
+// Itens visíveis para Operador+ (nível 40+)
+const uploaderItems = [
+  { icon: Upload, label: 'Importar Vídeo', path: '/upload?mode=new' },
+  { icon: Radio, label: 'Ao Vivo', path: '/live' },
+  { icon: Share2, label: 'Redes Sociais', path: '/social' },
+];
+
+// Itens visíveis para Gerente+ (nível 60+)
+const managerItems = [
   { icon: Settings, label: 'Configurações', path: '/settings' },
 ];
 
-const adminItems = [
+const superAdminItems = [
   { icon: ShieldCheck, label: 'Administração', path: '/admin' },
 ];
 
@@ -56,7 +65,7 @@ interface MobileNavProps {
 }
 
 export function MobileNav({ open, onOpenChange }: MobileNavProps) {
-  const { isAdmin, user, signOut } = useAuth();
+  const { isSuperAdmin, canUpload, canManage, user, signOut } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const currentMatchId = searchParams.get('match') || sessionStorage.getItem('arena_selected_match');
@@ -97,8 +106,9 @@ export function MobileNav({ open, onOpenChange }: MobileNavProps) {
 
         <ScrollArea className="flex-1 h-[calc(100vh-180px)]">
           <nav className="p-3">
+            {/* Itens para todos */}
             <ul className="space-y-1">
-              {navItems.map((item) => (
+              {viewerItems.map((item) => (
                 <li key={item.path}>
                   <NavLink
                     to={getNavPath(item.path)}
@@ -121,14 +131,81 @@ export function MobileNav({ open, onOpenChange }: MobileNavProps) {
               ))}
             </ul>
 
-            {isAdmin && (
+            {/* Operador+ (nível 40+) */}
+            {canUpload && (
+              <>
+                <Separator className="my-3" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-3">
+                  Operações
+                </span>
+                <ul className="space-y-1 mt-2">
+                  {uploaderItems.map((item) => (
+                    <li key={item.path}>
+                      <NavLink
+                        to={getNavPath(item.path)}
+                        onClick={handleNavClick}
+                        className={({ isActive }) =>
+                          cn(
+                            "flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-all",
+                            "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                            "active:scale-[0.98] touch-manipulation",
+                            isActive
+                              ? "bg-primary/10 text-primary"
+                              : "text-sidebar-foreground"
+                          )
+                        }
+                      >
+                        <item.icon className="h-5 w-5 shrink-0" />
+                        <span>{item.label}</span>
+                      </NavLink>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {/* Gerente+ (nível 60+) */}
+            {canManage && (
+              <>
+                <Separator className="my-3" />
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-3">
+                  Gestão
+                </span>
+                <ul className="space-y-1 mt-2">
+                  {managerItems.map((item) => (
+                    <li key={item.path}>
+                      <NavLink
+                        to={getNavPath(item.path)}
+                        onClick={handleNavClick}
+                        className={({ isActive }) =>
+                          cn(
+                            "flex items-center gap-3 rounded-lg px-3 py-3 text-sm font-medium transition-all",
+                            "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                            "active:scale-[0.98] touch-manipulation",
+                            isActive
+                              ? "bg-primary/10 text-primary"
+                              : "text-sidebar-foreground"
+                          )
+                        }
+                      >
+                        <item.icon className="h-5 w-5 shrink-0" />
+                        <span>{item.label}</span>
+                      </NavLink>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            )}
+
+            {/* SuperAdmin only */}
+            {isSuperAdmin && (
               <>
                 <Separator className="my-3" />
                 <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground px-3">
                   Admin
                 </span>
                 <ul className="space-y-1 mt-2">
-                  {adminItems.map((item) => (
+                  {superAdminItems.map((item) => (
                     <li key={item.path}>
                       <NavLink
                         to={item.path}
