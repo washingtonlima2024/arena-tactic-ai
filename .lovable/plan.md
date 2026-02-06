@@ -1,185 +1,127 @@
 
-# Plano: Implementar Publicação Automática no Instagram
+# Levantamento: Falhas de Controle de Acesso por Role
 
-## Situação Atual
+## Problema Identificado
 
-### ✅ O que está funcionando:
-| Item | Status | Detalhes |
-|------|--------|----------|
-| Conexão Instagram | ✅ Configurada | Token: `EAAJznF7ef1gBQ...`, Account ID: `690065397153624` |
-| Tabela `social_connections` | ✅ Dados salvos | `@wahington.lima` conectado |
-| Tabela `social_scheduled_posts` | ✅ Posts agendados | 3 posts pendentes para Instagram |
-| Interface de agendamento | ✅ Funcional | ScheduledPostsManager operacional |
+Um usuario com role "Espectador" (viewer, nivel 20) conseguiu subir um video. Isso ocorre porque **nenhuma rota tem restricao de permissao** -- o componente `RequireAuth` ja suporta props como `requireUploader`, `requireManager`, `requireAdmin`, mas elas **nao estao sendo usadas em nenhuma rota**.
 
-### ❌ O que está faltando:
-| Item | Status | Problema |
-|------|--------|----------|
-| Edge Function `social-publish` | ❌ Não existe | Diretório não criado, apenas configurado no config.toml |
-| Edge Function `process-scheduled-posts` | ❌ Não existe | Para processar posts agendados automaticamente |
-| Publicação de vídeos no Instagram | ❌ Não implementado | Requer upload em duas etapas (container + publish) |
+## Diagnostico Completo
 
-## Como a Instagram Graph API funciona
+### 1. Rotas sem Restricao (App.tsx)
 
-A publicação de mídia no Instagram via API requer **duas etapas**:
+Todas as rotas usam apenas `<RequireAuth>` sem nenhuma prop de permissao:
 
-```text
-Etapa 1: Criar Container de Mídia
-POST https://graph.facebook.com/v19.0/{ig-user-id}/media
-  → video_url: URL pública do vídeo
-  → caption: texto da legenda
-  → media_type: REELS (para vídeos)
+| Rota | Restricao Atual | Restricao Necessaria | Problema |
+|------|-----------------|---------------------|----------|
+| `/upload` | Apenas login | `requireUploader` (nivel 40+) | **Espectador consegue fazer upload** |
+| `/live` | Apenas login | `requireUploader` (nivel 40+) | Espectador pode iniciar transmissao ao vivo |
+| `/live/config` | Apenas login | `requireUploader` (nivel 40+) | Espectador pode configurar stream |
+| `/social` | Apenas login | `requireUploader` (nivel 40+) | Espectador pode agendar posts |
+| `/settings` | Apenas login | `requireManager` (nivel 60+) | Espectador pode alterar configuracoes |
+| `/admin` | Apenas login (verifica internamente) | `requireAdmin` (nivel 80+) | Rota carrega e so depois bloqueia |
+| `/home` | Apenas login | OK - todos podem ver | -- |
+| `/matches` | Apenas login | OK - todos podem ver | -- |
+| `/analysis` | Apenas login | OK - visualizacao | -- |
+| `/dashboard` | Apenas login | OK - visualizacao | -- |
+| `/events` | Apenas login | OK - visualizacao | -- |
+| `/media` | Apenas login | OK - visualizacao | -- |
+| `/audio` | Apenas login | OK - visualizacao | -- |
+| `/field` | Apenas login | OK - visualizacao | -- |
+| `/viewer` | Apenas login | OK - visualizacao | -- |
 
-Etapa 2: Publicar o Container
-POST https://graph.facebook.com/v19.0/{ig-user-id}/media_publish
-  → creation_id: ID retornado da etapa 1
-```
+### 2. Menu Lateral sem Restricao (Sidebar.tsx e MobileNav.tsx)
 
-**Limitações importantes:**
-- **100 posts por 24 horas** (limite da API)
-- A URL do vídeo deve ser **pública e acessível** pela Meta
-- Vídeos devem ter **3-90 segundos** para Reels
+O menu mostra **todos os itens** para todos os usuarios, incluindo "Importar Video" e "Redes Sociais" para Espectadores. Apenas o menu "Administracao" e filtrado por `isAdmin`.
 
-## Implementação Necessária
+### 3. Admin usa `isAdmin` em vez de `isSuperAdmin`
 
-### 1. Edge Function `social-publish`
+Segundo as regras de RBAC definidas, a pagina Admin deveria ser restrita a **SuperAdmin (nivel 100)**, mas usa `isAdmin` (nivel 80+), permitindo que Admin Empresa tambem acesse.
 
-Será criada em `supabase/functions/social-publish/index.ts`:
+## Plano de Correcao
 
-```text
-Função: Publicar imediatamente em uma rede social
+### Etapa 1: Adicionar restricoes nas rotas (App.tsx)
 
-Fluxo:
-1. Recebe: platform, content, mediaUrl, userId
-2. Busca credenciais na tabela social_connections
-3. Dependendo da plataforma:
-   - Instagram: Cria container → Aguarda processamento → Publica
-   - Facebook: Post direto via Graph API
-   - X/Twitter: OAuth 1.0a com assinatura HMAC-SHA1
-4. Retorna: success, result ou error
-```
-
-### 2. Edge Function `process-scheduled-posts`
-
-Será criada em `supabase/functions/process-scheduled-posts/index.ts`:
-
-```text
-Função: Executar automaticamente pelo cron ou trigger
-
-Fluxo:
-1. Busca posts com status='scheduled' e scheduled_at <= agora
-2. Para cada post:
-   - Atualiza status para 'publishing'
-   - Chama a lógica de publicação
-   - Atualiza status para 'published' ou 'failed'
-```
-
-### 3. Verificação de URL de Mídia
-
-O post agendado tem uma URL do Supabase Storage:
-```
-https://wtpvajxekyfekdmypcok.supabase.co/storage/v1/object/public/smart-editor/social-media/1768422636080.mp4
-```
-
-Esta URL é **pública**, então funcionará com a API do Instagram.
-
-**Problema identificado:** Um dos posts usa URL local:
-```
-http://localhost:5000/api/storage/.../clips/first_half/43min-foul-ARG.mp4
-```
-Esta URL **não funcionará** porque a Meta não consegue acessar localhost.
-
-## Arquivos a Criar
-
-| Arquivo | Função |
-|---------|--------|
-| `supabase/functions/social-publish/index.ts` | Publica posts imediatamente |
-| `supabase/functions/process-scheduled-posts/index.ts` | Processa posts agendados (cron) |
-
-## Código da Edge Function `social-publish`
+Aplicar as props corretas de permissao no `RequireAuth`:
 
 ```typescript
-// Estrutura principal
-serve(async (req) => {
-  // 1. Parse body: { platform, content, mediaUrl, userId }
-  
-  // 2. Buscar credenciais
-  const { data: connection } = await supabaseAdmin
-    .from('social_connections')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('platform', platform)
-    .single();
-  
-  // 3. Publicar baseado na plataforma
-  switch (platform) {
-    case 'instagram':
-      return await publishToInstagram(connection, content, mediaUrl);
-    case 'facebook':
-      return await publishToFacebook(connection, content, mediaUrl);
-    // ... outras plataformas
-  }
-});
+// Rotas que exigem nivel Operador (40+)
+<Route path="/upload" element={<RequireAuth requireUploader><Upload /></RequireAuth>} />
+<Route path="/live" element={<RequireAuth requireUploader><Live /></RequireAuth>} />
+<Route path="/live/config" element={<RequireAuth requireUploader><LiveConfig /></RequireAuth>} />
+<Route path="/social" element={<RequireAuth requireUploader><Social /></RequireAuth>} />
 
-// Publicação no Instagram (2 etapas)
-async function publishToInstagram(connection, caption, videoUrl) {
-  const { access_token, account_id } = connection;
-  
-  // Etapa 1: Criar container
-  const containerRes = await fetch(
-    `https://graph.facebook.com/v19.0/${account_id}/media`,
-    {
-      method: 'POST',
-      body: JSON.stringify({
-        video_url: videoUrl,
-        caption: caption,
-        media_type: 'REELS'
-      })
-    }
-  );
-  const { id: creationId } = await containerRes.json();
-  
-  // Aguardar processamento (polling)
-  // ...
-  
-  // Etapa 2: Publicar
-  const publishRes = await fetch(
-    `https://graph.facebook.com/v19.0/${account_id}/media_publish`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ creation_id: creationId })
-    }
-  );
-  
-  return await publishRes.json();
-}
+// Rotas que exigem nivel Gerente (60+)
+<Route path="/settings" element={<RequireAuth requireManager><Settings /></RequireAuth>} />
+
+// Rota Admin - exigir SuperAdmin
+<Route path="/admin" element={<RequireAuth requireSuperAdmin><Admin /></RequireAuth>} />
 ```
 
-## Resumo de Tarefas
+### Etapa 2: Filtrar itens do menu por permissao (Sidebar.tsx)
 
-1. **Criar** `supabase/functions/social-publish/index.ts`
-   - Implementar publicação para Instagram via Graph API
-   - Implementar publicação para Facebook
-   - Adicionar suporte para X/Twitter com OAuth 1.0a
+Separar os itens de navegacao em categorias de permissao e filtrar baseado no role do usuario:
 
-2. **Criar** `supabase/functions/process-scheduled-posts/index.ts`
-   - Processar posts agendados cujo horário já passou
-   - Atualizar status no banco de dados
+```typescript
+// Itens visiveis para todos (Espectador+)
+const viewerItems = [
+  { icon: LayoutDashboard, label: 'Inicio', path: '/home' },
+  { icon: Video, label: 'Partidas', path: '/matches' },
+  { icon: BarChart3, label: 'Analise Tatica', path: '/analysis' },
+  { icon: Layers, label: 'Dashboard Analise', path: '/dashboard' },
+  { icon: Calendar, label: 'Eventos', path: '/events' },
+  { icon: Scissors, label: 'Cortes & Midia', path: '/media' },
+  { icon: Mic, label: 'Podcast & Locucao', path: '/audio' },
+  { icon: Ruler, label: 'Campo FIFA', path: '/field' },
+];
 
-3. **Validar URLs de mídia**
-   - Garantir que apenas URLs públicas sejam aceitas para agendamento
-   - Alertar usuário quando URL não for acessível
+// Itens visiveis para Operador+ (nivel 40+)
+const uploaderItems = [
+  { icon: Upload, label: 'Importar Video', path: '/upload?mode=new' },
+  { icon: Radio, label: 'Ao Vivo', path: '/live' },
+  { icon: Share2, label: 'Redes Sociais', path: '/social' },
+];
 
-## Observação sobre Token do Instagram
+// Itens visiveis para Gerente+ (nivel 60+)
+const managerItems = [
+  { icon: Settings, label: 'Configuracoes', path: '/settings' },
+];
+```
 
-O token que você tem (`EAAJznF7ef1gBQ...`) parece ser um token de longa duração. Tokens de longa duração da Meta expiram em **60 dias**. A edge function deve:
-- Verificar validade do token antes de usar
-- Alertar quando o token estiver próximo de expirar
+### Etapa 3: Aplicar o mesmo filtro no MobileNav.tsx
 
-## Estimativa
+Replicar a mesma logica de filtragem no menu mobile.
 
-| Tarefa | Complexidade |
-|--------|-------------|
-| Edge function social-publish | Média-Alta |
-| Edge function process-scheduled-posts | Média |
-| Validação de URLs | Baixa |
-| **Total** | ~2-3 implementações |
+### Etapa 4: Corrigir Admin para usar `isSuperAdmin`
+
+Alterar `Admin.tsx` para verificar `isSuperAdmin` em vez de `isAdmin`, alinhando com as regras RBAC definidas.
+
+## Resumo das Permissoes por Role
+
+```text
+Pagina              | Espectador | Operador | Gerente | Admin Org | SuperAdmin
+--------------------|------------|----------|---------|-----------|----------
+Inicio, Partidas    |     ✓      |    ✓     |    ✓    |     ✓     |     ✓
+Analise, Eventos    |     ✓      |    ✓     |    ✓    |     ✓     |     ✓
+Midia, Audio, Campo |     ✓      |    ✓     |    ✓    |     ✓     |     ✓
+Importar Video      |     ✗      |    ✓     |    ✓    |     ✓     |     ✓
+Ao Vivo             |     ✗      |    ✓     |    ✓    |     ✓     |     ✓
+Redes Sociais       |     ✗      |    ✓     |    ✓    |     ✓     |     ✓
+Configuracoes       |     ✗      |    ✗     |    ✓    |     ✓     |     ✓
+Administracao       |     ✗      |    ✗     |    ✗    |     ✗     |     ✓
+```
+
+## Arquivos a Modificar
+
+| Arquivo | Alteracao |
+|---------|----------|
+| `src/App.tsx` | Adicionar props de permissao nas rotas |
+| `src/components/layout/Sidebar.tsx` | Filtrar itens do menu por role |
+| `src/components/layout/MobileNav.tsx` | Filtrar itens do menu por role |
+| `src/pages/Admin.tsx` | Trocar `isAdmin` por `isSuperAdmin` |
+
+## Ordem de Execucao
+
+1. Corrigir `App.tsx` -- adicionar restricoes de rota (impacto imediato)
+2. Corrigir `Sidebar.tsx` -- esconder itens do menu conforme role
+3. Corrigir `MobileNav.tsx` -- mesma logica para mobile
+4. Corrigir `Admin.tsx` -- usar `isSuperAdmin` no lugar de `isAdmin`
