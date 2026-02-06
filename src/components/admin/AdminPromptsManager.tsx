@@ -593,14 +593,14 @@ function ModelSelector({
   const isOllama = !isWhisper && !isGemini && !isGPT;
 
   // Para Ollama: garantir que o modelo atual sempre apareça na lista
-  const ollamaItems = isOllama ? [...ollamaModels] : [];
+  const ollamaItems = isOllama ? [...ollamaModels].filter(m => m.value && m.value.trim() !== '') : [];
   if (isOllama) {
     // Adicionar modelo padrão se não estiver na lista do Ollama
-    if (!ollamaItems.find(m => m.value === defaultModel)) {
+    if (defaultModel && defaultModel.trim() !== '' && !ollamaItems.find(m => m.value === defaultModel)) {
       ollamaItems.unshift({ value: defaultModel, label: defaultModel });
     }
     // Adicionar modelo atual (value) se diferente e não estiver na lista
-    if (value && value !== defaultModel && !ollamaItems.find(m => m.value === value)) {
+    if (value && value.trim() !== '' && value !== defaultModel && !ollamaItems.find(m => m.value === value)) {
       ollamaItems.unshift({ value, label: value });
     }
   }
