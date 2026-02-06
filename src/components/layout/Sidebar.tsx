@@ -29,27 +29,36 @@ import kakttusLogo from '@/assets/logo-kakttus.png';
 // Pages that should preserve the match parameter
 const MATCH_CONTEXT_PAGES = ['/events', '/analysis', '/media', '/audio', '/field', '/dashboard'];
 
-const navItems = [
+// Itens visíveis para todos (Espectador+)
+const viewerItems = [
   { icon: LayoutDashboard, label: 'Início', path: '/home' },
   { icon: Video, label: 'Partidas', path: '/matches' },
-  { icon: Upload, label: 'Importar Vídeo', path: '/upload?mode=new' },
-  { icon: Radio, label: 'Ao Vivo', path: '/live' },
   { icon: BarChart3, label: 'Análise Tática', path: '/analysis' },
   { icon: Layers, label: 'Dashboard Análise', path: '/dashboard' },
   { icon: Calendar, label: 'Eventos', path: '/events' },
   { icon: Scissors, label: 'Cortes & Mídia', path: '/media' },
   { icon: Mic, label: 'Podcast & Locução', path: '/audio' },
-  { icon: Share2, label: 'Redes Sociais', path: '/social' },
   { icon: Ruler, label: 'Campo FIFA', path: '/field' },
+];
+
+// Itens visíveis para Operador+ (nível 40+)
+const uploaderItems = [
+  { icon: Upload, label: 'Importar Vídeo', path: '/upload?mode=new' },
+  { icon: Radio, label: 'Ao Vivo', path: '/live' },
+  { icon: Share2, label: 'Redes Sociais', path: '/social' },
+];
+
+// Itens visíveis para Gerente+ (nível 60+)
+const managerItems = [
   { icon: Settings, label: 'Configurações', path: '/settings' },
 ];
 
-const adminItems = [
+const superAdminItems = [
   { icon: ShieldCheck, label: 'Administração', path: '/admin' },
 ];
 
 export function Sidebar() {
-  const { isAdmin } = useAuth();
+  const { isSuperAdmin, canUpload, canManage } = useAuth();
   const { collapsed, toggle } = useSidebarContext();
   const [searchParams] = useSearchParams();
   const isMobile = useIsMobile();
@@ -93,8 +102,9 @@ export function Sidebar() {
 
       {/* Navigation */}
       <nav className="flex-1 overflow-y-auto p-3 scrollbar-arena">
+        {/* Itens para todos os usuários */}
         <ul className="space-y-1">
-          {navItems.map((item) => (
+          {viewerItems.map((item) => (
             <li key={item.path}>
               <NavLink
                 to={getNavPath(item.path)}
@@ -115,8 +125,78 @@ export function Sidebar() {
           ))}
         </ul>
 
-        {/* Admin Section */}
-        {isAdmin && (
+        {/* Itens para Operador+ (nível 40+) */}
+        {canUpload && (
+          <>
+            <div className="my-3 px-3">
+              {!collapsed && (
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Operações
+                </span>
+              )}
+              {collapsed && <div className="h-px bg-border" />}
+            </div>
+            <ul className="space-y-1">
+              {uploaderItems.map((item) => (
+                <li key={item.path}>
+                  <NavLink
+                    to={getNavPath(item.path)}
+                    className={({ isActive }) =>
+                      cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                        "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                        isActive
+                          ? "bg-primary/10 text-primary shadow-sm arena-glow-subtle"
+                          : "text-sidebar-foreground"
+                      )
+                    }
+                  >
+                    <item.icon className="h-5 w-5 shrink-0" />
+                    {!collapsed && <span>{item.label}</span>}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {/* Itens para Gerente+ (nível 60+) */}
+        {canManage && (
+          <>
+            <div className="my-3 px-3">
+              {!collapsed && (
+                <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                  Gestão
+                </span>
+              )}
+              {collapsed && <div className="h-px bg-border" />}
+            </div>
+            <ul className="space-y-1">
+              {managerItems.map((item) => (
+                <li key={item.path}>
+                  <NavLink
+                    to={getNavPath(item.path)}
+                    className={({ isActive }) =>
+                      cn(
+                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all duration-200",
+                        "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                        isActive
+                          ? "bg-primary/10 text-primary shadow-sm arena-glow-subtle"
+                          : "text-sidebar-foreground"
+                      )
+                    }
+                  >
+                    <item.icon className="h-5 w-5 shrink-0" />
+                    {!collapsed && <span>{item.label}</span>}
+                  </NavLink>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+
+        {/* Admin Section - SuperAdmin only */}
+        {isSuperAdmin && (
           <>
             <div className="my-3 px-3">
               {!collapsed && (
@@ -127,7 +207,7 @@ export function Sidebar() {
               {collapsed && <div className="h-px bg-border" />}
             </div>
             <ul className="space-y-1">
-              {adminItems.map((item) => (
+              {superAdminItems.map((item) => (
                 <li key={item.path}>
                   <NavLink
                     to={item.path}

@@ -86,19 +86,19 @@ const App = () => {
                 <Route path="/auth" element={<Auth />} />
                 <Route path="/home" element={<RequireAuth><Index /></RequireAuth>} />
                 <Route path="/matches" element={<RequireAuth><Matches /></RequireAuth>} />
-                <Route path="/upload" element={<RequireAuth><Upload /></RequireAuth>} />
-                <Route path="/live" element={<RequireAuth><Live /></RequireAuth>} />
-                <Route path="/live/config" element={<RequireAuth><LiveConfig /></RequireAuth>} />
+                <Route path="/upload" element={<RequireAuth requireUploader><Upload /></RequireAuth>} />
+                <Route path="/live" element={<RequireAuth requireUploader><Live /></RequireAuth>} />
+                <Route path="/live/config" element={<RequireAuth requireUploader><LiveConfig /></RequireAuth>} />
                 <Route path="/viewer" element={<RequireAuth><Viewer /></RequireAuth>} />
                 <Route path="/analysis" element={<RequireAuth><Analysis /></RequireAuth>} />
                 <Route path="/dashboard" element={<RequireAuth><MatchDashboard /></RequireAuth>} />
                 <Route path="/events" element={<RequireAuth><Events /></RequireAuth>} />
                 <Route path="/media" element={<RequireAuth><Media /></RequireAuth>} />
                 <Route path="/audio" element={<RequireAuth><Audio /></RequireAuth>} />
-                <Route path="/social" element={<RequireAuth><Social /></RequireAuth>} />
-                <Route path="/settings" element={<RequireAuth><Settings /></RequireAuth>} />
+                <Route path="/social" element={<RequireAuth requireUploader><Social /></RequireAuth>} />
+                <Route path="/settings" element={<RequireAuth requireManager><Settings /></RequireAuth>} />
                 <Route path="/field" element={<RequireAuth><Field /></RequireAuth>} />
-                <Route path="/admin" element={<RequireAuth><Admin /></RequireAuth>} />
+                <Route path="/admin" element={<RequireAuth requireSuperAdmin><Admin /></RequireAuth>} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
               <ArenaChatbot />
