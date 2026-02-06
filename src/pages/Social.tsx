@@ -182,11 +182,7 @@ export default function Social() {
 
   const fetchConnections = async () => {
     try {
-      const { data, error } = await supabase
-        .from('social_connections')
-        .select('*');
-
-      if (error) throw error;
+      const data = await apiClient.get('/api/social/connections');
       setConnections(data || []);
     } catch (error) {
       console.error('Error fetching connections:', error);
@@ -230,49 +226,20 @@ export default function Social() {
     setConnectingPlatform(selectedNetwork.id);
 
     try {
-      // Obter usuário autenticado
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        toast({
-          title: 'Usuário não autenticado',
-          description: 'Faça login para conectar redes sociais.',
-          variant: 'destructive',
-        });
-        setConnectingPlatform(null);
-        return;
-      }
-
       const existingConnection = getConnection(selectedNetwork.id);
+      const payload = {
+        platform: selectedNetwork.id,
+        access_token: credentials.access_token || credentials.api_key,
+        refresh_token: credentials.refresh_token || credentials.access_token_secret,
+        account_id: credentials.account_id,
+        account_name: credentials.account_name || selectedNetwork.name,
+        is_connected: true,
+      };
 
       if (existingConnection) {
-        const { error } = await supabase
-          .from('social_connections')
-          .update({
-            access_token: credentials.access_token || credentials.api_key,
-            refresh_token: credentials.refresh_token || credentials.access_token_secret,
-            account_id: credentials.account_id,
-            account_name: credentials.account_name || selectedNetwork.name,
-            is_connected: true,
-            last_sync_at: new Date().toISOString()
-          })
-          .eq('id', existingConnection.id);
-
-        if (error) throw error;
+        await apiClient.put(`/api/social/connections/${existingConnection.id}`, payload);
       } else {
-        const { error } = await supabase
-          .from('social_connections')
-          .insert({
-            user_id: user.id,
-            platform: selectedNetwork.id,
-            access_token: credentials.access_token || credentials.api_key,
-            refresh_token: credentials.refresh_token || credentials.access_token_secret,
-            account_id: credentials.account_id,
-            account_name: credentials.account_name || selectedNetwork.name,
-            is_connected: true,
-            last_sync_at: new Date().toISOString()
-          });
-
-        if (error) throw error;
+        await apiClient.post('/api/social/connections', payload);
       }
 
       toast({
@@ -299,12 +266,7 @@ export default function Social() {
     if (!connection) return;
 
     try {
-      const { error } = await supabase
-        .from('social_connections')
-        .update({ is_connected: false })
-        .eq('id', connection.id);
-
-      if (error) throw error;
+      await apiClient.put(`/api/social/connections/${connection.id}`, { is_connected: false });
 
       toast({
         title: 'Desconectado',
