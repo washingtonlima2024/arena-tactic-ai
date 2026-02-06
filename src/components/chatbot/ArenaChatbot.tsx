@@ -371,15 +371,30 @@ export function ArenaChatbot() {
         >
           <div className="flex items-center gap-2">
             <div className="relative">
-              <div className="absolute inset-0 bg-primary rounded-full blur-sm opacity-50" />
-              <div className="relative flex items-center justify-center w-8 h-8 bg-gradient-to-br from-primary to-primary/70 rounded-full">
+              <div className={cn(
+                "absolute inset-0 bg-primary rounded-full blur-sm transition-opacity duration-300",
+                isPlaying ? "opacity-80 animate-pulse" : "opacity-50"
+              )} />
+              <div className={cn(
+                "relative flex items-center justify-center w-8 h-8 bg-gradient-to-br from-primary to-primary/70 rounded-full transition-all duration-300",
+                isPlaying && "ring-2 ring-primary/50"
+              )}>
                 <Bot className="w-4 h-4 text-primary-foreground" />
               </div>
+              {isPlaying && (
+                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 flex gap-[2px]">
+                  <span className="w-[3px] h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDuration: '0.35s', animationDelay: '0ms' }} />
+                  <span className="w-[3px] h-2.5 bg-primary rounded-full animate-bounce" style={{ animationDuration: '0.35s', animationDelay: '100ms' }} />
+                  <span className="w-[3px] h-1.5 bg-primary rounded-full animate-bounce" style={{ animationDuration: '0.35s', animationDelay: '200ms' }} />
+                </div>
+              )}
             </div>
             <div>
               <h3 className="font-display font-semibold text-sm">Arena Play AI</h3>
               {!isMinimized && (
-                <p className="text-xs text-muted-foreground">Seu assistente tático</p>
+                <p className="text-xs text-muted-foreground">
+                  {isPlaying ? 'Falando...' : 'Seu assistente tático'}
+                </p>
               )}
             </div>
           </div>
@@ -439,8 +454,20 @@ export function ArenaChatbot() {
                       )}
                     >
                       {message.role === 'assistant' && (
-                        <div className="flex-shrink-0 w-7 h-7 rounded-full bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center">
-                          <Bot className="w-4 h-4 text-primary-foreground" />
+                        <div className="flex-shrink-0 relative">
+                          <div className={cn(
+                            "w-7 h-7 rounded-full bg-gradient-to-br from-primary to-primary/70 flex items-center justify-center transition-all duration-300",
+                            isPlaying && "ring-2 ring-primary/50 shadow-[0_0_8px_hsl(var(--primary)/0.4)]"
+                          )}>
+                            <Bot className="w-4 h-4 text-primary-foreground" />
+                          </div>
+                          {isPlaying && (
+                            <div className="absolute -bottom-1.5 left-1/2 -translate-x-1/2 flex gap-[2px]">
+                              <span className="w-[3px] h-2 bg-primary rounded-full animate-bounce" style={{ animationDuration: '0.4s', animationDelay: '0ms' }} />
+                              <span className="w-[3px] h-3 bg-primary rounded-full animate-bounce" style={{ animationDuration: '0.4s', animationDelay: '120ms' }} />
+                              <span className="w-[3px] h-2 bg-primary rounded-full animate-bounce" style={{ animationDuration: '0.4s', animationDelay: '240ms' }} />
+                            </div>
+                          )}
                         </div>
                       )}
                       
@@ -452,12 +479,12 @@ export function ArenaChatbot() {
                             : "bg-muted/70 text-foreground rounded-bl-md"
                         )}
                       >
-                        <p className="whitespace-pre-wrap">{message.content}</p>
+                        <p className="whitespace-pre-wrap leading-relaxed">{message.content}</p>
                         
                         {message.role === 'assistant' && message.content && (
                           <button
                             onClick={() => isPlaying ? stopAudio() : speakText(message.content)}
-                            className="mt-1 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1"
+                            className="mt-1 text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
                           >
                             {isPlaying ? (
                               <>

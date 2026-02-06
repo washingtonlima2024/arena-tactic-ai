@@ -148,15 +148,32 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
       }
 
       if (responseText) {
+        // Strip emojis from response before displaying
+        const cleanResponse = responseText
+          .replace(/[\u{1F600}-\u{1F64F}]/gu, '')
+          .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')
+          .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')
+          .replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '')
+          .replace(/[\u{2600}-\u{26FF}]/gu, '')
+          .replace(/[\u{2700}-\u{27BF}]/gu, '')
+          .replace(/[\u{FE00}-\u{FE0F}]/gu, '')
+          .replace(/[\u{1F900}-\u{1F9FF}]/gu, '')
+          .replace(/[\u{1FA00}-\u{1FA6F}]/gu, '')
+          .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '')
+          .replace(/[\u{200D}]/gu, '')
+          .replace(/[\u{20E3}]/gu, '')
+          .replace(/\s{2,}/g, ' ')
+          .trim();
+
         const assistantMessage: Message = {
           id: generateId(),
           role: 'assistant',
-          content: responseText,
+          content: cleanResponse,
           timestamp: new Date(),
         };
 
         setMessages(prev => [...prev, assistantMessage]);
-        return responseText;
+        return cleanResponse;
       }
 
       throw new Error('Não foi possível obter resposta do assistente');
@@ -170,8 +187,31 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
     }
   }, [messages, isLoading, contextString, matchContext, sendViaCloud]);
 
+  // Strip emojis from text for cleaner TTS and display
+  const stripEmojis = useCallback((text: string): string => {
+    return text
+      .replace(/[\u{1F600}-\u{1F64F}]/gu, '')
+      .replace(/[\u{1F300}-\u{1F5FF}]/gu, '')
+      .replace(/[\u{1F680}-\u{1F6FF}]/gu, '')
+      .replace(/[\u{1F1E0}-\u{1F1FF}]/gu, '')
+      .replace(/[\u{2600}-\u{26FF}]/gu, '')
+      .replace(/[\u{2700}-\u{27BF}]/gu, '')
+      .replace(/[\u{FE00}-\u{FE0F}]/gu, '')
+      .replace(/[\u{1F900}-\u{1F9FF}]/gu, '')
+      .replace(/[\u{1FA00}-\u{1FA6F}]/gu, '')
+      .replace(/[\u{1FA70}-\u{1FAFF}]/gu, '')
+      .replace(/[\u{200D}]/gu, '')
+      .replace(/[\u{20E3}]/gu, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+  }, []);
+
   const speakText = useCallback(async (text: string) => {
     if (!text || isPlaying) return;
+
+    // Clean text for TTS
+    const cleanText = stripEmojis(text);
+    if (!cleanText) return;
 
     setIsPlaying(true);
     try {
@@ -179,16 +219,40 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
       let audioContent: string | undefined;
       
       try {
-        const data = await apiClient.tts({ text, voice: 'onyx' });
+        const data = await apiClient.tts({ text: cleanText, voice: 'onyx' });
         audioContent = data?.audioContent;
       } catch {
-        // TTS not available without local server, use browser TTS
+        // Local TTS unavailable - use browser Speech Synthesis
         console.log('[ArenaChatbot] Using browser TTS fallback');
         if ('speechSynthesis' in window) {
-          const utterance = new SpeechSynthesisUtterance(text);
+          // Cancel any ongoing speech first
+          window.speechSynthesis.cancel();
+          
+          const utterance = new SpeechSynthesisUtterance(cleanText);
           utterance.lang = 'pt-BR';
-          utterance.onend = () => setIsPlaying(false);
-          utterance.onerror = () => setIsPlaying(false);
+          utterance.rate = 1.05;
+          
+          // Try to find a Portuguese voice
+          const voices = window.speechSynthesis.getVoices();
+          const ptVoice = voices.find(v => v.lang.startsWith('pt'));
+          if (ptVoice) utterance.voice = ptVoice;
+          
+          utterance.onend = () => {
+            setIsPlaying(false);
+          };
+          utterance.onerror = (e) => {
+            console.error('[ArenaChatbot] Browser TTS error:', e.error);
+            setIsPlaying(false);
+          };
+          
+          // Workaround for Chrome bug where onend doesn't fire
+          const checkInterval = setInterval(() => {
+            if (!window.speechSynthesis.speaking) {
+              clearInterval(checkInterval);
+              setIsPlaying(false);
+            }
+          }, 500);
+          
           window.speechSynthesis.speak(utterance);
           return;
         }
@@ -226,10 +290,9 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
       }
     } catch (error) {
       console.error('TTS error:', error);
-      toast.error('Erro ao reproduzir áudio');
       setIsPlaying(false);
     }
-  }, [isPlaying]);
+  }, [isPlaying, stripEmojis]);
 
   const stopAudio = useCallback(() => {
     if (audioRef.current) {
