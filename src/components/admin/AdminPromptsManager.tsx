@@ -587,8 +587,23 @@ function ModelSelector({
   ollamaModels: Array<{ value: string; label: string }>;
 }) {
   // Determinar o provedor baseado no modelo padrão do prompt
-  const providerType = getModelType(defaultModel);
-  const isOllama = !defaultModel.startsWith('google/') && !defaultModel.startsWith('openai/') && !defaultModel.startsWith('whisper-local/');
+  const isWhisper = defaultModel.startsWith('whisper-local/') || category === 'transcription';
+  const isGemini = defaultModel.startsWith('google/');
+  const isGPT = defaultModel.startsWith('openai/');
+  const isOllama = !isWhisper && !isGemini && !isGPT;
+
+  // Para Ollama: garantir que o modelo atual sempre apareça na lista
+  const ollamaItems = isOllama ? [...ollamaModels] : [];
+  if (isOllama) {
+    // Adicionar modelo padrão se não estiver na lista do Ollama
+    if (!ollamaItems.find(m => m.value === defaultModel)) {
+      ollamaItems.unshift({ value: defaultModel, label: defaultModel });
+    }
+    // Adicionar modelo atual (value) se diferente e não estiver na lista
+    if (value && value !== defaultModel && !ollamaItems.find(m => m.value === value)) {
+      ollamaItems.unshift({ value, label: value });
+    }
+  }
 
   return (
     <Select value={value} onValueChange={onChange}>
@@ -596,8 +611,8 @@ function ModelSelector({
         <SelectValue placeholder="Selecione o modelo" />
       </SelectTrigger>
       <SelectContent>
-        {/* Whisper - apenas para transcrição */}
-        {category === 'transcription' && (
+        {/* Whisper - para transcrição */}
+        {isWhisper && (
           <SelectGroup>
             <SelectLabel className="flex items-center gap-2">
               <Mic className="h-3 w-3" />
@@ -616,14 +631,14 @@ function ModelSelector({
           </SelectGroup>
         )}
 
-        {/* Ollama Local - apenas se o modelo padrão é Ollama */}
-        {isOllama && ollamaModels.length > 0 && (
+        {/* Ollama Local */}
+        {isOllama && (
           <SelectGroup>
             <SelectLabel className="flex items-center gap-2">
               <Server className="h-3 w-3" />
               Ollama Local
             </SelectLabel>
-            {ollamaModels.map(m => (
+            {ollamaItems.map(m => (
               <SelectItem key={m.value} value={m.value}>
                 <span className="flex items-center gap-2">
                   {m.label}
@@ -636,8 +651,8 @@ function ModelSelector({
           </SelectGroup>
         )}
 
-        {/* Gemini - apenas se o modelo padrão é Gemini */}
-        {defaultModel.startsWith('google/') && (
+        {/* Google Gemini */}
+        {isGemini && (
           <SelectGroup>
             <SelectLabel className="flex items-center gap-2">
               <Cloud className="h-3 w-3" />
@@ -656,8 +671,8 @@ function ModelSelector({
           </SelectGroup>
         )}
 
-        {/* GPT - apenas se o modelo padrão é GPT */}
-        {defaultModel.startsWith('openai/') && (
+        {/* OpenAI GPT */}
+        {isGPT && (
           <SelectGroup>
             <SelectLabel className="flex items-center gap-2">
               <Cloud className="h-3 w-3" />
