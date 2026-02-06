@@ -87,6 +87,60 @@ conversion_jobs = {}
 app = Flask(__name__)
 CORS(app)
 
+def resolve_video_path(file_url: str, match_id: str = None) -> str:
+    """
+    Resolve a video file URL to its actual filesystem path.
+    Handles localhost URLs, tunnel URLs, relative paths, and videos/original/ fallback.
+    """
+    if not file_url:
+        return None
+    
+    # If it's already an absolute path that exists, use it
+    if os.path.exists(file_url):
+        return file_url
+    
+    # Try to extract match_id and filename from the URL
+    clean_url = file_url
+    for prefix in ['http://localhost:5000', 'http://127.0.0.1:5000']:
+        clean_url = clean_url.replace(prefix, '')
+    
+    # Handle any tunnel/external URL with /api/storage/
+    if '/api/storage/' in clean_url:
+        relative_path = clean_url.split('/api/storage/')[-1]
+    elif clean_url.startswith('/api/storage/'):
+        relative_path = clean_url.replace('/api/storage/', '', 1)
+    else:
+        # Try direct path under STORAGE_DIR
+        if match_id:
+            basename = os.path.basename(file_url)
+            candidates = [
+                os.path.join(STORAGE_DIR, match_id, 'videos', basename),
+                os.path.join(STORAGE_DIR, match_id, 'videos', 'original', basename),
+            ]
+            for c in candidates:
+                if os.path.exists(c):
+                    return c
+        return None
+    
+    parts = relative_path.strip('/').split('/')
+    if len(parts) >= 3:
+        local_match_id = parts[0]
+        subfolder = parts[1]
+        filename = '/'.join(parts[2:])
+        
+        # Primary path
+        primary = get_file_path(local_match_id, subfolder, filename)
+        if primary and os.path.exists(primary):
+            return str(primary)
+        
+        # Fallback: try videos/original/
+        if subfolder == 'videos':
+            fallback = get_file_path(local_match_id, subfolder, f"original/{filename}")
+            if fallback and os.path.exists(fallback):
+                return str(fallback)
+    
+    return None
+
 
 @app.after_request
 def add_cors_headers(response):
@@ -1262,10 +1316,22 @@ def _sync_videos_for_match(match_id: str) -> dict:
         existing = session.query(Video).filter_by(match_id=match_id).all()
         existing_files = {v.file_name for v in existing if v.file_name}
         
-        # Verificar arquivos no disco
+        # Verificar arquivos no disco - incluindo subpasta original/
         video_extensions = {'.mp4', '.mov', '.avi', '.mkv', '.webm', '.m4v'}
         
+        # Coletar arquivos de videos/ e videos/original/
+        video_files = []
         for file_path in storage_path.iterdir():
+            if file_path.is_file() and file_path.suffix.lower() in video_extensions:
+                video_files.append(file_path)
+        
+        original_path = storage_path / 'original'
+        if original_path.exists():
+            for file_path in original_path.iterdir():
+                if file_path.is_file() and file_path.suffix.lower() in video_extensions:
+                    video_files.append(file_path)
+        
+        for file_path in video_files:
             if file_path.is_file() and file_path.suffix.lower() in video_extensions:
                 filename = file_path.name
                 
@@ -2363,6 +2429,7 @@ def create_video_proxy_endpoint(video_id: str):
                 # Try storage paths
                 possible_paths = [
                     os.path.join(STORAGE_DIR, video.match_id, 'videos', os.path.basename(video.file_url)),
+                    os.path.join(STORAGE_DIR, video.match_id, 'videos', 'original', os.path.basename(video.file_url)),
                     os.path.join(STORAGE_DIR, video.match_id, 'original', os.path.basename(video.file_url)),
                 ]
                 for path in possible_paths:
@@ -4022,6 +4089,11 @@ def analyze_match():
                                 subfolder = parts[1]
                                 filename = '/'.join(parts[2:])
                                 video_path = get_file_path(local_match_id, subfolder, filename)
+                                # Fallback: tentar em videos/original/
+                                if not (video_path and os.path.exists(video_path)) and subfolder == 'videos':
+                                    alt_path = get_file_path(local_match_id, subfolder, f"original/{filename}")
+                                    if alt_path and os.path.exists(alt_path):
+                                        video_path = alt_path
                                 print(f"[ANALYZE-MATCH] Resolved video path: {video_path} (from URL: {video_url[:80]}...)")
                         
                         if video_path and os.path.exists(video_path):
@@ -4247,6 +4319,11 @@ def refine_event_clips(match_id: str):
                     subfolder = parts[1]
                     filename = '/'.join(parts[2:])
                     video_path = get_file_path(local_match_id, subfolder, filename)
+                    # Fallback: tentar em videos/original/
+                    if not (video_path and os.path.exists(video_path)) and subfolder == 'videos':
+                        alt_path = get_file_path(local_match_id, subfolder, f"original/{filename}")
+                        if alt_path and os.path.exists(alt_path):
+                            video_path = alt_path
             
             if not video_path or not os.path.exists(video_path):
                 print(f"[REFINE] Video file not found: {video_url[:60]}...")

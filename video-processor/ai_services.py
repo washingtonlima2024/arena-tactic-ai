@@ -6823,6 +6823,13 @@ def transcribe_large_video(
                 local_path = get_file_path(local_match_id, subfolder, filename)
                 print(f"[Transcribe] URL local detectada -> Caminho: {local_path}")
                 
+                # Fallback: tentar em videos/original/ se não encontrar em videos/
+                if not (local_path and os.path.exists(local_path)) and subfolder == 'videos':
+                    original_path = get_file_path(local_match_id, subfolder, f"original/{filename}")
+                    print(f"[Transcribe] Tentando fallback em videos/original/: {original_path}")
+                    if original_path and os.path.exists(original_path):
+                        local_path = original_path
+                
                 if local_path and os.path.exists(local_path):
                     import shutil
                     shutil.copy(local_path, video_path)
