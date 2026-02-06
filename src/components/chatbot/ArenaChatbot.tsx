@@ -8,7 +8,7 @@ import { Badge } from '@/components/ui/badge';
 import { useArenaChatbot } from '@/hooks/useArenaChatbot';
 import { useSpeechRecognition } from '@/hooks/useSpeechRecognition';
 import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { cn } from '@/lib/utils';
 import {
   MessageCircle,
@@ -48,40 +48,35 @@ export function ArenaChatbot() {
   const scrollViewportRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // Fetch match context if we have a matchId
+  // Fetch match context from LOCAL SERVER (not Cloud)
   const { data: matchContext } = useQuery({
-    queryKey: ['chatbot-match-context', matchId],
+    queryKey: ['chatbot-match-context-local', matchId],
     queryFn: async () => {
       if (!matchId) return null;
       
-      const { data: match } = await supabase
-        .from('matches')
-        .select(`
-          *,
-          home_team:teams!matches_home_team_id_fkey(name, short_name),
-          away_team:teams!matches_away_team_id_fkey(name, short_name)
-        `)
-        .eq('id', matchId)
-        .single();
-      
-      if (!match) return null;
-      
-      const { data: events } = await supabase
-        .from('match_events')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('minute', { ascending: true });
-      
-      return {
-        match,
-        events: events || [],
-        homeTeam: match.home_team?.name || 'Time Casa',
-        awayTeam: match.away_team?.name || 'Time Visitante',
-        homeScore: match.home_score || 0,
-        awayScore: match.away_score || 0,
-      };
+      try {
+        // Fetch match details from local server
+        const match = await apiClient.getMatch(matchId);
+        if (!match) return null;
+        
+        // Fetch events from local server
+        const events = await apiClient.getMatchEvents(matchId);
+        
+        return {
+          match,
+          events: events || [],
+          homeTeam: match.home_team?.name || match.home_team_name || 'Time Casa',
+          awayTeam: match.away_team?.name || match.away_team_name || 'Time Visitante',
+          homeScore: match.home_score || 0,
+          awayScore: match.away_score || 0,
+        };
+      } catch (error) {
+        console.warn('[ArenaChatbot] Failed to fetch match context from local server:', error);
+        return null;
+      }
     },
     enabled: !!matchId,
+    staleTime: 30000, // 30 seconds
   });
 
   const {
