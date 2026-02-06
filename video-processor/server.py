@@ -8512,8 +8512,17 @@ def list_temp_folders():
 # URL DOWNLOAD SYSTEM
 # ============================================================================
 
+def is_youtube_url(url: str) -> bool:
+    """Verifica se a URL é do YouTube."""
+    return bool(re.search(r'(youtube\.com|youtu\.be)', url, re.IGNORECASE))
+
+
 def convert_to_direct_url(url: str) -> str:
     """Converte URLs de Google Drive, Dropbox, etc. para links diretos."""
+    
+    # YouTube: não tentar converter, será tratado pelo yt-dlp
+    if is_youtube_url(url):
+        return url
     
     # Google Drive: /file/d/{ID}/view → /uc?export=download&id={ID}
     if 'drive.google.com' in url:
@@ -8534,37 +8543,135 @@ def convert_to_direct_url(url: str) -> str:
     return url
 
 
+def download_youtube_with_progress(url: str, output_path: str, job_id: str):
+    """Baixa vídeo do YouTube usando yt-dlp com progresso em tempo real."""
+    try:
+        import shutil
+        yt_dlp_path = shutil.which('yt-dlp')
+        if not yt_dlp_path:
+            raise Exception("yt-dlp não encontrado. Execute: pip install yt-dlp")
+        
+        # Garantir que output_path termina com .mp4
+        if not output_path.lower().endswith('.mp4'):
+            output_path = os.path.splitext(output_path)[0] + '.mp4'
+        
+        cmd = [
+            yt_dlp_path,
+            '-f', 'bestvideo[height<=720]+bestaudio/best[height<=720]',
+            '--merge-output-format', 'mp4',
+            '--no-playlist',
+            '--newline',  # Uma linha por update de progresso
+            '-o', output_path,
+            url
+        ]
+        
+        print(f"[yt-dlp] Executando: {' '.join(cmd)}")
+        download_jobs[job_id]['message'] = 'Iniciando download do YouTube...'
+        
+        process = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+        
+        for line in process.stdout:
+            line = line.strip()
+            if not line:
+                continue
+            
+            # Parse progress: [download]  45.2% of ~150.00MiB at 5.00MiB/s ETA 00:15
+            progress_match = re.search(r'\[download\]\s+([\d.]+)%', line)
+            if progress_match:
+                pct = float(progress_match.group(1))
+                download_jobs[job_id]['progress'] = min(int(pct), 99)
+                download_jobs[job_id]['message'] = f'Baixando do YouTube ({int(pct)}%)'
+                
+                # Tentar extrair tamanho total
+                size_match = re.search(r'of\s+~?([\d.]+)(\w+)', line)
+                if size_match:
+                    size_val = float(size_match.group(1))
+                    unit = size_match.group(2).upper()
+                    multiplier = {'KIB': 1024, 'MIB': 1024**2, 'GIB': 1024**3, 'KB': 1000, 'MB': 1000**2, 'GB': 1000**3}
+                    total_bytes = int(size_val * multiplier.get(unit, 1))
+                    download_jobs[job_id]['total_bytes'] = total_bytes
+                    download_jobs[job_id]['bytes_downloaded'] = int(total_bytes * pct / 100)
+            
+            # Detectar merge
+            if '[Merger]' in line or 'Merging' in line:
+                download_jobs[job_id]['message'] = 'Mesclando áudio e vídeo...'
+                download_jobs[job_id]['progress'] = 95
+            
+            # Log completo para debug
+            if '[download]' in line or '[Merger]' in line or 'ERROR' in line:
+                print(f"[yt-dlp] {line}")
+        
+        process.wait(timeout=1800)  # 30 min timeout
+        
+        if process.returncode != 0:
+            raise Exception(f"yt-dlp retornou código {process.returncode}")
+        
+        # Verificar se o arquivo existe
+        if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:
+            # yt-dlp pode adicionar extensão extra - procurar o arquivo
+            base = os.path.splitext(output_path)[0]
+            for ext in ['.mp4', '.mkv', '.webm']:
+                alt_path = base + ext
+                if os.path.exists(alt_path) and os.path.getsize(alt_path) > 1000:
+                    if alt_path != output_path:
+                        os.rename(alt_path, output_path)
+                    break
+            else:
+                raise Exception("Arquivo baixado não encontrado ou inválido")
+        
+        file_size = os.path.getsize(output_path)
+        print(f"[yt-dlp] Download completo: {file_size / (1024*1024):.1f} MB")
+        download_jobs[job_id]['bytes_downloaded'] = file_size
+        download_jobs[job_id]['total_bytes'] = file_size
+        
+    except subprocess.TimeoutExpired:
+        process.kill()
+        raise Exception("Download do YouTube expirou após 30 minutos")
+
+
 def download_video_with_progress(url: str, output_path: str, job_id: str, match_id: str, video_type: str):
     """Baixa vídeo com tracking de progresso."""
     try:
-        # Converter URLs de serviços de nuvem para links diretos
-        direct_url = convert_to_direct_url(url)
-        print(f"[download-url] Job {job_id}: Baixando de {direct_url[:80]}...")
-        
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-        
-        response = requests.get(direct_url, stream=True, timeout=60, headers=headers)
-        response.raise_for_status()
-        
-        total_size = int(response.headers.get('content-length', 0))
-        download_jobs[job_id]['total_bytes'] = total_size
-        
-        downloaded = 0
-        with open(output_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks
-                if chunk:
-                    f.write(chunk)
-                    downloaded += len(chunk)
-                    
-                    # Atualizar progresso
-                    if total_size > 0:
-                        progress = int((downloaded / total_size) * 100)
-                        download_jobs[job_id]['progress'] = progress
-                    download_jobs[job_id]['bytes_downloaded'] = downloaded
-        
-        print(f"[download-url] Job {job_id}: Download completo ({downloaded / (1024*1024):.1f} MB)")
+        # Verificar se é URL do YouTube
+        if is_youtube_url(url):
+            print(f"[download-url] Job {job_id}: Detectado YouTube, usando yt-dlp...")
+            download_jobs[job_id]['source'] = 'youtube'
+            download_youtube_with_progress(url, output_path, job_id)
+        else:
+            # Download direto para URLs normais
+            direct_url = convert_to_direct_url(url)
+            print(f"[download-url] Job {job_id}: Baixando de {direct_url[:80]}...")
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            response = requests.get(direct_url, stream=True, timeout=60, headers=headers)
+            response.raise_for_status()
+            
+            total_size = int(response.headers.get('content-length', 0))
+            download_jobs[job_id]['total_bytes'] = total_size
+            
+            downloaded = 0
+            with open(output_path, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=1024*1024):  # 1MB chunks
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        
+                        # Atualizar progresso
+                        if total_size > 0:
+                            progress = int((downloaded / total_size) * 100)
+                            download_jobs[job_id]['progress'] = progress
+                        download_jobs[job_id]['bytes_downloaded'] = downloaded
+            
+            print(f"[download-url] Job {job_id}: Download completo ({downloaded / (1024*1024):.1f} MB)")
         
         # Verificar se o arquivo foi baixado
         if not os.path.exists(output_path) or os.path.getsize(output_path) < 1000:

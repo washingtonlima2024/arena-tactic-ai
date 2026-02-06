@@ -695,6 +695,21 @@ export default function VideoUpload() {
       setLinkValidationTime(Math.floor((Date.now() - startTime) / 1000));
     }, 1000);
 
+    // YouTube: avisar que requer servidor Python
+    const isYouTube = /youtube\.com|youtu\.be/i.test(embedUrl);
+    if (isYouTube && !isLocalServerOnline) {
+      clearInterval(timerInterval);
+      setIsValidatingLink(false);
+      setLinkValidationTime(0);
+      toast({
+        title: "YouTube requer servidor local",
+        description: "O download de vídeos do YouTube requer o servidor Python rodando. Inicie o servidor e tente novamente.",
+        variant: "destructive",
+        duration: 8000,
+      });
+      return;
+    }
+
     try {
       // Simulate link validation (in a real scenario, you might ping the URL or check metadata)
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -1485,6 +1500,109 @@ export default function VideoUpload() {
       
       // Store the matchId for later navigation
       setCreatedMatchId(matchId);
+
+      // ============ YOUTUBE DOWNLOAD STEP ============
+      // Check if any segments are YouTube links that need downloading first
+      const youtubeSegments = currentSegments.filter(s => 
+        s.isLink && s.url && /youtube\.com|youtu\.be/i.test(s.url)
+      );
+      
+      if (youtubeSegments.length > 0) {
+        if (!isLocalServerOnline) {
+          setProcessingStage('error');
+          setProcessingError('Download do YouTube requer o servidor Python local rodando.');
+          return;
+        }
+        
+        console.log(`[YouTube] ${youtubeSegments.length} vídeo(s) do YouTube para baixar`);
+        setProcessingStage('preparing');
+        setProcessingMessage('Baixando vídeo(s) do YouTube...');
+        setProcessingProgress(5);
+        
+        for (let i = 0; i < youtubeSegments.length; i++) {
+          const seg = youtubeSegments[i];
+          try {
+            setProcessingMessage(`Baixando do YouTube (${i + 1}/${youtubeSegments.length})...`);
+            
+            // Start download job
+            const downloadResult = await apiClient.downloadVideoFromUrl(
+              matchId, seg.url!, seg.videoType, undefined
+            );
+            
+            const jobId = downloadResult.job_id;
+            console.log(`[YouTube] Job ${jobId} iniciado para segmento ${seg.id}`);
+            
+            // Poll progress until done
+            let downloadComplete = false;
+            let attempts = 0;
+            const maxAttempts = 900; // 30 min @ 2s interval
+            
+            while (!downloadComplete && attempts < maxAttempts) {
+              await new Promise(r => setTimeout(r, 2000));
+              attempts++;
+              
+              const status = await apiClient.getDownloadStatus(jobId);
+              
+              // Update progress bar
+              const baseProgress = 5 + (i / youtubeSegments.length) * 20;
+              const segProgress = (status.progress / 100) * (20 / youtubeSegments.length);
+              setProcessingProgress(Math.round(baseProgress + segProgress));
+              setProcessingMessage(
+                status.status === 'downloading'
+                  ? `Baixando do YouTube (${status.progress}%)${status.total_bytes ? ` - ${(status.bytes_downloaded / (1024*1024)).toFixed(0)}MB` : ''}`
+                  : 'Finalizando download...'
+              );
+              
+              if (status.status === 'completed') {
+                downloadComplete = true;
+                console.log(`[YouTube] Download completo: ${status.filename}`);
+                
+                // Update segment with local file URL
+                const localUrl = status.video?.file_url || '';
+                setSegments(prev => prev.map(s => 
+                  s.id === seg.id 
+                    ? { ...s, url: localUrl, isLink: false, status: 'complete' as const, name: status.filename || s.name }
+                    : s
+                ));
+                // Also update in currentSegments ref
+                const segIdx = currentSegments.findIndex(s => s.id === seg.id);
+                if (segIdx >= 0) {
+                  currentSegments[segIdx] = { 
+                    ...currentSegments[segIdx], 
+                    url: localUrl, 
+                    isLink: false, 
+                    status: 'complete',
+                    name: status.filename || currentSegments[segIdx].name 
+                  };
+                }
+              } else if (status.status === 'failed') {
+                throw new Error(status.error || 'Download do YouTube falhou');
+              }
+            }
+            
+            if (!downloadComplete) {
+              throw new Error('Timeout: download do YouTube demorou mais de 30 minutos');
+            }
+          } catch (error: any) {
+            console.error(`[YouTube] Erro no download:`, error);
+            setProcessingStage('error');
+            setProcessingError(`Erro ao baixar do YouTube: ${error.message}`);
+            toast({
+              title: "Erro no download do YouTube",
+              description: error.message?.includes('yt-dlp')
+                ? "yt-dlp não encontrado. Execute: pip install yt-dlp"
+                : error.message || "Não foi possível baixar o vídeo do YouTube.",
+              variant: "destructive",
+              duration: 10000,
+            });
+            return;
+          }
+        }
+        
+        console.log('[YouTube] Todos os downloads concluídos, continuando pipeline...');
+        setProcessingProgress(25);
+        setProcessingMessage('Downloads concluídos, prosseguindo com análise...');
+      }
 
       // Check if we should use async processing (local server available + large files or local mode)
       const hasLargeVideos = currentSegments.some(s => (s.size || 0) > 300 * 1024 * 1024); // 300MB+
