@@ -5,7 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Brain, RotateCcw, Save, Pencil, Server, Cloud, Mic } from 'lucide-react';
+import { Brain, RotateCcw, Save, Pencil, Server, Cloud, Mic, Zap } from 'lucide-react';
 import { useAiPrompts, AiPrompt } from '@/hooks/useAiPrompts';
 import { apiClient } from '@/lib/apiClient';
 import { formatOllamaModelName } from '@/lib/modelBranding';
@@ -44,16 +44,27 @@ const REPORT_VARIABLES = [
   '{firstHalfCount}', '{secondHalfCount}', '{eventsList}',
 ];
 
+// Variáveis disponíveis para templates de eventos
+const EVENT_VARIABLES = [
+  '{home_team}', '{away_team}', '{half_desc}',
+  '{game_start_minute}', '{game_end_minute}', '{transcription}',
+  '{home_score}', '{away_score}',
+  '{first_half_summary}', '{first_half_tactical}',
+  '{second_half_summary}', '{second_half_tactical}',
+];
+
 const CATEGORY_LABELS: Record<string, string> = {
   chatbot: 'Chatbot',
   report: 'Relatório',
   transcription: 'Transcrição',
+  events: 'Geração de Eventos',
 };
 
 const CATEGORY_ICONS: Record<string, typeof Brain> = {
   chatbot: Brain,
   report: Brain,
   transcription: Mic,
+  events: Zap,
 };
 
 function getDefaultBadge(prompt: AiPrompt, currentModel: string): string | null {
@@ -343,6 +354,23 @@ export default function AdminPromptsManager() {
                     </Badge>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Legenda de variáveis para eventos */}
+            {editingPrompt?.category === 'events' && (
+              <div className="p-3 bg-muted rounded-lg space-y-2">
+                <p className="text-xs font-medium">Variáveis disponíveis (usadas pelo video-processor):</p>
+                <div className="flex flex-wrap gap-1">
+                  {EVENT_VARIABLES.map(v => (
+                    <Badge key={v} variant="secondary" className="text-xs font-mono">
+                      {v}
+                    </Badge>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  ⚠️ Estes prompts são usados pelo video-processor local. Alterações aqui servem como referência e documentação.
+                </p>
               </div>
             )}
           </div>
