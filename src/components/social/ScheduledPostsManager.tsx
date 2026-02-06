@@ -172,9 +172,18 @@ export function ScheduledPostsManager() {
     setDialogOpen(true);
   };
 
+  const platformRequiresMedia = (platform: string) => {
+    return ['instagram', 'facebook', 'tiktok', 'youtube'].includes(platform);
+  };
+
   const handleSubmit = async () => {
     if (!formData.platform || !formData.content || !formData.scheduled_at) {
       toast({ title: 'Preencha todos os campos obrigatórios', variant: 'destructive' });
+      return;
+    }
+
+    if (platformRequiresMedia(formData.platform) && !formData.media_url) {
+      toast({ title: 'URL de mídia obrigatória', description: `${formData.platform} exige um vídeo ou imagem para publicar.`, variant: 'destructive' });
       return;
     }
 
@@ -231,6 +240,12 @@ export function ScheduledPostsManager() {
   };
 
   const publishNow = async (post: ScheduledPost) => {
+    // Validate media before attempting
+    if (platformRequiresMedia(post.platform) && !post.media_url) {
+      toast({ title: 'Mídia obrigatória', description: `${post.platform} exige um vídeo ou imagem. Edite o post e adicione uma URL de mídia.`, variant: 'destructive' });
+      return;
+    }
+
     setPublishing(post.id);
     try {
       // Get current user
@@ -253,7 +268,9 @@ export function ScheduledPostsManager() {
           platform: post.platform,
           content: post.content,
           mediaUrl: post.media_url,
+          mediaType: post.media_type,
           userId: user.id,
+          postId: post.id,
         }
       });
 
