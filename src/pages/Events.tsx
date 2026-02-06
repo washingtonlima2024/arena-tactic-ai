@@ -981,8 +981,8 @@ export default function Events() {
       <div className="space-y-6">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex items-center gap-3">
-            <h1 className="font-display text-3xl font-bold">Eventos da Partida</h1>
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
+            <h1 className="font-display text-xl sm:text-3xl font-bold">Eventos da Partida</h1>
             {/* Data origin indicator */}
             {events.length > 0 && (
               <Badge variant="outline" className="gap-1 text-xs">
@@ -1014,25 +1014,25 @@ export default function Events() {
               <div className="flex items-center justify-between gap-4">
                 {/* Home Team */}
                 <div className="flex-1 flex flex-col items-center gap-3">
-                  <Avatar className="h-16 w-16 border-2 border-primary/20 shadow-lg ring-2 ring-primary/10">
+                  <Avatar className="h-12 w-12 sm:h-16 sm:w-16 border-2 border-primary/20 shadow-lg ring-2 ring-primary/10">
                     <AvatarImage src={selectedMatch.home_team?.logo_url || ''} className="object-contain p-1" />
-                    <AvatarFallback className="text-xl font-bold bg-primary/10">
+                    <AvatarFallback className="text-lg sm:text-xl font-bold bg-primary/10">
                       {selectedMatch.home_team?.short_name?.slice(0, 2) || 'H'}
                     </AvatarFallback>
                   </Avatar>
-                  <p className="font-semibold text-center text-sm truncate max-w-[120px]">
+                  <p className="font-semibold text-center text-xs sm:text-sm truncate max-w-[80px] sm:max-w-[120px]">
                     {selectedMatch.home_team?.name || 'Time Casa'}
                   </p>
                 </div>
 
                 {/* Score Display - Calculated from events */}
                 <div className="flex flex-col items-center gap-2">
-                  <div className="flex items-center gap-4">
-                    <span className="text-5xl font-black tabular-nums w-14 text-center text-primary">
+                  <div className="flex items-center gap-2 sm:gap-4">
+                    <span className="text-3xl sm:text-5xl font-black tabular-nums w-10 sm:w-14 text-center text-primary">
                       {calculatedScore.home}
                     </span>
-                    <span className="text-xl font-bold text-muted-foreground">vs</span>
-                    <span className="text-5xl font-black tabular-nums w-14 text-center text-primary">
+                    <span className="text-lg sm:text-xl font-bold text-muted-foreground">vs</span>
+                    <span className="text-3xl sm:text-5xl font-black tabular-nums w-10 sm:w-14 text-center text-primary">
                       {calculatedScore.away}
                     </span>
                   </div>
@@ -1056,13 +1056,13 @@ export default function Events() {
 
                 {/* Away Team */}
                 <div className="flex-1 flex flex-col items-center gap-3">
-                  <Avatar className="h-16 w-16 border-2 border-primary/20 shadow-lg ring-2 ring-primary/10">
+                  <Avatar className="h-12 w-12 sm:h-16 sm:w-16 border-2 border-primary/20 shadow-lg ring-2 ring-primary/10">
                     <AvatarImage src={selectedMatch.away_team?.logo_url || ''} className="object-contain p-1" />
-                    <AvatarFallback className="text-xl font-bold bg-primary/10">
+                    <AvatarFallback className="text-lg sm:text-xl font-bold bg-primary/10">
                       {selectedMatch.away_team?.short_name?.slice(0, 2) || 'V'}
                     </AvatarFallback>
                   </Avatar>
-                  <p className="font-semibold text-center text-sm truncate max-w-[120px]">
+                  <p className="font-semibold text-center text-xs sm:text-sm truncate max-w-[80px] sm:max-w-[120px]">
                     {selectedMatch.away_team?.name || 'Time Visitante'}
                   </p>
                 </div>

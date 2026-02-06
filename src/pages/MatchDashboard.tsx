@@ -1017,7 +1017,7 @@ export default function MatchDashboard() {
           <div className="flex flex-wrap items-center gap-2">
             {/* Period Selector */}
             <Select value={period} onValueChange={(v) => setPeriod(v as PeriodKey)}>
-              <SelectTrigger className="w-[140px]">
+              <SelectTrigger className="w-full sm:w-[140px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -1032,7 +1032,7 @@ export default function MatchDashboard() {
               setTeamFilter(v);
               if (v !== "all") setAnalysisLevel(2);
             }}>
-              <SelectTrigger className="w-[140px]">
+              <SelectTrigger className="w-full sm:w-[140px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

@@ -366,7 +366,7 @@ export default function Audio() {
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="font-display text-3xl font-bold">Podcast & Locução</h1>
+            <h1 className="font-display text-xl sm:text-3xl font-bold">Podcast & Locução</h1>
             <p className="text-muted-foreground">
               {selectedMatch.home_team?.name} vs {selectedMatch.away_team?.name} • Áudio original e podcasts da partida
             </p>
@@ -377,21 +377,21 @@ export default function Audio() {
         {selectedMatch && (
           <Card variant="glass">
             <CardContent className="py-4">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                <div className="flex items-center gap-3 sm:gap-4">
                   <div className="text-center">
-                    <p className="font-semibold">{homeTeamName}</p>
-                    <p className="text-2xl font-bold">{displayScore.home}</p>
+                    <p className="font-semibold text-sm sm:text-base">{homeTeamName}</p>
+                    <p className="text-xl sm:text-2xl font-bold">{displayScore.home}</p>
                   </div>
                   <span className="text-muted-foreground">vs</span>
                   <div className="text-center">
-                    <p className="font-semibold">{awayTeamName}</p>
-                    <p className="text-2xl font-bold">{displayScore.away}</p>
+                    <p className="font-semibold text-sm sm:text-base">{awayTeamName}</p>
+                    <p className="text-xl sm:text-2xl font-bold">{displayScore.away}</p>
                   </div>
                 </div>
                 <div className="flex gap-2">
-                  <Badge variant="success">Análise Completa</Badge>
-                  <Badge variant="outline">{events?.length || 0} eventos</Badge>
+                  <Badge variant="success" className="text-xs">Análise Completa</Badge>
+                  <Badge variant="outline" className="text-xs">{events?.length || 0} eventos</Badge>
                 </div>
               </div>
             </CardContent>
@@ -400,22 +400,25 @@ export default function Audio() {
 
         {/* Main Content */}
         <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-          <TabsList className="grid w-full grid-cols-4">
-            <TabsTrigger value="narration">
-              <Mic className="mr-2 h-4 w-4" />
-              Locução
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 h-auto">
+            <TabsTrigger value="narration" className="text-xs sm:text-sm">
+              <Mic className="mr-1 sm:mr-2 h-4 w-4" />
+              <span className="hidden sm:inline">Locução</span>
+              <span className="sm:hidden">Locução</span>
             </TabsTrigger>
-            <TabsTrigger value="podcast">
-              <Radio className="mr-2 h-4 w-4" />
+            <TabsTrigger value="podcast" className="text-xs sm:text-sm">
+              <Radio className="mr-1 sm:mr-2 h-4 w-4" />
               Podcast
             </TabsTrigger>
-            <TabsTrigger value="free-tts">
-              <Volume2 className="mr-2 h-4 w-4" />
-              kakttus Voice
+            <TabsTrigger value="free-tts" className="text-xs sm:text-sm">
+              <Volume2 className="mr-1 sm:mr-2 h-4 w-4" />
+              <span className="hidden sm:inline">kakttus Voice</span>
+              <span className="sm:hidden">Voice</span>
             </TabsTrigger>
-            <TabsTrigger value="chatbots">
-              <MessageSquare className="mr-2 h-4 w-4" />
-              Chatbots
+            <TabsTrigger value="chatbots" className="text-xs sm:text-sm">
+              <MessageSquare className="mr-1 sm:mr-2 h-4 w-4" />
+              <span className="hidden sm:inline">Chatbots</span>
+              <span className="sm:hidden">Chat</span>
             </TabsTrigger>
           </TabsList>
 
