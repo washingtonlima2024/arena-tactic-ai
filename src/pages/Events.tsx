@@ -777,7 +777,27 @@ export default function Events() {
       const homeTeam = selectedMatch.home_team?.name || 'Casa';
       const awayTeam = selectedMatch.away_team?.name || 'Visitante';
       
-      for (const video of matchVideos) {
+      // Filtrar vídeos processáveis: excluir clips, pendentes e duplicatas
+      const processableVideos = matchVideos
+        .filter(v => v.video_type !== 'clip')
+        .filter(v => v.status === 'completed' || v.status === 'ready' || v.status === 'analyzed')
+        .filter((v, i, arr) => {
+          const normalizedUrl = v.file_url?.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '');
+          return arr.findIndex(x => {
+            const xUrl = x.file_url?.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '');
+            return xUrl === normalizedUrl;
+          }) === i;
+        });
+
+      if (processableVideos.length === 0) {
+        toast.error('Nenhum vídeo válido para processar (apenas clips ou pendentes encontrados)');
+        setIsProcessingMatch(false);
+        return;
+      }
+
+      console.log(`[ProcessMatch] ${matchVideos.length} vídeos encontrados, ${processableVideos.length} processáveis`);
+      
+      for (const video of processableVideos) {
         const videoType = video.video_type || 'full';
         const halfLabel = videoType === 'first_half' ? '1º tempo' : 
                           videoType === 'second_half' ? '2º tempo' : 'vídeo';
