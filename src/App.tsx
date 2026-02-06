@@ -7,7 +7,7 @@ import { BrowserRouter, Routes, Route, useSearchParams } from "react-router-dom"
 import { SidebarProvider } from "./contexts/SidebarContext";
 import { LiveBroadcastProvider } from "./contexts/LiveBroadcastContext";
 import { ClipSyncProvider } from "./contexts/ClipSyncContext";
-import { ClipSyncIndicator } from "./components/media/ClipSyncIndicator";
+
 import { FloatingLivePlayer } from "./components/live/FloatingLivePlayer";
 import { getApiBase, autoDiscoverServer, getDiscoveredServer } from "./lib/apiMode";
 import Landing from "./pages/Landing";
@@ -102,7 +102,6 @@ const App = () => {
                 <Route path="*" element={<NotFound />} />
               </Routes>
               <ArenaChatbot />
-              <ClipSyncIndicator />
             </ClipSyncWrapper>
           </BrowserRouter>
         </SidebarProvider>
