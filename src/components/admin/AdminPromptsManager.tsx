@@ -8,32 +8,30 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Brain, RotateCcw, Save, Pencil, Server, Cloud, Mic, Zap } from 'lucide-react';
 import { useAiPrompts, AiPrompt } from '@/hooks/useAiPrompts';
 import { apiClient } from '@/lib/apiClient';
-import { formatOllamaModelName } from '@/lib/modelBranding';
+// Admin mostra nomes reais dos modelos (sem branding kakttus)
 import { useQuery } from '@tanstack/react-query';
 
-// Modelos fixos kakttus Pro (Gemini)
+// Modelos com nomes reais para a área Admin
 const GEMINI_MODELS = [
-  { value: 'google/gemini-2.5-pro', label: 'kakttus Pro Ultra' },
-  { value: 'google/gemini-2.5-flash', label: 'kakttus Pro' },
-  { value: 'google/gemini-2.5-flash-lite', label: 'kakttus Pro Lite' },
-  { value: 'google/gemini-3-pro-preview', label: 'kakttus Pro Preview' },
-  { value: 'google/gemini-3-flash-preview', label: 'kakttus Pro Flash' },
+  { value: 'google/gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+  { value: 'google/gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  { value: 'google/gemini-2.5-flash-lite', label: 'Gemini 2.5 Flash Lite' },
+  { value: 'google/gemini-3-pro-preview', label: 'Gemini 3 Pro Preview' },
+  { value: 'google/gemini-3-flash-preview', label: 'Gemini 3 Flash Preview' },
 ];
 
-// Modelos fixos kakttus Vision (GPT)
 const GPT_MODELS = [
-  { value: 'openai/gpt-5', label: 'kakttus Vision Ultra' },
-  { value: 'openai/gpt-5-mini', label: 'kakttus Vision' },
-  { value: 'openai/gpt-5-nano', label: 'kakttus Vision Lite' },
+  { value: 'openai/gpt-5', label: 'GPT-5' },
+  { value: 'openai/gpt-5-mini', label: 'GPT-5 Mini' },
+  { value: 'openai/gpt-5-nano', label: 'GPT-5 Nano' },
 ];
 
-// Modelos Whisper Local
 const WHISPER_MODELS = [
-  { value: 'whisper-local/tiny', label: 'kakttus Transcrição Tiny' },
-  { value: 'whisper-local/base', label: 'kakttus Transcrição Base' },
-  { value: 'whisper-local/small', label: 'kakttus Transcrição Small' },
-  { value: 'whisper-local/medium', label: 'kakttus Transcrição Medium' },
-  { value: 'whisper-local/large-v3', label: 'kakttus Transcrição Pro' },
+  { value: 'whisper-local/tiny', label: 'Whisper Tiny' },
+  { value: 'whisper-local/base', label: 'Whisper Base' },
+  { value: 'whisper-local/small', label: 'Whisper Small' },
+  { value: 'whisper-local/medium', label: 'Whisper Medium' },
+  { value: 'whisper-local/large-v3', label: 'Whisper Large v3' },
 ];
 
 // Variáveis disponíveis para templates de relatório
@@ -94,7 +92,7 @@ export default function AdminPromptsManager() {
 
   const ollamaModels = (ollamaData?.models || []).map(m => ({
     value: m.name,
-    label: formatOllamaModelName(m.name, m.parameter_size),
+    label: m.parameter_size ? `${m.name} (${m.parameter_size})` : m.name,
   }));
 
   const handleEdit = (prompt: AiPrompt) => {
@@ -251,9 +249,9 @@ export default function AdminPromptsManager() {
                   {/* Whisper models para categoria transcription */}
                   {editingPrompt?.category === 'transcription' ? (
                     <SelectGroup>
-                      <SelectLabel className="flex items-center gap-2">
+                       <SelectLabel className="flex items-center gap-2">
                         <Mic className="h-3 w-3" />
-                        kakttus Transcrição (Local)
+                        Whisper Local
                       </SelectLabel>
                       {WHISPER_MODELS.map(m => (
                         <SelectItem key={m.value} value={m.value}>
@@ -273,7 +271,7 @@ export default function AdminPromptsManager() {
                         <SelectGroup>
                           <SelectLabel className="flex items-center gap-2">
                             <Server className="h-3 w-3" />
-                            kakttus.ai Local (Ollama)
+                            Ollama Local
                           </SelectLabel>
                           {ollamaModels.map(m => (
                             <SelectItem key={m.value} value={m.value}>
@@ -292,7 +290,7 @@ export default function AdminPromptsManager() {
                       <SelectGroup>
                         <SelectLabel className="flex items-center gap-2">
                           <Cloud className="h-3 w-3" />
-                          kakttus Pro (Gemini)
+                          Google Gemini
                         </SelectLabel>
                         {GEMINI_MODELS.map(m => (
                           <SelectItem key={m.value} value={m.value}>
@@ -310,7 +308,7 @@ export default function AdminPromptsManager() {
                       <SelectGroup>
                         <SelectLabel className="flex items-center gap-2">
                           <Cloud className="h-3 w-3" />
-                          kakttus Vision (GPT)
+                          OpenAI GPT
                         </SelectLabel>
                         {GPT_MODELS.map(m => (
                           <SelectItem key={m.value} value={m.value}>
