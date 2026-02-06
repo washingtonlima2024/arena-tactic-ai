@@ -1,155 +1,156 @@
 
 
-# Reestruturacao Completa da Pagina de Analise Tatica
+# Prompts Parametrizados com Seletor de Modelo e Padrao na Administracao
 
 ## Objetivo
 
-Transformar a pagina de Analise em um relatorio tatico profissional e detalhado, com 7 secoes distintas que cobrem todos os aspectos do jogo. A principal novidade e a geracao de um relatorio completo pela IA com analise por tempo, avaliacao individual dos times, analise tatica profunda e resumo final com recomendacoes.
-
----
-
-## Estrutura Final da Pagina
-
-```text
-+------------------------------------------+
-|  1. VISAO GERAL DA PARTIDA               |
-|  (Placar, competicao, cenario inicial)    |
-+------------------------------------------+
-|  2. LINHA DO TEMPO DE EVENTOS             |
-|  (Momentos principais com clips e         |
-|   analise curta de cada evento)           |
-+------------------------------------------+
-|  3. PRIMEIRO TEMPO                        |
-|  (Posicionamento, construcao, erros,      |
-|   intensidade, transicoes)                |
-+------------------------------------------+
-|  4. SEGUNDO TEMPO                         |
-|  (Ajustes taticos, mudancas de ritmo,     |
-|   momentos decisivos)                     |
-+------------------------------------------+
-|  5. ANALISE INDIVIDUAL DOS TIMES          |
-|  (Bloco casa + bloco visitante:           |
-|   fortalezas, fragilidades, sincronia)    |
-+------------------------------------------+
-|  6. ANALISE TATICA COMPLETA               |
-|  (Fases do jogo, padronizacoes,           |
-|   bola parada, marcacao, sequencias)      |
-+------------------------------------------+
-|  7. RESUMO FINAL                          |
-|  (Melhores pontos, falhas, correcoes,     |
-|   fatores que influenciaram o placar)     |
-+------------------------------------------+
-|  COMPARATIVO DE ESTATISTICAS              |
-|  (Barras visuais lado a lado)             |
-+------------------------------------------+
-|  MELHOR JOGADOR EM CAMPO                  |
-+------------------------------------------+
-|  MAPA DE CALOR - REPLAY DO JOGO           |
-+------------------------------------------+
-|  ESTATISTICAS DETALHADAS (Grid)           |
-+------------------------------------------+
-```
+Criar um sistema na aba "Config" da Administracao onde o SuperAdmin pode editar os prompts de IA e escolher qual modelo processa cada prompt. O sistema sempre lista todos os modelos disponiveis (Local/Ollama, kakttus Pro/Gemini, kakttus Vision/GPT) e ja define um modelo padrao para cada prompt. A transcricao usa Whisper Local como padrao.
 
 ---
 
 ## O Que Sera Feito
 
-### 1. Nova Edge Function: generate-match-report
+### 1. Nova Tabela: ai_prompts
 
-Funcao backend que recebe todos os eventos e estatisticas da partida e envia para a IA (google/gemini-2.5-flash via Lovable AI gateway) com um prompt detalhado pedindo:
+Tabela no banco de dados para armazenar os prompts e o modelo configurado:
 
-- Secao 1: Visao geral da partida (contexto, adversario, competicao, cenario inicial)
-- Secao 2: Resumo dos eventos principais com analise curta de cada momento
-- Secao 3: Analise do primeiro tempo (posicionamento, construcao desde a defesa, ocupacao de espaco, intensidade com e sem bola, transicoes, erros recorrentes)
-- Secao 4: Analise do segundo tempo (ajustes taticos, entrada de novos jogadores, mudanca de ritmo, padroes de ataque e recomposicao, momentos de pressao, situacoes que decidiram o resultado)
-- Secao 5: Analise individual dos times (time principal: comportamento coletivo, sincronia entre setores, fortalezas, fragilidades, melhorias entre tempos; adversario: como marcou, como atacou, pontos de dificuldade, movimentos repetidos)
-- Secao 6: Analise tatica completa (fases do jogo, padronizacoes, modelo de jogo, bola parada, marcacao, sequencias repetitivas)
-- Secao 7: Resumo final (melhores pontos, maiores falhas, o que corrigir no proximo treino, o que funcionou, fatores que influenciaram o placar)
+- **id** (uuid, PK)
+- **prompt_key** (text, unico) - identificador do prompt
+- **prompt_name** (text) - nome amigavel exibido na interface
+- **prompt_value** (text) - texto completo do prompt
+- **description** (text) - descricao curta do que faz
+- **category** (text) - "chatbot" | "report" | "transcription"
+- **ai_model** (text) - modelo real selecionado (ex: "google/gemini-2.5-flash")
+- **is_default** (boolean) - se e o valor padrao original (para restaurar)
+- **default_value** (text) - copia do prompt original para restauracao
+- **default_model** (text) - modelo padrao original
+- **updated_at** (timestamp)
+- **updated_by** (uuid)
 
-O formato de resposta sera JSON com cada secao separada, permitindo renderizar cada uma individualmente na interface.
+Politicas RLS:
+- SELECT: qualquer autenticado (edge functions precisam ler)
+- INSERT/UPDATE/DELETE: apenas admins (is_admin())
 
-Modelo: google/gemini-2.5-flash (bom equilibrio entre custo e qualidade)
-Max tokens: 4096 (relatorio detalhado)
-Temperatura: 0.7
+Dados iniciais inseridos na migracao:
 
-### 2. Novo Hook: useMatchReport
+| prompt_key | prompt_name | category | modelo padrao | badge |
+|---|---|---|---|---|
+| chatbot_system | Chatbot - Prompt do Sistema | chatbot | google/gemini-3-flash-preview (kakttus Pro Flash) | Padrao |
+| report_system | Relatorio - Prompt do Sistema | report | google/gemini-2.5-flash (kakttus Pro) | Padrao |
+| report_user_template | Relatorio - Template do Usuario | report | google/gemini-2.5-flash (kakttus Pro) | Padrao |
+| transcription_engine | Motor de Transcricao | transcription | whisper-local/base (kakttus Transcricao) | Padrao / Local |
 
-Hook React que gerencia:
-- Chamada a edge function generate-match-report
-- Estado de loading enquanto a IA processa
-- Cache do resultado com React Query
-- Funcao para gerar/regenerar o relatorio
-- Armazena o relatorio gerado em estado local
+### 2. Novo Componente: AdminPromptsManager
 
-### 3. Novo Componente: TacticalReportSection
+Interface na aba "Config" da Administracao com:
 
-Componente que renderiza cada secao do relatorio da IA como um card estilizado com:
-- Titulo da secao (ex: "Primeiro Tempo", "Analise Tatica Completa")
-- Icone correspondente
-- Texto do relatorio em paragrafos limpos
-- Animacao de fade-in
-- Se a secao nao tem conteudo, nao aparece
+Para cada prompt cadastrado:
+- Nome, descricao e categoria
+- **Seletor de modelo com 3 categorias sempre visiveis e modelo padrao pre-selecionado**:
+  - **kakttus.ai Local** - Modelos Ollama ja baixados (carrega dinamicamente via apiClient.getOllamaModels) + badge "Local"
+  - **kakttus Pro** - Modelos Gemini fixos (Pro Ultra, Pro, Pro Lite, Pro Flash, Pro Preview) + badge "Cloud"
+  - **kakttus Vision** - Modelos GPT fixos (Vision Ultra, Vision, Vision Lite, Vision Multi, Vision Mini, Reasoning, Reasoning Lite) + badge "Cloud"
+- O modelo padrao de cada prompt vem pre-selecionado e marcado com badge "Padrao"
+- Textarea grande para editar o texto do prompt
+- Contagem de caracteres
+- Legenda de variaveis disponiveis para o template do relatorio ({homeTeam}, {awayTeam}, {stats}, etc.)
+- Botao "Restaurar Padrao" que volta prompt e modelo ao valor original
+- Secao de transcricao mostrando Whisper Local como padrao com badge "Local / Padrao"
 
-### 4. Pagina Analysis.tsx Reformulada
+### 3. Novo Hook: useAiPrompts
 
-A pagina sera reorganizada para seguir a estrutura de 7 secoes do relatorio:
-- Cabecalho com placar e info (ja existe, manter)
-- Botao "Gerar Relatorio Tatico com IA" que dispara a geracao
-- As 7 secoes do relatorio IA aparecem em sequencia
-- Abaixo do relatorio, mantem os componentes existentes: comparativo, melhor jogador, mapa de calor, grid de stats, timeline
-- Se o relatorio ainda nao foi gerado, mostra o resumo local como fallback
+Hook React para gerenciar CRUD dos prompts:
+- Listar todos os prompts (useQuery)
+- Atualizar texto e modelo de um prompt (useMutation)
+- Restaurar prompt ao valor padrao
+- Cache com React Query
 
-### 5. Enriquecimento do useEventBasedAnalysis
+### 4. Edge Functions Atualizadas
 
-O hook local sera expandido para gerar summaries mais detalhados por tempo (primeiro e segundo tempo), servindo como fallback quando o relatorio IA nao foi gerado.
+Ambas as edge functions serao modificadas para buscar prompts e modelo do banco:
+
+**arena-chatbot/index.ts:**
+- Cria cliente Supabase com SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY
+- Busca prompt_key "chatbot_system" na tabela ai_prompts
+- Se encontrar: usa o prompt_value e o ai_model do banco
+- Se nao encontrar (fallback): usa o prompt e modelo hardcoded atual
+- Garante que nunca quebra mesmo se a tabela estiver vazia
+
+**generate-match-report/index.ts:**
+- Busca "report_system" e "report_user_template" na tabela ai_prompts
+- Se encontrar: usa o prompt_value como system prompt e o ai_model como modelo
+- Se nao encontrar: usa os prompts hardcoded atuais
+- O user prompt template usa placeholders ({homeTeam}, {stats}, etc.) substituidos em runtime
+
+### 5. AdminSettings Atualizado
+
+A aba Config da Administracao recebe uma nova secao "Prompts e Modelos de IA" com o componente AdminPromptsManager integrado.
 
 ---
 
 ## Detalhes Tecnicos
 
 ### Arquivos a criar:
-1. `supabase/functions/generate-match-report/index.ts` - Edge function com prompt detalhado para as 7 secoes
-2. `src/hooks/useMatchReport.ts` - Hook para gerenciar a geracao do relatorio
-3. `src/components/analysis/TacticalReportSection.tsx` - Componente para renderizar cada secao do relatorio
+1. **Migracao SQL** - Tabela ai_prompts com RLS, dados iniciais (prompts atuais copiados + modelos padrao definidos)
+2. **src/hooks/useAiPrompts.ts** - Hook CRUD para prompts com React Query
+3. **src/components/admin/AdminPromptsManager.tsx** - Interface de edicao com seletor de modelo (3 categorias sempre visiveis + padrao marcado)
 
 ### Arquivos a modificar:
-1. `src/pages/Analysis.tsx` - Adicionar botao de gerar relatorio e renderizar as 7 secoes
-2. `src/hooks/useEventBasedAnalysis.ts` - Expandir summaries locais com analise por tempo
-3. `supabase/config.toml` - Adicionar configuracao da nova edge function
+1. **supabase/functions/arena-chatbot/index.ts** - Adicionar busca de prompt e modelo no banco antes de usar hardcoded
+2. **supabase/functions/generate-match-report/index.ts** - Adicionar busca de prompts e modelo no banco antes de usar hardcoded
+3. **src/components/admin/AdminSettings.tsx** - Adicionar secao de Prompts e Modelos de IA com o AdminPromptsManager
 
-### Formato do JSON retornado pela IA:
+### Modelos no seletor (sempre listados, com padrao marcado):
+
+**kakttus.ai Local (Ollama)** - badge "Local"
+- Carregados dinamicamente via apiClient.getOllamaModels() (ex: kakttus Mist, kakttus Llama, kakttus Deep, etc.)
+- Usa formatOllamaModelName() do modelBranding.ts para nomes
+
+**kakttus Pro (Gemini)** - badge "Cloud"
+- google/gemini-2.5-pro → kakttus Pro Ultra
+- google/gemini-2.5-flash → kakttus Pro (PADRAO para relatorio)
+- google/gemini-2.5-flash-lite → kakttus Pro Lite
+- google/gemini-3-pro-preview → kakttus Pro Preview
+- google/gemini-3-flash-preview → kakttus Pro Flash (PADRAO para chatbot)
+
+**kakttus Vision (GPT)** - badge "Cloud"
+- openai/gpt-5 → kakttus Vision Ultra
+- openai/gpt-5-mini → kakttus Vision
+- openai/gpt-5-nano → kakttus Vision Lite
+
+**kakttus Transcricao (Whisper)** - badge "Local / Padrao"
+- whisper-local/tiny → kakttus Transcricao Tiny
+- whisper-local/base → kakttus Transcricao Base (PADRAO)
+- whisper-local/small → kakttus Transcricao Small
+- whisper-local/medium → kakttus Transcricao Medium
+- whisper-local/large-v3 → kakttus Transcricao Pro
+
+### Como as edge functions buscam os prompts:
+
 ```text
-{
-  "visaoGeral": "texto...",
-  "linhaDoTempo": "texto...",
-  "primeiroTempo": "texto...",
-  "segundoTempo": "texto...",
-  "analiseIndividual": {
-    "timePrincipal": "texto...",
-    "adversario": "texto..."
-  },
-  "analiseTatica": "texto...",
-  "resumoFinal": "texto..."
-}
+// Dentro da edge function:
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+
+const supabase = createClient(
+  Deno.env.get("SUPABASE_URL")!,
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
+);
+
+const { data } = await supabase
+  .from("ai_prompts")
+  .select("prompt_value, ai_model")
+  .eq("prompt_key", "chatbot_system")
+  .single();
+
+// Se encontrou, usa data.prompt_value e data.ai_model
+// Se nao encontrou, usa SYSTEM_PROMPT e modelo hardcoded como fallback
 ```
 
-### Dados enviados para a IA:
-- Nomes dos times, placar, competicao, data, local
-- Lista completa de eventos (tipo, minuto, descricao, time, jogador)
-- Estatisticas calculadas (finalizacoes, faltas, cartoes, escanteios, posse, defesas, etc.)
-- Melhor jogador calculado
-- Padroes taticos identificados
-- Eventos separados por tempo (primeiro e segundo)
+### Variaveis disponiveis no template do relatorio:
+`{homeTeam}`, `{awayTeam}`, `{homeScore}`, `{awayScore}`, `{competition}`, `{matchDate}`, `{venue}`, `{stats}`, `{bestPlayer}`, `{patterns}`, `{eventsList}`, `{firstHalfCount}`, `{secondHalfCount}`
 
-### Regras do texto:
-- Sem emojis, sem asteriscos, sem markdown
-- Portugues brasileiro com terminologia de futebol
-- Detalhado mas objetivo
-- Paragrafos claros por tema
-- Baseado exclusivamente nos dados reais dos eventos
-
-### Dependencias:
-- Usa LOVABLE_API_KEY ja configurada
-- Usa o mesmo gateway de IA do arena-chatbot (ai.gateway.lovable.dev)
-- Nenhuma dependencia nova necessaria
+### Seguranca:
+- Apenas SuperAdmin/Admin edita prompts (RLS com is_admin())
+- Edge functions leem com service_role_key (bypassa RLS para leitura)
+- Campo updated_by registra quem editou por ultimo
 
