@@ -1,65 +1,79 @@
 
-# Correção: Reprocessamento de vídeos importados do YouTube
+
+# Fix: Erro "Unexpected token '<'" na Importação Inteligente
 
 ## Problema Identificado
 
-Ao clicar em "Processar Partida" na página de Eventos, o sistema tenta transcrever **todos os vídeos registrados** para a partida -- incluindo clips, vídeos duplicados e registros pendentes. No caso da partida Barcelona vs Real Madrid, existem **5 registros de vídeo**:
+Quando voce tenta usar a Importacao Inteligente com upload de arquivo, o codigo faz um `POST` para `/api/upload-video`, mas esse endpoint nao existe no backend (retorna 405 - Method Not Allowed com pagina HTML). O codigo tenta interpretar esse HTML como JSON e causa o erro.
 
-- `video_e8194543.mp4` - tipo `clip`, status `completed` (arquivo pode não existir)
-- `video_049eca64.mp4` - tipo `full`, status `pending` (registro duplicado de importação)
-- `video_049eca64.mp4` - tipo `full`, status `completed` (arquivo real)
-- `video_56d3093d.mp4` - tipo `full`, status `pending` (registro duplicado de importação)
-- `video_56d3093d.mp4` - tipo `full`, status `completed` (arquivo real)
+## Causa Raiz
 
-O loop em `handleProcessMatch` itera TODOS eles sem filtro, e ao tentar transcrever o clip `video_e8194543.mp4` (que não existe no disco), o backend retorna o erro "Local file not found".
+No `SmartImportCard.tsx`, o upload de video usa `fetch()` direto sem:
+1. Verificar se a resposta foi bem-sucedida antes de interpretar como JSON
+2. Usar o endpoint correto do backend (que requer um `match_id`)
 
-## Solução
+O problema principal e que na Importacao Inteligente, a partida ainda nao foi criada, entao nao existe `match_id` para usar no endpoint de upload padrao (`/api/storage/{matchId}/videos/upload`).
 
-### 1. Filtrar vídeos antes de processar (frontend)
+## Solucao
 
-No `handleProcessMatch` em `src/pages/Events.tsx`, filtrar os vídeos para:
-- Excluir vídeos do tipo `clip` (não fazem sentido para transcrição completa)
-- Excluir vídeos com status `pending` (são registros de importação duplicados)
-- Remover duplicatas baseado no `file_url` (manter apenas um registro por arquivo físico)
+Reestruturar o fluxo do SmartImportCard para funcionar em dois cenarios:
 
-### 2. Normalizar a URL do vídeo antes de enviar ao backend
+### Cenario 1: Upload de Arquivo
+- Fazer upload usando o endpoint correto com um `match_id` temporario, OU
+- Usar o `apiClient.post` para enviar o arquivo para `/api/smart-import/transcribe` diretamente (o backend Python recebe o arquivo e faz a transcricao em um unico passo)
 
-Atualmente o `handleProcessMatch` envia `video.file_url` diretamente (ex: `http://localhost:5000/api/storage/...`). Como o backend já lida com isso, o problema é menor, mas idealmente devemos enviar o caminho relativo (`/api/storage/...`) para consistência.
+### Cenario 2: URL de Video
+- Enviar a URL diretamente para `/api/smart-import/transcribe` (ja funciona)
 
-## Detalhes Técnicos
+## Alteracoes Planejadas
 
-### Arquivo: `src/pages/Events.tsx` (linhas ~778-793)
+### 1. `src/components/upload/SmartImportCard.tsx`
 
-Antes:
-```typescript
-for (const video of matchVideos) {
-  const videoType = video.video_type || 'full';
-  // ... processa todos os vídeos
-}
+**Remover** o upload separado para `/api/upload-video` e unificar o fluxo:
+
+- Para **arquivo**: Enviar o video como `FormData` diretamente para `/api/smart-import/transcribe` (o backend recebe o arquivo, transcreve e retorna o texto)
+- Para **URL**: Enviar a URL como JSON para `/api/smart-import/transcribe` (comportamento atual)
+- Adicionar verificacao de `response.ok` antes de chamar `.json()`
+- Usar `buildApiUrl` via `apiClient` para montar a URL corretamente
+- Tratar erros HTTP com mensagens claras (ex: "Servidor retornou erro 405")
+
+### 2. `src/lib/apiClient.ts`
+
+Adicionar metodo `smartImportTranscribe` que aceita tanto arquivo quanto URL:
+
+```text
+smartImportTranscribe(options: { file?: File, videoUrl?: string })
+  -> Se file: envia FormData com multipart
+  -> Se videoUrl: envia JSON com video_url
+  -> Retorna { transcription: string }
+  -> Usa timeout longo (5 min) pois inclui transcricao
 ```
 
-Depois:
-```typescript
-// Filtrar vídeos processáveis: excluir clips, pendentes e duplicatas
-const processableVideos = matchVideos
-  .filter(v => v.video_type !== 'clip')           // Excluir clips
-  .filter(v => v.status === 'completed' || v.status === 'ready' || v.status === 'analyzed')  // Apenas vídeos com arquivo real
-  .filter((v, i, arr) => {                          // Remover duplicatas por file_url
-    const normalizedUrl = v.file_url?.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '');
-    return arr.findIndex(x => {
-      const xUrl = x.file_url?.replace('http://localhost:5000', '').replace('http://127.0.0.1:5000', '');
-      return xUrl === normalizedUrl;
-    }) === i;
-  });
+## Detalhes Tecnicos
 
-if (processableVideos.length === 0) {
-  toast.error('Nenhum vídeo válido para processar (apenas clips ou pendentes encontrados)');
-  return;
-}
-
-for (const video of processableVideos) {
-  // ... processar normalmente
-}
+```text
+Fluxo Corrigido:
+  [Usuario seleciona video]
+         |
+         v
+  smartImportTranscribe({ file ou videoUrl })
+    -> POST /api/smart-import/transcribe
+    -> FormData (arquivo) ou JSON (url)
+    -> Timeout: 5 minutos
+         |
+         v
+  extractMatchInfo(transcription)
+    -> POST /api/extract-match-info
+    -> JSON { transcription }
+    -> Timeout: 2 minutos
+         |
+         v
+  [Exibir resultado para revisao]
 ```
 
-Isso garante que apenas vídeos reais e completos sejam enviados para transcrição, evitando erros de "arquivo não encontrado".
+As mudancas no frontend garantem que:
+- Nenhuma chamada e feita para endpoints inexistentes
+- Respostas HTML sao tratadas sem crash
+- O fluxo funciona para upload de arquivo e URL
+- O backend Python precisa aceitar o arquivo em `/api/smart-import/transcribe` (multipart) ou a URL (JSON)
+
