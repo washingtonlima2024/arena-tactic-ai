@@ -1,79 +1,66 @@
 
-
-# Fix: Erro "Unexpected token '<'" na Importação Inteligente
+# Auto-match de Times na Importacao Inteligente
 
 ## Problema Identificado
 
-Quando voce tenta usar a Importacao Inteligente com upload de arquivo, o codigo faz um `POST` para `/api/upload-video`, mas esse endpoint nao existe no backend (retorna 405 - Method Not Allowed com pagina HTML). O codigo tenta interpretar esse HTML como JSON e causa o erro.
+A IA extrai corretamente os nomes dos times (ex: "Sport", "CRB"), mas o formulario recebe `homeTeamId: ''` e `awayTeamId: ''` porque nenhuma logica de correspondencia (matching) entre os nomes extraidos e os times cadastrados no banco foi implementada.
 
-## Causa Raiz
-
-No `SmartImportCard.tsx`, o upload de video usa `fetch()` direto sem:
-1. Verificar se a resposta foi bem-sucedida antes de interpretar como JSON
-2. Usar o endpoint correto do backend (que requer um `match_id`)
-
-O problema principal e que na Importacao Inteligente, a partida ainda nao foi criada, entao nao existe `match_id` para usar no endpoint de upload padrao (`/api/storage/{matchId}/videos/upload`).
+No codigo atual (Upload.tsx, linha 2649-2655), ha um comentario "Try to match team names to existing teams" seguido de codigo que nao faz nada com os times.
 
 ## Solucao
 
-Reestruturar o fluxo do SmartImportCard para funcionar em dois cenarios:
+### 1. Passar os nomes dos times extraidos pela IA para a callback
 
-### Cenario 1: Upload de Arquivo
-- Fazer upload usando o endpoint correto com um `match_id` temporario, OU
-- Usar o `apiClient.post` para enviar o arquivo para `/api/smart-import/transcribe` diretamente (o backend Python recebe o arquivo e faz a transcricao em um unico passo)
+O `SmartImportCard` ja extrai `home_team` e `away_team` como texto, mas nao repassa esses nomes para o componente pai. Vamos incluir esses nomes no resultado.
 
-### Cenario 2: URL de Video
-- Enviar a URL diretamente para `/api/smart-import/transcribe` (ja funciona)
+**Arquivo:** `src/components/upload/SmartImportCard.tsx`
 
-## Alteracoes Planejadas
+- Expandir a interface `MatchSetupData` ou passar os nomes como parametros extras na callback `onMatchInfoExtracted`
+- Na funcao `handleConfirm`, incluir `extractionResult.home_team` e `extractionResult.away_team` como dados adicionais
 
-### 1. `src/components/upload/SmartImportCard.tsx`
+### 2. Implementar logica de fuzzy matching de times
 
-**Remover** o upload separado para `/api/upload-video` e unificar o fluxo:
+**Arquivo:** `src/pages/Upload.tsx` (callback `onMatchInfoExtracted`, linhas 2647-2658)
 
-- Para **arquivo**: Enviar o video como `FormData` diretamente para `/api/smart-import/transcribe` (o backend recebe o arquivo, transcreve e retorna o texto)
-- Para **URL**: Enviar a URL como JSON para `/api/smart-import/transcribe` (comportamento atual)
-- Adicionar verificacao de `response.ok` antes de chamar `.json()`
-- Usar `buildApiUrl` via `apiClient` para montar a URL corretamente
-- Tratar erros HTTP com mensagens claras (ex: "Servidor retornou erro 405")
+- Usar a lista `teams` (do hook `useTeams()`, ja disponivel na linha 217) para buscar correspondencias
+- Implementar matching por:
+  1. Nome exato (case-insensitive)
+  2. Nome parcial (ex: "Sport" encontra "Sport Club do Recife")
+  3. Short name (ex: "CRB" encontra time com short_name "CRB")
+- Pre-preencher `homeTeamId` e `awayTeamId` com os IDs encontrados
+- Se nao encontrar correspondencia, manter vazio (o usuario seleciona manualmente)
 
-### 2. `src/lib/apiClient.ts`
+### 3. Preencher campos extras (venue, competition, date)
 
-Adicionar metodo `smartImportTranscribe` que aceita tanto arquivo quanto URL:
-
-```text
-smartImportTranscribe(options: { file?: File, videoUrl?: string })
-  -> Se file: envia FormData com multipart
-  -> Se videoUrl: envia JSON com video_url
-  -> Retorna { transcription: string }
-  -> Usa timeout longo (5 min) pois inclui transcricao
-```
+Atualmente o `extractedData` ja traz `competition`, `matchDate` e `venue`, e esses campos estao sendo preenchidos corretamente (como mostra a screenshot com "Serie B do Campeonato Brasileiro" e "07/02/2026"). O problema e exclusivamente dos times.
 
 ## Detalhes Tecnicos
 
 ```text
-Fluxo Corrigido:
-  [Usuario seleciona video]
-         |
-         v
-  smartImportTranscribe({ file ou videoUrl })
-    -> POST /api/smart-import/transcribe
-    -> FormData (arquivo) ou JSON (url)
-    -> Timeout: 5 minutos
-         |
-         v
-  extractMatchInfo(transcription)
-    -> POST /api/extract-match-info
-    -> JSON { transcription }
-    -> Timeout: 2 minutos
-         |
-         v
-  [Exibir resultado para revisao]
+Fluxo atual:
+  SmartImport extrai: { home_team: "Sport", away_team: "CRB" }
+  handleConfirm cria: { homeTeamId: '', awayTeamId: '' }
+  Upload recebe: matchData com IDs vazios
+  MatchSetupCard: Select mostra "Selecione o time"
+
+Fluxo corrigido:
+  SmartImport extrai: { home_team: "Sport", away_team: "CRB" }
+  handleConfirm cria: { homeTeamId: '', awayTeamId: '', _homeTeamName: "Sport", _awayTeamName: "CRB" }
+  Upload recebe: faz matching "Sport" -> teams.find() -> ID do time
+  Upload seta: { homeTeamId: "uuid-do-sport", awayTeamId: "uuid-do-crb" }
+  MatchSetupCard: Select mostra "Sport" e "CRB" pre-selecionados
 ```
 
-As mudancas no frontend garantem que:
-- Nenhuma chamada e feita para endpoints inexistentes
-- Respostas HTML sao tratadas sem crash
-- O fluxo funciona para upload de arquivo e URL
-- O backend Python precisa aceitar o arquivo em `/api/smart-import/transcribe` (multipart) ou a URL (JSON)
+### Arquivos a modificar
 
+1. **`src/components/upload/SmartImportCard.tsx`** - Repassar `home_team` e `away_team` como parametros extras na callback
+2. **`src/pages/Upload.tsx`** - Implementar a logica de matching na callback `onMatchInfoExtracted` (linhas 2647-2658), usando a lista `teams` que ja esta disponivel no componente
+
+### Funcao de matching (a ser adicionada no Upload.tsx)
+
+A funcao compara nome extraido pela IA com:
+- `team.name` (case-insensitive, trim)
+- `team.short_name` (case-insensitive)
+- Substring match (nome extraido contido no nome do time ou vice-versa)
+
+Se encontrar exatamente um resultado, usa o ID. Se encontrar multiplos, usa o primeiro (melhor match).
