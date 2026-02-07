@@ -8124,27 +8124,59 @@ def _process_match_pipeline(job_id: str, data: dict):
             first_half_text = ''
             second_half_text = ''
             
-            # 🆕 Fallback: Buscar SRT do storage se não fornecido
+            # 🆕 Fallback: Buscar transcrição do storage se não fornecida (1º tempo)
+            if not has_preloaded_first:
+                existing_txt_path_1 = get_subfolder_path(match_id, 'texts') / 'first_half_transcription.txt'
+                existing_srt_path_1 = get_subfolder_path(match_id, 'srt') / 'first_half.srt'
+                alt_srt_path_1 = get_subfolder_path(match_id, 'srt') / 'first_transcription.srt'
+                
+                if existing_txt_path_1.exists():
+                    with open(existing_txt_path_1, 'r', encoding='utf-8') as f:
+                        first_half_text = f.read()
+                    has_preloaded_first = len(first_half_text.strip()) > 100
+                    if has_preloaded_first:
+                        print(f"[ASYNC-PIPELINE] ✓ 1st half TXT loaded from storage: {len(first_half_text)} chars")
+                
+                if not has_preloaded_first and existing_srt_path_1.exists():
+                    with open(existing_srt_path_1, 'r', encoding='utf-8') as f:
+                        first_half_text = f.read()
+                    has_preloaded_first = len(first_half_text.strip()) > 100
+                    if has_preloaded_first:
+                        print(f"[ASYNC-PIPELINE] ✓ 1st half SRT loaded from storage: {len(first_half_text)} chars")
+                
+                if not has_preloaded_first and alt_srt_path_1.exists():
+                    with open(alt_srt_path_1, 'r', encoding='utf-8') as f:
+                        first_half_text = f.read()
+                    has_preloaded_first = len(first_half_text.strip()) > 100
+                    if has_preloaded_first:
+                        print(f"[ASYNC-PIPELINE] ✓ 1st half SRT (alt) loaded from storage: {len(first_half_text)} chars")
+            
+            # 🆕 Fallback: Buscar transcrição do storage se não fornecida (2º tempo)
             if not has_preloaded_second:
                 existing_srt_path = get_subfolder_path(match_id, 'srt') / 'second_half.srt'
                 existing_txt_path = get_subfolder_path(match_id, 'texts') / 'second_half_transcription.txt'
                 alt_srt_path = get_subfolder_path(match_id, 'srt') / 'second_transcription.srt'
                 
-                if existing_srt_path.exists():
-                    with open(existing_srt_path, 'r', encoding='utf-8') as f:
-                        second_half_text = f.read()
-                    has_preloaded_second = len(second_half_text.strip()) > 100
-                    print(f"[ASYNC-PIPELINE] ✓ 2nd half SRT loaded from storage: {len(second_half_text)} chars")
-                elif alt_srt_path.exists():
-                    with open(alt_srt_path, 'r', encoding='utf-8') as f:
-                        second_half_text = f.read()
-                    has_preloaded_second = len(second_half_text.strip()) > 100
-                    print(f"[ASYNC-PIPELINE] ✓ 2nd half SRT (alt) loaded from storage: {len(second_half_text)} chars")
-                elif existing_txt_path.exists():
+                if existing_txt_path.exists():
                     with open(existing_txt_path, 'r', encoding='utf-8') as f:
                         second_half_text = f.read()
                     has_preloaded_second = len(second_half_text.strip()) > 100
-                    print(f"[ASYNC-PIPELINE] ✓ 2nd half TXT loaded from storage: {len(second_half_text)} chars")
+                    if has_preloaded_second:
+                        print(f"[ASYNC-PIPELINE] ✓ 2nd half TXT loaded from storage: {len(second_half_text)} chars")
+                
+                if not has_preloaded_second and existing_srt_path.exists():
+                    with open(existing_srt_path, 'r', encoding='utf-8') as f:
+                        second_half_text = f.read()
+                    has_preloaded_second = len(second_half_text.strip()) > 100
+                    if has_preloaded_second:
+                        print(f"[ASYNC-PIPELINE] ✓ 2nd half SRT loaded from storage: {len(second_half_text)} chars")
+                
+                if not has_preloaded_second and alt_srt_path.exists():
+                    with open(alt_srt_path, 'r', encoding='utf-8') as f:
+                        second_half_text = f.read()
+                    has_preloaded_second = len(second_half_text.strip()) > 100
+                    if has_preloaded_second:
+                        print(f"[ASYNC-PIPELINE] ✓ 2nd half SRT (alt) loaded from storage: {len(second_half_text)} chars")
             
             if has_preloaded_first or has_preloaded_second:
                 # Use pre-loaded transcriptions - SKIP WHISPER
