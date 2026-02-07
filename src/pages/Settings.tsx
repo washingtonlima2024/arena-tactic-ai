@@ -10,6 +10,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TeamFormDialog } from "@/components/teams/TeamFormDialog";
 import { TeamCard } from "@/components/teams/TeamCard";
+import { BulkImportTeamsDialog } from "@/components/teams/BulkImportTeamsDialog";
 import { useTeams, useCreateTeam, useUpdateTeam, useDeleteTeam, type Team } from "@/hooks/useTeams";
 import { useApiSettings, useUpsertApiSetting } from "@/hooks/useApiSettings";
 import { AIProviderPriority } from "@/components/settings/AIProviderPriority";
@@ -39,6 +40,7 @@ import {
   HardDrive,
   RefreshCw,
   Wifi,
+  Download,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -56,6 +58,7 @@ export default function Settings() {
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
   const [editingTeam, setEditingTeam] = useState<Team | null>(null);
   const [deleteConfirmTeam, setDeleteConfirmTeam] = useState<Team | null>(null);
+  const [bulkImportOpen, setBulkImportOpen] = useState(false);
 
   // Profile settings
   const [profileName, setProfileName] = useState("");
@@ -457,6 +460,13 @@ export default function Settings() {
                   >
                     <Plus className="mr-2 h-4 w-4" />
                     Novo Time
+                  </Button>
+                  <Button
+                    variant="arena-outline"
+                    onClick={() => setBulkImportOpen(true)}
+                  >
+                    <Download className="mr-2 h-4 w-4" />
+                    Importar Times
                   </Button>
                 </div>
               </CardHeader>
@@ -1548,6 +1558,17 @@ export default function Settings() {
         team={editingTeam}
         onSubmit={editingTeam ? handleUpdateTeam : handleCreateTeam}
         isLoading={createTeam.isPending || updateTeam.isPending}
+      />
+
+      <BulkImportTeamsDialog
+        open={bulkImportOpen}
+        onOpenChange={setBulkImportOpen}
+        existingTeams={teams || []}
+        onImport={async (teamsToImport) => {
+          for (const team of teamsToImport) {
+            await createTeam.mutateAsync(team);
+          }
+        }}
       />
     </AppLayout>
   );
