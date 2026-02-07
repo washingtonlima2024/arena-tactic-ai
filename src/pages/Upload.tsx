@@ -2653,16 +2653,10 @@ export default function VideoUpload() {
                   const findTeamId = (extractedName: string): string => {
                     if (!extractedName || !teams.length) return '';
                     const normalized = extractedName.trim().toLowerCase();
-                    
-                    // 1. Exact match on name
                     const exact = teams.find(t => t.name.trim().toLowerCase() === normalized);
                     if (exact) return exact.id;
-                    
-                    // 2. Exact match on short_name
                     const shortMatch = teams.find(t => t.short_name?.trim().toLowerCase() === normalized);
                     if (shortMatch) return shortMatch.id;
-                    
-                    // 3. Substring match (extracted name contained in team name or vice-versa)
                     const partial = teams.find(t => 
                       t.name.toLowerCase().includes(normalized) || 
                       normalized.includes(t.name.toLowerCase()) ||
@@ -2672,7 +2666,6 @@ export default function VideoUpload() {
                       ))
                     );
                     if (partial) return partial.id;
-                    
                     return '';
                   };
                   
@@ -2699,15 +2692,75 @@ export default function VideoUpload() {
                     homeExtracted: _homeTeamName, homeMatched: homeTeamId,
                     awayExtracted: _awayTeamName, awayMatched: awayTeamId,
                   });
-                  
-                  setMatchData(prev => ({
-                    ...prev,
-                    ...cleanData,
-                    homeTeamId: homeTeamId || prev.homeTeamId,
-                    awayTeamId: awayTeamId || prev.awayTeamId,
-                  }));
-                  setDefaultsApplied(true);
-                  setCurrentStep('match');
+
+                  // If teams couldn't be resolved, fallback to manual match setup
+                  if (!homeTeamId || !awayTeamId) {
+                    setMatchData(prev => ({
+                      ...prev,
+                      ...cleanData,
+                      homeTeamId: homeTeamId || prev.homeTeamId,
+                      awayTeamId: awayTeamId || prev.awayTeamId,
+                    }));
+                    setDefaultsApplied(true);
+                    setCurrentStep('match');
+                    return;
+                  }
+
+                  // --- FULL AUTO: Create match + attach video ---
+                  setIsCreatingMatch(true);
+                  try {
+                    let matchDateTime: string | undefined;
+                    if (cleanData.matchDate) {
+                      try {
+                        const timeStr = cleanData.matchTime || '00:00';
+                        const parsedDate = new Date(`${cleanData.matchDate}T${timeStr}:00`);
+                        if (!isNaN(parsedDate.getTime())) {
+                          matchDateTime = parsedDate.toISOString();
+                        }
+                      } catch {
+                        console.warn('[SmartImport] Failed to parse date');
+                      }
+                    }
+
+                    const match = await createMatch.mutateAsync({
+                      home_team_id: homeTeamId,
+                      away_team_id: awayTeamId,
+                      competition: cleanData.competition || undefined,
+                      match_date: matchDateTime,
+                      venue: cleanData.venue || undefined,
+                    });
+
+                    setCreatedMatchId(match.id);
+                    setSelectedExistingMatch(match.id);
+                    navigate(`/upload?match=${match.id}`, { replace: true });
+
+                    const homeLabel = teams.find(t => t.id === homeTeamId)?.name || _homeTeamName || 'Casa';
+                    const awayLabel = teams.find(t => t.id === awayTeamId)?.name || _awayTeamName || 'Visitante';
+
+                    toast({
+                      title: "✓ Partida criada automaticamente",
+                      description: `${homeLabel} vs ${awayLabel}`,
+                    });
+
+                    // Auto-attach video and go to videos step
+                    setCurrentStep('videos');
+                    if (videoFile) {
+                      setTimeout(() => uploadFile(videoFile), 300);
+                    }
+                  } catch (error: any) {
+                    console.error('[SmartImport] Error creating match:', error);
+                    toast({
+                      title: "Erro ao criar partida",
+                      description: error.message,
+                      variant: "destructive",
+                    });
+                    // Fallback to manual setup
+                    setMatchData(prev => ({ ...prev, ...cleanData, homeTeamId, awayTeamId }));
+                    setDefaultsApplied(true);
+                    setCurrentStep('match');
+                  } finally {
+                    setIsCreatingMatch(false);
+                  }
                 }}
                 onCancel={() => setCurrentStep('choice')}
               />
