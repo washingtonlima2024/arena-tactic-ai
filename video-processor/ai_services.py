@@ -2488,7 +2488,9 @@ def call_ai(
         except Exception as e:
             print(f"[AI] ✗ Fallback OpenAI failed: {e}")
     
-    raise ValueError(f"All AI providers failed (including fallbacks). Last error: {last_error}")
+    # NUNCA CRASHAR: Retornar None para o chamador decidir
+    print(f"[AI] ⚠ All AI providers failed (including fallbacks). Last error: {last_error}")
+    return None
 
 
 def call_lovable_ai(
@@ -4955,8 +4957,9 @@ def analyze_match_events(
             "Nenhum provedor de IA configurado. "
             "Configure uma chave de API (Lovable, Gemini, OpenAI ou Ollama) em Configurações > API."
         )
-        print(f"[AI] ❌ ERRO: {error_msg}")
-        raise ValueError(error_msg)
+        print(f"[AI] ⚠ {error_msg}")
+        # Retornar lista vazia em vez de crashar
+        return []
     
     # Log dos provedores disponíveis
     providers = []
@@ -5615,9 +5618,12 @@ RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL."""
         if attempt < max_retries - 1:
             time.sleep(2 * (attempt + 1))
     
+    # NUNCA CRASHAR: Retornar lista vazia em vez de raise
+    # O frontend vai mostrar "0 eventos detectados" e permitir análise manual
     error_msg = f"Análise falhou após {max_retries} tentativas. Último erro: {last_error}"
-    print(f"[AI] ❌ {error_msg}")
-    raise RuntimeError(error_msg)
+    print(f"[AI] ⚠ {error_msg}")
+    print(f"[AI] ℹ️ Retornando lista vazia - o usuário pode importar eventos manualmente")
+    return []
 
 
 def validate_goal_detection(transcription: str, detected_events: List[Dict]) -> Dict:

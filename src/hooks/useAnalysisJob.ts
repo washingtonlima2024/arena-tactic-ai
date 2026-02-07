@@ -114,28 +114,58 @@ export function useStartAnalysis() {
         matchData: params.matchData
       });
 
-      if (!data?.success) {
-        throw new Error(data?.error || 'Análise falhou');
+      // Tratar resposta com sucesso mas 0 eventos (IA indisponível)
+      const eventsCount = data?.events?.length || 0;
+      const aiWarning = data?.ai_warning;
+      
+      if (!data?.success && !data?.events) {
+        // Erro real do servidor - mas não crashar
+        console.warn('Analysis returned error but we continue:', data?.error);
+        toast({
+          title: '⚠️ Análise incompleta',
+          description: data?.error || 'A IA não conseguiu analisar. Você pode adicionar eventos manualmente na página de Eventos.',
+          variant: 'destructive',
+        });
+        return {
+          success: true, // Não crashar o fluxo
+          eventsDetected: 0,
+          events: [],
+          warning: 'ai_unavailable',
+        };
       }
 
-      toast({
-        title: 'Análise completa!',
-        description: `${data.events?.length || 0} eventos detectados.`,
-      });
+      if (eventsCount === 0) {
+        toast({
+          title: '⚠️ Nenhum evento detectado',
+          description: aiWarning || 'A IA não detectou eventos. Verifique se o Ollama está rodando ou configure outro provedor em Configurações.',
+        });
+      } else {
+        toast({
+          title: 'Análise completa!',
+          description: `${eventsCount} eventos detectados.`,
+        });
+      }
 
       return {
         success: true,
-        eventsDetected: data.events?.length || 0,
-        events: data.events,
+        eventsDetected: eventsCount,
+        events: data?.events || [],
+        warning: eventsCount === 0 ? 'no_events' : undefined,
       };
     } catch (error: any) {
       console.error('Error in analysis:', error);
+      // NUNCA PARAR O FLUXO: retornar resultado vazio em vez de throw
       toast({
-        title: 'Erro na análise',
-        description: error.message || 'Ocorreu um erro ao analisar a transcrição.',
+        title: '⚠️ Análise indisponível',
+        description: 'Os provedores de IA não estão acessíveis. Você pode adicionar eventos manualmente na página de Eventos.',
         variant: 'destructive',
       });
-      throw error;
+      return {
+        success: true, // Não crashar o fluxo
+        eventsDetected: 0,
+        events: [],
+        warning: 'ai_error',
+      };
     } finally {
       setIsLoading(false);
     }
