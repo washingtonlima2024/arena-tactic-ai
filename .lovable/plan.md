@@ -1,84 +1,134 @@
 
+# Plano: Pipeline Automatizado Completo no Smart Import
 
-# Plano: Reaproveitar Transcrição do Smart Import
+## Problema Atual
 
-## Problema
+O fluxo do Smart Import para na etapa de **gestao de videos** (`videos` step), exigindo que o usuario:
+1. Revise os videos adicionados manualmente
+2. Clique em "Continuar para Analise"
+3. Revise o resumo
+4. Clique em "Iniciar Analise"
+5. O sistema transcreve **novamente** o video inteiro
 
-O sistema transcreve o vídeo **duas vezes**:
-1. **Smart Import** (`smartImportTranscribe`): transcreve 5 min de áudio para extrair metadados (times, competição, etc.)
-2. **Análise** (`handleStartAnalysis` -> `transcribeWithWhisper`): transcreve o vídeo **inteiro** de novo, ignorando completamente a transcrição anterior
+Isso contradiz o objetivo de automacao "zero-clique" do Smart Import.
 
-Isso desperdiça tempo e recursos de IA, especialmente quando o vídeo é curto (clips de 5-15 min onde a transcrição do Smart Import cobre praticamente todo o conteúdo).
+## Solucao Proposta
 
-## Solução
-
-Passar a transcrição obtida no Smart Import para o fluxo de análise, que a reutilizará como ponto de partida. Se o vídeo for mais longo que os 5 minutos transcritos, a análise complementa com o restante via Whisper.
-
-## Fluxo Revisado
+Apos o Smart Import criar a partida e vincular o video, o sistema deve **automaticamente** iniciar o pipeline completo de analise, pulando as etapas intermediarias (videos, summary). A transcricao ja obtida sera reutilizada, e o backend cuidara de:
+- Extrair o audio
+- Gerar versao otimizada do video
+- Organizar os arquivos na estrutura de pastas existente (audio/, clips/, images/, json/, srt/, texts/, videos/)
+- Analisar eventos usando a transcricao ja existente
+- Gerar clips e thumbnails
 
 ```text
-Smart Import
-  |
-  +--> Transcreve 5 min de áudio
-  +--> Extrai metadados (times, competição)
-  +--> Salva transcricao no estado do React  <-- NOVO
-  |
-  v
-Análise (handleStartAnalysis)
-  |
-  +--> Verifica se já tem transcrição salva  <-- NOVO
-  +--> Se SIM e vídeo é curto (<= 10 min):
-  |      Pular Whisper, usar transcrição existente
-  +--> Se SIM e vídeo é longo:
-  |      Usar como pré-carregada no pipeline async
-  +--> Se NÃO:
-         Transcrever normalmente (comportamento atual)
+FLUXO ATUAL:
+  Smart Import (transcricao 5min)
+    --> Cria partida
+    --> Vai para tela de Videos (manual)
+    --> Usuario clica "Continuar"
+    --> Resumo (manual)
+    --> Usuario clica "Iniciar Analise"
+    --> Transcreve NOVAMENTE + Analisa
+
+FLUXO NOVO:
+  Smart Import (transcricao 5min)
+    --> Cria partida + vincula video
+    --> Inicia pipeline async AUTOMATICAMENTE
+    --> Mostra progresso (AsyncProcessingProgress)
+    --> Redireciona para pagina de Eventos quando completo
 ```
 
-## Mudanças por Arquivo
+## Mudancas por Arquivo
 
-### 1. SmartImportCard.tsx
-- Adicionar a transcrição ao callback `onMatchInfoExtracted` (novo parâmetro `transcription`)
-- Passar o texto transcrito para o componente pai junto com os metadados
+### 1. src/pages/Upload.tsx
 
-### 2. Upload.tsx (componente pai)
-- Adicionar estado `smartImportTranscription` para armazenar a transcrição recebida do Smart Import
-- No `onMatchInfoExtracted`, salvar a transcrição recebida
-- No `handleStartAnalysis`, verificar se `smartImportTranscription` existe antes de chamar Whisper
-- Se existir: usar como `firstHalfTranscription` (ou passar ao pipeline async)
-- Se o vídeo for curto (duração <= 10 min): pular Whisper completamente
-- Se o vídeo for longo: usar como transcrição parcial e complementar via Whisper se necessário
+**No callback `onMatchInfoExtracted` (linhas ~2657-2825):**
 
-### 3. SmartImportCard - Interface (Props)
-- Atualizar a interface `SmartImportCardProps` para incluir `transcription?: string` no callback
+Apos criar a partida e vincular o video com sucesso, em vez de ir para `setCurrentStep('videos')`, o sistema:
+
+1. Monta os `videoInputs` a partir do video vinculado (file ou URL)
+2. Chama `asyncProcessing.startProcessing()` passando:
+   - `matchId` recem-criado
+   - `videoInputs` com os dados do video
+   - `homeTeam` / `awayTeam` dos times criados/encontrados
+   - `firstHalfTranscription` com a transcricao do Smart Import
+   - `autoClip: true` e `autoAnalysis: true`
+3. Muda para um novo step `'auto-processing'` que mostra o `AsyncProcessingProgress`
+
+**Novo step `'auto-processing'`:**
+
+Adicionar um novo bloco de renderizacao condicional para `currentStep === 'auto-processing'` que exibe:
+- O componente `AsyncProcessingProgress` ja existente
+- Um indicador de que o processo foi iniciado automaticamente
+- Redirecionamento automatico para `/events?match={matchId}` quando o status for `complete`
+
+**Para upload de arquivo (videoFile):**
+
+Quando o Smart Import fornece um `videoFile`, o upload precisa completar antes de iniciar o pipeline. O fluxo sera:
+1. Fazer upload do arquivo (reutilizar `uploadFile()` existente)
+2. Aguardar conclusao do upload
+3. Usar a URL resultante para montar o `videoInput`
+4. Iniciar o pipeline async
+
+**Para URL/link (videoUrl):**
+
+Quando e uma URL, nao precisa de upload. Montar o `videoInput` diretamente com a URL.
+
+### 2. src/components/upload/SmartImportCard.tsx
+
+Sem alteracoes adicionais necessarias. O componente ja passa corretamente a transcricao, video e dados da partida para o callback.
 
 ## Detalhes Tecnicos
 
-### Estado novo em Upload.tsx
-Um novo `useState` armazenará a transcrição do Smart Import:
-```
-smartImportTranscription: string | null
+### Montagem do VideoInput
+
+```text
+videoInputs = [{
+  url: <url do video apos upload ou URL direta>,
+  halfType: 'first',
+  videoType: 'full',
+  startMinute: 0,
+  endMinute: 90,
+  sizeMB: <tamanho em MB se conhecido>,
+}]
 ```
 
-### Lógica de decisão em handleStartAnalysis
-Antes de iniciar a fila de transcrição (linha ~1820), verificar:
-- Se `smartImportTranscription` existe e tem conteúdo (> 50 chars)
-- Se o vídeo é curto (durationSeconds <= 600, ou seja, 10 min): usar direto como `firstHalfTranscription`
-- Se o vídeo é longo: passar como `firstHalfTranscription` para o pipeline async, onde o backend pode complementar se necessário
+### Reutilizacao da Transcricao
 
-### Pipeline Async
-O pipeline async já aceita `firstHalfTranscription` como parâmetro. Ao receber a transcrição do Smart Import, ele vai pular o Whisper automaticamente (lógica já existente nas linhas 8043-8055 do server.py).
+O parametro `firstHalfTranscription` no `startAsyncProcessing` ja e suportado pelo backend (server.py linhas 8043-8055). Ao recebe-lo, o backend pula o Whisper automaticamente e usa a transcricao fornecida.
+
+### Fluxo de Upload + Pipeline
+
+Para arquivos locais (videoFile), o upload precisa completar primeiro. A logica sera:
+
+```text
+1. Criar partida (createMatch)
+2. Se videoFile:
+   a. Upload do arquivo via apiClient
+   b. Obter URL resultante
+3. Se videoUrl:
+   a. Usar URL diretamente
+4. Iniciar asyncProcessing.startProcessing()
+5. Mudar para step 'auto-processing'
+```
+
+### Novo Step de Renderizacao
+
+O step `'auto-processing'` reutilizara o componente `AsyncProcessingProgress` ja existente, adicionando:
+- Um banner informando que o processamento foi iniciado automaticamente
+- Um `useEffect` que monitora `asyncProcessing.isComplete` para redirecionar
 
 ## Arquivos Modificados
 
-| Arquivo | Mudança |
+| Arquivo | Mudanca |
 |---------|---------|
-| `src/components/upload/SmartImportCard.tsx` | Passar transcrição no callback `onMatchInfoExtracted` |
-| `src/pages/Upload.tsx` | Novo estado `smartImportTranscription`; reutilizar na análise |
+| `src/pages/Upload.tsx` | Novo step `'auto-processing'`; callback do Smart Import inicia pipeline automaticamente |
 
-## Benefícios
+## Beneficios
 
-- Elimina transcrição duplicada para vídeos curtos
-- Reduz tempo total do pipeline (economiza 2-5 min)
-- Aproveita melhor os recursos de IA (menos chamadas ao Gemini/Whisper)
-- Para vídeos longos, a transcrição parcial é reaproveitada como "head start"
+- Elimina 3 cliques manuais do fluxo (videos, continuar, iniciar)
+- Transcricao feita apenas uma vez (reutilizada do Smart Import)
+- Backend cuida de toda a organizacao de arquivos na estrutura existente
+- Usuario ve apenas o progresso e e redirecionado automaticamente ao final
+- Fluxo manual continua disponivel para quem preferir (opcao "Nova Partida" no choice)
