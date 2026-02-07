@@ -1,40 +1,44 @@
 import { useState, useCallback } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { 
-  Sparkles, Upload, Link as LinkIcon, Loader2, FileVideo 
+  Sparkles, Loader2 
 } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 import { MatchSetupData } from './MatchSetupCard';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { HalfVideoInput, HalfVideoData } from './HalfVideoInput';
+import { cn } from '@/lib/utils';
+
+export interface SmartImportVideo {
+  file?: File;
+  url?: string;
+  halfType: 'first' | 'second';
+  videoType: string;
+}
 
 interface SmartImportCardProps {
-  onMatchInfoExtracted: (data: MatchSetupData, videoFile?: File, videoUrl?: string, transcription?: string) => void;
+  onMatchInfoExtracted: (data: MatchSetupData, videoFile?: File, videoUrl?: string, transcription?: string, allVideos?: SmartImportVideo[]) => void;
   onCancel: () => void;
 }
 
 type SmartImportStep = 'video' | 'processing';
+type ImportMode = 'halves' | 'full';
 
 // Tenta extrair nomes de times a partir do nome do arquivo
-// Ex: "BrasilxArgentina.mp4" → { home: "Brasil", away: "Argentina" }
 function extractTeamsFromFilename(filename: string): { home?: string; away?: string } {
   if (!filename) return {};
-  // Remove extensão e path
   const name = filename.replace(/\.[^.]+$/, '').replace(/.*[/\\]/, '');
-  // Padrões comuns: "Time1 x Time2", "Time1 vs Time2", "Time1_x_Time2", "Time1-vs-Time2"
   const separators = [
-    /[_\s]*[xX][_\s]*/,          // x ou X
-    /[_\s]*[vV][sS]\.?[_\s]*/,   // vs ou VS
-    /\s+contra\s+/i,              // contra
+    /[_\s]*[xX][_\s]*/,
+    /[_\s]*[vV][sS]\.?[_\s]*/,
+    /\s+contra\s+/i,
   ];
   for (const sep of separators) {
     const parts = name.split(sep);
     if (parts.length >= 2) {
-      // Limpar sufixos como "_1_teste_primeiro"
       const cleanName = (s: string) => s.replace(/[_-]?\d+.*$/, '').replace(/[_-]+/g, ' ').trim();
       const home = cleanName(parts[0]);
       const away = cleanName(parts[1]);
@@ -48,28 +52,48 @@ function extractTeamsFromFilename(filename: string): { home?: string; away?: str
 
 export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportCardProps) {
   const [step, setStep] = useState<SmartImportStep>('video');
-  const [videoFile, setVideoFile] = useState<File | null>(null);
-  const [videoUrl, setVideoUrl] = useState('');
+  const [importMode, setImportMode] = useState<ImportMode>('full');
   const [progress, setProgress] = useState({ message: '', percent: 0 });
 
-  const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setVideoFile(file);
-      setVideoUrl('');
+  // Video inputs
+  const [firstHalf, setFirstHalf] = useState<HalfVideoData>({});
+  const [secondHalf, setSecondHalf] = useState<HalfVideoData>({});
+  const [fullMatch, setFullMatch] = useState<HalfVideoData>({});
+
+  // Computed: which video to use for AI transcription (first available)
+  const primaryVideo = importMode === 'full' 
+    ? fullMatch 
+    : (firstHalf.file || firstHalf.url ? firstHalf : secondHalf);
+
+  const hasAnyVideo = importMode === 'full'
+    ? !!(fullMatch.file || fullMatch.url?.trim())
+    : !!(firstHalf.file || firstHalf.url?.trim() || secondHalf.file || secondHalf.url?.trim());
+
+  // When switching modes, clear the other mode's data
+  const handleModeChange = useCallback((mode: ImportMode) => {
+    setImportMode(mode);
+    if (mode === 'full') {
+      setFirstHalf({});
+      setSecondHalf({});
+    } else {
+      setFullMatch({});
     }
   }, []);
 
   const handleStartProcessing = async () => {
-    if (!videoFile && !videoUrl.trim()) {
-      toast.error('Forneça um vídeo para importar');
+    if (!hasAnyVideo) {
+      toast.error('Forneça pelo menos um vídeo para importar');
       return;
     }
 
     setStep('processing');
     
     try {
-      // Step 1: Transcrever vídeo (upload de arquivo ou URL em um único passo)
+      // Determine primary video for AI transcription
+      const videoFile = primaryVideo.file || undefined;
+      const videoUrl = (primaryVideo.url || '').trim() || undefined;
+
+      // Step 1: Transcrever vídeo
       setProgress({ message: videoFile ? 'Enviando vídeo e transcrevendo...' : 'Baixando e transcrevendo áudio...', percent: 20 });
       
       let transcriptionText = '';
@@ -77,8 +101,8 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
       
       try {
         const transcribeResult = await apiClient.smartImportTranscribe({
-          file: videoFile || undefined,
-          videoUrl: videoUrl.trim() || undefined,
+          file: videoFile,
+          videoUrl: videoUrl,
         });
         
         transcriptionText = transcribeResult?.transcription || '';
@@ -88,15 +112,45 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
         transcriptionFailed = true;
       }
       
-      // Se transcrição falhou ou está vazia, tentar extrair do nome do arquivo
+      // Build allVideos array
+      const allVideos: SmartImportVideo[] = [];
+      
+      if (importMode === 'full') {
+        if (fullMatch.file || fullMatch.url?.trim()) {
+          allVideos.push({
+            file: fullMatch.file,
+            url: fullMatch.url?.trim(),
+            halfType: 'first',
+            videoType: 'full',
+          });
+        }
+      } else {
+        if (firstHalf.file || firstHalf.url?.trim()) {
+          allVideos.push({
+            file: firstHalf.file,
+            url: firstHalf.url?.trim(),
+            halfType: 'first',
+            videoType: 'first_half',
+          });
+        }
+        if (secondHalf.file || secondHalf.url?.trim()) {
+          allVideos.push({
+            file: secondHalf.file,
+            url: secondHalf.url?.trim(),
+            halfType: 'second',
+            videoType: 'second_half',
+          });
+        }
+      }
+
+      // Fallback: extract from filename
       if (!transcriptionText || transcriptionFailed) {
         console.log('[SmartImport] Sem transcrição - tentando extrair do nome do arquivo');
         
-        // Fallback: extrair times do nome do arquivo
-        const filenameTeams = videoFile ? extractTeamsFromFilename(videoFile.name) : {};
+        const firstFile = allVideos.find(v => v.file)?.file;
+        const filenameTeams = firstFile ? extractTeamsFromFilename(firstFile.name) : {};
         
         if (filenameTeams.home || filenameTeams.away) {
-          console.log('[SmartImport] Times extraídos do filename:', filenameTeams);
           toast.info('IA indisponível — times detectados pelo nome do arquivo.', { duration: 4000 });
         } else {
           toast.info('IA indisponível. Criando partida com dados parciais.', { duration: 4000 });
@@ -115,14 +169,15 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
         
         onMatchInfoExtracted(
           fallbackData,
-          videoFile || undefined,
-          videoUrl || undefined,
-          undefined
+          allVideos[0]?.file,
+          allVideos[0]?.url,
+          undefined,
+          allVideos
         );
         return;
       }
 
-      // Step 2: Extrair metadados da partida via IA
+      // Step 2: Extrair metadados via IA
       setProgress({ message: 'IA analisando transcrição para identificar partida...', percent: 70 });
       
       let extractResult: any = null;
@@ -133,11 +188,9 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
       }
       
       if (!extractResult?.success) {
-        // Extração falhou mas temos transcrição - tentar filename como fallback para times
-        const filenameTeams = videoFile ? extractTeamsFromFilename(videoFile.name) : {};
-        toast.info('IA não identificou times na transcrição. Criando partida automaticamente.', {
-          duration: 4000,
-        });
+        const firstFile = allVideos.find(v => v.file)?.file;
+        const filenameTeams = firstFile ? extractTeamsFromFilename(firstFile.name) : {};
+        toast.info('IA não identificou times na transcrição. Criando partida automaticamente.', { duration: 4000 });
         
         const fallbackData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
           homeTeamId: '',
@@ -152,14 +205,15 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
         
         onMatchInfoExtracted(
           fallbackData,
-          videoFile || undefined,
-          videoUrl || undefined,
-          transcriptionText || undefined
+          allVideos[0]?.file,
+          allVideos[0]?.url,
+          transcriptionText || undefined,
+          allVideos
         );
         return;
       }
 
-      // Sucesso — ir direto para o formulário com dados preenchidos pela IA
+      // Sucesso
       setProgress({ message: 'Metadados extraídos com sucesso!', percent: 100 });
       
       const matchData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
@@ -175,16 +229,15 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
 
       onMatchInfoExtracted(
         matchData,
-        videoFile || undefined,
-        videoUrl || undefined,
-        transcriptionText || undefined
+        allVideos[0]?.file,
+        allVideos[0]?.url,
+        transcriptionText || undefined,
+        allVideos
       );
       
     } catch (error: any) {
       console.error('[SmartImport] Erro inesperado:', error);
-      toast.error('Erro na importação. Preencha os dados manualmente.', {
-        duration: 5000,
-      });
+      toast.error('Erro na importação. Preencha os dados manualmente.', { duration: 5000 });
       
       const emptyMatchData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
         homeTeamId: '',
@@ -197,9 +250,10 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
       
       onMatchInfoExtracted(
         emptyMatchData,
-        videoFile || undefined,
-        videoUrl || undefined,
-        undefined
+        undefined,
+        undefined,
+        undefined,
+        []
       );
     }
   };
@@ -212,7 +266,7 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
         </div>
         <CardTitle className="text-xl">Importação Inteligente</CardTitle>
         <CardDescription>
-          Forneça o vídeo e a IA irá transcrever, interpretar e preencher os dados da partida automaticamente
+          Forneça o(s) vídeo(s) e a IA irá transcrever, interpretar e preencher os dados da partida automaticamente
         </CardDescription>
       </CardHeader>
 
@@ -220,64 +274,58 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
         {/* Step 1: Video Input */}
         {step === 'video' && (
           <>
-            <Tabs defaultValue="upload" className="w-full">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="upload">Upload</TabsTrigger>
-                <TabsTrigger value="link">Link / URL</TabsTrigger>
-              </TabsList>
+            {/* Mode selector */}
+            <div className="flex gap-2">
+              <Button
+                variant={importMode === 'halves' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => handleModeChange('halves')}
+                className="flex-1"
+              >
+                1º e 2º Tempo
+              </Button>
+              <Button
+                variant={importMode === 'full' ? 'default' : 'outline'}
+                size="sm"
+                onClick={() => handleModeChange('full')}
+                className="flex-1"
+              >
+                Jogo Completo
+              </Button>
+            </div>
 
-              <TabsContent value="upload" className="space-y-4 pt-4">
-                <div className="border-2 border-dashed border-border/50 rounded-lg p-8 text-center hover:border-primary/50 transition-colors">
-                  <input
-                    type="file"
-                    accept="video/*"
-                    onChange={handleFileChange}
-                    className="hidden"
-                    id="smart-import-file"
-                  />
-                  <label htmlFor="smart-import-file" className="cursor-pointer">
-                    {videoFile ? (
-                      <div className="flex flex-col items-center gap-2">
-                        <FileVideo className="h-10 w-10 text-primary" />
-                        <p className="font-medium">{videoFile.name}</p>
-                        <p className="text-sm text-muted-foreground">
-                          {(videoFile.size / (1024 * 1024)).toFixed(1)} MB
-                        </p>
-                        <Badge variant="secondary">Clique para trocar</Badge>
-                      </div>
-                    ) : (
-                      <div className="flex flex-col items-center gap-2">
-                        <Upload className="h-10 w-10 text-muted-foreground" />
-                        <p className="font-medium">Clique para selecionar o vídeo</p>
-                        <p className="text-sm text-muted-foreground">
-                          MP4, MKV, AVI, MOV
-                        </p>
-                      </div>
-                    )}
-                  </label>
-                </div>
-              </TabsContent>
+            {importMode === 'halves' ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <HalfVideoInput
+                  label="1º Tempo"
+                  halfType="first"
+                  color="blue"
+                  value={firstHalf}
+                  onChange={setFirstHalf}
+                />
+                <HalfVideoInput
+                  label="2º Tempo"
+                  halfType="second"
+                  color="orange"
+                  value={secondHalf}
+                  onChange={setSecondHalf}
+                />
+              </div>
+            ) : (
+              <HalfVideoInput
+                label="Jogo Completo"
+                halfType="full"
+                color="green"
+                value={fullMatch}
+                onChange={setFullMatch}
+              />
+            )}
 
-              <TabsContent value="link" className="space-y-4 pt-4">
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2">
-                    <LinkIcon className="h-4 w-4 text-muted-foreground" />
-                    <span className="text-sm font-medium">URL do vídeo</span>
-                  </div>
-                  <Input
-                    value={videoUrl}
-                    onChange={(e) => {
-                      setVideoUrl(e.target.value);
-                      setVideoFile(null);
-                    }}
-                    placeholder="https://youtube.com/watch?v=... ou URL direta do vídeo"
-                  />
-                  <p className="text-xs text-muted-foreground">
-                    Suporta YouTube, links diretos de vídeo e URLs do storage local
-                  </p>
-                </div>
-              </TabsContent>
-            </Tabs>
+            {importMode === 'halves' && (
+              <p className="text-xs text-muted-foreground text-center">
+                Forneça um ou ambos — o outro tempo pode ser adicionado depois na página de Eventos
+              </p>
+            )}
 
             <div className="flex gap-3 pt-4">
               <Button variant="outline" onClick={onCancel} className="flex-1">
@@ -285,7 +333,7 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
               </Button>
               <Button 
                 onClick={handleStartProcessing}
-                disabled={!videoFile && !videoUrl.trim()}
+                disabled={!hasAnyVideo}
                 className="flex-1 gap-2"
               >
                 <Sparkles className="h-4 w-4" />
