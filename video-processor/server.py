@@ -8010,38 +8010,104 @@ def _process_match_pipeline(job_id: str, data: dict):
             
             for half_type, video_path in video_paths.items():
                 try:
+                    # Resolve symlinks and verify file exists
                     resolved_path = os.path.realpath(video_path) if os.path.islink(video_path) else video_path
+                    print(f"[ASYNC-PIPELINE] Audio extraction for {half_type}: video_path={video_path}, resolved={resolved_path}, exists={os.path.exists(resolved_path)}")
+                    
+                    if not os.path.exists(resolved_path):
+                        print(f"[ASYNC-PIPELINE] ⚠ Arquivo não encontrado: {resolved_path}")
+                        # Try to find video in storage
+                        storage_video_dir = get_subfolder_path(match_id, 'videos')
+                        for vf in storage_video_dir.iterdir():
+                            if vf.suffix.lower() in ('.mp4', '.mkv', '.avi', '.mov', '.webm'):
+                                resolved_path = str(vf)
+                                print(f"[ASYNC-PIPELINE] ✓ Usando vídeo do storage: {resolved_path}")
+                                break
+                    
                     duration_s = get_video_duration_seconds(resolved_path)
                     video_durations[half_type] = duration_s
+                    print(f"[ASYNC-PIPELINE] Duração {half_type}: {duration_s:.1f}s")
                     
                     # Extract audio using FFmpeg
                     audio_filename = f"{half_type}_audio.mp3"
                     audio_tmp_path = os.path.join(tmpdir, audio_filename)
+                    audio_dest = get_subfolder_path(match_id, 'audio') / audio_filename
                     
+                    # Try method 1: libmp3lame codec
                     cmd = [
                         'ffmpeg', '-y', '-i', resolved_path,
                         '-vn', '-acodec', 'libmp3lame', '-ab', '128k',
                         audio_tmp_path
                     ]
-                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                    print(f"[ASYNC-PIPELINE] FFmpeg cmd: {' '.join(cmd)}")
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
                     
-                    if result.returncode == 0 and os.path.exists(audio_tmp_path):
-                        audio_dest = get_subfolder_path(match_id, 'audio') / audio_filename
+                    if result.returncode == 0 and os.path.exists(audio_tmp_path) and os.path.getsize(audio_tmp_path) > 1000:
                         shutil.copy2(audio_tmp_path, str(audio_dest))
-                        print(f"[ASYNC-PIPELINE] ✓ Áudio extraído: {audio_filename} ({duration_s:.0f}s)")
+                        print(f"[ASYNC-PIPELINE] ✓ Áudio extraído (método 1): {audio_filename} ({duration_s:.0f}s, {os.path.getsize(str(audio_dest))/1024:.0f}KB)")
                     else:
-                        print(f"[ASYNC-PIPELINE] ⚠ Falha na extração de áudio {half_type}: {result.stderr[:200] if result.stderr else 'unknown'}")
+                        # Try method 2: copy codec (faster, preserves original)
+                        print(f"[ASYNC-PIPELINE] ⚠ Método 1 falhou (rc={result.returncode}), tentando método 2...")
+                        if result.stderr:
+                            print(f"[ASYNC-PIPELINE] FFmpeg stderr: {result.stderr[-300:]}")
+                        
+                        audio_tmp_path2 = os.path.join(tmpdir, f"{half_type}_audio_v2.mp3")
+                        cmd2 = [
+                            'ffmpeg', '-y', '-i', resolved_path,
+                            '-vn', '-ar', '16000', '-ac', '1', '-q:a', '5',
+                            '-y', audio_tmp_path2
+                        ]
+                        print(f"[ASYNC-PIPELINE] FFmpeg cmd2: {' '.join(cmd2)}")
+                        result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=600)
+                        
+                        if result2.returncode == 0 and os.path.exists(audio_tmp_path2) and os.path.getsize(audio_tmp_path2) > 1000:
+                            shutil.copy2(audio_tmp_path2, str(audio_dest))
+                            print(f"[ASYNC-PIPELINE] ✓ Áudio extraído (método 2): {audio_filename} ({duration_s:.0f}s, {os.path.getsize(str(audio_dest))/1024:.0f}KB)")
+                        else:
+                            # Try method 3: aac -> wav fallback
+                            print(f"[ASYNC-PIPELINE] ⚠ Método 2 falhou (rc={result2.returncode}), tentando WAV...")
+                            if result2.stderr:
+                                print(f"[ASYNC-PIPELINE] FFmpeg stderr2: {result2.stderr[-300:]}")
+                            
+                            audio_tmp_wav = os.path.join(tmpdir, f"{half_type}_audio.wav")
+                            cmd3 = ['ffmpeg', '-y', '-i', resolved_path, '-vn', '-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1', audio_tmp_wav]
+                            result3 = subprocess.run(cmd3, capture_output=True, text=True, timeout=600)
+                            
+                            if result3.returncode == 0 and os.path.exists(audio_tmp_wav) and os.path.getsize(audio_tmp_wav) > 1000:
+                                # Convert WAV to MP3
+                                cmd4 = ['ffmpeg', '-y', '-i', audio_tmp_wav, '-acodec', 'libmp3lame', '-ab', '128k', audio_tmp_path]
+                                result4 = subprocess.run(cmd4, capture_output=True, text=True, timeout=300)
+                                if result4.returncode == 0 and os.path.exists(audio_tmp_path):
+                                    shutil.copy2(audio_tmp_path, str(audio_dest))
+                                    print(f"[ASYNC-PIPELINE] ✓ Áudio extraído (método 3 WAV→MP3): {audio_filename}")
+                                else:
+                                    # Just save WAV directly
+                                    wav_dest = get_subfolder_path(match_id, 'audio') / f"{half_type}_audio.wav"
+                                    shutil.copy2(audio_tmp_wav, str(wav_dest))
+                                    print(f"[ASYNC-PIPELINE] ✓ Áudio extraído como WAV: {half_type}_audio.wav")
+                            else:
+                                print(f"[ASYNC-PIPELINE] ✗ TODAS as tentativas de extração de áudio falharam para {half_type}")
+                                if result3.stderr:
+                                    print(f"[ASYNC-PIPELINE] FFmpeg stderr3: {result3.stderr[-300:]}")
+                    
                 except Exception as audio_err:
-                    print(f"[ASYNC-PIPELINE] ⚠ Erro extração áudio {half_type}: {audio_err}")
+                    import traceback
+                    print(f"[ASYNC-PIPELINE] ✗ Erro extração áudio {half_type}: {audio_err}")
+                    traceback.print_exc()
                     # Still try to get duration even if audio extraction fails
                     if half_type not in video_durations:
                         try:
-                            resolved_path = os.path.realpath(video_path) if os.path.islink(video_path) else video_path
-                            video_durations[half_type] = get_video_duration_seconds(resolved_path)
+                            rp = os.path.realpath(video_path) if os.path.islink(video_path) else video_path
+                            video_durations[half_type] = get_video_duration_seconds(rp)
                         except:
                             video_durations[half_type] = 0
             
             print(f"[ASYNC-PIPELINE] Durações dos vídeos: {video_durations}")
+            
+            # Verify audio was extracted
+            audio_dir = get_subfolder_path(match_id, 'audio')
+            audio_files = list(audio_dir.glob('*.mp3')) + list(audio_dir.glob('*.wav'))
+            print(f"[ASYNC-PIPELINE] Arquivos de áudio gerados: {[f.name for f in audio_files]}")
             
 
             # ========== PHASE 3: TRANSCRIPTION (60%) ==========
