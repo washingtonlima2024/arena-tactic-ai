@@ -1,80 +1,95 @@
 
-# Reutilizar Transcricoes Existentes na Importacao Manual
+# Corrigir Extracao de Audio no Pipeline Automatico (Smart Import)
 
 ## Problema
 
-Quando voce importa um jogo manualmente (fluxo sequencial no Upload.tsx), o sistema **sempre tenta transcrever o video novamente**, mesmo que ja exista uma transcricao salva em `storage/{match_id}/texts/` de uma importacao anterior ou Smart Import. Isso desperdiça tempo e recursos.
+No processo manual, o audio e extraido corretamente para `storage/{match_id}/audio/` porque o pipeline chama `transcribe_large_video()` que internamente extrai e salva o audio.
 
-## Onde as transcricoes sao salvas
+No processo automatico (Smart Import), o pipeline async tem o Phase 2.5 que deveria extrair o audio, mas ele pode estar falhando silenciosamente. O problema esta em dois pontos:
 
-O backend salva transcricoes em dois locais:
-- `storage/{match_id}/texts/first_half_transcription.txt`
-- `storage/{match_id}/texts/second_half_transcription.txt`
-- `storage/{match_id}/srt/first_half.srt`
-- `storage/{match_id}/srt/second_half.srt`
+### Causa Raiz 1: Erro silencioso na extracao
 
-O servidor Python ja tem endpoints para servir esses arquivos:
-- `GET /api/storage/{match_id}/texts/{filename}`
-- `GET /api/storage/{match_id}/texts` (lista arquivos)
+O Phase 2.5 (linhas 8007-8110 do server.py) esta dentro de um `try/except` que apenas loga erros mas nao interrompe o pipeline. Se o symlink criado na resolucao do video estiver quebrado ou o caminho nao existir, a extracao falha e o pipeline continua sem audio.
+
+### Causa Raiz 2: Transcricao pre-carregada pula `transcribe_large_video`
+
+No pipeline manual, `transcribe_large_video()` (ai_services.py, linha 6913) salva automaticamente o audio extraido para o storage. No Smart Import, como a transcricao ja vem pre-carregada (5 min do Smart Import), o sistema pula `transcribe_large_video()` completamente. Entao a unica chance de extrair audio e no Phase 2.5, que se falhar, nao ha segunda tentativa.
 
 ## Solucao
 
-Adicionar uma verificacao no frontend (Upload.tsx) e no backend (pipeline async) que, **antes de iniciar a transcricao**, consulta o storage para ver se ja existem arquivos de transcricao. Se existirem, usa os existentes e pula o Whisper.
+Tornar a extracao de audio no Phase 2.5 mais robusta, adicionando fallbacks adicionais e garantindo que o audio seja extraido mesmo quando a transcricao ja esta pre-carregada.
 
-### Mudanca 1: Frontend - apiClient.ts
+## Mudancas
 
-Adicionar um novo metodo `getExistingTranscription(matchId, halfType)` que:
-1. Tenta buscar o TXT de `texts/{half}_half_transcription.txt`
-2. Se nao encontrar, tenta o SRT de `srt/{half}_half.srt`
-3. Retorna o conteudo se encontrado, ou `null`
+### 1. `video-processor/server.py` - Phase 2.5 (Audio Extraction)
 
-### Mudanca 2: Frontend - Upload.tsx (Pipeline Sequencial)
+Adicionar verificacao pos-extracao e fallback usando o video diretamente do storage:
 
-No `handleStartAnalysis`, antes do bloco que monta os `transcriptionItems` para Whisper (~linha 1855), adicionar:
+**Apos o loop de extracao (apos linha 8110)**, adicionar:
 
 ```text
-1. Se nao tem firstHalfTranscription:
-   -> Chamar apiClient.getExistingTranscription(matchId, 'first')
-   -> Se retornar texto, usar como firstHalfTranscription
-   -> Mostrar toast "Transcricao existente encontrada para 1o tempo"
-
-2. Se nao tem secondHalfTranscription:
-   -> Chamar apiClient.getExistingTranscription(matchId, 'second')
-   -> Se retornar texto, usar como secondHalfTranscription
-   -> Mostrar toast "Transcricao existente encontrada para 2o tempo"
+Se audio_files estiver vazio apos Phase 2.5:
+  1. Buscar video diretamente em storage/{match_id}/videos/
+  2. Extrair audio com FFmpeg
+  3. Salvar em storage/{match_id}/audio/
+  4. Logar sucesso ou falha
 ```
 
-Mesma logica aplicada ao bloco do pipeline **async** (~linha 1660), antes de enviar para o backend.
+Alem disso, melhorar a resolucao de caminhos no inicio do Phase 2.5:
+- Quando o video e um symlink, verificar se o target existe
+- Se o target nao existir, buscar o video no storage diretamente
+- Usar `get_subfolder_path(match_id, 'videos')` como ultima opcao
 
-### Mudanca 3: Backend - Pipeline Async (server.py)
+### 2. `video-processor/server.py` - Fallback pos-transcricao
 
-O backend ja faz fallback para o 2o tempo (linhas 8128-8148), mas **nao faz para o 1o tempo**. Adicionar a mesma logica de verificacao no storage para o 1o tempo tambem.
+Apos Phase 3 (transcricao), adicionar uma verificacao extra:
+
+```text
+Se nenhum arquivo de audio existe em storage/{match_id}/audio/:
+  -> Chamar extracao de audio diretamente do video no storage
+  -> Usar o mesmo metodo que transcribe_large_video usa (FFmpeg -> MP3)
+```
+
+Isso garante que mesmo se o Phase 2.5 falhar, o audio sera extraido antes dos clips.
+
+### 3. Adicionar log detalhado
+
+Em todas as etapas de extracao de audio, adicionar logs claros:
+- Antes: caminho do video, se existe, tamanho
+- Depois: caminho do audio gerado, tamanho, se foi salvo
 
 ## Arquivos Modificados
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `src/lib/apiClient.ts` | Novo metodo `getExistingTranscription()` |
-| `src/pages/Upload.tsx` | Verificar transcricoes existentes antes de transcrever (pipelines sequencial e async) |
-| `video-processor/server.py` | Adicionar fallback de storage para 1o tempo no pipeline async |
+| `video-processor/server.py` | Melhorar Phase 2.5 com fallback de storage direto + verificacao pos-transcricao |
 
 ## Fluxo Apos Implementacao
 
 ```text
-Usuario clica "Iniciar Analise"
+Smart Import inicia Pipeline Async
   |
   v
-Ja tem transcricao do SRT/Smart Import?
-  SIM -> usa ela
-  NAO -> Verificar storage: texts/{half}_half_transcription.txt
-           EXISTE -> carregar e usar (pular Whisper)
-           NAO EXISTE -> Verificar SRT: srt/{half}_half.srt
-                           EXISTE -> carregar e usar (pular Whisper)
-                           NAO EXISTE -> Transcrever com Whisper normalmente
+Phase 2.5: Extrair audio do video (symlink)
+  SUCESSO -> audio salvo em storage/audio/
+  FALHA -> Fallback: buscar video em storage/videos/ e extrair diretamente
+    SUCESSO -> audio salvo
+    FALHA -> Log detalhado do erro
+  |
+  v
+Phase 3: Transcricao (usa pre-carregada do Smart Import)
+  |
+  v
+Verificacao pos-transcricao: audio existe em storage/audio/?
+  NAO -> Ultima tentativa: extrair audio de qualquer video em storage/videos/
+  SIM -> Continuar
+  |
+  v
+Phase 3.5: Analise, Clips, etc. (com audio disponivel)
 ```
 
 ## Resultado Esperado
 
-- Ao reimportar/reanalisar uma partida que ja foi transcrita, o sistema detecta os arquivos TXT/SRT existentes e reutiliza
-- Economia de tempo significativa (evita 5-15 min de transcricao por tempo)
-- Toast informativo: "Transcricao existente encontrada para 1o tempo - pulando Whisper"
+- O audio sempre sera extraido e salvo em `storage/{match_id}/audio/` tanto no fluxo manual quanto no automatico
+- Se o Phase 2.5 falhar por qualquer motivo (symlink quebrado, permissao, etc.), o fallback garante que o audio seja extraido antes de prosseguir
+- Logs detalhados facilitam debugging de problemas futuros
