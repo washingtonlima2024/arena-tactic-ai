@@ -8165,6 +8165,18 @@ def _process_match_pipeline(job_id: str, data: dict):
             # ========== PHASE 1: PREPARATION (5%) ==========
             _update_async_job(job_id, 'preparing', 5, 'Preparando arquivos...', 'preparing')
             
+            # Limpar transcricoes parciais do Smart Import (< 1KB)
+            for half_label in ['first', 'second']:
+                txt_path = get_subfolder_path(match_id, 'texts') / f'{half_label}_half_transcription.txt'
+                srt_path = get_subfolder_path(match_id, 'srt') / f'{half_label}_half.srt'
+                
+                for fpath in [txt_path, srt_path]:
+                    if fpath.exists():
+                        file_size = fpath.stat().st_size
+                        if file_size < 1000:
+                            print(f"[ASYNC-PIPELINE] Removendo transcricao parcial: {fpath.name} ({file_size} bytes)")
+                            fpath.unlink()
+            
             # Organize videos by half — detect full-match videos
             first_half_videos = []
             second_half_videos = []
@@ -8422,26 +8434,48 @@ def _process_match_pipeline(job_id: str, data: dict):
                 existing_srt_path_1 = get_subfolder_path(match_id, 'srt') / 'first_half.srt'
                 alt_srt_path_1 = get_subfolder_path(match_id, 'srt') / 'first_transcription.srt'
                 
+                def _validate_storage_transcription(text, half_key):
+                    """Valida se transcricao do storage e proporcional ao video (nao parcial)."""
+                    text_len = len(text.strip())
+                    dur = video_durations.get(half_key, 0)
+                    if dur > 300 and text_len > 0:
+                        chars_per_sec = text_len / dur
+                        if chars_per_sec < 3:
+                            print(f"[ASYNC-PIPELINE] Transcricao do storage DESCARTADA: "
+                                  f"{text_len} chars / {dur:.0f}s = {chars_per_sec:.1f} chars/s (< 3 = parcial)")
+                            return False
+                        else:
+                            print(f"[ASYNC-PIPELINE] Transcricao do storage ACEITA: "
+                                  f"{text_len} chars / {dur:.0f}s = {chars_per_sec:.1f} chars/s")
+                            return True
+                    return text_len > 100
+                
                 if existing_txt_path_1.exists():
                     with open(existing_txt_path_1, 'r', encoding='utf-8') as f:
                         first_half_text = f.read()
-                    has_preloaded_first = len(first_half_text.strip()) > 100
+                    has_preloaded_first = _validate_storage_transcription(first_half_text, 'first')
                     if has_preloaded_first:
                         print(f"[ASYNC-PIPELINE] ✓ 1st half TXT loaded from storage: {len(first_half_text)} chars")
+                    else:
+                        first_half_text = ''
                 
                 if not has_preloaded_first and existing_srt_path_1.exists():
                     with open(existing_srt_path_1, 'r', encoding='utf-8') as f:
                         first_half_text = f.read()
-                    has_preloaded_first = len(first_half_text.strip()) > 100
+                    has_preloaded_first = _validate_storage_transcription(first_half_text, 'first')
                     if has_preloaded_first:
                         print(f"[ASYNC-PIPELINE] ✓ 1st half SRT loaded from storage: {len(first_half_text)} chars")
+                    else:
+                        first_half_text = ''
                 
                 if not has_preloaded_first and alt_srt_path_1.exists():
                     with open(alt_srt_path_1, 'r', encoding='utf-8') as f:
                         first_half_text = f.read()
-                    has_preloaded_first = len(first_half_text.strip()) > 100
+                    has_preloaded_first = _validate_storage_transcription(first_half_text, 'first')
                     if has_preloaded_first:
                         print(f"[ASYNC-PIPELINE] ✓ 1st half SRT (alt) loaded from storage: {len(first_half_text)} chars")
+                    else:
+                        first_half_text = ''
             
             # 🆕 Fallback: Buscar transcrição do storage se não fornecida (2º tempo)
             if not has_preloaded_second:
@@ -8452,23 +8486,38 @@ def _process_match_pipeline(job_id: str, data: dict):
                 if existing_txt_path.exists():
                     with open(existing_txt_path, 'r', encoding='utf-8') as f:
                         second_half_text = f.read()
-                    has_preloaded_second = len(second_half_text.strip()) > 100
+                    has_preloaded_second = _validate_storage_transcription(second_half_text, 'second')
                     if has_preloaded_second:
                         print(f"[ASYNC-PIPELINE] ✓ 2nd half TXT loaded from storage: {len(second_half_text)} chars")
+                    else:
+                        second_half_text = ''
                 
                 if not has_preloaded_second and existing_srt_path.exists():
                     with open(existing_srt_path, 'r', encoding='utf-8') as f:
                         second_half_text = f.read()
-                    has_preloaded_second = len(second_half_text.strip()) > 100
+                    has_preloaded_second = _validate_storage_transcription(second_half_text, 'second')
                     if has_preloaded_second:
                         print(f"[ASYNC-PIPELINE] ✓ 2nd half SRT loaded from storage: {len(second_half_text)} chars")
+                    else:
+                        second_half_text = ''
                 
                 if not has_preloaded_second and alt_srt_path.exists():
                     with open(alt_srt_path, 'r', encoding='utf-8') as f:
                         second_half_text = f.read()
-                    has_preloaded_second = len(second_half_text.strip()) > 100
+                    has_preloaded_second = _validate_storage_transcription(second_half_text, 'second')
                     if has_preloaded_second:
                         print(f"[ASYNC-PIPELINE] ✓ 2nd half SRT (alt) loaded from storage: {len(second_half_text)} chars")
+                    else:
+                        second_half_text = ''
+            
+            # Suporte a forceTranscription para reprocessamento
+            force_transcription = data.get('forceTranscription', False)
+            if force_transcription:
+                print(f"[ASYNC-PIPELINE] ⚡ forceTranscription=True - ignorando transcricoes pre-carregadas")
+                has_preloaded_first = False
+                has_preloaded_second = False
+                first_half_text = ''
+                second_half_text = ''
             
             if has_preloaded_first or has_preloaded_second:
                 # Use pre-loaded transcriptions - SKIP WHISPER
