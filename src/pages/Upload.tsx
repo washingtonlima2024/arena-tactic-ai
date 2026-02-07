@@ -2708,17 +2708,35 @@ export default function VideoUpload() {
                     awayExtracted: _awayTeamName, awayMatched: awayTeamId,
                   });
 
-                  // If teams couldn't be resolved, fallback to manual match setup
-                  if (!homeTeamId || !awayTeamId) {
-                    setMatchData(prev => ({
-                      ...prev,
-                      ...cleanData,
-                      homeTeamId: homeTeamId || prev.homeTeamId,
-                      awayTeamId: awayTeamId || prev.awayTeamId,
-                    }));
-                    setDefaultsApplied(true);
-                    setCurrentStep('match');
-                    return;
+                  // Se times não puderam ser resolvidos, auto-criar a partir dos nomes extraídos
+                  // Smart Import NUNCA mostra o formulário manual
+                  if (!homeTeamId && !_homeTeamName?.trim() && !awayTeamId && !_awayTeamName?.trim()) {
+                    // Sem nenhum dado de time — criar times genéricos
+                    console.log('[SmartImport] Sem nomes de times — criando times genéricos');
+                    try {
+                      const homeTeam = await createTeamMutation.mutateAsync({ name: 'Time Casa' });
+                      homeTeamId = (homeTeam as any)?.id || '';
+                      const awayTeam = await createTeamMutation.mutateAsync({ name: 'Time Visitante' });
+                      awayTeamId = (awayTeam as any)?.id || '';
+                    } catch (err) {
+                      console.warn('[SmartImport] Error creating generic teams:', err);
+                    }
+                  } else if (!homeTeamId || !awayTeamId) {
+                    // Temos nomes mas não conseguimos fazer match — forçar criação
+                    try {
+                      if (!homeTeamId && _homeTeamName?.trim()) {
+                        console.log('[SmartImport] Force-creating home team:', _homeTeamName);
+                        const newTeam = await createTeamMutation.mutateAsync({ name: _homeTeamName.trim() });
+                        homeTeamId = (newTeam as any)?.id || '';
+                      }
+                      if (!awayTeamId && _awayTeamName?.trim()) {
+                        console.log('[SmartImport] Force-creating away team:', _awayTeamName);
+                        const newTeam = await createTeamMutation.mutateAsync({ name: _awayTeamName.trim() });
+                        awayTeamId = (newTeam as any)?.id || '';
+                      }
+                    } catch (err) {
+                      console.warn('[SmartImport] Error force-creating teams:', err);
+                    }
                   }
 
                   // --- FULL AUTO: Create match + attach video ---
@@ -2793,11 +2811,11 @@ export default function VideoUpload() {
                   } catch (error: any) {
                     console.error('[SmartImport] Error creating match:', error);
                     toast({
-                      title: "Erro ao criar partida",
-                      description: error.message,
+                      title: "Erro ao criar partida automaticamente",
+                      description: "Preencha os dados manualmente e tente novamente.",
                       variant: "destructive",
                     });
-                    // Fallback to manual setup
+                    // Fallback absoluto — só quando a criação no banco falha
                     setMatchData(prev => ({ ...prev, ...cleanData, homeTeamId, awayTeamId }));
                     setDefaultsApplied(true);
                     setCurrentStep('match');

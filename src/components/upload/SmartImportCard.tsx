@@ -19,6 +19,33 @@ interface SmartImportCardProps {
 
 type SmartImportStep = 'video' | 'processing';
 
+// Tenta extrair nomes de times a partir do nome do arquivo
+// Ex: "BrasilxArgentina.mp4" → { home: "Brasil", away: "Argentina" }
+function extractTeamsFromFilename(filename: string): { home?: string; away?: string } {
+  if (!filename) return {};
+  // Remove extensão e path
+  const name = filename.replace(/\.[^.]+$/, '').replace(/.*[/\\]/, '');
+  // Padrões comuns: "Time1 x Time2", "Time1 vs Time2", "Time1_x_Time2", "Time1-vs-Time2"
+  const separators = [
+    /[_\s]*[xX][_\s]*/,          // x ou X
+    /[_\s]*[vV][sS]\.?[_\s]*/,   // vs ou VS
+    /\s+contra\s+/i,              // contra
+  ];
+  for (const sep of separators) {
+    const parts = name.split(sep);
+    if (parts.length >= 2) {
+      // Limpar sufixos como "_1_teste_primeiro"
+      const cleanName = (s: string) => s.replace(/[_-]?\d+.*$/, '').replace(/[_-]+/g, ' ').trim();
+      const home = cleanName(parts[0]);
+      const away = cleanName(parts[1]);
+      if (home.length >= 2 && away.length >= 2) {
+        return { home, away };
+      }
+    }
+  }
+  return {};
+}
+
 export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportCardProps) {
   const [step, setStep] = useState<SmartImportStep>('video');
   const [videoFile, setVideoFile] = useState<File | null>(null);
@@ -61,24 +88,33 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
         transcriptionFailed = true;
       }
       
-      // Se transcrição falhou ou está vazia, ir direto para formulário manual
+      // Se transcrição falhou ou está vazia, tentar extrair do nome do arquivo
       if (!transcriptionText || transcriptionFailed) {
-        console.log('[SmartImport] Sem transcrição - pulando para formulário manual');
-        toast.info('A IA não conseguiu detectar os dados automaticamente. Preencha manualmente.', {
-          duration: 6000,
-        });
+        console.log('[SmartImport] Sem transcrição - tentando extrair do nome do arquivo');
         
-        const emptyMatchData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
+        // Fallback: extrair times do nome do arquivo
+        const filenameTeams = videoFile ? extractTeamsFromFilename(videoFile.name) : {};
+        
+        if (filenameTeams.home || filenameTeams.away) {
+          console.log('[SmartImport] Times extraídos do filename:', filenameTeams);
+          toast.info('IA indisponível — times detectados pelo nome do arquivo.', { duration: 4000 });
+        } else {
+          toast.info('IA indisponível. Criando partida com dados parciais.', { duration: 4000 });
+        }
+        
+        const fallbackData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
           homeTeamId: '',
           awayTeamId: '',
           competition: '',
           matchDate: new Date().toISOString().split('T')[0],
           matchTime: '',
           venue: '',
+          _homeTeamName: filenameTeams.home || undefined,
+          _awayTeamName: filenameTeams.away || undefined,
         };
         
         onMatchInfoExtracted(
-          emptyMatchData,
+          fallbackData,
           videoFile || undefined,
           videoUrl || undefined,
           undefined
@@ -97,21 +133,25 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
       }
       
       if (!extractResult?.success) {
-        toast.info('IA não conseguiu interpretar os dados da partida. Preencha manualmente.', {
-          duration: 5000,
+        // Extração falhou mas temos transcrição - tentar filename como fallback para times
+        const filenameTeams = videoFile ? extractTeamsFromFilename(videoFile.name) : {};
+        toast.info('IA não identificou times na transcrição. Criando partida automaticamente.', {
+          duration: 4000,
         });
         
-        const emptyMatchData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
+        const fallbackData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
           homeTeamId: '',
           awayTeamId: '',
           competition: '',
           matchDate: new Date().toISOString().split('T')[0],
           matchTime: '',
           venue: '',
+          _homeTeamName: filenameTeams.home || undefined,
+          _awayTeamName: filenameTeams.away || undefined,
         };
         
         onMatchInfoExtracted(
-          emptyMatchData,
+          fallbackData,
           videoFile || undefined,
           videoUrl || undefined,
           transcriptionText || undefined
