@@ -4752,10 +4752,19 @@ def extract_event_clips_auto(
     # ═══════════════════════════════════════════════════════════════
     # FILTRAR EVENTOS DUPLICADOS ANTES DE PROCESSAR
     # ═══════════════════════════════════════════════════════════════
-    def filter_duplicate_events(events_list: list, min_gap_seconds: int = 30) -> list:
-        """Remove eventos muito próximos para evitar clips repetidos."""
+    # Tipos de evento de alta prioridade que NUNCA devem ser filtrados
+    HIGH_PRIORITY_TYPES = {'goal', 'penalty', 'red_card'}
+    
+    def filter_duplicate_events(events_list: list, min_gap_seconds: int = 10) -> tuple:
+        """
+        Remove eventos muito próximos para evitar clips repetidos.
+        Eventos de alta prioridade (goal, penalty, red_card) NUNCA são removidos.
+        
+        Returns:
+            tuple: (filtered_events, filtered_out_event_ids)
+        """
         if not events_list or len(events_list) < 2:
-            return events_list
+            return events_list, []
         
         # Ordenar por timestamp (usar 'or 0' para tratar None)
         sorted_events = sorted(events_list, key=lambda e: (e.get('minute') or 0) * 60 + (e.get('second') or 0))
@@ -4764,7 +4773,17 @@ def extract_event_clips_auto(
         priority = {'goal': 10, 'penalty': 9, 'red_card': 8, 'yellow_card': 7, 'save': 6, 'shot': 5, 'foul': 4}
         
         filtered = [sorted_events[0]]
+        filtered_out_ids = []
+        
         for event in sorted_events[1:]:
+            event_type = event.get('event_type', '')
+            
+            # Eventos de alta prioridade SEMPRE passam (nunca são filtrados)
+            if event_type in HIGH_PRIORITY_TYPES:
+                print(f"[CLIP] ★ Evento {event_type} protegido - sempre gera clip (min {event.get('minute')}:{event.get('second', 0)})")
+                filtered.append(event)
+                continue
+            
             last_event = filtered[-1]
             last_time = (last_event.get('minute') or 0) * 60 + (last_event.get('second') or 0)
             current_time = (event.get('minute') or 0) * 60 + (event.get('second') or 0)
@@ -4772,22 +4791,57 @@ def extract_event_clips_auto(
             if current_time - last_time >= min_gap_seconds:
                 filtered.append(event)
             else:
+                # Se o último evento é de alta prioridade, não substituir - apenas ignorar o atual
+                last_type = last_event.get('event_type', '')
+                if last_type in HIGH_PRIORITY_TYPES:
+                    print(f"[CLIP] Ignorando {event_type} duplicado (< {min_gap_seconds}s de {last_type} protegido)")
+                    if event.get('id'):
+                        filtered_out_ids.append(event.get('id'))
+                    continue
+                
                 # Se for um evento mais importante, substituir
-                event_priority = priority.get(event.get('event_type'), 0)
-                last_priority = priority.get(last_event.get('event_type'), 0)
+                event_priority = priority.get(event_type, 0)
+                last_priority = priority.get(last_type, 0)
                 if event_priority > last_priority:
-                    print(f"[CLIP] Substituindo {last_event.get('event_type')} por {event.get('event_type')} (mais relevante)")
+                    print(f"[CLIP] Substituindo {last_type} por {event_type} (mais relevante)")
+                    old_event = filtered[-1]
+                    if old_event.get('id'):
+                        filtered_out_ids.append(old_event.get('id'))
                     filtered[-1] = event
                 else:
-                    print(f"[CLIP] Ignorando {event.get('event_type')} duplicado (< {min_gap_seconds}s de {last_event.get('event_type')})")
+                    print(f"[CLIP] Ignorando {event_type} duplicado (< {min_gap_seconds}s de {last_type})")
+                    if event.get('id'):
+                        filtered_out_ids.append(event.get('id'))
         
         if len(events_list) != len(filtered):
             print(f"[CLIP] Filtrados {len(events_list) - len(filtered)} eventos duplicados ({len(events_list)} -> {len(filtered)})")
+            print(f"[CLIP] IDs filtrados (sem clip): {filtered_out_ids}")
         
-        return filtered
+        return filtered, filtered_out_ids
     
-    # Aplicar filtro de duplicatas
-    events = filter_duplicate_events(events, min_gap_seconds=30)
+    # Aplicar filtro de duplicatas (gap reduzido para 10s, eventos importantes protegidos)
+    events, filtered_out_ids = filter_duplicate_events(events, min_gap_seconds=10)
+    
+    # ═══════════════════════════════════════════════════════════════
+    # ATUALIZAR clip_pending=false PARA EVENTOS FILTRADOS
+    # Evita polling infinito no frontend para clips que nunca serão gerados
+    # ═══════════════════════════════════════════════════════════════
+    if filtered_out_ids:
+        session = get_session()
+        try:
+            updated_count = session.query(MatchEvent).filter(
+                MatchEvent.id.in_(filtered_out_ids)
+            ).update(
+                {MatchEvent.clip_pending: False},
+                synchronize_session='fetch'
+            )
+            session.commit()
+            print(f"[CLIP] ✓ Marcados {updated_count} eventos filtrados como clip_pending=false")
+        except Exception as db_err:
+            print(f"[CLIP] ⚠ Erro ao atualizar eventos filtrados: {db_err}")
+            session.rollback()
+        finally:
+            session.close()
     
     # Resolve symlink if video_path is a symlink
     if os.path.islink(video_path):
@@ -4990,10 +5044,13 @@ def extract_event_clips_auto(
             elif away_team and away_team.lower() in description.lower():
                 team_short = away_team[:3].upper()
             
-            # Generate clip filename
+            # Generate clip filename with unique event_id suffix to prevent overwriting
+            event_id_short = (event.get('id') or '')[:8]
             filename = f"{minute:02d}min-{event_type}"
             if team_short:
                 filename += f"-{team_short}"
+            if event_id_short:
+                filename += f"-{event_id_short}"
             filename += ".mp4"
             
             # Get clip subfolder path
@@ -5130,6 +5187,31 @@ def extract_event_clips_auto(
         except Exception as e:
             print(f"[CLIP] Error extracting clip: {e}")
             continue
+    
+    # ═══════════════════════════════════════════════════════════════
+    # SAFETY NET: Marcar eventos que falharam na geração como clip_pending=false
+    # Isso evita que o frontend fique em polling infinito
+    # ═══════════════════════════════════════════════════════════════
+    extracted_event_ids = {c.get('event_id') for c in extracted if c.get('event_id')}
+    all_event_ids = {e.get('id') for e in events if e.get('id')}
+    failed_event_ids = all_event_ids - extracted_event_ids
+    
+    if failed_event_ids:
+        session = get_session()
+        try:
+            updated_count = session.query(MatchEvent).filter(
+                MatchEvent.id.in_(list(failed_event_ids))
+            ).update(
+                {MatchEvent.clip_pending: False},
+                synchronize_session='fetch'
+            )
+            session.commit()
+            print(f"[CLIP] ✓ Marcados {updated_count} eventos com falha como clip_pending=false (IDs: {list(failed_event_ids)[:5]}...)")
+        except Exception as db_err:
+            print(f"[CLIP] ⚠ Erro ao atualizar eventos com falha: {db_err}")
+            session.rollback()
+        finally:
+            session.close()
     
     return extracted
 
