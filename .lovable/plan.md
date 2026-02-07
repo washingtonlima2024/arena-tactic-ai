@@ -1,133 +1,218 @@
 
 
-# Corrigir Pipeline: Transcrição do Storage Parcial Causa 0 Eventos
+# Melhorar Feedback de Progresso do Whisper no Pipeline Async
 
-## Problema Diagnosticado
+## Situacao Atual
 
-O jogo `f60ae001` processou e finalizou com "0 eventos, 0 clips" porque:
-
-1. O Smart Import anterior salvou uma transcrição de 5 minutos no storage (368 bytes em `texts/first_half_transcription.txt` e 626 bytes em `srt/first_half.srt`)
-2. Mesmo com a correção de `firstHalfTranscription: undefined` no Upload.tsx, o pipeline tem um **fallback que lê arquivos do storage** (linhas 8420-8444)
-3. Esse fallback encontra o arquivo de 368 bytes, verifica `len > 100` (368 > 100 = verdadeiro), e marca `has_preloaded_first = True`
-4. Com essa flag ativa, o pipeline **pula o Whisper completamente** (linha 8473-8493)
-5. A IA analisa apenas 368 bytes de texto e encontra 0 eventos
+O processo esta rodando normalmente -- o Whisper Local esta transcrevendo o video de 49 MB no modo CPU, o que pode levar de 5 a 15 minutos. O problema e que a UI mostra 20% e "pending" durante todo esse tempo porque o pipeline so atualiza o status quando a transcricao de uma parte **termina completamente**.
 
 ```text
-FLUXO ATUAL (bug):
-
-Upload.tsx envia firstHalfTranscription = undefined  (corrigido)
-    |
-    v
-Pipeline: has_preloaded_first = False  (ok)
-    |
-    v
-Fallback storage (linha 8425): encontra first_half_transcription.txt (368 bytes)
-    |
-    v
-368 > 100 chars = True -> has_preloaded_first = True  (BUG!)
-    |
-    v
-Pipeline PULA WHISPER -> IA analisa 368 bytes -> 0 eventos
+FLUXO ATUAL:
+  _update_async_job(20%, "Transcrevendo com Whisper...")  -- linha 8545
+       |
+       v
+  ThreadPoolExecutor.submit(_transcribe_part_parallel)  -- sem update intermediario
+       |
+       (5-15 min de silencio na UI)
+       |
+       v
+  as_completed -> _update_async_job(80%, "Parte 1/1 transcrita")  -- so aqui atualiza
 ```
 
-## Solucao
+## Mudancas Propostas
 
-### Mudanca 1: Validar tamanho minimo da transcricao do storage
+### 1. Atualizar status da parte para "transcribing" quando inicia (server.py)
 
-**Arquivo:** `video-processor/server.py` (linhas 8420-8444 e 8447-8471)
+**Arquivo:** `video-processor/server.py` (linhas 8566-8574)
 
-O threshold de 100 caracteres e muito baixo para distinguir uma transcricao real de uma parcial do Smart Import. Para um video de 15 MB (~10-26 minutos), a transcricao completa deveria ter pelo menos 2000-5000 caracteres.
+Antes de submeter cada parte ao executor, atualizar o status para "transcribing" imediatamente, dando feedback visual ao usuario:
 
-Solucao: Comparar o tamanho da transcricao com a duracao do video. Se a relacao chars/segundo for muito baixa, ignorar a transcricao do storage e rodar Whisper.
+```python
+# ANTES (linha 8566-8574):
+for item in all_parts_flat:
+    future = executor.submit(
+        _transcribe_part_parallel,
+        item['partInfo'],
+        item['halfType'],
+        match_id,
+        item['minuteOffset']
+    )
+    transcribe_futures[future] = item
 
-```text
-ANTES (linha 8428):
-  has_preloaded_first = len(first_half_text.strip()) > 100
-
-DEPOIS:
-  text_len = len(first_half_text.strip())
-  first_dur = video_durations.get('first', 0)
-  
-  # Validar se transcricao e proporcional ao video
-  # Uma transcricao real tem ~8-15 chars/segundo
-  # Smart Import de 5 min em video de 26 min teria ~1.5 chars/s
-  if first_dur > 300 and text_len > 0:
-      chars_per_sec = text_len / first_dur
-      if chars_per_sec < 3:
-          print(f"[ASYNC-PIPELINE] Transcricao do storage DESCARTADA: "
-                f"{text_len} chars / {first_dur:.0f}s = {chars_per_sec:.1f} chars/s (< 3 = parcial)")
-          has_preloaded_first = False
-          first_half_text = ''  # Limpar para forcar Whisper
-      else:
-          has_preloaded_first = True
-          print(f"[ASYNC-PIPELINE] Transcricao do storage ACEITA: "
-                f"{text_len} chars / {first_dur:.0f}s = {chars_per_sec:.1f} chars/s")
-  else:
-      has_preloaded_first = text_len > 100
-```
-
-A mesma logica deve ser aplicada para o segundo tempo (linhas 8447-8471), usando `video_durations.get('second', 0)`.
-
-### Mudanca 2: Garantir video_durations esta populado ANTES do fallback do storage
-
-**Arquivo:** `video-processor/server.py`
-
-Atualmente, `video_durations` e preenchido na Phase 2.5 (linhas 8280-8400), que roda ANTES da Phase 3. Isso e correto - o valor ja estara disponivel no momento do fallback. Nenhuma mudanca necessaria aqui.
-
-### Mudanca 3: Limpar transcricao parcial do storage ao iniciar pipeline
-
-**Arquivo:** `video-processor/server.py` (apos linha 8166, no inicio da Phase 1)
-
-Alternativa complementar: quando o pipeline async inicia, verificar se existe uma transcricao suspeitamente curta no storage e remove-la, forcando a re-transcricao.
-
-```text
-# Phase 1 inicio - Limpar transcricoes parciais do Smart Import
-for half_label in ['first', 'second']:
-    txt_path = get_subfolder_path(match_id, 'texts') / f'{half_label}_half_transcription.txt'
-    srt_path = get_subfolder_path(match_id, 'srt') / f'{half_label}_half.srt'
+# DEPOIS:
+for item in all_parts_flat:
+    # Atualizar status da parte para "transcribing" imediatamente
+    for ps in parts_status:
+        if ps['halfType'] == item['halfType'] and ps['part'] == item['partInfo']['part']:
+            ps['status'] = 'transcribing'
+            ps['progress'] = 10
+            break
     
-    for fpath in [txt_path, srt_path]:
-        if fpath.exists():
-            file_size = fpath.stat().st_size
-            if file_size < 1000:  # Menor que 1KB = provavel Smart Import parcial
-                print(f"[ASYNC-PIPELINE] Removendo transcricao parcial: {fpath.name} ({file_size} bytes)")
-                fpath.unlink()
+    future = executor.submit(
+        _transcribe_part_parallel,
+        item['partInfo'],
+        item['halfType'],
+        match_id,
+        item['minuteOffset']
+    )
+    transcribe_futures[future] = item
+
+# Atualizar job com status "transcribing" nas partes
+_update_async_job(job_id, 'transcribing', 25, 
+                  'Whisper processando audio (pode levar alguns minutos)...',
+                  'transcribing', 0, total_parts, parts_status)
 ```
 
-Isso garante que transcricoes menores que 1KB (como a de 368 bytes ou 626 bytes do Smart Import) sejam removidas antes do pipeline tentar usa-las como fallback.
+### 2. Adicionar mensagem informativa sobre modo CPU (server.py)
 
-### Mudanca 4: Seguranca adicional - forcar re-transcricao em reprocessamento
+**Arquivo:** `video-processor/server.py` (linha 8545)
 
-**Arquivo:** `video-processor/server.py` (linha 8473)
+Quando o Whisper inicia, mostrar uma mensagem mais informativa que inclui a estimativa de tempo baseada no modo (CPU vs GPU):
 
-Quando o pipeline e executado em modo de reprocessamento (o jogo ja existia), ele deveria sempre rodar o Whisper em vez de reusar transcricoes antigas. Adicionar um parametro `forceTranscription` que o frontend pode enviar:
+```python
+# ANTES (linha 8545):
+_update_async_job(job_id, 'transcribing', 20, 'Transcrevendo com Whisper...', 'transcribing')
 
-```text
-# Na verificacao de pre-loaded transcriptions
-force_transcription = data.get('forceTranscription', False)
+# DEPOIS:
+# Verificar se Whisper esta em modo GPU ou CPU para estimar tempo
+gpu_info = ""
+try:
+    import torch
+    if torch.cuda.is_available():
+        gpu_info = " (GPU - rapido)"
+    else:
+        gpu_info = " (CPU - pode levar 5-15 min)"
+except:
+    gpu_info = " (CPU)"
 
-if (has_preloaded_first or has_preloaded_second) and not force_transcription:
-    # Usar transcricoes carregadas
-    ...
-else:
-    # Rodar Whisper
-    ...
+_update_async_job(job_id, 'transcribing', 20, 
+                  f'Transcrevendo com Whisper Local{gpu_info}...', 
+                  'transcribing', 0, total_parts, parts_status)
+```
+
+### 3. Adicionar heartbeat de progresso durante transcricao (server.py)
+
+**Arquivo:** `video-processor/server.py` (funcao `_transcribe_part_parallel`, linhas 8097-8136)
+
+Executar a transcricao em uma thread separada com heartbeat a cada 10 segundos para dar feedback visual:
+
+```python
+def _transcribe_part_parallel(part_info: dict, half_type: str, match_id: str, minute_offset: float):
+    """Transcribe a single video part - used by ThreadPoolExecutor."""
+    try:
+        part_path = part_info['path']
+        part_num = part_info['part']
+        part_start = part_info['start']
+        part_duration = part_info['duration']
+        
+        part_start_minute = minute_offset + (part_start / 60)
+        
+        print(f"[ASYNC-TRANSCRIBE] Part {part_num} (half={half_type}): transcribing...")
+        
+        # Log inicio com tamanho do arquivo para diagnostico
+        file_size_mb = os.path.getsize(part_path) / (1024 * 1024) if os.path.exists(part_path) else 0
+        print(f"[ASYNC-TRANSCRIBE] Part {part_num}: {file_size_mb:.1f} MB, estimativa: {file_size_mb * 0.3:.0f}-{file_size_mb * 0.6:.0f}s")
+        
+        result = _transcribe_video_part_direct(part_path, part_start, minute_offset)
+        
+        if result.get('success') and result.get('text'):
+            print(f"[ASYNC-TRANSCRIBE] Part {part_num}: CONCLUIDO - {len(result.get('text', ''))} chars")
+            return {
+                'success': True,
+                'part': part_num,
+                'halfType': half_type,
+                'text': result.get('text', ''),
+                'srtContent': result.get('srtContent', ''),
+                'startMinute': part_start_minute,
+                'duration': part_duration
+            }
+        else:
+            return {
+                'success': False,
+                'part': part_num,
+                'halfType': half_type,
+                'error': result.get('error', 'Unknown error')
+            }
+    except Exception as e:
+        return {
+            'success': False,
+            'part': part_info.get('part', 0),
+            'halfType': half_type,
+            'error': str(e)
+        }
+```
+
+### 4. Progresso simulado durante espera longa (server.py)
+
+**Arquivo:** `video-processor/server.py` (linhas 8576-8599, bloco `as_completed`)
+
+Adicionar um timer que incrementa o progresso gradualmente enquanto espera o Whisper terminar, para que a barra nao fique parada em 20%:
+
+```python
+# Substituir o bloco as_completed simples por um com heartbeat
+import time as time_module_local
+
+last_heartbeat = time_module.time()
+heartbeat_progress = 25  # Comeca em 25% (ja mostrou 20%)
+
+while transcribe_futures:
+    # Verificar futures completas (timeout curto para nao bloquear)
+    done_futures = []
+    for future in list(transcribe_futures.keys()):
+        if future.done():
+            done_futures.append(future)
+    
+    for future in done_futures:
+        item = transcribe_futures.pop(future)
+        result = future.result()
+        completed_parts += 1
+        
+        # Update part status
+        for ps in parts_status:
+            if ps['halfType'] == item['halfType'] and ps['part'] == item['partInfo']['part']:
+                ps['status'] = 'done' if result['success'] else 'error'
+                ps['progress'] = 100
+                break
+        
+        progress = 20 + int((completed_parts / len(all_parts_flat)) * 60)
+        
+        if result['success']:
+            transcription_results[item['halfType']].append(result)
+            print(f"[ASYNC-PIPELINE] Transcribed {item['halfType']} part {result['part']}: {len(result['text'])} chars")
+            _update_async_job(job_id, 'transcribing', progress, 
+                            f'Parte {completed_parts}/{len(all_parts_flat)} transcrita',
+                            'transcribing', completed_parts, total_parts, parts_status)
+        else:
+            print(f"[ASYNC-PIPELINE] Failed {item['halfType']} part: {result.get('error')}")
+    
+    # Heartbeat a cada 15 segundos para mostrar progresso
+    now = time_module.time()
+    if now - last_heartbeat > 15 and not done_futures:
+        heartbeat_progress = min(heartbeat_progress + 2, 75)  # Incrementa ate 75%
+        elapsed = int(now - start_time)
+        _update_async_job(job_id, 'transcribing', heartbeat_progress, 
+                         f'Whisper processando... ({elapsed}s)',
+                         'transcribing', completed_parts, total_parts, parts_status)
+        last_heartbeat = now
+    
+    if transcribe_futures:
+        time_module.sleep(2)  # Esperar 2s antes de verificar novamente
 ```
 
 ## Arquivos Modificados
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `video-processor/server.py` | Linhas 8420-8444: Validar chars/segundo antes de aceitar transcricao do storage |
-| `video-processor/server.py` | Linhas 8447-8471: Mesma validacao para segundo tempo |
-| `video-processor/server.py` | Apos linha 8166: Limpar transcricoes parciais (< 1KB) no inicio do pipeline |
-| `video-processor/server.py` | Linha 8473: Suporte a `forceTranscription` para reprocessamento |
+| `video-processor/server.py` | Linhas 8545: Mensagem informativa com modo CPU/GPU |
+| `video-processor/server.py` | Linhas 8566-8574: Marcar partes como "transcribing" ao iniciar |
+| `video-processor/server.py` | Linhas 8097-8136: Log de diagnostico com tamanho do arquivo |
+| `video-processor/server.py` | Linhas 8576-8599: Heartbeat de progresso a cada 15s |
 
-## Resultado Esperado
+## Resultado
 
-- Transcricao parcial de 368 bytes sera descartada (chars/s < 3)
-- Whisper roda no video completo (~15 MB, ~26 minutos)
-- IA analisa transcricao completa com range 0-90 min
-- Eventos e gols sao detectados corretamente
-- Clips sao gerados automaticamente na Phase 5
+- Barra de progresso incrementa gradualmente de 20% a 75% durante a transcricao
+- Partes mostram status "transcribing" em vez de "pending"
+- Mensagem informa se esta usando CPU ou GPU
+- Tempo decorrido visivel na mensagem de progresso
+- O Whisper continua rodando normalmente -- apenas o feedback visual e melhorado
 
