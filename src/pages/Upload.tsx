@@ -214,6 +214,9 @@ export default function VideoUpload() {
   const [createdMatchId, setCreatedMatchId] = useState<string | null>(null);
   const [isCreatingMatch, setIsCreatingMatch] = useState(false);
   
+  // Transcrição reutilizada do Smart Import (evita reprocessar no pipeline de análise)
+  const [smartImportTranscription, setSmartImportTranscription] = useState<string | null>(null);
+  
   const { data: teams = [] } = useTeams();
   const createTeamMutation = useCreateTeam();
   const createMatch = useCreateMatch();
@@ -1641,7 +1644,13 @@ export default function VideoUpload() {
         let firstHalfTranscription = '';
         let secondHalfTranscription = '';
         
-        if (firstHalfSrt) {
+        // Carregar transcrição do Smart Import se disponível
+        if (!firstHalfTranscription && smartImportTranscription && smartImportTranscription.length > 50) {
+          firstHalfTranscription = smartImportTranscription;
+          console.log('📝 Transcrição 1º tempo carregada do Smart Import:', firstHalfTranscription.length, 'chars');
+        }
+        
+        if (!firstHalfTranscription && firstHalfSrt) {
           firstHalfTranscription = await readSrtFile(firstHalfSrt);
           console.log('📝 Transcrição 1º tempo carregada do SRT:', firstHalfTranscription.length, 'chars');
         }
@@ -1765,8 +1774,14 @@ export default function VideoUpload() {
       let firstHalfTranscription = '';
       let secondHalfTranscription = '';
 
+      // Get transcription from Smart Import first (avoids redundant Whisper call)
+      if (!firstHalfTranscription && smartImportTranscription && smartImportTranscription.length > 50) {
+        firstHalfTranscription = smartImportTranscription;
+        console.log('📝 Transcrição 1º tempo carregada do Smart Import:', firstHalfTranscription.length, 'chars');
+      }
+      
       // Get transcription from SRT files or segments
-      if (firstHalfSrt) {
+      if (!firstHalfTranscription && firstHalfSrt) {
         firstHalfTranscription = await readSrtFile(firstHalfSrt);
       }
       if (secondHalfSrt) {
@@ -2639,7 +2654,13 @@ export default function VideoUpload() {
               </Button>
               
               <SmartImportCard
-                onMatchInfoExtracted={async (extractedData, videoFile, videoUrl) => {
+                onMatchInfoExtracted={async (extractedData, videoFile, videoUrl, transcription) => {
+                  // Salvar transcrição do Smart Import para reutilizar na análise
+                  if (transcription && transcription.length > 50) {
+                    console.log('[SmartImport] Transcrição salva para reutilização:', transcription.length, 'chars');
+                    setSmartImportTranscription(transcription);
+                  }
+                  
                   // Extract AI team names for fuzzy matching
                   const { _homeTeamName, _awayTeamName, ...cleanData } = extractedData as any;
                   
