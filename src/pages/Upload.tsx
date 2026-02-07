@@ -1694,6 +1694,38 @@ export default function VideoUpload() {
           console.log('📝 Transcrição 2º tempo carregada do segmento:', secondHalfTranscription.length, 'chars');
         }
         
+        // 🆕 Verificar transcrições existentes no storage (reutilizar se já processadas)
+        if (!firstHalfTranscription) {
+          try {
+            const existingFirst = await apiClient.getExistingTranscription(matchId, 'first');
+            if (existingFirst) {
+              firstHalfTranscription = existingFirst;
+              console.log('📝 Transcrição 1º tempo reutilizada do storage:', existingFirst.length, 'chars');
+              toast({
+                title: "📝 Transcrição existente encontrada",
+                description: `1º tempo: ${existingFirst.length} caracteres — pulando Whisper`,
+              });
+            }
+          } catch (e) {
+            console.log('[Async] Sem transcrição existente no storage para 1º tempo');
+          }
+        }
+        if (!secondHalfTranscription) {
+          try {
+            const existingSecond = await apiClient.getExistingTranscription(matchId, 'second');
+            if (existingSecond) {
+              secondHalfTranscription = existingSecond;
+              console.log('📝 Transcrição 2º tempo reutilizada do storage:', existingSecond.length, 'chars');
+              toast({
+                title: "📝 Transcrição existente encontrada",
+                description: `2º tempo: ${existingSecond.length} caracteres — pulando Whisper`,
+              });
+            }
+          } catch (e) {
+            console.log('[Async] Sem transcrição existente no storage para 2º tempo');
+          }
+        }
+        
         // 🆕 Validar que segundo tempo tem transcrição se tem vídeo
         if (secondHalfSegments.length > 0 && !secondHalfTranscription) {
           console.error('[ASYNC] ⚠️ Vídeo do 2º tempo SEM transcrição! Abortando pipeline async.');
@@ -1842,6 +1874,38 @@ export default function VideoUpload() {
       }
       if (!secondHalfTranscription && secondHalfSegments[0]?.transcription) {
         secondHalfTranscription = secondHalfSegments[0].transcription;
+      }
+      
+      // 🆕 Verificar transcrições existentes no storage (reutilizar se já processadas)
+      if (!firstHalfTranscription) {
+        try {
+          const existingFirst = await apiClient.getExistingTranscription(matchId, 'first');
+          if (existingFirst) {
+            firstHalfTranscription = existingFirst;
+            console.log('📝 Transcrição 1º tempo reutilizada do storage:', existingFirst.length, 'chars');
+            toast({
+              title: "📝 Transcrição existente encontrada",
+              description: `1º tempo: ${existingFirst.length} caracteres — pulando Whisper`,
+            });
+          }
+        } catch (e) {
+          console.log('[Sequential] Sem transcrição existente no storage para 1º tempo');
+        }
+      }
+      if (!secondHalfTranscription) {
+        try {
+          const existingSecond = await apiClient.getExistingTranscription(matchId, 'second');
+          if (existingSecond) {
+            secondHalfTranscription = existingSecond;
+            console.log('📝 Transcrição 2º tempo reutilizada do storage:', existingSecond.length, 'chars');
+            toast({
+              title: "📝 Transcrição existente encontrada",
+              description: `2º tempo: ${existingSecond.length} caracteres — pulando Whisper`,
+            });
+          }
+        } catch (e) {
+          console.log('[Sequential] Sem transcrição existente no storage para 2º tempo');
+        }
       }
 
       console.log('=== TRANSCRIÇÕES PRÉ-WHISPER ===');

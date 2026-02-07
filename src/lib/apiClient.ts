@@ -1237,6 +1237,48 @@ export const apiClient = {
   deleteMatchStorage: (matchId: string) =>
     apiRequest<{ success: boolean }>(`/api/storage/${matchId}`, { method: 'DELETE' }),
   
+  // ============== Transcription Reuse ==============
+  /**
+   * Verifica se já existe uma transcrição salva no storage para um determinado tempo.
+   * Tenta TXT primeiro, depois SRT como fallback.
+   * Retorna o conteúdo da transcrição ou null se não encontrada.
+   */
+  getExistingTranscription: async (matchId: string, halfType: 'first' | 'second'): Promise<string | null> => {
+    const filesToTry = [
+      { subfolder: 'texts', filename: `${halfType}_half_transcription.txt` },
+      { subfolder: 'srt', filename: `${halfType}_half.srt` },
+      { subfolder: 'srt', filename: `${halfType}_transcription.srt` },
+    ];
+    
+    for (const { subfolder, filename } of filesToTry) {
+      try {
+        const apiBase = getApiBase();
+        const url = buildApiUrl(apiBase, `/api/storage/${matchId}/${subfolder}/${filename}`);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10000);
+        
+        const response = await fetch(url, { 
+          signal: controller.signal,
+          headers: { 'Accept': 'text/plain, application/octet-stream, */*' }
+        });
+        clearTimeout(timeout);
+        
+        if (response.ok) {
+          const text = await response.text();
+          if (text && text.trim().length > 50) {
+            console.log(`[getExistingTranscription] ✓ Found ${halfType} half transcription in ${subfolder}/${filename}: ${text.length} chars`);
+            return text;
+          }
+        }
+      } catch {
+        // File not found or server error - try next
+      }
+    }
+    
+    console.log(`[getExistingTranscription] No existing transcription found for ${halfType} half`);
+    return null;
+  },
+
   // ============== Maintenance ==============
   cleanupOrphanRecords: () =>
     apiRequest<{ success: boolean; deleted: Record<string, number>; message: string }>('/api/maintenance/cleanup-orphans', { method: 'POST' }),
