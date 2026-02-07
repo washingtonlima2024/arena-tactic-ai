@@ -928,8 +928,8 @@ def _validate_all_events_with_context(
     
     for event in events:
         event_type = event.get('event_type')
-        minute = event.get('minute', 0)
-        second = event.get('second', 0)
+        minute = event.get('minute') or 0
+        second = event.get('second') or 0
         
         # Extrair contexto centrado na keyword do evento (janela 40s)
         context = _extract_context_around_timestamp(
@@ -1461,8 +1461,8 @@ def refine_event_timestamp_from_srt(
         return event
     
     # Calculate AI-detected timestamp in total seconds
-    ai_minute = event.get('minute', 0)
-    ai_second = event.get('second', 0)
+    ai_minute = event.get('minute') or 0
+    ai_second = event.get('second') or 0
     ai_total_seconds = ai_minute * 60 + ai_second
     
     try:
@@ -1581,14 +1581,14 @@ def deduplicate_events(events: List[Dict], threshold_seconds: int = 60) -> List[
         return []
     
     # Sort by timestamp - use videoSecond if available, otherwise calculate from minute
-    sorted_events = sorted(events, key=lambda e: e.get('videoSecond', e.get('minute', 0) * 60 + e.get('second', 0)))
+    sorted_events = sorted(events, key=lambda e: e.get('videoSecond') or ((e.get('minute') or 0) * 60 + (e.get('second') or 0)))
     
     result = []
     
     for event in sorted_events:
         event_type = event.get('event_type')
         event_team = event.get('team', 'unknown')
-        event_time = event.get('videoSecond', event.get('minute', 0) * 60 + event.get('second', 0))
+        event_time = event.get('videoSecond') or ((event.get('minute') or 0) * 60 + (event.get('second') or 0))
         
         # Check if there's already an event of the SAME TYPE AND TEAM too close
         is_duplicate = False
@@ -1600,7 +1600,7 @@ def deduplicate_events(events: List[Dict], threshold_seconds: int = 60) -> List[
             
             # Only compare same type AND same team
             if existing_type == event_type and existing_team == event_team:
-                existing_time = existing.get('videoSecond', existing.get('minute', 0) * 60 + existing.get('second', 0))
+                existing_time = existing.get('videoSecond') or ((existing.get('minute') or 0) * 60 + (existing.get('second') or 0))
                 time_diff = abs(event_time - existing_time)
                 
                 if time_diff < threshold_seconds:

@@ -3964,7 +3964,7 @@ def analyze_match():
                     print(f"[ANALYZE-MATCH] ⚠ Evento sem 'second', usando 0: {event_data.get('description', '')[:30]}")
                 
                 # Validate second range (0-59)
-                event_second = event_data.get('second', 0)
+                event_second = event_data.get('second') or 0
                 if event_second < 0 or event_second > 59:
                     event_second = max(0, min(59, event_second))
                     event_data['second'] = event_second
@@ -4757,8 +4757,8 @@ def extract_event_clips_auto(
         if not events_list or len(events_list) < 2:
             return events_list
         
-        # Ordenar por timestamp
-        sorted_events = sorted(events_list, key=lambda e: e.get('minute', 0) * 60 + e.get('second', 0))
+        # Ordenar por timestamp (usar 'or 0' para tratar None)
+        sorted_events = sorted(events_list, key=lambda e: (e.get('minute') or 0) * 60 + (e.get('second') or 0))
         
         # Prioridade por tipo de evento (maior = mais importante)
         priority = {'goal': 10, 'penalty': 9, 'red_card': 8, 'yellow_card': 7, 'save': 6, 'shot': 5, 'foul': 4}
@@ -4766,8 +4766,8 @@ def extract_event_clips_auto(
         filtered = [sorted_events[0]]
         for event in sorted_events[1:]:
             last_event = filtered[-1]
-            last_time = last_event.get('minute', 0) * 60 + last_event.get('second', 0)
-            current_time = event.get('minute', 0) * 60 + event.get('second', 0)
+            last_time = (last_event.get('minute') or 0) * 60 + (last_event.get('second') or 0)
+            current_time = (event.get('minute') or 0) * 60 + (event.get('second') or 0)
             
             if current_time - last_time >= min_gap_seconds:
                 filtered.append(event)
@@ -4809,8 +4809,8 @@ def extract_event_clips_auto(
     
     for event in events:
         try:
-            minute = event.get('minute', 0)
-            second = event.get('second', 0)
+            minute = event.get('minute') or 0
+            second = event.get('second') or 0
             event_type = event.get('event_type', 'event')
             description = event.get('description', '')
             
@@ -5532,12 +5532,12 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
                             
                             # Calcular videoSecond preciso para extração de clips
                             start_minute = 0 if half_type == 'first' else 45
-                            video_second = (raw_minute - start_minute) * 60 + event_data.get('second', 0)
+                            video_second = (raw_minute - start_minute) * 60 + (event_data.get('second') or 0)
                             
                             saved_event = {
                                 'id': event.id,
                                 'minute': raw_minute,
-                                'second': event_data.get('second', 0),
+                                'second': event_data.get('second') or 0,
                                 'event_type': event_data.get('event_type'),
                                 'description': event_data.get('description', ''),
                                 'team': event_data.get('team', 'home'),
@@ -6709,8 +6709,8 @@ def transcribe_large_video_endpoint():
                                     db_event = MatchEvent(
                                         match_id=match_id,
                                         event_type=event.get('event_type', 'unknown'),
-                                        minute=event.get('minute', 0),
-                                        second=event.get('second', 0),
+                                        minute=event.get('minute') or 0,
+                                        second=event.get('second') or 0,
                                         description=event.get('description'),
                                         match_half=analysis_half,
                                         metadata={
@@ -8356,8 +8356,8 @@ def _process_match_pipeline(job_id: str, data: dict):
                         segment_end = 45
                         
                         for event_data in events:
-                            raw_minute = event_data.get('minute', 0)
-                            evt_second = event_data.get('second', 0)
+                            raw_minute = event_data.get('minute') or 0
+                            evt_second = event_data.get('second') or 0
                             
                             # Calculate videoSecond relative to this video segment
                             video_second = (raw_minute - segment_start) * 60 + evt_second
@@ -8439,7 +8439,7 @@ def _process_match_pipeline(job_id: str, data: dict):
                             raw_minute = event_data.get('minute', 45)
                             if raw_minute < 45:
                                 raw_minute += 45
-                            evt_second = event_data.get('second', 0)
+                            evt_second = event_data.get('second') or 0
                             
                             # Calculate videoSecond relative to this video segment
                             video_second = (raw_minute - segment_start) * 60 + evt_second
@@ -10370,7 +10370,7 @@ def analyze_live_match():
                 video_id=video.id,
                 event_type=event.get('type', 'unknown'),
                 minute=minute,
-                second=event.get('second', 0),
+                second=event.get('second') or 0,
                 description=event.get('description', ''),
                 match_half=match_half,
                 clip_pending=True,
