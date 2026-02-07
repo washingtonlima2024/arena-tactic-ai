@@ -8004,6 +8004,46 @@ def _process_match_pipeline(job_id: str, data: dict):
             
             _update_async_job(job_id, 'splitting', 20, 'Divisão concluída', 'splitting')
             
+            # ========== PHASE 2.5: AUDIO EXTRACTION ==========
+            _update_async_job(job_id, 'extracting_audio', 18, 'Extraindo áudio dos vídeos...', 'extracting_audio')
+            video_durations = {}
+            
+            for half_type, video_path in video_paths.items():
+                try:
+                    resolved_path = os.path.realpath(video_path) if os.path.islink(video_path) else video_path
+                    duration_s = get_video_duration_seconds(resolved_path)
+                    video_durations[half_type] = duration_s
+                    
+                    # Extract audio using FFmpeg
+                    audio_filename = f"{half_type}_audio.mp3"
+                    audio_tmp_path = os.path.join(tmpdir, audio_filename)
+                    
+                    cmd = [
+                        'ffmpeg', '-y', '-i', resolved_path,
+                        '-vn', '-acodec', 'libmp3lame', '-ab', '128k',
+                        audio_tmp_path
+                    ]
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                    
+                    if result.returncode == 0 and os.path.exists(audio_tmp_path):
+                        audio_dest = get_subfolder_path(match_id, 'audio') / audio_filename
+                        shutil.copy2(audio_tmp_path, str(audio_dest))
+                        print(f"[ASYNC-PIPELINE] ✓ Áudio extraído: {audio_filename} ({duration_s:.0f}s)")
+                    else:
+                        print(f"[ASYNC-PIPELINE] ⚠ Falha na extração de áudio {half_type}: {result.stderr[:200] if result.stderr else 'unknown'}")
+                except Exception as audio_err:
+                    print(f"[ASYNC-PIPELINE] ⚠ Erro extração áudio {half_type}: {audio_err}")
+                    # Still try to get duration even if audio extraction fails
+                    if half_type not in video_durations:
+                        try:
+                            resolved_path = os.path.realpath(video_path) if os.path.islink(video_path) else video_path
+                            video_durations[half_type] = get_video_duration_seconds(resolved_path)
+                        except:
+                            video_durations[half_type] = 0
+            
+            print(f"[ASYNC-PIPELINE] Durações dos vídeos: {video_durations}")
+            
+
             # ========== PHASE 3: TRANSCRIPTION (60%) ==========
             # Check if we have pre-loaded transcriptions from frontend (skip Whisper)
             has_preloaded_first = bool(first_half_transcription and len(first_half_transcription.strip()) > 100)
@@ -8163,6 +8203,50 @@ def _process_match_pipeline(job_id: str, data: dict):
                     f.write(second_half_text)
                 print(f"[ASYNC-PIPELINE] ✓ Transcrição 2º tempo salva: {txt_path}")
             
+            # ========== PHASE 3.5: SYNTHETIC SRT GENERATION ==========
+            # Generate SRT files when transcription is plain text (not SRT format)
+            for half_label, text_content in [('first', first_half_text), ('second', second_half_text)]:
+                if text_content and not is_srt_format(text_content):
+                    half_duration = video_durations.get(half_label, 2700)
+                    if half_duration <= 0:
+                        half_duration = 2700  # Default 45 min
+                    
+                    # Split text into blocks of ~10 words
+                    words = text_content.split()
+                    block_size = 10
+                    blocks = [' '.join(words[i:i+block_size]) for i in range(0, len(words), block_size)]
+                    
+                    if blocks:
+                        time_per_block = half_duration / len(blocks)
+                        srt_lines = []
+                        for idx, block in enumerate(blocks):
+                            start_s = idx * time_per_block
+                            end_s = min((idx + 1) * time_per_block, half_duration)
+                            
+                            start_h = int(start_s // 3600)
+                            start_m = int((start_s % 3600) // 60)
+                            start_sec = int(start_s % 60)
+                            start_ms = int((start_s % 1) * 1000)
+                            
+                            end_h = int(end_s // 3600)
+                            end_m = int((end_s % 3600) // 60)
+                            end_sec = int(end_s % 60)
+                            end_ms = int((end_s % 1) * 1000)
+                            
+                            srt_lines.append(f"{idx + 1}")
+                            srt_lines.append(f"{start_h:02d}:{start_m:02d}:{start_sec:02d},{start_ms:03d} --> {end_h:02d}:{end_m:02d}:{end_sec:02d},{end_ms:03d}")
+                            srt_lines.append(block)
+                            srt_lines.append("")
+                        
+                        srt_content = '\n'.join(srt_lines)
+                        srt_path = get_subfolder_path(match_id, 'srt') / f'{half_label}_half.srt'
+                        with open(srt_path, 'w', encoding='utf-8') as f:
+                            f.write(srt_content)
+                        print(f"[ASYNC-PIPELINE] ✓ SRT sintético gerado: {half_label}_half.srt ({len(blocks)} blocos, {half_duration:.0f}s)")
+                    else:
+                        print(f"[ASYNC-PIPELINE] ⚠ SRT não gerado para {half_label}: texto vazio após split")
+            
+
             # ========== PHASE 4: AI ANALYSIS (10%) ==========
             _update_async_job(job_id, 'analyzing', 80, 'Analisando com IA...', 'analyzing')
             
@@ -8198,23 +8282,53 @@ def _process_match_pipeline(job_id: str, data: dict):
                     print(f"[ASYNC-PIPELINE] ⚠ Análise 1º tempo falhou: {ai_err}")
                     events = []
                 if events:
-                    # Save events
+                    # Save events with correct metadata and videoSecond
                     session = get_session()
                     try:
+                        first_duration = video_durations.get('first', 0)
+                        segment_start = 0
+                        segment_end = 45
+                        
                         for event_data in events:
+                            raw_minute = event_data.get('minute', 0)
+                            evt_second = event_data.get('second', 0)
+                            
+                            # Calculate videoSecond relative to this video segment
+                            video_second = (raw_minute - segment_start) * 60 + evt_second
+                            
+                            # Proportional correction if videoSecond exceeds video duration
+                            if first_duration > 0 and video_second > first_duration:
+                                expected_duration = (segment_end - segment_start) * 60
+                                if expected_duration > 0:
+                                    ratio = first_duration / expected_duration
+                                    video_second = int(video_second * ratio)
+                                    print(f"[ASYNC-PIPELINE] ⚡ Correção proporcional 1T: min {raw_minute} -> videoSecond {video_second}s (ratio {ratio:.2f})")
+                            
+                            event_ms = video_second * 1000
+                            
                             event = MatchEvent(
                                 match_id=match_id,
                                 event_type=event_data.get('event_type', 'unknown'),
                                 description=event_data.get('description'),
-                                minute=event_data.get('minute', 0),
+                                minute=raw_minute,
+                                second=evt_second,
                                 match_half='first_half',
                                 is_highlight=event_data.get('is_highlight', False),
-                                metadata={'ai_generated': True, 'pipeline': 'async', **event_data}
+                                clip_pending=True,
+                                event_metadata={
+                                    'ai_generated': True,
+                                    'pipeline': 'async',
+                                    'videoSecond': video_second,
+                                    'eventMs': event_ms,
+                                    'confidence': event_data.get('confidence', 0.5),
+                                    'team': event_data.get('team', ''),
+                                    'player': event_data.get('player', ''),
+                                }
                             )
                             session.add(event)
                         session.commit()
                         total_events += len(events)
-                        print(f"[ASYNC-PIPELINE] ✓ First half: {len(events)} events saved")
+                        print(f"[ASYNC-PIPELINE] ✓ First half: {len(events)} events saved (with videoSecond)")
                     finally:
                         session.close()
             
@@ -8248,25 +8362,55 @@ def _process_match_pipeline(job_id: str, data: dict):
                     print(f"[ASYNC-PIPELINE] ⚠ Análise 2º tempo falhou: {ai_err}")
                     events = []
                 if events:
+                    # Save events with correct metadata and videoSecond
                     session = get_session()
                     try:
+                        second_duration = video_durations.get('second', 0)
+                        segment_start = 45
+                        segment_end = 90
+                        
                         for event_data in events:
                             raw_minute = event_data.get('minute', 45)
                             if raw_minute < 45:
                                 raw_minute += 45
+                            evt_second = event_data.get('second', 0)
+                            
+                            # Calculate videoSecond relative to this video segment
+                            video_second = (raw_minute - segment_start) * 60 + evt_second
+                            
+                            # Proportional correction if videoSecond exceeds video duration
+                            if second_duration > 0 and video_second > second_duration:
+                                expected_duration = (segment_end - segment_start) * 60
+                                if expected_duration > 0:
+                                    ratio = second_duration / expected_duration
+                                    video_second = int(video_second * ratio)
+                                    print(f"[ASYNC-PIPELINE] ⚡ Correção proporcional 2T: min {raw_minute} -> videoSecond {video_second}s (ratio {ratio:.2f})")
+                            
+                            event_ms = video_second * 1000
+                            
                             event = MatchEvent(
                                 match_id=match_id,
                                 event_type=event_data.get('event_type', 'unknown'),
                                 description=event_data.get('description'),
                                 minute=raw_minute,
+                                second=evt_second,
                                 match_half='second_half',
                                 is_highlight=event_data.get('is_highlight', False),
-                                metadata={'ai_generated': True, 'pipeline': 'async', **event_data}
+                                clip_pending=True,
+                                event_metadata={
+                                    'ai_generated': True,
+                                    'pipeline': 'async',
+                                    'videoSecond': video_second,
+                                    'eventMs': event_ms,
+                                    'confidence': event_data.get('confidence', 0.5),
+                                    'team': event_data.get('team', ''),
+                                    'player': event_data.get('player', ''),
+                                }
                             )
                             session.add(event)
                         session.commit()
                         total_events += len(events)
-                        print(f"[ASYNC-PIPELINE] ✓ Second half: {len(events)} events saved")
+                        print(f"[ASYNC-PIPELINE] ✓ Second half: {len(events)} events saved (with videoSecond)")
                     finally:
                         session.close()
             
