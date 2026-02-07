@@ -1,8 +1,10 @@
+import { useEffect, useState, useRef } from 'react';
 import { ProcessingStatus } from '@/hooks/useAsyncProcessing';
 import { Progress } from '@/components/ui/progress';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
+import { SoccerBallLoader } from '@/components/ui/SoccerBallLoader';
 import { 
   CheckCircle2, 
   Clock, 
@@ -48,18 +50,65 @@ export function AsyncProcessingProgress({
   onRetry, 
   onComplete 
 }: AsyncProcessingProgressProps) {
+  // Simulated progress for early stages (queued/preparing)
+  const [simulatedProgress, setSimulatedProgress] = useState(0);
+  const [simulatedMessage, setSimulatedMessage] = useState('Iniciando...');
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const earlyMessages = [
+    'Iniciando processamento...',
+    'Preparando vídeo...',
+    'Configurando pipeline...',
+    'Verificando formato...',
+    'Extraindo informações...',
+    'Alocando recursos...',
+  ];
+
+  const isEarlyStage = status?.status === 'queued' || status?.status === 'preparing';
+  const realProgress = status?.progress ?? 0;
+
+  useEffect(() => {
+    if (!isEarlyStage || realProgress > 5) {
+      if (timerRef.current) clearInterval(timerRef.current);
+      return;
+    }
+
+    setSimulatedProgress(1);
+    timerRef.current = setInterval(() => {
+      setSimulatedProgress(prev => {
+        const next = Math.min(prev + 0.6, 18);
+        const msgIdx = Math.floor((next / 18) * earlyMessages.length);
+        setSimulatedMessage(earlyMessages[Math.min(msgIdx, earlyMessages.length - 1)]);
+        return next;
+      });
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [isEarlyStage, realProgress]);
+
   if (!status) {
     return (
       <Card className="border-muted">
         <CardContent className="p-6">
-          <div className="flex items-center gap-3">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-            <span className="text-muted-foreground">Aguardando início...</span>
-          </div>
+          <SoccerBallLoader 
+            message="Aguardando início..." 
+            progress={0}
+            showProgress={false}
+            className="min-h-[150px]"
+          />
         </CardContent>
       </Card>
     );
   }
+
+  const displayProgress = isEarlyStage && realProgress < 5 
+    ? Math.max(realProgress, simulatedProgress) 
+    : realProgress;
+  const displayMessage = isEarlyStage && realProgress < 5 
+    ? simulatedMessage 
+    : (status.progressMessage || 'Processando...');
 
   const currentStage = stageConfig[status.status] || stageConfig.queued;
   const StageIcon = currentStage.icon;
@@ -84,61 +133,73 @@ export function AsyncProcessingProgress({
       isActive && "border-arena-500/50"
     )}>
       <CardContent className="p-6 space-y-6">
-        {/* Header with stage info */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className={cn(
-              "p-2 rounded-lg",
-              isComplete && "bg-green-100 dark:bg-green-900/30",
-              isError && "bg-destructive/10",
-              isActive && "bg-arena-500/10"
-            )}>
-              <StageIcon className={cn(
-                "h-6 w-6",
-                currentStage.color,
-                isActive && status.status !== 'queued' && "animate-pulse"
-              )} />
-            </div>
-            <div>
-              <h3 className="font-semibold text-lg">{currentStage.label}</h3>
-              <p className="text-sm text-muted-foreground">
-                {status.progressMessage || 'Processando...'}
-              </p>
-            </div>
-          </div>
-
-          <div className="text-right">
-            <div className="text-2xl font-bold tabular-nums">
-              {status.progress}%
-            </div>
-            {status.estimatedTimeRemaining && isActive && (
-              <div className="text-xs text-muted-foreground flex items-center gap-1 justify-end">
-                <Clock className="h-3 w-3" />
-                {formatTime(status.estimatedTimeRemaining)}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Main progress bar */}
-        <div className="space-y-2">
-          <Progress 
-            value={status.progress} 
-            className={cn(
-              "h-3",
-              isComplete && "[&>div]:bg-green-500",
-              isError && "[&>div]:bg-destructive"
-            )}
+        {/* Early stage: SoccerBallLoader with animated progress */}
+        {isEarlyStage && realProgress < 5 ? (
+          <SoccerBallLoader
+            message={displayMessage}
+            progress={Math.round(displayProgress)}
+            showProgress={true}
+            className="min-h-[180px]"
           />
-          {status.totalParts > 0 && (
-            <div className="flex justify-between text-xs text-muted-foreground">
-              <span>Partes: {status.partsCompleted}/{status.totalParts}</span>
-              {status.eventsDetected !== undefined && (
-                <span>{status.eventsDetected} eventos detectados</span>
+        ) : (
+          <>
+            {/* Header with stage info */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  "p-2 rounded-lg",
+                  isComplete && "bg-green-100 dark:bg-green-900/30",
+                  isError && "bg-destructive/10",
+                  isActive && "bg-arena-500/10"
+                )}>
+                  <StageIcon className={cn(
+                    "h-6 w-6",
+                    currentStage.color,
+                    isActive && status.status !== 'queued' && "animate-pulse"
+                  )} />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-lg">{currentStage.label}</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {displayMessage}
+                  </p>
+                </div>
+              </div>
+
+              <div className="text-right">
+                <div className="text-2xl font-bold tabular-nums">
+                  {Math.round(displayProgress)}%
+                </div>
+                {status.estimatedTimeRemaining && isActive && (
+                  <div className="text-xs text-muted-foreground flex items-center gap-1 justify-end">
+                    <Clock className="h-3 w-3" />
+                    {formatTime(status.estimatedTimeRemaining)}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Main progress bar */}
+            <div className="space-y-2">
+              <Progress 
+                value={displayProgress} 
+                className={cn(
+                  "h-3",
+                  isComplete && "[&>div]:bg-green-500",
+                  isError && "[&>div]:bg-destructive"
+                )}
+              />
+              {status.totalParts > 0 && (
+                <div className="flex justify-between text-xs text-muted-foreground">
+                  <span>Partes: {status.partsCompleted}/{status.totalParts}</span>
+                  {status.eventsDetected !== undefined && (
+                    <span>{status.eventsDetected} eventos detectados</span>
+                  )}
+                </div>
               )}
             </div>
-          )}
-        </div>
+          </>
+        )}
 
         {/* Parts status grid */}
         {status.partsStatus && status.partsStatus.length > 0 && (
