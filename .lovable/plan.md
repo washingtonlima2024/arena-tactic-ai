@@ -1,131 +1,133 @@
 
-# Aplicar Correções Pendentes no Pipeline Async
 
-## Situação Atual
+# Corrigir Pipeline: Transcrição do Storage Parcial Causa 0 Eventos
 
-As mudanças planejadas anteriormente **não foram aplicadas** ao `server.py`. O código atual ainda:
+## Problema Diagnosticado
 
-1. Usa transcricao parcial de 5 min como se fosse completa
-2. Nao detecta `videoType: 'full'`
-3. Analisa apenas range 0-45 min (perde metade do jogo)
+O jogo `f60ae001` processou e finalizou com "0 eventos, 0 clips" porque:
 
-O fatiamento de video e audio **ja funciona** -- Phase 2 divide videos grandes e Phase 2.5 extrai audio com 3 metodos fallback. O pipeline nao vai travar por causa disso.
-
-## Mudancas Necessarias (3 arquivos)
-
-### 1. Upload.tsx -- Nao enviar transcricao parcial ao pipeline
-
-**Arquivo:** `src/pages/Upload.tsx` (linha 2936)
-
-A transcricao do Smart Import (5 minutos) serve apenas para detectar times/competicao. Nao deve ser passada como `firstHalfTranscription` ao pipeline async, porque isso faz o Whisper ser pulado.
+1. O Smart Import anterior salvou uma transcrição de 5 minutos no storage (368 bytes em `texts/first_half_transcription.txt` e 626 bytes em `srt/first_half.srt`)
+2. Mesmo com a correção de `firstHalfTranscription: undefined` no Upload.tsx, o pipeline tem um **fallback que lê arquivos do storage** (linhas 8420-8444)
+3. Esse fallback encontra o arquivo de 368 bytes, verifica `len > 100` (368 > 100 = verdadeiro), e marca `has_preloaded_first = True`
+4. Com essa flag ativa, o pipeline **pula o Whisper completamente** (linha 8473-8493)
+5. A IA analisa apenas 368 bytes de texto e encontra 0 eventos
 
 ```text
-ANTES (linha 2936):
-  firstHalfTranscription: transcription && transcription.length > 50 ? transcription : undefined
+FLUXO ATUAL (bug):
 
-DEPOIS:
-  // Transcricao do Smart Import e parcial (5 min) - nao usar como transcricao completa
-  firstHalfTranscription: undefined
+Upload.tsx envia firstHalfTranscription = undefined  (corrigido)
+    |
+    v
+Pipeline: has_preloaded_first = False  (ok)
+    |
+    v
+Fallback storage (linha 8425): encontra first_half_transcription.txt (368 bytes)
+    |
+    v
+368 > 100 chars = True -> has_preloaded_first = True  (BUG!)
+    |
+    v
+Pipeline PULA WHISPER -> IA analisa 368 bytes -> 0 eventos
 ```
 
-Isso forca o pipeline a rodar Whisper no video inteiro (Phase 3, linha 8480+).
+## Solucao
 
-### 2. server.py Phase 1 -- Detectar video de jogo completo
+### Mudanca 1: Validar tamanho minimo da transcricao do storage
 
-**Arquivo:** `video-processor/server.py` (linhas 8168-8170)
+**Arquivo:** `video-processor/server.py` (linhas 8420-8444 e 8447-8471)
 
-Substituir a organizacao simples por deteccao de `videoType: 'full'`:
+O threshold de 100 caracteres e muito baixo para distinguir uma transcricao real de uma parcial do Smart Import. Para um video de 15 MB (~10-26 minutos), a transcricao completa deveria ter pelo menos 2000-5000 caracteres.
+
+Solucao: Comparar o tamanho da transcricao com a duracao do video. Se a relacao chars/segundo for muito baixa, ignorar a transcricao do storage e rodar Whisper.
 
 ```text
-ANTES:
-  first_half_videos = [v for v in videos if v.get('halfType') == 'first']
-  second_half_videos = [v for v in videos if v.get('halfType') == 'second']
+ANTES (linha 8428):
+  has_preloaded_first = len(first_half_text.strip()) > 100
 
 DEPOIS:
-  first_half_videos = []
-  second_half_videos = []
-  is_full_match_video = False
-
-  for v in videos:
-      video_type = v.get('videoType', '')
-      half_type = v.get('halfType', 'first')
-
-      if video_type == 'full':
-          is_full_match_video = True
-          first_half_videos.append(v)
-          print(f"[ASYNC-PIPELINE] Video de jogo COMPLETO detectado")
-      elif half_type == 'second':
-          second_half_videos.append(v)
-      else:
-          first_half_videos.append(v)
-```
-
-### 3. server.py Phase 4 -- Analisar range 0-90 para jogo completo
-
-**Arquivo:** `video-processor/server.py` (linhas 8658-8659)
-
-Quando e jogo completo, a IA precisa analisar 0-90 min em vez de 0-45:
-
-```text
-ANTES:
-  events = ai_services.analyze_match_events(
-      first_half_text, home_team, away_team, 0, 45,
-      match_id=match_id,
-      ...
-  )
-
-DEPOIS:
-  game_end = 90 if is_full_match_video else 45
-  print(f"[ASYNC-PIPELINE] Analise 1T: range 0-{game_end} min (full_match={is_full_match_video})")
-  events = ai_services.analyze_match_events(
-      first_half_text, home_team, away_team, 0, game_end,
-      match_id=match_id,
-      ...
-  )
-```
-
-### 4. server.py Phase 3 -- Log diagnostico de transcricao
-
-**Arquivo:** `video-processor/server.py` (apos linha 8566, depois de salvar o TXT)
-
-Adicionar log que detecta transcricoes suspeitamente curtas:
-
-```text
-  # Diagnostico: chars por segundo
+  text_len = len(first_half_text.strip())
   first_dur = video_durations.get('first', 0)
-  if first_dur > 0:
-      chars_per_sec = len(first_half_text) / first_dur
-      print(f"[ASYNC-PIPELINE] Transcricao 1T: {len(first_half_text)} chars, "
-            f"video={first_dur:.0f}s, ratio={chars_per_sec:.1f} chars/s")
-      if chars_per_sec < 2 and first_dur > 600:
-          print(f"[ASYNC-PIPELINE] ALERTA: Transcricao parece PARCIAL! "
-                f"Esperado ~{int(first_dur * 8)} chars, recebido {len(first_half_text)}")
+  
+  # Validar se transcricao e proporcional ao video
+  # Uma transcricao real tem ~8-15 chars/segundo
+  # Smart Import de 5 min em video de 26 min teria ~1.5 chars/s
+  if first_dur > 300 and text_len > 0:
+      chars_per_sec = text_len / first_dur
+      if chars_per_sec < 3:
+          print(f"[ASYNC-PIPELINE] Transcricao do storage DESCARTADA: "
+                f"{text_len} chars / {first_dur:.0f}s = {chars_per_sec:.1f} chars/s (< 3 = parcial)")
+          has_preloaded_first = False
+          first_half_text = ''  # Limpar para forcar Whisper
+      else:
+          has_preloaded_first = True
+          print(f"[ASYNC-PIPELINE] Transcricao do storage ACEITA: "
+                f"{text_len} chars / {first_dur:.0f}s = {chars_per_sec:.1f} chars/s")
+  else:
+      has_preloaded_first = text_len > 100
 ```
 
-## Sobre Fatiamento (Video e Audio)
+A mesma logica deve ser aplicada para o segundo tempo (linhas 8447-8471), usando `video_durations.get('second', 0)`.
 
-O pipeline **ja tem** o fatiamento implementado e nao vai travar:
+### Mudanca 2: Garantir video_durations esta populado ANTES do fallback do storage
 
-| Phase | O que faz | Status |
-|-------|-----------|--------|
-| Phase 2 (linha 8226) | Divide video em N partes via FFmpeg se > 300MB | Ja funciona |
-| Phase 2.5 (linha 8263) | Extrai audio MP3 com 3 fallbacks (libmp3lame, mono 16kHz, WAV-to-MP3) | Ja funciona |
-| Phase 3 (linha 8500) | Transcreve partes em paralelo (4 workers) | Ja funciona |
+**Arquivo:** `video-processor/server.py`
 
-O unico risco de "parar" seria se o Whisper demorasse muito em videos longos. Para um video de 26 min, a transcricao leva ~3-8 minutos dependendo do hardware. Videos de 90 min podem levar 15-30 min, mas o pipeline mostra progresso em tempo real.
+Atualmente, `video_durations` e preenchido na Phase 2.5 (linhas 8280-8400), que roda ANTES da Phase 3. Isso e correto - o valor ja estara disponivel no momento do fallback. Nenhuma mudanca necessaria aqui.
+
+### Mudanca 3: Limpar transcricao parcial do storage ao iniciar pipeline
+
+**Arquivo:** `video-processor/server.py` (apos linha 8166, no inicio da Phase 1)
+
+Alternativa complementar: quando o pipeline async inicia, verificar se existe uma transcricao suspeitamente curta no storage e remove-la, forcando a re-transcricao.
+
+```text
+# Phase 1 inicio - Limpar transcricoes parciais do Smart Import
+for half_label in ['first', 'second']:
+    txt_path = get_subfolder_path(match_id, 'texts') / f'{half_label}_half_transcription.txt'
+    srt_path = get_subfolder_path(match_id, 'srt') / f'{half_label}_half.srt'
+    
+    for fpath in [txt_path, srt_path]:
+        if fpath.exists():
+            file_size = fpath.stat().st_size
+            if file_size < 1000:  # Menor que 1KB = provavel Smart Import parcial
+                print(f"[ASYNC-PIPELINE] Removendo transcricao parcial: {fpath.name} ({file_size} bytes)")
+                fpath.unlink()
+```
+
+Isso garante que transcricoes menores que 1KB (como a de 368 bytes ou 626 bytes do Smart Import) sejam removidas antes do pipeline tentar usa-las como fallback.
+
+### Mudanca 4: Seguranca adicional - forcar re-transcricao em reprocessamento
+
+**Arquivo:** `video-processor/server.py` (linha 8473)
+
+Quando o pipeline e executado em modo de reprocessamento (o jogo ja existia), ele deveria sempre rodar o Whisper em vez de reusar transcricoes antigas. Adicionar um parametro `forceTranscription` que o frontend pode enviar:
+
+```text
+# Na verificacao de pre-loaded transcriptions
+force_transcription = data.get('forceTranscription', False)
+
+if (has_preloaded_first or has_preloaded_second) and not force_transcription:
+    # Usar transcricoes carregadas
+    ...
+else:
+    # Rodar Whisper
+    ...
+```
 
 ## Arquivos Modificados
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `src/pages/Upload.tsx` | Linha 2936: `firstHalfTranscription: undefined` |
-| `video-processor/server.py` | Linhas 8168-8170: Detectar `videoType: 'full'` e flag `is_full_match_video` |
-| `video-processor/server.py` | Linhas 8658-8659: Usar `game_end = 90` quando jogo completo |
-| `video-processor/server.py` | Apos linha 8566: Log diagnostico chars/segundo |
+| `video-processor/server.py` | Linhas 8420-8444: Validar chars/segundo antes de aceitar transcricao do storage |
+| `video-processor/server.py` | Linhas 8447-8471: Mesma validacao para segundo tempo |
+| `video-processor/server.py` | Apos linha 8166: Limpar transcricoes parciais (< 1KB) no inicio do pipeline |
+| `video-processor/server.py` | Linha 8473: Suporte a `forceTranscription` para reprocessamento |
 
-## Resultado
+## Resultado Esperado
 
-- Whisper roda no video **inteiro** (nao apenas 5 min)
-- IA analisa **0-90 min** para jogos compactados (detecta todos os gols)
-- Pipeline nao trava -- fatiamento e audio ja funcionam
-- Log de chars/s permite detectar problemas rapidamente
+- Transcricao parcial de 368 bytes sera descartada (chars/s < 3)
+- Whisper roda no video completo (~15 MB, ~26 minutos)
+- IA analisa transcricao completa com range 0-90 min
+- Eventos e gols sao detectados corretamente
+- Clips sao gerados automaticamente na Phase 5
+
