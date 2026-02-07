@@ -2933,7 +2933,9 @@ export default function VideoUpload() {
                         awayTeam: awayLabel,
                         autoClip: true,
                         autoAnalysis: true,
-                        firstHalfTranscription: transcription && transcription.length > 50 ? transcription : undefined,
+                        // Transcricao do Smart Import e parcial (5 min) - NAO usar como transcricao completa
+                        // O pipeline deve rodar Whisper no video inteiro
+                        firstHalfTranscription: undefined,
                       });
                       
                       toast({

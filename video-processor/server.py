@@ -8165,9 +8165,23 @@ def _process_match_pipeline(job_id: str, data: dict):
             # ========== PHASE 1: PREPARATION (5%) ==========
             _update_async_job(job_id, 'preparing', 5, 'Preparando arquivos...', 'preparing')
             
-            # Organize videos by half
-            first_half_videos = [v for v in videos if v.get('halfType') == 'first']
-            second_half_videos = [v for v in videos if v.get('halfType') == 'second']
+            # Organize videos by half — detect full-match videos
+            first_half_videos = []
+            second_half_videos = []
+            is_full_match_video = False
+
+            for v in videos:
+                video_type = v.get('videoType', '')
+                half_type = v.get('halfType', 'first')
+
+                if video_type == 'full':
+                    is_full_match_video = True
+                    first_half_videos.append(v)
+                    print(f"[ASYNC-PIPELINE] Video de jogo COMPLETO detectado")
+                elif half_type == 'second':
+                    second_half_videos.append(v)
+                else:
+                    first_half_videos.append(v)
             
             # Calculate parts needed based on size
             def calc_parts(videos_list):
@@ -8564,6 +8578,16 @@ def _process_match_pipeline(job_id: str, data: dict):
                 with open(txt_path, 'w', encoding='utf-8') as f:
                     f.write(first_half_text)
                 print(f"[ASYNC-PIPELINE] ✓ Transcrição 1º tempo salva: {txt_path}")
+                
+                # Diagnostico: chars por segundo — detecta transcricoes parciais
+                first_dur = video_durations.get('first', 0)
+                if first_dur > 0:
+                    chars_per_sec = len(first_half_text) / first_dur
+                    print(f"[ASYNC-PIPELINE] Transcricao 1T: {len(first_half_text)} chars, "
+                          f"video={first_dur:.0f}s, ratio={chars_per_sec:.1f} chars/s")
+                    if chars_per_sec < 2 and first_dur > 600:
+                        print(f"[ASYNC-PIPELINE] ALERTA: Transcricao parece PARCIAL! "
+                              f"Esperado ~{int(first_dur * 8)} chars, recebido {len(first_half_text)}")
             
             if second_half_text:
                 # Se é formato SRT, salvar na pasta srt com extensão correta
@@ -8655,8 +8679,10 @@ def _process_match_pipeline(job_id: str, data: dict):
                 
                 local_settings = get_local_settings()
                 try:
+                    game_end = 90 if is_full_match_video else 45
+                    print(f"[ASYNC-PIPELINE] Analise 1T: range 0-{game_end} min (full_match={is_full_match_video})")
                     events = ai_services.analyze_match_events(
-                        first_half_text, home_team, away_team, 0, 45,
+                        first_half_text, home_team, away_team, 0, game_end,
                         match_id=match_id,
                         use_dual_verification=True,
                         settings=local_settings
@@ -8671,7 +8697,7 @@ def _process_match_pipeline(job_id: str, data: dict):
                     try:
                         first_duration = video_durations.get('first', 0)
                         segment_start = 0
-                        segment_end = 45
+                        segment_end = game_end
                         
                         for event_data in events:
                             raw_minute = event_data.get('minute') or 0
