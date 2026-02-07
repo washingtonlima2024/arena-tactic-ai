@@ -8384,9 +8384,73 @@ def _process_match_pipeline(job_id: str, data: dict):
                             video_paths[half_type] = video_path
                         else:
                             raise Exception(f"Arquivo local não encontrado: {local_path}")
+                elif is_youtube_url(video_url):
+                    # YouTube URLs need yt-dlp, not simple HTTP download
+                    print(f"[ASYNC-PIPELINE] YouTube URL detectada, usando yt-dlp: {video_url[:60]}...")
+                    _update_async_job(job_id, 'preparing', 8, 'Baixando vídeo do YouTube via yt-dlp...', 'preparing')
+                    try:
+                        import shutil as _shutil
+                        yt_dlp_path = _shutil.which('yt-dlp')
+                        if not yt_dlp_path:
+                            raise Exception("yt-dlp não encontrado. Execute: pip install yt-dlp")
+                        
+                        cmd = [
+                            yt_dlp_path,
+                            '-f', 'bestvideo[height<=720]+bestaudio/best[height<=720]',
+                            '--merge-output-format', 'mp4',
+                            '-o', video_path,
+                            '--no-playlist',
+                            '--socket-timeout', '60',
+                            video_url
+                        ]
+                        print(f"[ASYNC-PIPELINE] yt-dlp cmd: {' '.join(cmd)}")
+                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
+                        
+                        if result.returncode != 0:
+                            print(f"[ASYNC-PIPELINE] yt-dlp stderr: {result.stderr[-500:]}")
+                            raise Exception(f"yt-dlp falhou: {result.stderr[-200:]}")
+                        
+                        # yt-dlp may add different extension - find the file
+                        if not os.path.exists(video_path) or os.path.getsize(video_path) < 1000:
+                            base = os.path.splitext(video_path)[0]
+                            for ext in ['.mp4', '.mkv', '.webm']:
+                                alt = base + ext
+                                if os.path.exists(alt) and os.path.getsize(alt) > 1000:
+                                    if alt != video_path:
+                                        os.rename(alt, video_path)
+                                    break
+                        
+                        if os.path.exists(video_path) and os.path.getsize(video_path) > 1000:
+                            video_paths[half_type] = video_path
+                            size_mb = os.path.getsize(video_path) / (1024 * 1024)
+                            print(f"[ASYNC-PIPELINE] ✓ YouTube download concluído: {size_mb:.1f} MB")
+                            
+                            # Also save to storage for future use
+                            try:
+                                storage_video_dir = get_subfolder_path(match_id, 'videos')
+                                dest_name = f"{half_type}_half.mp4"
+                                dest_path = storage_video_dir / dest_name
+                                shutil.copy2(video_path, str(dest_path))
+                                print(f"[ASYNC-PIPELINE] ✓ Vídeo salvo no storage: {dest_name}")
+                            except Exception as save_err:
+                                print(f"[ASYNC-PIPELINE] ⚠ Erro ao salvar no storage: {save_err}")
+                        else:
+                            raise Exception("Download do YouTube completou mas arquivo não encontrado")
+                    except Exception as yt_err:
+                        print(f"[ASYNC-PIPELINE] ✗ Erro no download YouTube: {yt_err}")
+                        raise Exception(f"Falha ao baixar do YouTube: {yt_err}")
                 else:
                     if download_video(video_url, video_path):
                         video_paths[half_type] = video_path
+                        # Save to storage for future use
+                        try:
+                            storage_video_dir = get_subfolder_path(match_id, 'videos')
+                            dest_name = f"{half_type}_half.mp4"
+                            dest_path = storage_video_dir / dest_name
+                            shutil.copy2(video_path, str(dest_path))
+                            print(f"[ASYNC-PIPELINE] ✓ Vídeo link salvo no storage: {dest_name}")
+                        except Exception as save_err:
+                            print(f"[ASYNC-PIPELINE] ⚠ Erro ao salvar link no storage: {save_err}")
                     else:
                         raise Exception(f"Falha ao baixar vídeo: {video_url[:50]}")
             
