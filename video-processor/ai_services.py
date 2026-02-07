@@ -7049,43 +7049,14 @@ def transcribe_large_video(
 
 
 def _transcribe_audio_file(audio_path: str, match_id: str = None) -> Dict[str, Any]:
-    """Transcribe a single audio file using Whisper API."""
-    with open(audio_path, 'rb') as audio_file:
-        response = requests.post(
-            f'{OPENAI_API_URL}/audio/transcriptions',
-            headers={'Authorization': f'Bearer {OPENAI_API_KEY}'},
-            files={'file': audio_file},
-            data={
-                'model': 'whisper-1',
-                'language': 'pt',
-                'response_format': 'verbose_json'
-            },
-            timeout=600
-        )
-    
-    if not response.ok:
-        return {"error": f"Whisper error: {response.status_code} - {response.text}"}
-    
-    data = response.json()
-    text = data.get('text', '')
-    segments = data.get('segments', [])
-    
-    srt_lines = []
-    for i, seg in enumerate(segments, 1):
-        start = _format_srt_time(seg.get('start', 0))
-        end = _format_srt_time(seg.get('end', 0))
-        text_seg = seg.get('text', '').strip()
-        srt_lines.append(f"{i}\n{start} --> {end}\n{text_seg}\n")
-    
-    srt_content = '\n'.join(srt_lines)
-    
-    return {
-        "success": True,
-        "text": text,
-        "srtContent": srt_content,
-        "segments": segments,
-        "matchId": match_id
-    }
+    """
+    Compat wrapper for older code paths.
+
+    This function used to call OpenAI Whisper directly.
+    It now delegates to transcribe_audio_file, which follows the provider priority
+    and uses Local Whisper when available.
+    """
+    return transcribe_audio_file(audio_path, match_id=match_id, language='pt')
 
 
 def _transcribe_multi_chunk(
