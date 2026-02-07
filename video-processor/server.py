@@ -8441,6 +8441,11 @@ def _process_match_pipeline(job_id: str, data: dict):
                         print(f"[ASYNC-PIPELINE] ✓ Video split: 1st half={first_size_mb:.0f}MB ({first_parts_count} parts), "
                               f"2nd half={second_size_mb:.0f}MB ({second_parts_count} parts)")
                         
+                        # CRITICAL: Reset flag — video was split into two independent halves
+                        # Without this, Phase 4 would use game_end=90 for 1st half (wrong)
+                        is_full_match_video = False
+                        print(f"[ASYNC-PIPELINE] is_full_match_video resetado para False (vídeo foi dividido em dois tempos)")
+                        
                         _update_async_job(job_id, 'splitting', 14, 
                                          f'Vídeo separado em dois tempos',
                                          'splitting', 0, total_parts, parts_status)

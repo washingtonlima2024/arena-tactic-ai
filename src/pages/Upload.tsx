@@ -2863,61 +2863,78 @@ export default function VideoUpload() {
                     
                     const videoInputs: VideoInput[] = [];
                     
-                    for (const vid of videosToProcess) {
-                      let vidUrl = '';
-                      
-                      if (vid.url) {
-                        vidUrl = extractEmbedUrl(vid.url);
-                      } else if (vid.file) {
-                        toast({
-                          title: "📦 Enviando vídeo...",
-                          description: `${vid.file.name} — aguarde o upload.`,
-                        });
+                    // Upload all videos in parallel for better performance
+                    const uploadResults = await Promise.all(
+                      videosToProcess.map(async (vid) => {
+                        let vidUrl = '';
                         
-                        try {
-                          const sanitizedName = vid.file.name
-                            .normalize('NFD')
-                            .replace(/[\u0300-\u036f]/g, '')
-                            .replace(/[^a-zA-Z0-9._-]/g, '_');
-                          const fileName = `${Date.now()}-${sanitizedName}`;
-                          
-                          if (isLocalServerOnline) {
-                            const result = await apiClient.uploadBlobWithProgress(
-                              match.id,
-                              'videos',
-                              vid.file,
-                              fileName,
-                              () => {}
-                            );
-                            vidUrl = result.url;
-                          } else {
-                            setCurrentStep('videos');
-                            if (vid.file) setTimeout(() => uploadFile(vid.file!), 300);
-                            return;
-                          }
-                        } catch (uploadErr: any) {
-                          console.error('[SmartImport] Upload error:', uploadErr);
+                        if (vid.url) {
+                          vidUrl = extractEmbedUrl(vid.url);
+                        } else if (vid.file) {
                           toast({
-                            title: "Erro no upload",
-                            description: uploadErr.message || "Falha ao enviar o vídeo.",
-                            variant: "destructive",
+                            title: "📦 Enviando vídeo...",
+                            description: `${vid.file.name} — aguarde o upload.`,
                           });
-                          setCurrentStep('videos');
-                          return;
+                          
+                          try {
+                            const sanitizedName = vid.file.name
+                              .normalize('NFD')
+                              .replace(/[\u0300-\u036f]/g, '')
+                              .replace(/[^a-zA-Z0-9._-]/g, '_');
+                            const fileName = `${Date.now()}-${sanitizedName}`;
+                            
+                            if (isLocalServerOnline) {
+                              const result = await apiClient.uploadBlobWithProgress(
+                                match.id,
+                                'videos',
+                                vid.file,
+                                fileName,
+                                () => {}
+                              );
+                              vidUrl = result.url;
+                            } else {
+                              return null; // Will fallback to manual flow
+                            }
+                          } catch (uploadErr: any) {
+                            console.error('[SmartImport] Upload error:', uploadErr);
+                            toast({
+                              title: "Erro no upload",
+                              description: uploadErr.message || "Falha ao enviar o vídeo.",
+                              variant: "destructive",
+                            });
+                            return null;
+                          }
                         }
-                      }
-                      
-                      if (vidUrl) {
-                        const isSecond = vid.halfType === 'second';
-                        videoInputs.push({
-                          url: vidUrl,
-                          halfType: vid.halfType,
-                          videoType: vid.videoType,
-                          startMinute: isSecond ? 45 : 0,
-                          endMinute: isSecond ? 90 : (vid.videoType === 'full' ? 90 : 45),
-                          sizeMB: vid.file ? vid.file.size / (1024 * 1024) : undefined,
-                        });
-                      }
+                        
+                        if (vidUrl) {
+                          const isSecond = vid.halfType === 'second';
+                          return {
+                            url: vidUrl,
+                            halfType: vid.halfType,
+                            videoType: vid.videoType,
+                            startMinute: isSecond ? 45 : 0,
+                            endMinute: isSecond ? 90 : (vid.videoType === 'full' ? 90 : 45),
+                            sizeMB: vid.file ? vid.file.size / (1024 * 1024) : undefined,
+                          } as VideoInput;
+                        }
+                        return null;
+                      })
+                    );
+                    
+                    // Check if any upload failed (returned null with a file)
+                    const hasFailedFileUpload = videosToProcess.some(
+                      (vid, i) => vid.file && uploadResults[i] === null && !isLocalServerOnline
+                    );
+                    if (hasFailedFileUpload) {
+                      setCurrentStep('videos');
+                      const firstFile = videosToProcess.find(v => v.file)?.file;
+                      if (firstFile) setTimeout(() => uploadFile(firstFile), 300);
+                      return;
+                    }
+                    
+                    // Filter successful uploads
+                    for (const result of uploadResults) {
+                      if (result) videoInputs.push(result);
                     }
                     
                     if (videoInputs.length === 0) {
