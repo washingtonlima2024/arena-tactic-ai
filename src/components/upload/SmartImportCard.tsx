@@ -14,7 +14,7 @@ import { MatchSetupData } from './MatchSetupCard';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 interface SmartImportCardProps {
-  onMatchInfoExtracted: (data: MatchSetupData, videoFile?: File, videoUrl?: string) => void;
+  onMatchInfoExtracted: (data: MatchSetupData, videoFile?: File, videoUrl?: string, transcription?: string) => void;
   onCancel: () => void;
 }
 
@@ -36,6 +36,7 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
   const [videoUrl, setVideoUrl] = useState('');
   const [progress, setProgress] = useState({ message: '', percent: 0 });
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null);
+  const [savedTranscription, setSavedTranscription] = useState<string>('');
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -94,7 +95,8 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
         onMatchInfoExtracted(
           emptyMatchData,
           videoFile || undefined,
-          videoUrl || undefined
+          videoUrl || undefined,
+          undefined // sem transcrição
         );
         return;
       }
@@ -127,13 +129,15 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
         onMatchInfoExtracted(
           emptyMatchData,
           videoFile || undefined,
-          videoUrl || undefined
+          videoUrl || undefined,
+          transcriptionText || undefined // passar transcrição mesmo sem metadados
         );
         return;
       }
 
       setProgress({ message: 'Metadados extraídos com sucesso!', percent: 100 });
       setExtractionResult(extractResult);
+      setSavedTranscription(transcriptionText);
       setStep('review');
       
     } catch (error: any) {
@@ -152,11 +156,12 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
         venue: '',
       };
       
-      onMatchInfoExtracted(
-        emptyMatchData,
-        videoFile || undefined,
-        videoUrl || undefined
-      );
+        onMatchInfoExtracted(
+          emptyMatchData,
+          videoFile || undefined,
+          videoUrl || undefined,
+          undefined // erro inesperado, sem transcrição
+        );
     }
   };
 
@@ -179,7 +184,8 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
     onMatchInfoExtracted(
       matchData, 
       videoFile || undefined,
-      videoUrl || undefined
+      videoUrl || undefined,
+      savedTranscription || undefined
     );
   };
 
