@@ -2645,13 +2645,49 @@ export default function VideoUpload() {
               
               <SmartImportCard
                 onMatchInfoExtracted={(extractedData, videoFile, videoUrl) => {
-                  // Auto-fill match data with AI-extracted info
-                  // Try to match team names to existing teams
-                  const teams = allMatches.flatMap(m => [m.home_team, m.away_team]).filter(Boolean);
+                  // Extract AI team names for fuzzy matching
+                  const { _homeTeamName, _awayTeamName, ...cleanData } = extractedData as any;
+                  
+                  // Fuzzy match team names to existing teams in the database
+                  const findTeamId = (extractedName: string): string => {
+                    if (!extractedName || !teams.length) return '';
+                    const normalized = extractedName.trim().toLowerCase();
+                    
+                    // 1. Exact match on name
+                    const exact = teams.find(t => t.name.trim().toLowerCase() === normalized);
+                    if (exact) return exact.id;
+                    
+                    // 2. Exact match on short_name
+                    const shortMatch = teams.find(t => t.short_name?.trim().toLowerCase() === normalized);
+                    if (shortMatch) return shortMatch.id;
+                    
+                    // 3. Substring match (extracted name contained in team name or vice-versa)
+                    const partial = teams.find(t => 
+                      t.name.toLowerCase().includes(normalized) || 
+                      normalized.includes(t.name.toLowerCase()) ||
+                      (t.short_name && (
+                        t.short_name.toLowerCase().includes(normalized) || 
+                        normalized.includes(t.short_name.toLowerCase())
+                      ))
+                    );
+                    if (partial) return partial.id;
+                    
+                    return '';
+                  };
+                  
+                  const homeTeamId = findTeamId(_homeTeamName || '');
+                  const awayTeamId = findTeamId(_awayTeamName || '');
+                  
+                  console.log('[SmartImport] Team matching:', {
+                    homeExtracted: _homeTeamName, homeMatched: homeTeamId,
+                    awayExtracted: _awayTeamName, awayMatched: awayTeamId,
+                  });
                   
                   setMatchData(prev => ({
                     ...prev,
-                    ...extractedData,
+                    ...cleanData,
+                    homeTeamId: homeTeamId || prev.homeTeamId,
+                    awayTeamId: awayTeamId || prev.awayTeamId,
                   }));
                   setDefaultsApplied(true);
                   setCurrentStep('match');

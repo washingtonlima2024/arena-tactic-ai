@@ -91,13 +91,16 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
     if (!extractionResult) return;
     
     // Build MatchSetupData from extraction - user will correct in the form
-    const matchData: MatchSetupData = {
-      homeTeamId: '', // Will be matched by name in the form
+    // Include _homeTeamName and _awayTeamName for fuzzy matching in parent
+    const matchData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
+      homeTeamId: '',
       awayTeamId: '',
       competition: extractionResult.competition || '',
       matchDate: extractionResult.match_date || new Date().toISOString().split('T')[0],
       matchTime: '',
       venue: extractionResult.venue || '',
+      _homeTeamName: extractionResult.home_team || undefined,
+      _awayTeamName: extractionResult.away_team || undefined,
     };
 
     onMatchInfoExtracted(
