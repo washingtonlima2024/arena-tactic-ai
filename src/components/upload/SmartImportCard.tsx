@@ -54,40 +54,19 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
     setStep('processing');
     
     try {
-      // Step 1: Upload/register the video
-      setProgress({ message: 'Enviando vídeo para o servidor...', percent: 10 });
+      // Step 1: Transcrever vídeo (upload de arquivo ou URL em um único passo)
+      setProgress({ message: videoFile ? 'Enviando vídeo e transcrevendo...' : 'Transcrevendo áudio...', percent: 20 });
       
-      let registeredVideoUrl = '';
-      
-      if (videoFile) {
-        // Upload file to server
-        const formData = new FormData();
-        formData.append('file', videoFile);
-        formData.append('video_type', 'full');
-        
-        const uploadResult = await fetch(`${apiClient.getApiUrl()}/api/upload-video`, {
-          method: 'POST',
-          body: formData,
-        }).then(r => r.json());
-        
-        registeredVideoUrl = uploadResult.file_url || uploadResult.url || '';
-      } else if (videoUrl.trim()) {
-        registeredVideoUrl = videoUrl.trim();
-      }
-
-      // Step 2: Transcribe
-      setProgress({ message: 'Transcrevendo áudio com Whisper Local...', percent: 30 });
-      
-      const transcribeResult = await apiClient.post('/api/smart-import/transcribe', {
-        video_url: registeredVideoUrl,
-        video_file: videoFile?.name,
+      const transcribeResult = await apiClient.smartImportTranscribe({
+        file: videoFile || undefined,
+        videoUrl: videoUrl.trim() || undefined,
       });
       
       if (!transcribeResult?.transcription) {
         throw new Error('Transcrição não retornou texto');
       }
 
-      // Step 3: Extract match info via Ollama
+      // Step 2: Extrair metadados da partida via IA
       setProgress({ message: 'IA analisando transcrição para identificar partida...', percent: 70 });
       
       const extractResult = await apiClient.extractMatchInfo(transcribeResult.transcription);
