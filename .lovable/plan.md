@@ -1,66 +1,154 @@
 
-# Auto-match de Times na Importacao Inteligente
+# Plano: Pipeline de Transcricao Robusto e Resiliente
 
-## Problema Identificado
+## Problema Atual
 
-A IA extrai corretamente os nomes dos times (ex: "Sport", "CRB"), mas o formulario recebe `homeTeamId: ''` e `awayTeamId: ''` porque nenhuma logica de correspondencia (matching) entre os nomes extraidos e os times cadastrados no banco foi implementada.
+O fluxo de transcricao falha e para completamente em diversos cenarios:
 
-No codigo atual (Upload.tsx, linha 2649-2655), ha um comentario "Try to match team names to existing teams" seguido de codigo que nao faz nada com os times.
+1. **Smart Import com URLs do YouTube**: O `yt-dlp` pode falhar no download, o FFmpeg pode falhar na extracao de audio, ou o provedor de transcricao (Gemini/Whisper) pode falhar -- e qualquer erro interrompe tudo.
 
-## Solucao
+2. **Timeout de 5 minutos no Smart Import**: O `smartImportTranscribe` tem timeout de apenas 5 min, insuficiente para videos longos do YouTube.
 
-### 1. Passar os nomes dos times extraidos pela IA para a callback
+3. **Sem retry no Smart Import**: Diferente do pipeline principal (que tem `MAX_RETRIES = 2`), o Smart Import nao tenta novamente quando falha.
 
-O `SmartImportCard` ja extrai `home_team` e `away_team` como texto, mas nao repassa esses nomes para o componente pai. Vamos incluir esses nomes no resultado.
+4. **Transcrição e um gargalo unico**: Todo o audio e enviado de uma vez para o Gemini (limite de 20MB) ou Whisper. Se falhar, nao ha recuperacao parcial.
 
-**Arquivo:** `src/components/upload/SmartImportCard.tsx`
+5. **Nenhuma transcrição = tela de erro final**: Quando a transcrição falha, o fluxo mostra uma tela de erro sem opcao clara de continuar.
 
-- Expandir a interface `MatchSetupData` ou passar os nomes como parametros extras na callback `onMatchInfoExtracted`
-- Na funcao `handleConfirm`, incluir `extractionResult.home_team` e `extractionResult.away_team` como dados adicionais
+## Solucao Proposta: Pipeline de 3 Camadas
 
-### 2. Implementar logica de fuzzy matching de times
+```text
++-------------------------------------------------------------------+
+|                    CAMADA 1: Smart Import                         |
+|   Transcreve apenas primeiros 5-10 min para extrair metadados     |
+|   (rapido, baixo risco de falha)                                  |
++-------------------------------------------------------------------+
+                              |
+                              v
++-------------------------------------------------------------------+
+|                    CAMADA 2: Transcricao Completa                 |
+|   Dividir audio em chunks de 3-5 min + transcrever em paralelo    |
+|   + retry individual por chunk + resultado parcial aceito          |
++-------------------------------------------------------------------+
+                              |
+                              v
++-------------------------------------------------------------------+
+|                    CAMADA 3: Fallback / Continuar Sem              |
+|   Se transcricao falhar: continuar pipeline sem transcrição        |
+|   Permitir importar SRT manualmente depois na pagina de Eventos   |
++-------------------------------------------------------------------+
+```
 
-**Arquivo:** `src/pages/Upload.tsx` (callback `onMatchInfoExtracted`, linhas 2647-2658)
+## Mudancas Detalhadas
 
-- Usar a lista `teams` (do hook `useTeams()`, ja disponivel na linha 217) para buscar correspondencias
-- Implementar matching por:
-  1. Nome exato (case-insensitive)
-  2. Nome parcial (ex: "Sport" encontra "Sport Club do Recife")
-  3. Short name (ex: "CRB" encontra time com short_name "CRB")
-- Pre-preencher `homeTeamId` e `awayTeamId` com os IDs encontrados
-- Se nao encontrar correspondencia, manter vazio (o usuario seleciona manualmente)
+### 1. Backend: Smart Import Otimizado (server.py)
 
-### 3. Preencher campos extras (venue, competition, date)
+**Problema**: O endpoint `/api/smart-import/transcribe` tenta transcrever o video inteiro. Para um jogo de 90min, isso e desnecessario -- so precisamos de alguns minutos para a IA identificar times, competicao, etc.
 
-Atualmente o `extractedData` ja traz `competition`, `matchDate` e `venue`, e esses campos estao sendo preenchidos corretamente (como mostra a screenshot com "Serie B do Campeonato Brasileiro" e "07/02/2026"). O problema e exclusivamente dos times.
+**Solucao**: Extrair apenas os primeiros 5 minutos de audio para o Smart Import:
+- Adicionar parametro `-t 300` (5 min) no comando FFmpeg de extracao de audio
+- Isso reduz o arquivo de audio de ~100MB para ~5MB
+- Transcrição sera rapida e confiavel (arquivo pequeno, cabe em um unico request)
+
+```text
+FFmpeg atual:  ffmpeg -i video -vn -acodec libmp3lame ...
+FFmpeg novo:   ffmpeg -i video -vn -t 300 -acodec libmp3lame ...
+                                    ^^^^^
+                              apenas 5 minutos
+```
+
+### 2. Backend: Transcricao com Chunks Resilientes (ai_services.py)
+
+**Problema**: `_transcribe_gemini_chunks` ja divide em chunks, mas nao tem retry por chunk e nao salva progresso parcial.
+
+**Solucao**: Adicionar retry por chunk com backoff exponencial:
+- Cada chunk que falhar sera tentado ate 3 vezes
+- Se um chunk falhar apos 3 tentativas, ele e pulado (nao interrompe o pipeline)
+- Aceitar transcricao parcial se >= 50% dos chunks forem transcritos com sucesso
+- Adicionar delay entre chunks para evitar rate limiting
+
+### 3. Backend: Fallback em Cadeia no Smart Import (server.py)
+
+Implementar uma cadeia de fallbacks robusta:
+1. Tentar Gemini com audio curto (5 min)
+2. Se falhar -> Tentar Whisper Local com audio curto
+3. Se falhar -> Tentar com audio de apenas 2 minutos
+4. Se tudo falhar -> Retornar resultado vazio com `success: true` e flag `transcription_failed: true`
+
+O frontend nunca recebera um erro 500 do Smart Import -- sempre recebera uma resposta valida.
+
+### 4. Frontend: Smart Import Nunca Para (SmartImportCard.tsx)
+
+**Problema**: Se a transcricao falha, o fluxo volta para a tela de selecao de video.
+
+**Solucao**:
+- Se a transcricao falhar, pular a etapa de extracao de metadados
+- Ir direto para o formulario manual de cadastro da partida
+- Mostrar toast informativo explicando que a IA nao conseguiu detectar os dados automaticamente
+- O video ja esta vinculado, so precisa preencher os times manualmente
+
+### 5. Frontend: Timeout Ajustado (apiClient.ts)
+
+- Aumentar timeout do `smartImportTranscribe` de 5 min para 15 min
+- Para URLs do YouTube, o download pode levar varios minutos antes mesmo de comecar a transcrição
+
+### 6. Frontend: Transcricao Principal com "Continuar Sem" (Upload.tsx)
+
+**Problema**: Quando `transcribeWithWhisper` retorna `null`, o fluxo mostra erro e para.
+
+**Solucao**: Ja existe logica parcial para continuar sem transcricao (linhas 1893-1916), mas ela redireciona para Eventos sem completar. Vamos melhorar:
+- Ao inves de redirecionar imediatamente, mostrar opcao "Continuar sem transcricao" na UI
+- Permitir que o usuario arraste um SRT ou tente novamente
+- Adicionar botao "Pular transcricao e analisar depois" que redireciona para a pagina de Eventos
+
+### 7. Backend: Download YouTube Mais Robusto (server.py)
+
+Adicionar resiliencia ao download do YouTube:
+- Tentar primeiro `bestaudio` (menor, mais rapido)
+- Se falhar, tentar `worst` (video mais leve possível)
+- Timeout de 10 min com mensagens de progresso
+- Tratar erros comuns (video privado, geo-bloqueado, etc.) com mensagens claras
+
+## Resumo dos Arquivos Modificados
+
+| Arquivo | Mudanca |
+|---------|---------|
+| `video-processor/server.py` | Smart Import: extrair apenas 5 min de audio; download YouTube robusto; fallback em cadeia |
+| `video-processor/ai_services.py` | Retry por chunk; aceitar resultado parcial; delay entre chunks |
+| `src/lib/apiClient.ts` | Timeout do Smart Import de 5min para 15min |
+| `src/components/upload/SmartImportCard.tsx` | Nunca parar em erro; fallback para formulario manual |
+| `src/pages/Upload.tsx` | Botao "Pular transcricao"; UI de retry melhorada |
 
 ## Detalhes Tecnicos
 
-```text
-Fluxo atual:
-  SmartImport extrai: { home_team: "Sport", away_team: "CRB" }
-  handleConfirm cria: { homeTeamId: '', awayTeamId: '' }
-  Upload recebe: matchData com IDs vazios
-  MatchSetupCard: Select mostra "Selecione o time"
+### Smart Import: Fluxo Revisado
 
-Fluxo corrigido:
-  SmartImport extrai: { home_team: "Sport", away_team: "CRB" }
-  handleConfirm cria: { homeTeamId: '', awayTeamId: '', _homeTeamName: "Sport", _awayTeamName: "CRB" }
-  Upload recebe: faz matching "Sport" -> teams.find() -> ID do time
-  Upload seta: { homeTeamId: "uuid-do-sport", awayTeamId: "uuid-do-crb" }
-  MatchSetupCard: Select mostra "Sport" e "CRB" pre-selecionados
+```text
+1. Usuario fornece video/URL
+2. Backend extrai apenas 5 min de audio (rapido)
+3. Transcreve 5 min com Gemini/Whisper (confiavel - arquivo pequeno)
+4. Se transcricao OK -> IA extrai metadados -> preenche formulario
+5. Se transcricao FALHA -> pula para formulario manual com toast
+6. Em ambos os casos: video ja vinculado, usuario so confirma
 ```
 
-### Arquivos a modificar
+### Transcricao Completa: Fluxo Revisado
 
-1. **`src/components/upload/SmartImportCard.tsx`** - Repassar `home_team` e `away_team` como parametros extras na callback
-2. **`src/pages/Upload.tsx`** - Implementar a logica de matching na callback `onMatchInfoExtracted` (linhas 2647-2658), usando a lista `teams` que ja esta disponivel no componente
+```text
+1. Extrair audio completo do video
+2. Dividir em chunks de ~3 minutos (nao por tamanho, por duracao)
+3. Transcrever cada chunk com retry (3 tentativas)
+4. Se chunk falhar -> pular, nao parar
+5. Combinar resultados parciais
+6. Se < 50% transcritos -> mostrar opcao "Continuar sem" / "Tentar novamente"
+7. Se >= 50% -> continuar pipeline normalmente
+```
 
-### Funcao de matching (a ser adicionada no Upload.tsx)
+### Retry por Chunk (ai_services.py)
 
-A funcao compara nome extraido pela IA com:
-- `team.name` (case-insensitive, trim)
-- `team.short_name` (case-insensitive)
-- Substring match (nome extraido contido no nome do time ou vice-versa)
-
-Se encontrar exatamente um resultado, usa o ID. Se encontrar multiplos, usa o primeiro (melhor match).
+```text
+Para cada chunk:
+  tentativa 1 -> falhou? -> espera 2s
+  tentativa 2 -> falhou? -> espera 5s  
+  tentativa 3 -> falhou? -> marca como pulado, continua proximo
+```
