@@ -1,16 +1,14 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Progress } from '@/components/ui/progress';
-import { 
-  Sparkles, Loader2 
-} from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 import { MatchSetupData } from './MatchSetupCard';
 import { HalfVideoInput, HalfVideoData } from './HalfVideoInput';
 import { cn } from '@/lib/utils';
+import { SoccerBallLoader } from '@/components/ui/SoccerBallLoader';
 
 export interface SmartImportVideo {
   file?: File;
@@ -54,6 +52,51 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
   const [step, setStep] = useState<SmartImportStep>('video');
   const [importMode, setImportMode] = useState<ImportMode>('full');
   const [progress, setProgress] = useState({ message: '', percent: 0 });
+  const [phase, setPhase] = useState<'idle' | 'transcribing' | 'extracting' | 'done'>('idle');
+  const progressTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Simulated gradual progress during long API calls
+  useEffect(() => {
+    if (step !== 'processing' || phase === 'idle' || phase === 'done') {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+      return;
+    }
+
+    const limits: Record<string, number> = { transcribing: 55, extracting: 85 };
+    const maxPercent = limits[phase] || 90;
+
+    const messages: Record<string, string[]> = {
+      transcribing: [
+        'Enviando vídeo para transcrição...',
+        'Extraindo faixa de áudio...',
+        'Processando áudio com IA...',
+        'Transcrevendo narração...',
+        'Identificando times e jogadores...',
+        'Analisando contexto da partida...',
+      ],
+      extracting: [
+        'IA analisando transcrição...',
+        'Identificando times...',
+        'Extraindo metadados da partida...',
+        'Detectando competição e data...',
+      ],
+    };
+
+    progressTimerRef.current = setInterval(() => {
+      setProgress(prev => {
+        const increment = phase === 'transcribing' ? 0.8 : 1.2;
+        const newPercent = Math.min(prev.percent + increment, maxPercent);
+        const phaseMessages = messages[phase] || [];
+        const msgIndex = Math.floor((newPercent / maxPercent) * phaseMessages.length);
+        const message = phaseMessages[Math.min(msgIndex, phaseMessages.length - 1)] || prev.message;
+        return { percent: newPercent, message };
+      });
+    }, 1200);
+
+    return () => {
+      if (progressTimerRef.current) clearInterval(progressTimerRef.current);
+    };
+  }, [step, phase]);
 
   // Video inputs
   const [firstHalf, setFirstHalf] = useState<HalfVideoData>({});
@@ -87,14 +130,13 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
     }
 
     setStep('processing');
+    setPhase('transcribing');
+    setProgress({ message: 'Preparando vídeo...', percent: 2 });
     
     try {
       // Determine primary video for AI transcription
       const videoFile = primaryVideo.file || undefined;
       const videoUrl = (primaryVideo.url || '').trim() || undefined;
-
-      // Step 1: Transcrever vídeo
-      setProgress({ message: videoFile ? 'Enviando vídeo e transcrevendo...' : 'Baixando e transcrevendo áudio...', percent: 20 });
       
       let transcriptionText = '';
       let transcriptionFailed = false;
@@ -178,7 +220,8 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
       }
 
       // Step 2: Extrair metadados via IA
-      setProgress({ message: 'IA analisando transcrição para identificar partida...', percent: 70 });
+      setPhase('extracting');
+      setProgress({ message: 'IA analisando transcrição...', percent: 60 });
       
       let extractResult: any = null;
       try {
@@ -214,6 +257,7 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
       }
 
       // Sucesso
+      setPhase('done');
       setProgress({ message: 'Metadados extraídos com sucesso!', percent: 100 });
       
       const matchData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
@@ -345,12 +389,12 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
 
         {/* Step 2: Processing */}
         {step === 'processing' && (
-          <div className="space-y-6 py-8">
-            <div className="flex flex-col items-center gap-4">
-              <Loader2 className="h-12 w-12 text-primary animate-spin" />
-              <p className="font-medium text-center">{progress.message}</p>
-            </div>
-            <Progress value={progress.percent} className="h-2" />
+          <div className="space-y-4 py-4">
+            <SoccerBallLoader
+              message={progress.message}
+              progress={progress.percent}
+              showProgress={true}
+            />
             <p className="text-xs text-muted-foreground text-center">
               Isso pode levar alguns minutos dependendo da duração do vídeo
             </p>
