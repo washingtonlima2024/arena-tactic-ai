@@ -8386,7 +8386,7 @@ def _process_match_pipeline(job_id: str, data: dict):
                         else:
                             raise Exception(f"Arquivo local não encontrado: {local_path}")
                 elif is_youtube_url(video_url):
-                    # YouTube URLs need yt-dlp, not simple HTTP download
+                    # YouTube URLs need yt-dlp with Popen for progress + robust format fallback
                     print(f"[ASYNC-PIPELINE] YouTube URL detectada, usando yt-dlp: {video_url[:60]}...")
                     _update_async_job(job_id, 'preparing', 8, 'Baixando vídeo do YouTube via yt-dlp...', 'preparing')
                     try:
@@ -8395,31 +8395,101 @@ def _process_match_pipeline(job_id: str, data: dict):
                         if not yt_dlp_path:
                             raise Exception("yt-dlp não encontrado. Execute: pip install yt-dlp")
                         
+                        # Garantir extensão .mp4
+                        if not video_path.lower().endswith('.mp4'):
+                            video_path = os.path.splitext(video_path)[0] + '.mp4'
+                        
                         cmd = [
                             yt_dlp_path,
-                            '-f', 'bestvideo[height<=720]+bestaudio/best[height<=720]',
+                            '-f', 'bestvideo[height<=720]+bestaudio/best[height<=720]/best[height<=720]/best',
                             '--merge-output-format', 'mp4',
                             '-o', video_path,
                             '--no-playlist',
+                            '--newline',
+                            '--force-overwrites',
                             '--socket-timeout', '60',
+                            '--retries', '3',
                             video_url
                         ]
                         print(f"[ASYNC-PIPELINE] yt-dlp cmd: {' '.join(cmd)}")
-                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
                         
-                        if result.returncode != 0:
-                            print(f"[ASYNC-PIPELINE] yt-dlp stderr: {result.stderr[-500:]}")
-                            raise Exception(f"yt-dlp falhou: {result.stderr[-200:]}")
+                        process = subprocess.Popen(
+                            cmd,
+                            stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT,
+                            text=True,
+                            bufsize=1
+                        )
                         
-                        # yt-dlp may add different extension - find the file
+                        import time as _time
+                        dl_start = _time.time()
+                        dl_timeout = 1800  # 30 min
+                        
+                        for line in process.stdout:
+                            # Timeout check
+                            if _time.time() - dl_start > dl_timeout:
+                                process.kill()
+                                raise Exception("Download do YouTube expirou após 30 minutos")
+                            
+                            line = line.strip()
+                            if not line:
+                                continue
+                            
+                            # Parse progress: [download]  45.2% of ~150.00MiB at 5.00MiB/s ETA 00:15
+                            progress_match = re.search(r'\[download\]\s+([\d.]+)%', line)
+                            if progress_match:
+                                pct = float(progress_match.group(1))
+                                dl_pct = min(int(pct), 99)
+                                # Map download progress to job progress (8-25% range)
+                                job_pct = 8 + int(dl_pct * 0.17)  # 8% to ~25%
+                                _update_async_job(job_id, 'preparing', job_pct, f'Baixando do YouTube ({dl_pct}%)...', 'preparing')
+                            
+                            # Detect merge phase
+                            if '[Merger]' in line or 'Merging' in line:
+                                _update_async_job(job_id, 'preparing', 24, 'Mesclando áudio e vídeo...', 'preparing')
+                            
+                            # Log important lines
+                            if '[download]' in line or '[Merger]' in line or 'ERROR' in line or 'WARNING' in line:
+                                print(f"[ASYNC-PIPELINE][yt-dlp] {line}")
+                        
+                        process.wait(timeout=60)  # Should be done already, just cleanup
+                        
+                        if process.returncode != 0:
+                            raise Exception(f"yt-dlp retornou código {process.returncode}")
+                        
+                        # Post-download: find the actual file (may have different extension)
                         if not os.path.exists(video_path) or os.path.getsize(video_path) < 1000:
                             base = os.path.splitext(video_path)[0]
+                            found_alt = False
                             for ext in ['.mp4', '.mkv', '.webm']:
                                 alt = base + ext
                                 if os.path.exists(alt) and os.path.getsize(alt) > 1000:
-                                    if alt != video_path:
-                                        os.rename(alt, video_path)
-                                    break
+                                    if ext != '.mp4':
+                                        # Convert to mp4 using ffmpeg
+                                        print(f"[ASYNC-PIPELINE] Convertendo {ext} para .mp4...")
+                                        _update_async_job(job_id, 'preparing', 25, f'Convertendo {ext} para MP4...', 'preparing')
+                                        conv_cmd = ['ffmpeg', '-y', '-i', alt, '-c', 'copy', video_path]
+                                        conv_result = subprocess.run(conv_cmd, capture_output=True, text=True, timeout=600)
+                                        if conv_result.returncode != 0:
+                                            # Fallback: re-encode
+                                            conv_cmd2 = ['ffmpeg', '-y', '-i', alt, '-c:v', 'libx264', '-c:a', 'aac', video_path]
+                                            subprocess.run(conv_cmd2, capture_output=True, text=True, timeout=1200)
+                                        if os.path.exists(video_path) and os.path.getsize(video_path) > 1000:
+                                            os.remove(alt)  # Clean up source
+                                            found_alt = True
+                                            break
+                                    else:
+                                        if alt != video_path:
+                                            os.rename(alt, video_path)
+                                        found_alt = True
+                                        break
+                            
+                            # Also check for .mp4.part (incomplete download)
+                            part_file = video_path + '.part'
+                            if not found_alt and os.path.exists(part_file):
+                                print(f"[ASYNC-PIPELINE] ⚠ Arquivo .part encontrado - download incompleto")
+                                os.remove(part_file)
+                                raise Exception("Download do YouTube incompleto (arquivo .part)")
                         
                         if os.path.exists(video_path) and os.path.getsize(video_path) > 1000:
                             video_paths[half_type] = video_path
@@ -8469,6 +8539,10 @@ def _process_match_pipeline(job_id: str, data: dict):
                             except Exception as db_err:
                                 print(f"[ASYNC-PIPELINE] ⚠ Erro ao registrar vídeo no DB: {db_err}")
                         else:
+                            # List files in tmp dir for debugging
+                            tmp_dir_path = os.path.dirname(video_path)
+                            files_in_tmp = os.listdir(tmp_dir_path) if os.path.exists(tmp_dir_path) else []
+                            print(f"[ASYNC-PIPELINE] Arquivos no tmp: {files_in_tmp}")
                             raise Exception("Download do YouTube completou mas arquivo não encontrado")
                     except Exception as yt_err:
                         print(f"[ASYNC-PIPELINE] ✗ Erro no download YouTube: {yt_err}")
@@ -9650,7 +9724,9 @@ def download_youtube_with_progress(url: str, output_path: str, job_id: str):
         
         cmd = [
             yt_dlp_path,
-            '-f', 'bestvideo[height<=720]+bestaudio/best[height<=720]',
+            '-f', 'bestvideo[height<=720]+bestaudio/best[height<=720]/best[height<=720]/best',
+            '--force-overwrites',
+            '--retries', '3',
             '--merge-output-format', 'mp4',
             '--no-playlist',
             '--newline',  # Uma linha por update de progresso
