@@ -8425,15 +8425,48 @@ def _process_match_pipeline(job_id: str, data: dict):
                             size_mb = os.path.getsize(video_path) / (1024 * 1024)
                             print(f"[ASYNC-PIPELINE] ✓ YouTube download concluído: {size_mb:.1f} MB")
                             
-                            # Also save to storage for future use
+                            # CRITICAL: Save to storage (mandatory - not in try/except)
+                            storage_video_dir = get_subfolder_path(match_id, 'videos')
+                            dest_name = f"{half_type}_half.mp4"
+                            dest_path = storage_video_dir / dest_name
+                            shutil.copy2(video_path, str(dest_path))
+                            print(f"[ASYNC-PIPELINE] ✓ Vídeo salvo no storage: {dest_path}")
+                            
+                            # Register video in database
                             try:
-                                storage_video_dir = get_subfolder_path(match_id, 'videos')
-                                dest_name = f"{half_type}_half.mp4"
-                                dest_path = storage_video_dir / dest_name
-                                shutil.copy2(video_path, str(dest_path))
-                                print(f"[ASYNC-PIPELINE] ✓ Vídeo salvo no storage: {dest_name}")
-                            except Exception as save_err:
-                                print(f"[ASYNC-PIPELINE] ⚠ Erro ao salvar no storage: {save_err}")
+                                video_type_map = {'first': 'first_half', 'second': 'second_half'}
+                                v_type = video.get('videoType', video_type_map.get(half_type, 'full'))
+                                storage_url = f"/api/storage/{match_id}/videos/{dest_name}"
+                                duration = get_video_duration_seconds(str(dest_path))
+                                
+                                db_session = get_session()
+                                try:
+                                    existing = db_session.query(Video).filter_by(
+                                        match_id=match_id, video_type=v_type
+                                    ).first()
+                                    if existing:
+                                        existing.file_url = storage_url
+                                        existing.file_name = dest_name
+                                        existing.status = 'ready'
+                                        existing.duration_seconds = duration
+                                    else:
+                                        new_video = Video(
+                                            match_id=match_id,
+                                            file_url=storage_url,
+                                            file_name=dest_name,
+                                            video_type=v_type,
+                                            status='ready',
+                                            duration_seconds=duration,
+                                            start_minute=0,
+                                            end_minute=90 if v_type == 'full' else 45
+                                        )
+                                        db_session.add(new_video)
+                                    db_session.commit()
+                                    print(f"[ASYNC-PIPELINE] ✓ Vídeo registrado no DB: {v_type} ({duration}s)")
+                                finally:
+                                    db_session.close()
+                            except Exception as db_err:
+                                print(f"[ASYNC-PIPELINE] ⚠ Erro ao registrar vídeo no DB: {db_err}")
                         else:
                             raise Exception("Download do YouTube completou mas arquivo não encontrado")
                     except Exception as yt_err:
@@ -8442,15 +8475,48 @@ def _process_match_pipeline(job_id: str, data: dict):
                 else:
                     if download_video(video_url, video_path):
                         video_paths[half_type] = video_path
-                        # Save to storage for future use
+                        # CRITICAL: Save to storage (mandatory)
+                        storage_video_dir = get_subfolder_path(match_id, 'videos')
+                        dest_name = f"{half_type}_half.mp4"
+                        dest_path = storage_video_dir / dest_name
+                        shutil.copy2(video_path, str(dest_path))
+                        print(f"[ASYNC-PIPELINE] ✓ Vídeo link salvo no storage: {dest_path}")
+                        
+                        # Register video in database
                         try:
-                            storage_video_dir = get_subfolder_path(match_id, 'videos')
-                            dest_name = f"{half_type}_half.mp4"
-                            dest_path = storage_video_dir / dest_name
-                            shutil.copy2(video_path, str(dest_path))
-                            print(f"[ASYNC-PIPELINE] ✓ Vídeo link salvo no storage: {dest_name}")
-                        except Exception as save_err:
-                            print(f"[ASYNC-PIPELINE] ⚠ Erro ao salvar link no storage: {save_err}")
+                            video_type_map = {'first': 'first_half', 'second': 'second_half'}
+                            v_type = video.get('videoType', video_type_map.get(half_type, 'full'))
+                            storage_url = f"/api/storage/{match_id}/videos/{dest_name}"
+                            duration = get_video_duration_seconds(str(dest_path))
+                            
+                            db_session = get_session()
+                            try:
+                                existing = db_session.query(Video).filter_by(
+                                    match_id=match_id, video_type=v_type
+                                ).first()
+                                if existing:
+                                    existing.file_url = storage_url
+                                    existing.file_name = dest_name
+                                    existing.status = 'ready'
+                                    existing.duration_seconds = duration
+                                else:
+                                    new_video = Video(
+                                        match_id=match_id,
+                                        file_url=storage_url,
+                                        file_name=dest_name,
+                                        video_type=v_type,
+                                        status='ready',
+                                        duration_seconds=duration,
+                                        start_minute=0,
+                                        end_minute=90 if v_type == 'full' else 45
+                                    )
+                                    db_session.add(new_video)
+                                db_session.commit()
+                                print(f"[ASYNC-PIPELINE] ✓ Vídeo registrado no DB: {v_type} ({duration}s)")
+                            finally:
+                                db_session.close()
+                        except Exception as db_err:
+                            print(f"[ASYNC-PIPELINE] ⚠ Erro ao registrar vídeo no DB: {db_err}")
                     else:
                         raise Exception(f"Falha ao baixar vídeo: {video_url[:50]}")
             
