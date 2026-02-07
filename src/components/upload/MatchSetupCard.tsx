@@ -183,7 +183,7 @@ export function MatchSetupCard({ data, onChange, onContinue, isCreating, isAutoF
         <div className="space-y-2">
           <Label className="flex items-center gap-2">
             <Trophy className="h-4 w-4 text-yellow-500" />
-            Competição
+            Competição (opcional)
           </Label>
           <Input
             value={data.competition}
@@ -197,7 +197,7 @@ export function MatchSetupCard({ data, onChange, onContinue, isCreating, isAutoF
           <div className="space-y-2">
             <Label className="flex items-center gap-2">
               <Calendar className="h-4 w-4 text-muted-foreground" />
-              Data da Partida
+              Data da Partida (opcional)
             </Label>
             <Input
               type="date"
@@ -209,7 +209,7 @@ export function MatchSetupCard({ data, onChange, onContinue, isCreating, isAutoF
           <div className="space-y-2">
             <Label className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-muted-foreground" />
-              Horário
+              Horário (opcional)
             </Label>
             <Input
               type="time"
