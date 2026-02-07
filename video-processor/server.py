@@ -7775,6 +7775,180 @@ import time as time_module
 # Global job tracker for async processing
 async_processing_jobs = {}
 
+
+def ensure_audio_extracted(match_id: str) -> list:
+    """
+    Ensure audio files exist in storage/{match_id}/audio/.
+    Uses the SAME approach as the manual process (save_file with binary data)
+    instead of shutil.copy2 which fails silently with symlinks.
+    
+    Returns list of audio file paths.
+    """
+    audio_dir = get_subfolder_path(match_id, 'audio')
+    existing = list(audio_dir.glob('*.mp3')) + list(audio_dir.glob('*.wav'))
+    
+    if existing:
+        print(f"[ENSURE-AUDIO] ✓ Áudio já existe para {match_id}: {[f.name for f in existing]}")
+        return existing
+    
+    print(f"[ENSURE-AUDIO] ⚠ Nenhum áudio encontrado para {match_id} - iniciando extração direta...")
+    
+    # 1. Find video files directly in storage (NO symlinks)
+    video_dir = get_subfolder_path(match_id, 'videos')
+    found_videos = []
+    
+    # Search in videos/ root and videos/original/
+    search_dirs = [video_dir]
+    original_dir = video_dir / 'original'
+    if original_dir.exists():
+        search_dirs.append(original_dir)
+    
+    for search_path in search_dirs:
+        if not search_path.exists():
+            continue
+        for vf in search_path.iterdir():
+            if vf.is_file() and vf.suffix.lower() in ('.mp4', '.mkv', '.avi', '.mov', '.webm'):
+                try:
+                    file_size = vf.stat().st_size
+                    if file_size > 10000:  # Skip tiny/corrupt files
+                        found_videos.append(vf)
+                        print(f"[ENSURE-AUDIO] 📂 Vídeo no storage: {vf.name} ({file_size/1024/1024:.1f}MB) em {search_path}")
+                except OSError as e:
+                    print(f"[ENSURE-AUDIO] ⚠ Erro ao acessar {vf}: {e}")
+    
+    # 2. Also check database for video records
+    if not found_videos:
+        print(f"[ENSURE-AUDIO] Buscando vídeos no banco de dados...")
+        session = get_session()
+        try:
+            db_videos = session.query(Video).filter_by(match_id=match_id).all()
+            for db_video in db_videos:
+                if db_video.file_name:
+                    # Try to find the file in storage
+                    for check_dir in [video_dir, video_dir / 'original']:
+                        candidate = check_dir / db_video.file_name
+                        if candidate.exists() and candidate.stat().st_size > 10000:
+                            found_videos.append(candidate)
+                            print(f"[ENSURE-AUDIO] 📂 Vídeo do DB encontrado: {candidate.name} ({candidate.stat().st_size/1024/1024:.1f}MB)")
+                            break
+                
+                # Also try resolving file_url
+                if not found_videos and db_video.file_url:
+                    resolved = resolve_video_path(db_video.file_url, match_id)
+                    if resolved and os.path.exists(resolved) and os.path.getsize(resolved) > 10000:
+                        found_videos.append(Path(resolved))
+                        print(f"[ENSURE-AUDIO] 📂 Vídeo via URL resolução: {resolved}")
+        finally:
+            session.close()
+    
+    if not found_videos:
+        print(f"[ENSURE-AUDIO] ✗ Nenhum vídeo encontrado para extrair áudio de {match_id}")
+        return []
+    
+    # Sort by size (largest first - more likely to be the full video)
+    found_videos.sort(key=lambda x: x.stat().st_size, reverse=True)
+    # Remove duplicates preserving order
+    seen = set()
+    unique_videos = []
+    for v in found_videos:
+        real = v.resolve()
+        if real not in seen:
+            seen.add(real)
+            unique_videos.append(v)
+    found_videos = unique_videos
+    
+    print(f"[ENSURE-AUDIO] 🔊 Extraindo áudio de {len(found_videos)} vídeo(s)...")
+    
+    extracted = []
+    for idx, video_file in enumerate(found_videos):
+        # Determine half label
+        if len(found_videos) == 1:
+            half_label = 'first_half'
+        else:
+            half_label = 'first_half' if idx == 0 else 'second_half'
+        
+        audio_filename = f"{half_label}_audio.mp3"
+        
+        # Check if already extracted in a previous iteration
+        if (audio_dir / audio_filename).exists():
+            print(f"[ENSURE-AUDIO] ✓ {audio_filename} já existe, pulando")
+            extracted.append(audio_dir / audio_filename)
+            continue
+        
+        print(f"[ENSURE-AUDIO] 🎵 Extraindo: {video_file.name} -> {audio_filename}")
+        
+        try:
+            # Use tempfile for FFmpeg output, then save_file() to write to storage
+            # This is the SAME approach that works in manual process (ai_services.py)
+            with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp:
+                tmp_path = tmp.name
+            
+            cmd = [
+                'ffmpeg', '-y', '-i', str(video_file),
+                '-vn', '-acodec', 'libmp3lame', '-ab', '128k',
+                tmp_path
+            ]
+            print(f"[ENSURE-AUDIO] FFmpeg: {' '.join(cmd)}")
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
+            
+            if result.returncode == 0 and os.path.exists(tmp_path) and os.path.getsize(tmp_path) > 1000:
+                # Read the audio data as bytes and use save_file() - SAME as manual process
+                with open(tmp_path, 'rb') as f:
+                    audio_data = f.read()
+                
+                saved = save_file(match_id, 'audio', audio_data, audio_filename)
+                print(f"[ENSURE-AUDIO] ✓ Áudio salvo via save_file(): {audio_filename} ({len(audio_data)/1024:.0f}KB) -> {saved['path']}")
+                extracted.append(Path(saved['path']))
+            else:
+                print(f"[ENSURE-AUDIO] ⚠ FFmpeg método 1 falhou (rc={result.returncode}), tentando método 2...")
+                if result.stderr:
+                    print(f"[ENSURE-AUDIO] stderr: {result.stderr[-300:]}")
+                
+                # Method 2: simpler extraction
+                with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp2:
+                    tmp_path2 = tmp2.name
+                
+                cmd2 = [
+                    'ffmpeg', '-y', '-i', str(video_file),
+                    '-vn', '-ar', '16000', '-ac', '1', '-q:a', '5',
+                    tmp_path2
+                ]
+                result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=900)
+                
+                if result2.returncode == 0 and os.path.exists(tmp_path2) and os.path.getsize(tmp_path2) > 1000:
+                    with open(tmp_path2, 'rb') as f:
+                        audio_data = f.read()
+                    
+                    saved = save_file(match_id, 'audio', audio_data, audio_filename)
+                    print(f"[ENSURE-AUDIO] ✓ Áudio salvo via save_file() (método 2): {audio_filename} ({len(audio_data)/1024:.0f}KB)")
+                    extracted.append(Path(saved['path']))
+                else:
+                    print(f"[ENSURE-AUDIO] ✗ Todas tentativas falharam para {video_file.name}")
+                    if result2.stderr:
+                        print(f"[ENSURE-AUDIO] stderr2: {result2.stderr[-300:]}")
+                
+                # Cleanup tmp2
+                try:
+                    os.unlink(tmp_path2)
+                except:
+                    pass
+            
+            # Cleanup tmp
+            try:
+                os.unlink(tmp_path)
+            except:
+                pass
+                
+        except Exception as e:
+            import traceback
+            print(f"[ENSURE-AUDIO] ✗ Erro extraindo áudio de {video_file.name}: {e}")
+            traceback.print_exc()
+    
+    # Final check
+    final_files = list(audio_dir.glob('*.mp3')) + list(audio_dir.glob('*.wav'))
+    print(f"[ENSURE-AUDIO] 📊 Resultado final: {len(final_files)} arquivo(s) de áudio: {[f.name for f in final_files]}")
+    return final_files
+
 def _update_async_job(job_id: str, status: str, progress: int, message: str = '', 
                       stage: str = None, parts_completed: int = None, 
                       total_parts: int = None, parts_status: list = None,
@@ -8109,82 +8283,27 @@ def _process_match_pipeline(job_id: str, data: dict):
             audio_files = list(audio_dir.glob('*.mp3')) + list(audio_dir.glob('*.wav'))
             print(f"[ASYNC-PIPELINE] Arquivos de áudio gerados: {[f.name for f in audio_files]}")
             
-            # ========== PHASE 2.5 FALLBACK: Extract audio from storage videos if missing ==========
+            # ========== PHASE 2.5 FALLBACK: Use ensure_audio_extracted (same method as manual) ==========
             if not audio_files:
-                print(f"[ASYNC-PIPELINE] ⚠️ Nenhum áudio extraído no Phase 2.5 - tentando fallback do storage...")
-                try:
-                    storage_video_dir = get_subfolder_path(match_id, 'videos')
-                    # Search in root videos/ and also in videos/original/
-                    video_search_dirs = [storage_video_dir]
-                    original_dir = storage_video_dir / 'original'
-                    if original_dir.exists():
-                        video_search_dirs.append(original_dir)
-                    
-                    found_videos = []
-                    for search_dir in video_search_dirs:
-                        for vf in search_dir.iterdir():
-                            if vf.is_file() and vf.suffix.lower() in ('.mp4', '.mkv', '.avi', '.mov', '.webm'):
-                                file_size = vf.stat().st_size
-                                print(f"[ASYNC-PIPELINE] 📂 Vídeo encontrado no storage: {vf.name} ({file_size/1024/1024:.1f}MB)")
-                                found_videos.append(vf)
-                    
-                    for idx, video_file in enumerate(found_videos):
-                        half_label = 'first_half' if idx == 0 else 'second_half'
-                        audio_filename = f"{half_label}_audio.mp3"
-                        audio_dest = audio_dir / audio_filename
-                        
-                        if audio_dest.exists():
-                            print(f"[ASYNC-PIPELINE] ✓ Áudio já existe: {audio_filename}")
-                            continue
-                        
-                        print(f"[ASYNC-PIPELINE] 🔊 Extraindo áudio de {video_file.name} -> {audio_filename}")
-                        
-                        audio_tmp = os.path.join(tmpdir, f"fallback_{audio_filename}")
-                        cmd = [
-                            'ffmpeg', '-y', '-i', str(video_file),
-                            '-vn', '-acodec', 'libmp3lame', '-ab', '128k',
-                            audio_tmp
-                        ]
-                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-                        
-                        if result.returncode == 0 and os.path.exists(audio_tmp) and os.path.getsize(audio_tmp) > 1000:
-                            shutil.copy2(audio_tmp, str(audio_dest))
-                            size_kb = os.path.getsize(str(audio_dest)) / 1024
-                            print(f"[ASYNC-PIPELINE] ✓ Fallback áudio extraído: {audio_filename} ({size_kb:.0f}KB)")
-                        else:
-                            # Try simpler extraction
-                            audio_tmp2 = os.path.join(tmpdir, f"fallback2_{audio_filename}")
-                            cmd2 = [
-                                'ffmpeg', '-y', '-i', str(video_file),
-                                '-vn', '-ar', '16000', '-ac', '1', '-q:a', '5',
-                                audio_tmp2
-                            ]
-                            result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=600)
-                            if result2.returncode == 0 and os.path.exists(audio_tmp2) and os.path.getsize(audio_tmp2) > 1000:
-                                shutil.copy2(audio_tmp2, str(audio_dest))
-                                print(f"[ASYNC-PIPELINE] ✓ Fallback áudio extraído (método 2): {audio_filename}")
-                            else:
-                                print(f"[ASYNC-PIPELINE] ✗ Fallback falhou para {video_file.name}")
-                                if result.stderr:
-                                    print(f"[ASYNC-PIPELINE] FFmpeg stderr: {result.stderr[-300:]}")
-                        
-                        # Also get duration if missing
-                        if not video_durations:
-                            try:
-                                dur = get_video_duration_seconds(str(video_file))
-                                video_durations[half_label.replace('_half', '')] = dur
-                                print(f"[ASYNC-PIPELINE] ✓ Duração obtida do fallback: {dur:.1f}s")
-                            except:
-                                pass
-                    
-                    # Re-check audio files
-                    audio_files = list(audio_dir.glob('*.mp3')) + list(audio_dir.glob('*.wav'))
-                    print(f"[ASYNC-PIPELINE] Áudio após fallback: {[f.name for f in audio_files]}")
-                    
-                except Exception as fallback_err:
-                    import traceback
-                    print(f"[ASYNC-PIPELINE] ✗ Fallback de áudio falhou: {fallback_err}")
-                    traceback.print_exc()
+                print(f"[ASYNC-PIPELINE] ⚠️ Nenhum áudio extraído no Phase 2.5 - usando ensure_audio_extracted()...")
+                audio_files = ensure_audio_extracted(match_id)
+                print(f"[ASYNC-PIPELINE] Áudio após ensure_audio_extracted: {[f.name for f in audio_files]}")
+                
+                # Also get durations from storage videos if missing
+                if not video_durations:
+                    try:
+                        storage_video_dir = get_subfolder_path(match_id, 'videos')
+                        for search_path in [storage_video_dir, storage_video_dir / 'original']:
+                            if search_path.exists():
+                                for vf in search_path.iterdir():
+                                    if vf.is_file() and vf.suffix.lower() in ('.mp4', '.mkv', '.avi', '.mov', '.webm'):
+                                        dur = get_video_duration_seconds(str(vf))
+                                        half_label = 'first' if not video_durations else 'second'
+                                        video_durations[half_label] = dur
+                                        print(f"[ASYNC-PIPELINE] ✓ Duração obtida: {half_label} = {dur:.1f}s")
+                                        break
+                    except Exception as dur_err:
+                        print(f"[ASYNC-PIPELINE] ⚠ Erro obtendo duração: {dur_err}")
             
 
             # ========== PHASE 3: TRANSCRIPTION (60%) ==========
@@ -8423,54 +8542,12 @@ def _process_match_pipeline(job_id: str, data: dict):
             
             
             # ========== POST-TRANSCRIPTION AUDIO VERIFICATION ==========
-            # Final safety net: ensure audio exists before proceeding to clips/analysis
-            audio_dir_check = get_subfolder_path(match_id, 'audio')
-            audio_files_check = list(audio_dir_check.glob('*.mp3')) + list(audio_dir_check.glob('*.wav'))
-            
-            if not audio_files_check:
-                print(f"[ASYNC-PIPELINE] ⚠️ VERIFICAÇÃO PÓS-TRANSCRIÇÃO: Nenhum áudio encontrado! Última tentativa de extração...")
-                try:
-                    storage_video_dir = get_subfolder_path(match_id, 'videos')
-                    # Search all possible locations
-                    all_video_files = []
-                    for search_path in [storage_video_dir, storage_video_dir / 'original']:
-                        if search_path.exists():
-                            for vf in search_path.iterdir():
-                                if vf.is_file() and vf.suffix.lower() in ('.mp4', '.mkv', '.avi', '.mov', '.webm'):
-                                    all_video_files.append(vf)
-                    
-                    if all_video_files:
-                        # Use the first (largest) video found
-                        all_video_files.sort(key=lambda x: x.stat().st_size, reverse=True)
-                        source_video = all_video_files[0]
-                        print(f"[ASYNC-PIPELINE] 🔊 Última tentativa: extraindo áudio de {source_video.name} ({source_video.stat().st_size/1024/1024:.1f}MB)")
-                        
-                        emergency_audio = audio_dir_check / 'first_half_audio.mp3'
-                        emergency_tmp = os.path.join(tmpdir, 'emergency_audio.mp3')
-                        
-                        cmd = [
-                            'ffmpeg', '-y', '-i', str(source_video),
-                            '-vn', '-acodec', 'libmp3lame', '-ab', '128k',
-                            emergency_tmp
-                        ]
-                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=900)
-                        
-                        if result.returncode == 0 and os.path.exists(emergency_tmp) and os.path.getsize(emergency_tmp) > 1000:
-                            shutil.copy2(emergency_tmp, str(emergency_audio))
-                            size_kb = os.path.getsize(str(emergency_audio)) / 1024
-                            print(f"[ASYNC-PIPELINE] ✓ EMERGÊNCIA: Áudio extraído com sucesso: first_half_audio.mp3 ({size_kb:.0f}KB)")
-                        else:
-                            print(f"[ASYNC-PIPELINE] ✗ EMERGÊNCIA: Extração de áudio falhou")
-                            if result.stderr:
-                                print(f"[ASYNC-PIPELINE] FFmpeg stderr: {result.stderr[-500:]}")
-                    else:
-                        print(f"[ASYNC-PIPELINE] ✗ EMERGÊNCIA: Nenhum vídeo encontrado em storage/{match_id}/videos/")
-                except Exception as emergency_err:
-                    import traceback
-                    print(f"[ASYNC-PIPELINE] ✗ EMERGÊNCIA áudio falhou: {emergency_err}")
-                    traceback.print_exc()
+            # Final safety net using ensure_audio_extracted (same method as manual process)
+            post_audio = ensure_audio_extracted(match_id)
+            if post_audio:
+                print(f"[ASYNC-PIPELINE] ✓ Verificação pós-transcrição OK: {[f.name for f in post_audio]}")
             else:
-                print(f"[ASYNC-PIPELINE] ✓ Verificação pós-transcrição OK: {[f.name for f in audio_files_check]}")
+                print(f"[ASYNC-PIPELINE] ⚠️ AVISO: Nenhum áudio disponível após todas as tentativas")
 
             # ========== PHASE 4: AI ANALYSIS (10%) ==========
             _update_async_job(job_id, 'analyzing', 80, 'Analisando com IA...', 'analyzing')
