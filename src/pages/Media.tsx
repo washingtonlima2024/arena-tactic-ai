@@ -339,6 +339,34 @@ export default function Media() {
                 
                 // USAR SERVIDOR PYTHON - mais robusto e rápido
                 try {
+                  // Auto-detectar incompatibilidade de timestamps ANTES de gerar
+                  const videoDurationSec = matchVideos?.[0]?.duration_seconds || 0;
+                  const maxEventSecond = Math.max(...clips.map(c => c.videoSecond || c.totalSeconds || 0));
+                  
+                  if (videoDurationSec > 0 && maxEventSecond > videoDurationSec * 1.1) {
+                    // Timestamps excedem a duração do vídeo — recalcular automaticamente
+                    toast({ 
+                      title: "⚡ Corrigindo timestamps...", 
+                      description: `Eventos apontam para ${Math.round(maxEventSecond/60)}min mas o vídeo tem ${Math.round(videoDurationSec/60)}min. Ajustando automaticamente.` 
+                    });
+                    
+                    try {
+                      const recalcResult = await apiClient.recalculateEventTimestamps(matchId);
+                      if (recalcResult.success && recalcResult.updated > 0) {
+                        toast({ 
+                          title: `✓ ${recalcResult.updated} eventos corrigidos`, 
+                          description: "Gerando clips com timestamps ajustados..." 
+                        });
+                        // Aguardar propagação
+                        await new Promise(r => setTimeout(r, 500));
+                        // Recarregar eventos para ter os timestamps atualizados
+                        refetchEvents();
+                      }
+                    } catch (recalcErr) {
+                      console.warn('[Media] Auto-recalculate failed, proceeding anyway:', recalcErr);
+                    }
+                  }
+                  
                   toast({ 
                     title: "Gerando clips no servidor...", 
                     description: `Processando ${eventsWithoutClips.length} eventos` 
