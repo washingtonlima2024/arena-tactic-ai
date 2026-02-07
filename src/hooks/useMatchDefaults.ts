@@ -1,5 +1,4 @@
-import { useQuery } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { useMemo } from 'react';
 import { format } from 'date-fns';
 
 export interface MatchDefaults {
@@ -12,36 +11,25 @@ export interface MatchDefaults {
 }
 
 /**
- * Fetches smart defaults for a new match based on the most recent match.
- * Auto-fills: date (today), time (now rounded), competition, venue, and teams from the last match.
+ * Returns minimal smart defaults for a new match (only date/time).
+ * Full metadata comes from AI analysis via Smart Import.
  */
 export function useMatchDefaults() {
-  return useQuery({
-    queryKey: ['match-defaults'],
-    queryFn: async (): Promise<MatchDefaults> => {
-      const now = new Date();
-      const todayDate = format(now, 'yyyy-MM-dd');
-      // Round to nearest hour
-      const roundedHour = now.getMinutes() >= 30 ? now.getHours() + 1 : now.getHours();
-      const todayTime = `${String(roundedHour % 24).padStart(2, '0')}:00`;
+  const data = useMemo((): MatchDefaults => {
+    const now = new Date();
+    const todayDate = format(now, 'yyyy-MM-dd');
+    const roundedHour = now.getMinutes() >= 30 ? now.getHours() + 1 : now.getHours();
+    const todayTime = `${String(roundedHour % 24).padStart(2, '0')}:00`;
 
-      // Fetch the most recent match with teams
-      const { data: lastMatch } = await supabase
-        .from('matches')
-        .select('home_team_id, away_team_id, competition, venue')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
+    return {
+      homeTeamId: '',
+      awayTeamId: '',
+      competition: '',
+      matchDate: todayDate,
+      matchTime: todayTime,
+      venue: '',
+    };
+  }, []);
 
-      return {
-        homeTeamId: lastMatch?.home_team_id || '',
-        awayTeamId: lastMatch?.away_team_id || '',
-        competition: lastMatch?.competition || '',
-        matchDate: todayDate,
-        matchTime: todayTime,
-        venue: lastMatch?.venue || '',
-      };
-    },
-    staleTime: 5 * 60 * 1000, // 5 min cache
-  });
+  return { data, isLoading: false };
 }

@@ -34,7 +34,8 @@ import {
   Cloud,
   Loader2,
   Terminal,
-  Trash2
+  Trash2,
+  Sparkles
 } from 'lucide-react';
 import { useTeams } from '@/hooks/useTeams';
 import { useCreateMatch } from '@/hooks/useMatches';
@@ -55,6 +56,7 @@ import arenaPlayWordmark from '@/assets/arena-play-wordmark.png';
 import { MatchSetupCard, MatchSetupData } from '@/components/upload/MatchSetupCard';
 import { useMatchDefaults } from '@/hooks/useMatchDefaults';
 import { VideoSegmentCard, VideoSegment, VideoType } from '@/components/upload/VideoSegmentCard';
+import { SmartImportCard } from '@/components/upload/SmartImportCard';
 import { CoverageTimeline } from '@/components/upload/CoverageTimeline';
 import { AnalysisSummary } from '@/components/upload/AnalysisSummary';
 import { MatchTimesConfig, defaultMatchTimes, MatchTimes } from '@/components/upload/MatchTimesConfig';
@@ -85,7 +87,7 @@ const suggestVideoType = (filename: string): VideoType => {
   return 'full';
 };
 
-type WizardStep = 'choice' | 'existing' | 'match' | 'videos' | 'summary';
+type WizardStep = 'choice' | 'existing' | 'match' | 'smart-import' | 'videos' | 'summary';
 
 export default function VideoUpload() {
   const navigate = useNavigate();
@@ -2467,7 +2469,26 @@ export default function VideoUpload() {
                     </p>
                   </div>
                   
-                  <div className="grid md:grid-cols-2 gap-4">
+                  <div className="grid md:grid-cols-3 gap-4">
+                    {/* Smart Import Option */}
+                    <button
+                      onClick={() => setCurrentStep('smart-import')}
+                      className="group relative p-6 rounded-lg border-2 border-primary/30 bg-primary/5 hover:border-primary/60 hover:bg-primary/10 transition-all text-left ring-1 ring-primary/20"
+                    >
+                      <div className="flex flex-col items-center text-center gap-4">
+                        <div className="h-16 w-16 rounded-full bg-primary/20 flex items-center justify-center group-hover:bg-primary/30 transition-colors">
+                          <Sparkles className="h-8 w-8 text-primary" />
+                        </div>
+                        <div>
+                          <h3 className="font-semibold text-lg mb-1">Importação Inteligente</h3>
+                          <p className="text-sm text-muted-foreground">
+                            Envie o vídeo e a IA preenche tudo automaticamente
+                          </p>
+                        </div>
+                        <Badge variant="secondary" className="text-xs">Recomendado</Badge>
+                      </div>
+                    </button>
+
                     {/* New Match Option */}
                     <button
                       onClick={() => setCurrentStep('match')}
@@ -2480,7 +2501,7 @@ export default function VideoUpload() {
                         <div>
                           <h3 className="font-semibold text-lg mb-1">Nova Partida</h3>
                           <p className="text-sm text-muted-foreground">
-                            Criar uma nova partida e fazer upload dos vídeos
+                            Preencher dados manualmente e fazer upload
                           </p>
                         </div>
                       </div>
@@ -2496,9 +2517,9 @@ export default function VideoUpload() {
                           <ListPlus className="h-8 w-8 text-primary" />
                         </div>
                         <div>
-                          <h3 className="font-semibold text-lg mb-1">Adicionar a Partida Existente</h3>
+                          <h3 className="font-semibold text-lg mb-1">Partida Existente</h3>
                           <p className="text-sm text-muted-foreground">
-                            Adicionar mais vídeos (ex: 2º tempo) a uma partida já analisada
+                            Adicionar vídeos a uma partida já cadastrada
                           </p>
                         </div>
                       </div>
@@ -2613,7 +2634,32 @@ export default function VideoUpload() {
             </div>
           )}
 
-          {/* Step 1: Match Setup */}
+          {/* Step Smart Import */}
+          {currentStep === 'smart-import' && (
+            <div className="max-w-4xl mx-auto space-y-6">
+              <Button variant="ghost" onClick={() => setCurrentStep('choice')} className="gap-2">
+                <ArrowLeft className="h-4 w-4" />
+                Voltar
+              </Button>
+              
+              <SmartImportCard
+                onMatchInfoExtracted={(extractedData, videoFile, videoUrl) => {
+                  // Auto-fill match data with AI-extracted info
+                  // Try to match team names to existing teams
+                  const teams = allMatches.flatMap(m => [m.home_team, m.away_team]).filter(Boolean);
+                  
+                  setMatchData(prev => ({
+                    ...prev,
+                    ...extractedData,
+                  }));
+                  setDefaultsApplied(true);
+                  setCurrentStep('match');
+                }}
+                onCancel={() => setCurrentStep('choice')}
+              />
+            </div>
+          )}
+
           {currentStep === 'match' && (
             <div className="max-w-4xl mx-auto space-y-6">
               <Button variant="ghost" onClick={() => setCurrentStep('choice')} className="gap-2">
