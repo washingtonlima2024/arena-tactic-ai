@@ -88,6 +88,7 @@ const suggestVideoType = (filename: string): VideoType => {
 };
 
 type WizardStep = 'choice' | 'existing' | 'match' | 'smart-import' | 'videos' | 'summary';
+// Force clean React fiber after hook refactor
 
 export default function VideoUpload() {
   const navigate = useNavigate();
