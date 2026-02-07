@@ -1,49 +1,56 @@
 
 
-# Corrigir Crash do Pipeline: `UnboundLocalError: time_module`
+# Corrigir Pipeline para Links de Video (nao-YouTube)
 
-## Causa Raiz
+## Problema Identificado
 
-O Python trata `time_module` como variavel **local** em toda a funcao `_process_match_pipeline` porque existe um `import time as time_module` na linha 8810 (dentro do heartbeat loop). Quando a funcao tenta usar `time_module.time()` na linha 8298, **antes** desse import, o Python lanca `UnboundLocalError` porque a variavel local ainda nao foi atribuida.
+Quando voce adiciona um video por **link direto** (nao YouTube), o sistema nao roteia para o pipeline assincrono do servidor local, mesmo quando o servidor esta online. Isso acontece porque a condicao `shouldUseAsyncPipeline` na linha 1646 do `Upload.tsx` avalia como `false`:
 
 ```text
-Linha 7855: import time as time_module  ← nivel do modulo (IGNORADO pela funcao)
-
-Funcao _process_match_pipeline():
-  Linha 8298: start_time = time_module.time()  ← CRASH! variavel local nao existe ainda
-  ...
-  Linha 8810: import time as time_module  ← faz Python tratar como LOCAL em toda a funcao
+shouldUseAsyncPipeline = isLocalServerOnline && (hasLargeVideos || isUsingLocalMode || hadYoutubeDownload)
 ```
 
-Este e um comportamento classico do Python: se uma variavel e atribuida em qualquer lugar dentro de uma funcao, o Python a trata como local em **todo** o escopo dessa funcao, mesmo em linhas anteriores a atribuicao.
+- `hasLargeVideos` = false (links tem size: 0)
+- `isUsingLocalMode` = false (quando nao esta em modo local)
+- `hadYoutubeDownload` = false (nao e YouTube)
+
+Resultado: o link cai no pipeline sequencial que tenta transcrever via Whisper no frontend, mas nao consegue porque e apenas uma URL sem arquivo local.
 
 ## Solucao
 
-Remover o `import time as time_module` redundante da linha 8810, ja que o import no nivel do modulo (linha 7855) ja cobre toda a funcao. Sem esse import local, o Python usa normalmente a referencia do modulo.
+Adicionar uma verificacao para **segmentos com link** (`isLink: true`) na condicao `shouldUseAsyncPipeline`, forçando o uso do pipeline assincrono quando o servidor esta online e ha links nao-YouTube. O servidor local ja sabe resolver URLs e baixar videos automaticamente.
 
-## Mudanca
+## Mudancas
 
-### Arquivo: `video-processor/server.py`
+### Arquivo: `src/pages/Upload.tsx`
 
-**Linha 8810**: Remover a linha `import time as time_module`
+**1. Incluir links na condicao do pipeline assincrono (linha 1646)**
+
+Adicionar verificacao `hasLinkSegments` para garantir que links diretos tambem usem o pipeline assincrono:
 
 ```text
-ANTES (linhas 8809-8812):
-  # Heartbeat loop - incrementa progresso enquanto Whisper processa
-  import time as time_module          ← REMOVER esta linha
-  last_heartbeat = time_module.time()
-  pipeline_start = time_module.time()
+ANTES:
+const shouldUseAsyncPipeline = isLocalServerOnline && (hasLargeVideos || isUsingLocalMode || hadYoutubeDownload);
 
-DEPOIS (linhas 8809-8811):
-  # Heartbeat loop - incrementa progresso enquanto Whisper processa
-  last_heartbeat = time_module.time()
-  pipeline_start = time_module.time()
+DEPOIS:
+const hasLinkSegments = currentSegments.some(s => s.isLink && s.status === 'ready');
+const shouldUseAsyncPipeline = isLocalServerOnline && (hasLargeVideos || isUsingLocalMode || hadYoutubeDownload || hasLinkSegments);
 ```
+
+**2. Adicionar log para links (apos logs existentes)**
+
+Adicionar log de debug para links detectados:
+
+```text
+console.log('Has link segments:', hasLinkSegments);
+```
+
+Isso garante que links diretos (Google Drive, Dropbox, URLs de video) sejam processados pelo servidor local, que ja possui a logica de `resolve_video_path` e download direto implementada no endpoint `/api/smart-import/transcribe` e no pipeline `_process_match_pipeline`.
 
 ## Resultado Esperado
 
-- O pipeline `_process_match_pipeline` inicia normalmente sem crash
-- O job sai do status `queued` e progride para `preparing`, `splitting`, `transcribing`, etc.
-- O progresso real e reportado ao frontend via polling
-- Nenhuma outra logica e alterada
+- Links diretos de video agora sao processados pelo pipeline assincrono quando o servidor esta online
+- O servidor local baixa o video, extrai audio, transcreve e analisa automaticamente
+- O progresso e mostrado na interface com SoccerBallLoader e barra de progresso
+- Links do YouTube continuam usando o fluxo de download dedicado (yt-dlp) antes do pipeline
 
