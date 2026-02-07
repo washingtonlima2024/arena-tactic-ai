@@ -12352,58 +12352,108 @@ def smart_import_transcribe():
                             f.write(chunk)
                     print(f"[SmartImport] Download concluído: {os.path.getsize(video_path) / (1024*1024):.1f} MB")
 
-        # ── Extrair áudio ──
+        # ── Extrair áudio (apenas primeiros 5 minutos para Smart Import) ──
         audio_path = os.path.join(tmp_dir, 'audio.mp3')
-        print(f"[SmartImport] Extraindo áudio com FFmpeg...")
+        SMART_IMPORT_AUDIO_DURATION = 300  # 5 minutos - suficiente para detectar metadados
+        print(f"[SmartImport] Extraindo primeiros {SMART_IMPORT_AUDIO_DURATION}s de áudio com FFmpeg...")
         ffmpeg_cmd = [
             'ffmpeg', '-i', video_path,
-            '-vn', '-acodec', 'libmp3lame', '-ar', '16000', '-ac', '1', '-q:a', '5',
+            '-vn', '-t', str(SMART_IMPORT_AUDIO_DURATION),
+            '-acodec', 'libmp3lame', '-ar', '16000', '-ac', '1', '-q:a', '5',
             '-y', audio_path
         ]
         result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=300)
         if result.returncode != 0:
             print(f"[SmartImport] FFmpeg stderr: {result.stderr[-500:]}")
-            return jsonify({'error': f'Erro ao extrair áudio: {result.stderr[-200:]}'}), 500
+            # Fallback: tentar sem limite de duração
+            print(f"[SmartImport] Tentando extrair áudio completo como fallback...")
+            ffmpeg_cmd_full = [
+                'ffmpeg', '-i', video_path,
+                '-vn', '-acodec', 'libmp3lame', '-ar', '16000', '-ac', '1', '-q:a', '5',
+                '-y', audio_path
+            ]
+            result2 = subprocess.run(ffmpeg_cmd_full, capture_output=True, text=True, timeout=600)
+            if result2.returncode != 0:
+                print(f"[SmartImport] FFmpeg fallback também falhou")
+                # Não retornar erro 500 - continuar sem transcrição
+                return jsonify({
+                    'success': True,
+                    'transcription': '',
+                    'transcription_failed': True,
+                    'error_detail': 'Falha ao extrair áudio do vídeo'
+                })
 
-        audio_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
+        audio_size_mb = os.path.getsize(audio_path) / (1024 * 1024) if os.path.exists(audio_path) else 0
         print(f"[SmartImport] Áudio extraído: {audio_size_mb:.1f} MB")
 
-        # ── Transcrever ──
-        # Usar a mesma lógica de prioridade do pipeline principal
+        # ── Transcrever com fallback em cadeia ──
+        # Cadeia: Gemini (5min) → Whisper Local (5min) → Gemini (2min) → Sem transcrição
         gemini_available = bool(ai_services.GOOGLE_API_KEY) or bool(getattr(ai_services, 'LOVABLE_API_KEY', None))
         local_whisper_available = getattr(ai_services, 'LOCAL_WHISPER_ENABLED', False) and getattr(ai_services, '_FASTER_WHISPER_AVAILABLE', False)
 
         transcription_text = ''
+        provider_used = None
 
-        if gemini_available:
-            print(f"[SmartImport] Transcrevendo com Gemini...")
+        # Tentativa 1: Gemini com áudio de 5 min
+        if gemini_available and not transcription_text:
+            print(f"[SmartImport] Tentativa 1: Gemini com áudio de {audio_size_mb:.1f}MB...")
             try:
                 result = ai_services._transcribe_with_gemini(audio_path)
-                if result.get('success'):
+                if result.get('success') and result.get('text', '').strip():
                     transcription_text = result.get('text', '')
-                    print(f"[SmartImport] Gemini OK: {len(transcription_text)} chars")
+                    provider_used = 'gemini'
+                    print(f"[SmartImport] ✓ Gemini OK: {len(transcription_text)} chars")
             except Exception as e:
-                print(f"[SmartImport] Gemini falhou: {e}")
+                print(f"[SmartImport] ✗ Gemini falhou: {e}")
 
+        # Tentativa 2: Whisper Local com áudio de 5 min
         if not transcription_text and local_whisper_available:
-            print(f"[SmartImport] Transcrevendo com Whisper Local...")
+            print(f"[SmartImport] Tentativa 2: Whisper Local...")
             try:
                 result = ai_services._transcribe_with_local_whisper(audio_path)
-                if result.get('success'):
+                if result.get('success') and result.get('text', '').strip():
                     transcription_text = result.get('text', '')
-                    print(f"[SmartImport] Whisper OK: {len(transcription_text)} chars")
+                    provider_used = 'whisper_local'
+                    print(f"[SmartImport] ✓ Whisper Local OK: {len(transcription_text)} chars")
             except Exception as e:
-                print(f"[SmartImport] Whisper falhou: {e}")
+                print(f"[SmartImport] ✗ Whisper Local falhou: {e}")
 
+        # Tentativa 3: Gemini com apenas 2 minutos de áudio (arquivo menor)
+        if not transcription_text and gemini_available and audio_size_mb > 2:
+            print(f"[SmartImport] Tentativa 3: Gemini com apenas 2 minutos...")
+            try:
+                short_audio_path = os.path.join(tmp_dir, 'audio_short.mp3')
+                short_cmd = [
+                    'ffmpeg', '-i', audio_path,
+                    '-t', '120',  # Apenas 2 minutos
+                    '-acodec', 'libmp3lame', '-ar', '16000', '-ac', '1', '-q:a', '5',
+                    '-y', short_audio_path
+                ]
+                subprocess.run(short_cmd, capture_output=True, timeout=60)
+                if os.path.exists(short_audio_path):
+                    result = ai_services._transcribe_with_gemini(short_audio_path)
+                    if result.get('success') and result.get('text', '').strip():
+                        transcription_text = result.get('text', '')
+                        provider_used = 'gemini_short'
+                        print(f"[SmartImport] ✓ Gemini (2min) OK: {len(transcription_text)} chars")
+            except Exception as e:
+                print(f"[SmartImport] ✗ Gemini (2min) falhou: {e}")
+
+        # NUNCA retornar erro 500 - sempre retornar resposta válida
         if not transcription_text:
+            print(f"[SmartImport] ⚠ Todas as tentativas de transcrição falharam - retornando sem transcrição")
             return jsonify({
-                'error': 'Nenhum provedor de transcrição disponível ou a transcrição falhou. '
-                         'Configure Gemini ou instale Whisper Local.'
-            }), 500
+                'success': True,
+                'transcription': '',
+                'transcription_failed': True,
+                'error_detail': 'Nenhum provedor conseguiu transcrever o áudio. Configure Gemini ou instale Whisper Local.'
+            })
 
         return jsonify({
             'success': True,
-            'transcription': transcription_text
+            'transcription': transcription_text,
+            'provider': provider_used,
+            'transcription_failed': False
         })
 
     except Exception as e:

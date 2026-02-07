@@ -55,24 +55,81 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
     
     try {
       // Step 1: Transcrever vídeo (upload de arquivo ou URL em um único passo)
-      setProgress({ message: videoFile ? 'Enviando vídeo e transcrevendo...' : 'Transcrevendo áudio...', percent: 20 });
+      setProgress({ message: videoFile ? 'Enviando vídeo e transcrevendo...' : 'Baixando e transcrevendo áudio...', percent: 20 });
       
-      const transcribeResult = await apiClient.smartImportTranscribe({
-        file: videoFile || undefined,
-        videoUrl: videoUrl.trim() || undefined,
-      });
+      let transcriptionText = '';
+      let transcriptionFailed = false;
       
-      if (!transcribeResult?.transcription) {
-        throw new Error('Transcrição não retornou texto');
+      try {
+        const transcribeResult = await apiClient.smartImportTranscribe({
+          file: videoFile || undefined,
+          videoUrl: videoUrl.trim() || undefined,
+        });
+        
+        transcriptionText = transcribeResult?.transcription || '';
+        transcriptionFailed = !!transcribeResult?.transcription_failed;
+      } catch (transcribeError: any) {
+        console.warn('[SmartImport] Transcrição falhou, continuando sem:', transcribeError.message);
+        transcriptionFailed = true;
+      }
+      
+      // Se transcrição falhou ou está vazia, pular extração de metadados
+      // e ir direto para formulário manual
+      if (!transcriptionText || transcriptionFailed) {
+        console.log('[SmartImport] Sem transcrição - pulando para formulário manual');
+        toast.info('A IA não conseguiu detectar os dados automaticamente. Preencha manualmente.', {
+          duration: 6000,
+        });
+        
+        // Ir direto para o formulário manual com dados vazios
+        const emptyMatchData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
+          homeTeamId: '',
+          awayTeamId: '',
+          competition: '',
+          matchDate: new Date().toISOString().split('T')[0],
+          matchTime: '',
+          venue: '',
+        };
+        
+        onMatchInfoExtracted(
+          emptyMatchData,
+          videoFile || undefined,
+          videoUrl || undefined
+        );
+        return;
       }
 
       // Step 2: Extrair metadados da partida via IA
       setProgress({ message: 'IA analisando transcrição para identificar partida...', percent: 70 });
       
-      const extractResult = await apiClient.extractMatchInfo(transcribeResult.transcription);
+      let extractResult: any = null;
+      try {
+        extractResult = await apiClient.extractMatchInfo(transcriptionText);
+      } catch (extractError: any) {
+        console.warn('[SmartImport] Extração de metadados falhou:', extractError.message);
+      }
       
       if (!extractResult?.success) {
-        throw new Error('IA não conseguiu interpretar a partida');
+        // Extração falhou, mas temos a transcrição - ir para formulário manual
+        toast.info('IA não conseguiu interpretar os dados da partida. Preencha manualmente.', {
+          duration: 5000,
+        });
+        
+        const emptyMatchData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
+          homeTeamId: '',
+          awayTeamId: '',
+          competition: '',
+          matchDate: new Date().toISOString().split('T')[0],
+          matchTime: '',
+          venue: '',
+        };
+        
+        onMatchInfoExtracted(
+          emptyMatchData,
+          videoFile || undefined,
+          videoUrl || undefined
+        );
+        return;
       }
 
       setProgress({ message: 'Metadados extraídos com sucesso!', percent: 100 });
@@ -80,10 +137,26 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
       setStep('review');
       
     } catch (error: any) {
-      console.error('[SmartImport] Erro:', error);
-      toast.error(error.message || 'Erro na importação inteligente');
-      setStep('video');
-      setProgress({ message: '', percent: 0 });
+      console.error('[SmartImport] Erro inesperado:', error);
+      // NUNCA parar no erro - ir para formulário manual
+      toast.error('Erro na importação. Preencha os dados manualmente.', {
+        duration: 5000,
+      });
+      
+      const emptyMatchData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
+        homeTeamId: '',
+        awayTeamId: '',
+        competition: '',
+        matchDate: new Date().toISOString().split('T')[0],
+        matchTime: '',
+        venue: '',
+      };
+      
+      onMatchInfoExtracted(
+        emptyMatchData,
+        videoFile || undefined,
+        videoUrl || undefined
+      );
     }
   };
 

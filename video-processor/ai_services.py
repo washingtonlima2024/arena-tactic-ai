@@ -6501,6 +6501,11 @@ def _transcribe_gemini_chunks(audio_path: str, tmpdir: str, match_id: str = None
     time_offset = 0
     successful_chunks = 0
     
+    CHUNK_MAX_RETRIES = 3
+    CHUNK_RETRY_DELAYS = [2, 5, 10]  # Backoff exponencial em segundos
+    INTER_CHUNK_DELAY = 1.5  # Delay entre chunks para evitar rate limiting
+    failed_chunks = []
+    
     for i in range(num_chunks):
         start_time = i * chunk_duration
         chunk_path = os.path.join(tmpdir, f'chunk_{i}.mp3')
@@ -6518,6 +6523,7 @@ def _transcribe_gemini_chunks(audio_path: str, tmpdir: str, match_id: str = None
             
             if not os.path.exists(chunk_path):
                 print(f"[GeminiChunks] ⚠ Chunk {i+1} não foi criado")
+                failed_chunks.append(i + 1)
                 continue
                 
             chunk_size_mb = os.path.getsize(chunk_path) / (1024 * 1024)
@@ -6525,40 +6531,56 @@ def _transcribe_gemini_chunks(audio_path: str, tmpdir: str, match_id: str = None
             
         except Exception as e:
             print(f"[GeminiChunks] ⚠ Erro ao extrair chunk {i+1}: {e}")
+            failed_chunks.append(i + 1)
             continue
         
-        # Transcribe chunk with Gemini
-        try:
-            chunk_result = _transcribe_with_gemini(chunk_path, match_id)
-            
-            if chunk_result.get('success') and chunk_result.get('text'):
-                chunk_text = chunk_result['text']
-                all_text.append(chunk_text)
-                successful_chunks += 1
+        # Transcribe chunk with Gemini - WITH RETRY AND BACKOFF
+        chunk_transcribed = False
+        for retry_attempt in range(CHUNK_MAX_RETRIES):
+            try:
+                if retry_attempt > 0:
+                    delay = CHUNK_RETRY_DELAYS[min(retry_attempt - 1, len(CHUNK_RETRY_DELAYS) - 1)]
+                    print(f"[GeminiChunks] Retry {retry_attempt + 1}/{CHUNK_MAX_RETRIES} para chunk {i+1} (aguardando {delay}s)...")
+                    import time
+                    time.sleep(delay)
                 
-                # Add SRT entries with adjusted timestamps - split by words, not paragraphs
-                all_words = chunk_text.split()
-                segment_size = 10  # Words per subtitle line
-                segments_in_chunk = max(1, len(all_words) // segment_size)
-                time_per_segment = chunk_duration / segments_in_chunk
+                chunk_result = _transcribe_with_gemini(chunk_path, match_id)
                 
-                for j in range(0, len(all_words), segment_size):
-                    word_chunk = all_words[j:j + segment_size]
-                    if not word_chunk:
-                        continue
+                if chunk_result.get('success') and chunk_result.get('text'):
+                    chunk_text = chunk_result['text']
+                    all_text.append(chunk_text)
+                    successful_chunks += 1
+                    chunk_transcribed = True
                     
-                    segment_text = ' '.join(word_chunk)
-                    seg_start = time_offset + ((j // segment_size) * time_per_segment)
-                    seg_end = seg_start + time_per_segment
-                    all_srt.append(f"{srt_index}\n{_format_srt_time(seg_start)} --> {_format_srt_time(seg_end)}\n{segment_text}\n")
-                    srt_index += 1
-                
-                print(f"[GeminiChunks] ✓ Chunk {i+1} transcrito: {len(chunk_text)} chars")
-            else:
-                print(f"[GeminiChunks] ⚠ Chunk {i+1} falhou: {chunk_result.get('error', 'unknown')}")
-                
-        except Exception as e:
-            print(f"[GeminiChunks] ⚠ Erro ao transcrever chunk {i+1}: {e}")
+                    # Add SRT entries with adjusted timestamps - split by words, not paragraphs
+                    all_words = chunk_text.split()
+                    segment_size = 10  # Words per subtitle line
+                    segments_in_chunk = max(1, len(all_words) // segment_size)
+                    time_per_segment = chunk_duration / segments_in_chunk
+                    
+                    for j in range(0, len(all_words), segment_size):
+                        word_chunk = all_words[j:j + segment_size]
+                        if not word_chunk:
+                            continue
+                        
+                        segment_text = ' '.join(word_chunk)
+                        seg_start = time_offset + ((j // segment_size) * time_per_segment)
+                        seg_end = seg_start + time_per_segment
+                        all_srt.append(f"{srt_index}\n{_format_srt_time(seg_start)} --> {_format_srt_time(seg_end)}\n{segment_text}\n")
+                        srt_index += 1
+                    
+                    print(f"[GeminiChunks] ✓ Chunk {i+1} transcrito: {len(chunk_text)} chars" + (f" (tentativa {retry_attempt + 1})" if retry_attempt > 0 else ""))
+                    break  # Sucesso, sair do loop de retry
+                else:
+                    error_msg = chunk_result.get('error', 'unknown')
+                    print(f"[GeminiChunks] ⚠ Chunk {i+1} tentativa {retry_attempt + 1} falhou: {error_msg}")
+                    
+            except Exception as e:
+                print(f"[GeminiChunks] ⚠ Erro ao transcrever chunk {i+1} tentativa {retry_attempt + 1}: {e}")
+        
+        if not chunk_transcribed:
+            print(f"[GeminiChunks] ✗ Chunk {i+1} falhou após {CHUNK_MAX_RETRIES} tentativas - PULANDO (não interrompe pipeline)")
+            failed_chunks.append(i + 1)
         
         time_offset += chunk_duration
         
@@ -6567,24 +6589,38 @@ def _transcribe_gemini_chunks(audio_path: str, tmpdir: str, match_id: str = None
             os.remove(chunk_path)
         except:
             pass
+        
+        # Delay entre chunks para evitar rate limiting
+        if i < num_chunks - 1 and INTER_CHUNK_DELAY > 0:
+            import time
+            time.sleep(INTER_CHUNK_DELAY)
     
-    # Combine results
+    # Combine results - aceitar resultado parcial se >= 50% dos chunks foram transcritos
+    partial_threshold = max(1, num_chunks * 0.5)  # Pelo menos 50% dos chunks
+    
     if successful_chunks == 0:
-        return {"error": "Nenhum chunk foi transcrito com sucesso", "success": False}
+        return {"error": "Nenhum chunk foi transcrito com sucesso", "success": False, "partial": False}
+    
+    is_partial = successful_chunks < num_chunks
     
     combined_text = '\n\n'.join(all_text)
     combined_srt = '\n'.join(all_srt)
     
-    print(f"[GeminiChunks] ✓ Transcrição completa: {successful_chunks}/{num_chunks} chunks, {len(combined_text)} chars")
+    if is_partial:
+        print(f"[GeminiChunks] ⚠ Transcrição PARCIAL: {successful_chunks}/{num_chunks} chunks, {len(combined_text)} chars (falhos: {failed_chunks})")
+    else:
+        print(f"[GeminiChunks] ✓ Transcrição completa: {successful_chunks}/{num_chunks} chunks, {len(combined_text)} chars")
     
     return {
-        "success": True,
+        "success": successful_chunks >= partial_threshold,  # Aceitar se >= 50% transcritos
         "text": combined_text,
         "srtContent": combined_srt,
         "matchId": match_id,
         "provider": "gemini",
         "chunksProcessed": successful_chunks,
-        "totalChunks": num_chunks
+        "totalChunks": num_chunks,
+        "partial": is_partial,
+        "failedChunks": failed_chunks
     }
 
 
