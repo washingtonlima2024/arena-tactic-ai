@@ -543,7 +543,7 @@ export default function Events() {
     // Type filter
     let typeMatch = true;
     if (typeFilter === 'goals') typeMatch = event.event_type === 'goal';
-    else if (typeFilter === 'shots') typeMatch = event.event_type.includes('shot');
+    else if (typeFilter === 'shots') typeMatch = event.event_type.includes('shot') || event.event_type === 'chance';
     else if (typeFilter === 'fouls') typeMatch = event.event_type === 'foul' || event.event_type.includes('card');
     else if (typeFilter === 'tactical') typeMatch = ['high_press', 'transition', 'ball_recovery', 'substitution'].includes(event.event_type);
     
@@ -559,7 +559,7 @@ export default function Events() {
   // Calculate counts
   const eventCounts = {
     goals: events.filter(e => e.event_type === 'goal').length,
-    shots: events.filter(e => e.event_type.includes('shot')).length,
+    shots: events.filter(e => e.event_type.includes('shot') || e.event_type === 'chance').length,
     fouls: events.filter(e => e.event_type === 'foul' || e.event_type.includes('card')).length,
     tactical: events.filter(e => ['high_press', 'transition', 'ball_recovery', 'substitution'].includes(e.event_type)).length,
     pending: events.filter(e => e.approval_status === 'pending' || !e.approval_status).length,

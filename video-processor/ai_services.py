@@ -3789,7 +3789,13 @@ TIMES DA PARTIDA:
 ╚══════════════════════════════════════════════════════════════════════════════╝
 
 Para CADA evento detectado, extraia:
-- event_type: goal, shot, save, foul, corner, chance, penalty, etc. (NÃO detecte yellow_card ou red_card)
+- event_type: TIPOS OBRIGATÓRIOS:
+  goal (gol marcado), shot (finalização/chute na trave/chute para fora),
+  shot_on_target (finalização no gol), save (defesa do goleiro),
+  foul (falta cometida), yellow_card (cartão amarelo mostrado),
+  red_card (cartão vermelho), corner (escanteio), penalty (pênalti),
+  free_kick (cobrança de falta), cross (cruzamento), offside (impedimento)
+  NÃO use "chance" - classifique como "shot" se for finalização
 - minute: MINUTO do timestamp SRT [HH:MM:SS] - extraia o valor de MM
 - second: SEGUNDO do timestamp SRT [HH:MM:SS] - extraia o valor de SS
 - team: "home" ou "away"
@@ -4854,7 +4860,7 @@ def _enrich_events(
         Enriched events with all required fields
     """
     VALID_EVENT_TYPES = [
-        'goal', 'shot', 'save', 'foul', 'yellow_card',  # 🔧 red_card REMOVIDO
+        'goal', 'shot', 'save', 'foul', 'yellow_card', 'red_card',
         'corner', 'offside', 'substitution', 'chance', 'penalty',
         'free_kick', 'throw_in', 'kick_off', 'half_time', 'full_time',
         'var', 'injury', 'assist', 'cross', 'tackle', 'interception',
@@ -4866,19 +4872,25 @@ def _enrich_events(
     for event in events:
         event_type = event.get('event_type', 'unknown')
         
-        # 🔧 CONVERSÃO: Cartão vermelho → Falta
-        if event_type == 'red_card':
-            print(f"[Sanitize] 🔄 Convertendo red_card → foul (min {event.get('minute', '?')}')")
-            event_type = 'foul'
-            event['event_type'] = 'foul'
-            event['description'] = f"Falta (menção a cartão): {(event.get('description') or '')[:80]}"[:100]
-        
-        # 🔧 CONVERSÃO: Cartão amarelo → Falta (desativado - muitos falsos positivos)
-        if event_type == 'yellow_card':
-            print(f"[Sanitize] 🔄 Convertendo yellow_card → foul (min {event.get('minute', '?')}')")
-            event_type = 'foul'
-            event['event_type'] = 'foul'
-            event['description'] = f"Falta (menção a cartão): {(event.get('description') or '')[:80]}"[:100]
+        # 🔧 RECLASSIFICAÇÃO: "chance" → tipo específico baseado na descrição
+        if event_type == 'chance':
+            description = (event.get('description') or '').lower()
+            if any(kw in description for kw in ['trave', 'poste', 'travessão', 'travessao']):
+                event_type = 'shot'
+                print(f"[Sanitize] 🔄 Reclassificando chance → shot (trave/poste) min {event.get('minute', '?')}'")
+            elif any(kw in description for kw in ['chut', 'finali', 'bomba', 'bateu', 'arrematou', 'chutou']):
+                event_type = 'shot'
+                print(f"[Sanitize] 🔄 Reclassificando chance → shot (finalização) min {event.get('minute', '?')}'")
+            elif any(kw in description for kw in ['cruz', 'cruzamento', 'cruzou']):
+                event_type = 'cross'
+                print(f"[Sanitize] 🔄 Reclassificando chance → cross min {event.get('minute', '?')}'")
+            elif any(kw in description for kw in ['cabece', 'cabeça']):
+                event_type = 'shot'
+                print(f"[Sanitize] 🔄 Reclassificando chance → shot (cabeceio) min {event.get('minute', '?')}'")
+            else:
+                event_type = 'shot'  # fallback: chance quase sempre é finalização
+                print(f"[Sanitize] 🔄 Reclassificando chance → shot (fallback) min {event.get('minute', '?')}'")
+            event['event_type'] = event_type
         
         if event_type not in VALID_EVENT_TYPES:
             event_type = 'unknown'
@@ -4889,8 +4901,7 @@ def _enrich_events(
         event['team'] = event.get('team', 'home')
         event['description'] = (event.get('description') or '')[:200]
         event['confidence'] = event.get('confidence', 0.8)
-        # 🔧 yellow_card e red_card removidos de highlights
-        event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'penalty'])
+        event['is_highlight'] = event.get('is_highlight', event_type in ['goal', 'penalty', 'red_card'])
         event['isOwnGoal'] = event.get('isOwnGoal', False)
         event['validated'] = True
         event['validation_reason'] = 'Approved by Ollama local'
@@ -5467,6 +5478,22 @@ TIMES DA PARTIDA:
 - AWAY (visitante): {away_team}
 - Período: {half_desc}
 
+Para CADA evento detectado, extraia:
+- event_type: TIPOS OBRIGATÓRIOS:
+  goal (gol marcado), shot (finalização/chute na trave/chute para fora),
+  shot_on_target (finalização no gol), save (defesa do goleiro),
+  foul (falta cometida), yellow_card (cartão amarelo mostrado),
+  red_card (cartão vermelho), corner (escanteio), penalty (pênalti),
+  free_kick (cobrança de falta), cross (cruzamento), offside (impedimento)
+  NÃO use "chance" - classifique como "shot" se for finalização
+- minute: MINUTO do timestamp SRT
+- second: SEGUNDO do timestamp SRT
+- team: "home" ou "away"
+- description: descrição curta (max 60 chars)
+- is_highlight: true para eventos importantes
+- isOwnGoal: true apenas para gols contra
+- confidence: 0.0-1.0
+
 FORMATO DE SAÍDA: Retorne APENAS um array JSON válido com minute E second, sem explicações."""
 
     user_prompt = f"""⚽⚽⚽ MISSÃO CRÍTICA: ENCONTRAR TODOS OS GOLS E EVENTOS! ⚽⚽⚽
@@ -5522,6 +5549,21 @@ RETORNE APENAS O ARRAY JSON, SEM TEXTO ADICIONAL."""
                 validated_events = []
                 for event in events:
                     event_type = event.get('event_type', 'unknown')
+                    
+                    # 🔧 RECLASSIFICAÇÃO: "chance" → tipo específico
+                    if event_type == 'chance':
+                        description = (event.get('description') or '').lower()
+                        if any(kw in description for kw in ['trave', 'poste', 'travessão', 'travessao']):
+                            event_type = 'shot'
+                        elif any(kw in description for kw in ['chut', 'finali', 'bomba', 'bateu', 'arrematou', 'chutou']):
+                            event_type = 'shot'
+                        elif any(kw in description for kw in ['cruz', 'cruzamento', 'cruzou']):
+                            event_type = 'cross'
+                        elif any(kw in description for kw in ['cabece', 'cabeça']):
+                            event_type = 'shot'
+                        else:
+                            event_type = 'shot'  # fallback
+                        print(f"[AI] 🔄 Reclassificando chance → {event_type} (min {event.get('minute', '?')}')")
                     
                     if event_type not in VALID_EVENT_TYPES:
                         print(f"[AI] ⚠ Invalid event_type '{event_type}' - converting to 'unknown'")
