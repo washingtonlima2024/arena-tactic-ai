@@ -1773,6 +1773,26 @@ export const apiClient = {
     // Stats
     getStats: () => apiRequest<any>('/api/admin/stats'),
   },
+
+  // ============== Smart Import (AI Metadata Extraction) ==============
+  /**
+   * Envia transcrição para o backend extrair metadados da partida via Ollama.
+   * Retorna: times, competição, estádio, data estimada, placar parcial.
+   */
+  extractMatchInfo: (transcription: string) => apiRequestLongRunning<{
+    success: boolean;
+    home_team: string | null;
+    away_team: string | null;
+    competition: string | null;
+    venue: string | null;
+    match_date: string | null;
+    score: { home: number; away: number } | null;
+    confidence: number;
+    raw_response?: string;
+  }>('/api/extract-match-info', {
+    method: 'POST',
+    body: JSON.stringify({ transcription }),
+  }, 120000), // 2 min timeout
 };
 
 export default apiClient;
