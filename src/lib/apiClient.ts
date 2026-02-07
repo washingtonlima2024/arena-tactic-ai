@@ -1775,6 +1775,93 @@ export const apiClient = {
   },
 
   // ============== Smart Import (AI Metadata Extraction) ==============
+  
+  /**
+   * Transcreve vídeo para importação inteligente.
+   * Aceita arquivo (FormData) ou URL (JSON).
+   * Timeout: 5 minutos (transcrição pode demorar).
+   */
+  smartImportTranscribe: async (options: { file?: File; videoUrl?: string }): Promise<{ transcription: string }> => {
+    const apiBase = getApiBase();
+    const url = buildApiUrl(apiBase, '/api/smart-import/transcribe');
+    const timeoutMs = 300000; // 5 minutos
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      let fetchOptions: RequestInit;
+
+      if (options.file) {
+        // Upload de arquivo via FormData (multipart)
+        const formData = new FormData();
+        formData.append('file', options.file);
+        fetchOptions = {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal,
+          headers: {
+            ...getDefaultHeaders(),
+            // NÃO definir Content-Type - o browser define automaticamente com boundary
+          },
+        };
+        // Remover Content-Type dos headers para FormData funcionar
+        delete (fetchOptions.headers as Record<string, string>)['Content-Type'];
+      } else if (options.videoUrl) {
+        // URL de vídeo via JSON
+        fetchOptions = {
+          method: 'POST',
+          body: JSON.stringify({ video_url: options.videoUrl }),
+          signal: controller.signal,
+          headers: {
+            ...getDefaultHeaders(),
+            'Content-Type': 'application/json',
+          },
+        };
+      } else {
+        throw new Error('Forneça um arquivo ou URL de vídeo');
+      }
+
+      console.log(`[API-SmartImport] POST ${url} (timeout: 5min)`);
+      const response = await fetch(url, fetchOptions);
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        const errorText = await response.text().catch(() => 'Erro desconhecido');
+        // Detectar resposta HTML (endpoint inexistente)
+        if (errorText.trimStart().startsWith('<!') || errorText.trimStart().startsWith('<html')) {
+          throw new Error(`Servidor retornou HTML em vez de JSON (HTTP ${response.status}). Verifique se o endpoint /api/smart-import/transcribe existe no backend.`);
+        }
+        let errorMessage = `HTTP ${response.status}`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          errorMessage = errorJson.error || errorMessage;
+        } catch {
+          if (errorText && errorText.length < 200) errorMessage = errorText;
+        }
+        throw new Error(errorMessage);
+      }
+
+      const contentType = response.headers.get('content-type') || '';
+      if (contentType.includes('application/json')) {
+        return response.json();
+      }
+      const text = await response.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        // Se retornou texto puro, tratar como transcrição
+        return { transcription: text };
+      }
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      if (error.name === 'AbortError') {
+        throw new Error('Transcrição expirou após 5 minutos - tente com um vídeo menor');
+      }
+      console.error('[API-SmartImport] Erro:', error.message);
+      throw error;
+    }
+  },
+
   /**
    * Envia transcrição para o backend extrair metadados da partida via Ollama.
    * Retorna: times, competição, estádio, data estimada, placar parcial.
