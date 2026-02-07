@@ -87,7 +87,7 @@ const suggestVideoType = (filename: string): VideoType => {
   return 'full';
 };
 
-type WizardStep = 'choice' | 'existing' | 'match' | 'smart-import' | 'videos' | 'summary';
+type WizardStep = 'choice' | 'existing' | 'match' | 'smart-import' | 'videos' | 'summary' | 'auto-processing';
 // Force clean React fiber after hook refactor
 
 export default function VideoUpload() {
@@ -227,6 +227,22 @@ export default function VideoUpload() {
   
   // Async processing hook for local server
   const asyncProcessing = useAsyncProcessing();
+  
+  // Auto-redirect when auto-processing completes
+  useEffect(() => {
+    if (currentStep === 'auto-processing' && asyncProcessing.isComplete) {
+      const matchId = createdMatchId || existingMatchId || selectedExistingMatch;
+      const timer = setTimeout(() => {
+        asyncProcessing.reset();
+        if (matchId) {
+          navigate(`/events?match=${matchId}`);
+        } else {
+          navigate('/matches');
+        }
+      }, 2000); // 2s delay to show "Concluído" before redirect
+      return () => clearTimeout(timer);
+    }
+  }, [currentStep, asyncProcessing.isComplete, createdMatchId, existingMatchId, selectedExistingMatch, navigate]);
   
   // Check if local server is available
   const { data: isLocalServerOnline } = useQuery({
@@ -2205,8 +2221,8 @@ export default function VideoUpload() {
   const firstHalfCount = segments.filter(s => s.half === 'first' || s.videoType === 'first_half').length;
   const secondHalfCount = segments.filter(s => s.half === 'second' || s.videoType === 'second_half').length;
 
-  // Show async processing progress (parallel pipeline)
-  if (asyncProcessing.isProcessing || asyncProcessing.status) {
+  // Show async processing progress (parallel pipeline) — only for non-Smart-Import flow
+  if (currentStep !== 'auto-processing' && (asyncProcessing.isProcessing || asyncProcessing.status)) {
     const handleAsyncComplete = () => {
       const matchId = createdMatchId || existingMatchId || selectedExistingMatch;
       
@@ -2775,38 +2791,100 @@ export default function VideoUpload() {
                       description: `${homeLabel} vs ${awayLabel}`,
                     });
 
-                    // Auto-attach video and go to videos step
-                    setCurrentStep('videos');
-                    if (videoFile) {
-                      setTimeout(() => uploadFile(videoFile), 300);
-                    } else if (videoUrl) {
-                      // Auto-add URL as a link segment
-                      setTimeout(() => {
-                        const embedUrl = extractEmbedUrl(videoUrl);
-                        const validation = isValidVideoUrl(embedUrl);
-                        const newSegment: VideoSegment = {
-                          id: generateUUID(),
-                          name: `${validation.platform}: ${embedUrl.slice(0, 40)}...`,
-                          url: embedUrl,
-                          videoType: 'full' as VideoType,
-                          title: 'Partida Completa',
-                          durationSeconds: null,
-                          startMinute: 0,
-                          endMinute: 90,
-                          progress: 100,
-                          status: 'ready',
-                          isLink: true,
-                          half: undefined,
-                        };
-                        setSegments(prev => {
-                          if (prev.some(s => s.url === newSegment.url)) return prev;
-                          return [...prev, newSegment];
-                        });
+                    // === PIPELINE AUTOMATIZADO: Iniciar processamento direto ===
+                    // Em vez de ir para 'videos', montar videoInputs e disparar o pipeline async
+                    
+                    // Determinar URL do vídeo
+                    let videoInputUrl = '';
+                    
+                    if (videoUrl) {
+                      // URL direta — usar imediatamente
+                      videoInputUrl = extractEmbedUrl(videoUrl);
+                    } else if (videoFile) {
+                      // Arquivo local — fazer upload primeiro
+                      toast({
+                        title: "📦 Enviando vídeo...",
+                        description: `${videoFile.name} — aguarde o upload antes do processamento.`,
+                      });
+                      
+                      try {
+                        const sanitizedName = videoFile.name
+                          .normalize('NFD')
+                          .replace(/[\u0300-\u036f]/g, '')
+                          .replace(/[^a-zA-Z0-9._-]/g, '_');
+                        const fileName = `${Date.now()}-${sanitizedName}`;
+                        
+                        // Upload para o servidor local
+                        if (isLocalServerOnline) {
+                          const result = await apiClient.uploadBlobWithProgress(
+                            match.id,
+                            'videos',
+                            videoFile,
+                            fileName,
+                            () => {} // Progress silencioso — já temos o toast
+                          );
+                          videoInputUrl = result.url;
+                        } else {
+                          // Fallback — sem servidor local, ir para fluxo manual
+                          setCurrentStep('videos');
+                          setTimeout(() => uploadFile(videoFile), 300);
+                          return;
+                        }
+                      } catch (uploadErr: any) {
+                        console.error('[SmartImport] Upload error:', uploadErr);
                         toast({
-                          title: `✓ ${validation.platform} adicionado`,
-                          description: 'Link do vídeo vinculado automaticamente.',
+                          title: "Erro no upload",
+                          description: uploadErr.message || "Falha ao enviar o vídeo. Tente o fluxo manual.",
+                          variant: "destructive",
                         });
-                      }, 300);
+                        setCurrentStep('videos');
+                        return;
+                      }
+                    }
+                    
+                    if (!videoInputUrl) {
+                      // Sem vídeo — ir para fluxo manual
+                      setCurrentStep('videos');
+                      return;
+                    }
+                    
+                    // Montar videoInputs
+                    const videoInputs: VideoInput[] = [{
+                      url: videoInputUrl,
+                      halfType: 'first',
+                      videoType: 'full',
+                      startMinute: 0,
+                      endMinute: 90,
+                      sizeMB: videoFile ? videoFile.size / (1024 * 1024) : undefined,
+                    }];
+                    
+                    // Iniciar pipeline assíncrono automaticamente
+                    setCurrentStep('auto-processing');
+                    
+                    try {
+                      await asyncProcessing.startProcessing({
+                        matchId: match.id,
+                        videos: videoInputs,
+                        homeTeam: homeLabel,
+                        awayTeam: awayLabel,
+                        autoClip: true,
+                        autoAnalysis: true,
+                        firstHalfTranscription: transcription && transcription.length > 50 ? transcription : undefined,
+                      });
+                      
+                      toast({
+                        title: "🚀 Pipeline automático iniciado",
+                        description: `${homeLabel} vs ${awayLabel} — processamento em andamento`,
+                      });
+                    } catch (pipelineErr: any) {
+                      console.error('[SmartImport] Pipeline error:', pipelineErr);
+                      toast({
+                        title: "Erro ao iniciar processamento",
+                        description: pipelineErr.message || "Falha no pipeline automático.",
+                        variant: "destructive",
+                      });
+                      // Fallback — mostrar vídeos para fluxo manual
+                      setCurrentStep('videos');
                     }
                   } catch (error: any) {
                     console.error('[SmartImport] Error creating match:', error);
@@ -2825,6 +2903,71 @@ export default function VideoUpload() {
                 }}
                 onCancel={() => setCurrentStep('choice')}
               />
+            </div>
+          )}
+
+          {/* Step Auto-Processing: Pipeline automatizado do Smart Import */}
+          {currentStep === 'auto-processing' && (
+            <div className="max-w-2xl mx-auto space-y-6">
+              <div className="text-center space-y-2">
+                <div className="flex items-center justify-center gap-2">
+                  <Sparkles className="h-6 w-6 text-primary" />
+                  <h2 className="font-display text-2xl font-bold">
+                    {asyncProcessing.isComplete ? 'Processamento Concluído' :
+                     asyncProcessing.isError ? 'Erro no Processamento' :
+                     'Processamento Automático'}
+                  </h2>
+                </div>
+                <p className="text-muted-foreground">
+                  {asyncProcessing.isComplete 
+                    ? 'A análise foi concluída com sucesso. Redirecionando...'
+                    : asyncProcessing.isError
+                    ? 'Ocorreu um erro durante o processamento automático'
+                    : 'O Smart Import iniciou o pipeline completo automaticamente — transcrição, análise e clips'}
+                </p>
+              </div>
+
+              <AsyncProcessingProgress
+                status={asyncProcessing.status}
+                onCancel={asyncProcessing.cancelProcessing}
+                onRetry={() => {
+                  asyncProcessing.reset();
+                  setCurrentStep('smart-import');
+                }}
+                onComplete={() => {
+                  const matchId = createdMatchId || existingMatchId || selectedExistingMatch;
+                  asyncProcessing.reset();
+                  if (matchId) {
+                    navigate(`/events?match=${matchId}`);
+                  } else {
+                    navigate('/matches');
+                  }
+                }}
+              />
+
+              {asyncProcessing.isComplete && (
+                <div className="flex gap-4 justify-center">
+                  <Button variant="arena" onClick={() => {
+                    const matchId = createdMatchId || existingMatchId || selectedExistingMatch;
+                    asyncProcessing.reset();
+                    if (matchId) {
+                      navigate(`/events?match=${matchId}`);
+                    } else {
+                      navigate('/matches');
+                    }
+                  }}>
+                    Ver Eventos
+                  </Button>
+                  <Button variant="arena-outline" onClick={() => {
+                    asyncProcessing.reset();
+                    setCreatedMatchId(null);
+                    setSmartImportTranscription(null);
+                    setCurrentStep('choice');
+                  }}>
+                    Nova Análise
+                  </Button>
+                </div>
+              )}
             </div>
           )}
 
