@@ -3,8 +3,9 @@ import { Label } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { useTeams } from '@/hooks/useTeams';
-import { ArrowRight, Trophy, MapPin, Calendar, Clock, Loader2 } from 'lucide-react';
+import { ArrowRight, Trophy, MapPin, Calendar, Clock, Loader2, Sparkles } from 'lucide-react';
 
 export interface MatchSetupData {
   homeTeamId: string;
@@ -20,9 +21,10 @@ interface MatchSetupCardProps {
   onChange: (data: MatchSetupData) => void;
   onContinue: () => Promise<void> | void;
   isCreating?: boolean;
+  isAutoFilled?: boolean;
 }
 
-export function MatchSetupCard({ data, onChange, onContinue, isCreating }: MatchSetupCardProps) {
+export function MatchSetupCard({ data, onChange, onContinue, isCreating, isAutoFilled }: MatchSetupCardProps) {
   const { data: teams, isLoading: teamsLoading } = useTeams();
 
   const updateField = (field: keyof MatchSetupData, value: string) => {
@@ -89,6 +91,14 @@ export function MatchSetupCard({ data, onChange, onContinue, isCreating }: Match
           </div>
         </div>
         <CardTitle className="text-xl">Configurar Partida</CardTitle>
+        {isAutoFilled && (
+          <div className="flex items-center justify-center gap-1.5 mt-2">
+            <Badge variant="secondary" className="text-xs gap-1">
+              <Sparkles className="h-3 w-3" />
+              Preenchido automaticamente — revise e corrija se necessário
+            </Badge>
+          </div>
+        )}
       </CardHeader>
 
       <CardContent className="space-y-6">

@@ -53,6 +53,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import arenaPlayWordmark from '@/assets/arena-play-wordmark.png';
 import { MatchSetupCard, MatchSetupData } from '@/components/upload/MatchSetupCard';
+import { useMatchDefaults } from '@/hooks/useMatchDefaults';
 import { VideoSegmentCard, VideoSegment, VideoType } from '@/components/upload/VideoSegmentCard';
 import { CoverageTimeline } from '@/components/upload/CoverageTimeline';
 import { AnalysisSummary } from '@/components/upload/AnalysisSummary';
@@ -141,7 +142,8 @@ export default function VideoUpload() {
     }
   });
   
-  // Match setup data
+  // Match setup data with auto-fill from last match
+  const { data: matchDefaults, isLoading: isLoadingDefaults } = useMatchDefaults();
   const [matchData, setMatchData] = useState<MatchSetupData>({
     homeTeamId: '',
     awayTeamId: '',
@@ -150,6 +152,22 @@ export default function VideoUpload() {
     matchTime: '',
     venue: '',
   });
+  const [defaultsApplied, setDefaultsApplied] = useState(false);
+
+  // Apply defaults once loaded
+  useEffect(() => {
+    if (matchDefaults && !defaultsApplied) {
+      setMatchData(prev => ({
+        homeTeamId: prev.homeTeamId || matchDefaults.homeTeamId,
+        awayTeamId: prev.awayTeamId || matchDefaults.awayTeamId,
+        competition: prev.competition || matchDefaults.competition,
+        matchDate: prev.matchDate || matchDefaults.matchDate,
+        matchTime: prev.matchTime || matchDefaults.matchTime,
+        venue: prev.venue || matchDefaults.venue,
+      }));
+      setDefaultsApplied(true);
+    }
+  }, [matchDefaults, defaultsApplied]);
 
   // Match times configuration
   const [matchTimes, setMatchTimes] = useState<MatchTimes>(defaultMatchTimes);
@@ -2608,6 +2626,7 @@ export default function VideoUpload() {
                 onChange={setMatchData}
                 onContinue={handleMatchSetupContinue}
                 isCreating={isCreatingMatch}
+                isAutoFilled={defaultsApplied}
               />
             </div>
           )}
