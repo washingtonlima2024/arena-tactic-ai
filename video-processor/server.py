@@ -8807,7 +8807,6 @@ def _process_match_pipeline(job_id: str, data: dict):
                                     'transcribing', 0, total_parts, parts_status)
                     
                     # Heartbeat loop - incrementa progresso enquanto Whisper processa
-                    import time as time_module
                     last_heartbeat = time_module.time()
                     pipeline_start = time_module.time()
                     heartbeat_progress = 25
