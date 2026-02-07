@@ -37,7 +37,7 @@ import {
   Trash2,
   Sparkles
 } from 'lucide-react';
-import { useTeams } from '@/hooks/useTeams';
+import { useTeams, useCreateTeam } from '@/hooks/useTeams';
 import { useCreateMatch } from '@/hooks/useMatches';
 import { useStartAnalysis, useAnalysisJob } from '@/hooks/useAnalysisJob';
 import { useWhisperTranscription } from '@/hooks/useWhisperTranscription';
@@ -215,6 +215,7 @@ export default function VideoUpload() {
   const [isCreatingMatch, setIsCreatingMatch] = useState(false);
   
   const { data: teams = [] } = useTeams();
+  const createTeamMutation = useCreateTeam();
   const createMatch = useCreateMatch();
   const { startAnalysis, isLoading: isStartingAnalysis } = useStartAnalysis();
   const analysisJob = useAnalysisJob(currentJobId);
@@ -2644,7 +2645,7 @@ export default function VideoUpload() {
               </Button>
               
               <SmartImportCard
-                onMatchInfoExtracted={(extractedData, videoFile, videoUrl) => {
+                onMatchInfoExtracted={async (extractedData, videoFile, videoUrl) => {
                   // Extract AI team names for fuzzy matching
                   const { _homeTeamName, _awayTeamName, ...cleanData } = extractedData as any;
                   
@@ -2675,8 +2676,24 @@ export default function VideoUpload() {
                     return '';
                   };
                   
-                  const homeTeamId = findTeamId(_homeTeamName || '');
-                  const awayTeamId = findTeamId(_awayTeamName || '');
+                  let homeTeamId = findTeamId(_homeTeamName || '');
+                  let awayTeamId = findTeamId(_awayTeamName || '');
+                  
+                  // Auto-create teams that don't exist in the database
+                  try {
+                    if (!homeTeamId && _homeTeamName?.trim()) {
+                      console.log('[SmartImport] Auto-creating home team:', _homeTeamName);
+                      const newTeam = await createTeamMutation.mutateAsync({ name: _homeTeamName.trim() });
+                      homeTeamId = (newTeam as any)?.id || '';
+                    }
+                    if (!awayTeamId && _awayTeamName?.trim()) {
+                      console.log('[SmartImport] Auto-creating away team:', _awayTeamName);
+                      const newTeam = await createTeamMutation.mutateAsync({ name: _awayTeamName.trim() });
+                      awayTeamId = (newTeam as any)?.id || '';
+                    }
+                  } catch (err) {
+                    console.warn('[SmartImport] Error auto-creating teams:', err);
+                  }
                   
                   console.log('[SmartImport] Team matching:', {
                     homeExtracted: _homeTeamName, homeMatched: homeTeamId,
