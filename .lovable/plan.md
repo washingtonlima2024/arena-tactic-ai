@@ -1,140 +1,79 @@
 
 
-# Separacao Automatica de Tempos e Importacao Incremental
+# Corrigir Preload e Analise com Dois Tempos no Pipeline Automatico
 
-## Contexto
+## Problema Principal
 
-O usuario quer duas funcionalidades complementares:
-1. **Separacao automatica de tempos**: quando um video `full` (>50 min) e importado via Smart Import, o backend deve detectar o ponto de intervalo e processar cada tempo independentemente.
-2. **Importacao incremental**: apos a importacao automatica do primeiro tempo (ou do jogo completo), permitir que o usuario adicione o segundo tempo, um trecho ou outro video diretamente pela pagina de Eventos ou Upload, sem perder os eventos ja detectados.
+Apos o split automatico de um video de jogo completo (>50 min) em dois tempos, a flag `is_full_match_video` permanece `True`. Isso faz a analise do 1o tempo usar o range 0-90 minutos ao inves de 0-45 minutos, mesmo que o video tenha sido dividido e cada metade tenha apenas ~45 minutos de conteudo.
+
+```text
+FLUXO COM BUG:
+
+Video full (90 min) → split em 2 videos de ~45 min
+    |
+    is_full_match_video = True  (NAO foi resetado!)
+    |
+    v
+Phase 4 - Analise 1T:
+    game_end = 90 if is_full_match_video else 45
+    → IA analisa 0-90 min em transcricao de 45 min → eventos incorretos
+```
 
 ## Mudancas Propostas
 
-### 1. Backend: Deteccao de Intervalo e Split Automatico (server.py)
+### Mudanca 1: Resetar `is_full_match_video` apos split bem-sucedido
 
-**Arquivo:** `video-processor/server.py`
+**Arquivo:** `video-processor/server.py` (apos linha 8442)
 
-Quando o pipeline async detecta um video `full` com duracao > 50 minutos, ele deve:
+Quando o split automatico termina com sucesso, o video ja nao e mais "full" — agora sao dois videos independentes. A flag deve ser resetada:
 
-1. **Detectar o ponto de intervalo** usando FFmpeg `silencedetect` na regiao central do video (40%-60% da duracao):
-   - Buscar silencio de >= 8 segundos na faixa de 35% a 65% da duracao
-   - Se encontrar, usar o ponto medio do silencio como corte
-   - Se nao encontrar, usar a metade exata da duracao como fallback
+```python
+# Apos o split bem-sucedido (linha 8442):
+print(f"[ASYNC-PIPELINE] Video split: ...")
 
-2. **Dividir o video em dois arquivos temporarios**:
-   - `first_half.mp4`: do inicio ate o ponto de corte
-   - `second_half.mp4`: do ponto de corte ate o final
-   
-3. **Processar cada metade independentemente** no pipeline existente:
-   - Cada metade gera sua propria transcricao
-   - Cada metade e analisada separadamente (0-45 e 45-90)
-   - Clips sao gerados para cada metade
-
-Logica de deteccao de silencio (pseudocodigo):
-
-```text
-# Executa FFmpeg silencedetect na regiao central
-ffmpeg -i video.mp4 -ss {35% duracao} -t {30% duracao} 
-       -af silencedetect=noise=-40dB:d=8 -f null -
-
-# Parseia output para encontrar silence_start e silence_end
-# Retorna o ponto medio como split_point
-# Fallback: duracao / 2
+# ADICIONAR: Reset flag pois agora temos dois videos separados
+is_full_match_video = False
+print(f"[ASYNC-PIPELINE] is_full_match_video resetado para False (video foi dividido)")
 ```
 
-Impacto no pipeline (Phase 2):
-- Antes de dividir em partes para transcricao, verificar se e video full e se deve ser split
-- Criar dois entries em `video_paths`: `first` e `second`
-- O restante do pipeline ja suporta processar primeiro e segundo tempo separadamente
+Isso corrige a Phase 4 onde `game_end` sera corretamente calculado como 45 para o 1o tempo e 90 para o 2o tempo.
 
-### 2. Frontend: Importacao Incremental do Segundo Tempo (Upload.tsx)
+### Mudanca 2: Upload paralelo de dois videos no frontend (opcional, melhoria de performance)
 
-**Arquivo:** `src/pages/Upload.tsx`
+**Arquivo:** `src/pages/Upload.tsx` (linhas 2866-2921)
 
-Apos o Smart Import completar e redirecionar para `/events`, o usuario pode querer adicionar mais videos. Duas abordagens complementares:
-
-#### 2a. SmartImportCard com duas entradas (primeiro e segundo tempo)
-
-**Arquivo:** `src/components/upload/SmartImportCard.tsx`
-
-Modificar o SmartImportCard para aceitar dois videos (um para cada tempo) ao inves de apenas um:
-
-- Adicionar duas zonas de upload/link: "1o Tempo" (azul) e "2o Tempo" (laranja)
-- Cada zona e opcional -- o usuario pode fornecer apenas um
-- A IA transcreve os primeiros 5 minutos do primeiro video disponivel para identificar a partida
-- Ao disparar o pipeline, ambos os videos sao enviados como `VideoInput[]`
-
-UI proposta:
+Atualmente os videos sao uploadados sequencialmente. Para dois videos grandes, fazer upload em paralelo usando `Promise.all`:
 
 ```text
-+-----------------------------------+
-|     Importacao Inteligente        |
-|                                   |
-|  +-------------+ +-------------+  |
-|  | 1o Tempo    | | 2o Tempo    |  |
-|  | [Upload]    | | [Upload]    |  |
-|  | ou link     | | ou link     |  |
-|  |  (azul)     | |  (laranja)  |  |
-|  +-------------+ +-------------+  |
-|                                   |
-|  +-----------------------------+  |
-|  | Jogo Completo (verde)      |  |
-|  | [Upload] ou link            |  |
-|  +-----------------------------+  |
-|                                   |
-|        [Iniciar Importacao]       |
-+-----------------------------------+
-```
+ANTES:
+  for (const vid of videosToProcess) {
+    // upload sequencial — lento para 2 videos
+  }
 
-O usuario escolhe UMA das opcoes:
-- Dois videos separados (1o + 2o tempo)
-- Um video completo
-- Apenas um tempo (o outro pode ser adicionado depois)
-
-#### 2b. Botao "Adicionar Video" na pagina de Eventos
-
-**Arquivo:** `src/pages/Events.tsx`
-
-Adicionar um botao discreto "Adicionar 2o Tempo" ou "Adicionar Video" na pagina de Eventos que redireciona para `/upload?match={matchId}` (fluxo de partida existente), permitindo importar videos adicionais sem perder eventos ja detectados.
-
-### 3. Pipeline Async: Suporte a Multiplos Videos por Tempo
-
-**Arquivo:** `video-processor/server.py`
-
-Na Phase 1 do pipeline, quando um video `full` e detectado E a funcao de split automatico esta disponivel:
-
-```text
-FLUXO ATUALIZADO:
-
-Video full detectado (duracao > 50 min)
-    |
-    v
-Detectar intervalo via silencedetect (regiao 35%-65%)
-    |
-    v
-Split em first_half.mp4 e second_half.mp4
-    |
-    v
-video_paths = {'first': first_half.mp4, 'second': second_half.mp4}
-    |
-    v
-Pipeline continua normalmente (ja suporta 2 tempos)
+DEPOIS:
+  await Promise.all(videosToProcess.map(async (vid) => {
+    // upload paralelo — ambos sobem ao mesmo tempo
+  }));
 ```
 
 ## Arquivos Modificados
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `video-processor/server.py` | Nova funcao `_detect_halftime_split_point()` usando FFmpeg silencedetect |
-| `video-processor/server.py` | Phase 1.5: Split automatico de video full em dois tempos |
-| `src/components/upload/SmartImportCard.tsx` | Duas zonas de entrada (1o tempo, 2o tempo, completo) |
-| `src/pages/Upload.tsx` | Passar multiplos videos do SmartImport para o pipeline |
-| `src/pages/Events.tsx` | Botao "Adicionar Video" para importacao incremental |
+| `video-processor/server.py` | Apos linha 8442: Resetar `is_full_match_video = False` apos split automatico |
+| `src/pages/Upload.tsx` | Linhas 2866-2921: Paralelizar upload de multiplos videos |
 
 ## O Que NAO Muda
 
-- Nenhuma alteracao nos componentes de UI existentes (VideoSegmentCard, HalfDropzone, etc.)
-- O fluxo manual (Nova Partida > Videos > Analise) permanece identico
-- A logica de transcricao e analise por tempo permanece a mesma
-- O pipeline de clips permanece o mesmo
+- A logica de split automatico com silencedetect permanece igual
+- O fallback de transcricao do storage permanece igual
+- A limpeza de transcricoes parciais (< 1KB) permanece igual
+- O fluxo manual nao e alterado
+
+## Resultado Esperado
+
+- Apos split automatico, analise do 1o tempo usa range 0-45 min (correto)
+- Analise do 2o tempo continua usando range 45-90 min (ja estava correto)
+- Upload de 2 videos separados e mais rapido (paralelo)
+- Eventos e clips sao gerados corretamente para ambos os tempos
 
