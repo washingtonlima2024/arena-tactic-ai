@@ -1,125 +1,131 @@
 
-# Corrigir Eventos Sem Classificacao
+# Aplicar Correções Pendentes no Pipeline Async
 
-## Problema Identificado
+## Situação Atual
 
-Analisando os dados e o codigo, encontrei **3 causas** para eventos saindo sem classificacao adequada:
+As mudanças planejadas anteriormente **não foram aplicadas** ao `server.py`. O código atual ainda:
 
-### Causa 1: A IA usa "chance" como tipo generico
+1. Usa transcricao parcial de 5 min como se fosse completa
+2. Nao detecta `videoType: 'full'`
+3. Analisa apenas range 0-45 min (perde metade do jogo)
 
-O prompt da IA (ai_services.py, linha 3792) diz:
-```
-event_type: goal, shot, save, foul, corner, chance, penalty, etc.
-```
+O fatiamento de video e audio **ja funciona** -- Phase 2 divide videos grandes e Phase 2.5 extrai audio com 3 metodos fallback. O pipeline nao vai travar por causa disso.
 
-A IA esta usando "chance" como tipo generico para qualquer lance que nao seja claramente um gol, falta ou defesa. No banco de dados, existem **11 eventos do tipo "chance"**, todos com descricoes que deveriam ter tipos mais especificos:
+## Mudancas Necessarias (3 arquivos)
 
-| Descricao | Tipo Atual | Tipo Correto |
-|-----------|------------|--------------|
-| "Neymar chuta na trave!" | chance | shot (woodwork) |
-| "Paulinho perde chance inacreditavel!" | chance | shot |
-| "Neymar arranca e cruza, sem sucesso" | chance | cross |
-| "Neymar acerta trave!" | chance | shot (woodwork) |
+### 1. Upload.tsx -- Nao enviar transcricao parcial ao pipeline
 
-### Causa 2: yellow_card e red_card convertidos para "foul"
+**Arquivo:** `src/pages/Upload.tsx` (linha 2936)
 
-A funcao `_enrich_events()` (ai_services.py, linha 4877) **converte todos os cartoes amarelos e vermelhos para falta**:
-
-```python
-if event_type == 'yellow_card':
-    event_type = 'foul'  # Destroi a classificacao!
-    event['description'] = f"Falta (mencao a cartao): ..."
-```
-
-E o prompt diz "NAO detecte yellow_card ou red_card" -- ou seja, a IA nem tenta classificar cartoes. O resultado e que cartoes aparecem como "Falta" generica.
-
-### Causa 3: "chance" nao aparece em nenhum filtro da UI
-
-Na pagina de Eventos, os filtros sao: gols, shots, fouls, tactical. Eventos do tipo "chance" nao encaixam em nenhum filtro, ficando visiveis apenas no modo "Todos".
-
-## Solucao
-
-### 1. Melhorar o prompt da IA para classificacao precisa
-
-**Arquivo: `video-processor/ai_services.py`** (prompt principal ~linha 3792)
-
-Substituir:
-```
-event_type: goal, shot, save, foul, corner, chance, penalty, etc. (NAO detecte yellow_card ou red_card)
-```
-
-Por:
-```
-event_type: TIPOS OBRIGATORIOS:
-- goal: gol marcado
-- shot: finalizacao (inclui chutes na trave, chutes para fora)
-- shot_on_target: finalizacao no gol
-- save: defesa do goleiro
-- foul: falta cometida
-- yellow_card: cartao amarelo mostrado
-- red_card: cartao vermelho
-- corner: escanteio
-- penalty: penalti
-- free_kick: cobranca de falta
-- cross: cruzamento
-- offside: impedimento
-NAO use "chance" - classifique como "shot" se for finalizacao
-```
-
-### 2. Remover conversao yellow_card/red_card para foul
-
-**Arquivo: `video-processor/ai_services.py`** (~linhas 4869-4881)
-
-Remover completamente os blocos de conversao:
-- `if event_type == 'red_card': event_type = 'foul'` (linha 4870)
-- `if event_type == 'yellow_card': event_type = 'foul'` (linha 4877)
-
-Isso permite que cartoes amarelos e vermelhos mantenham sua classificacao correta.
-
-### 3. Adicionar reclassificacao automatica de "chance"
-
-**Arquivo: `video-processor/ai_services.py`** (na funcao `_enrich_events`, apos linha 4867)
-
-Adicionar logica para reclassificar "chance" baseado em palavras-chave na descricao:
+A transcricao do Smart Import (5 minutos) serve apenas para detectar times/competicao. Nao deve ser passada como `firstHalfTranscription` ao pipeline async, porque isso faz o Whisper ser pulado.
 
 ```text
-Se event_type == 'chance':
-  Se descricao contem 'trave', 'poste', 'travessao' -> shot
-  Se descricao contem 'chut', 'finali', 'bomba', 'bateu' -> shot
-  Se descricao contem 'cruz', 'cruzamento' -> cross
-  Se descricao contem 'cabece' -> shot
-  Senao -> shot (fallback, pois "chance" quase sempre e uma finalizacao)
+ANTES (linha 2936):
+  firstHalfTranscription: transcription && transcription.length > 50 ? transcription : undefined
+
+DEPOIS:
+  // Transcricao do Smart Import e parcial (5 min) - nao usar como transcricao completa
+  firstHalfTranscription: undefined
 ```
 
-### 4. Atualizar tambem o prompt legado (Gemini)
+Isso forca o pipeline a rodar Whisper no video inteiro (Phase 3, linha 8480+).
 
-**Arquivo: `video-processor/ai_services.py`** (~linha 5470)
+### 2. server.py Phase 1 -- Detectar video de jogo completo
 
-O prompt do modo legado (Gemini) tambem precisa da mesma atualizacao de tipos para manter consistencia entre os dois modos de analise.
+**Arquivo:** `video-processor/server.py` (linhas 8168-8170)
 
-### 5. Adicionar filtro "Chances/Finalizacoes" na UI
+Substituir a organizacao simples por deteccao de `videoType: 'full'`:
 
-**Arquivo: `src/pages/Events.tsx`** (~linha 546)
+```text
+ANTES:
+  first_half_videos = [v for v in videos if v.get('halfType') == 'first']
+  second_half_videos = [v for v in videos if v.get('halfType') == 'second']
 
-Atualizar o filtro "shots" para incluir tambem "chance" (para compatibilidade com eventos antigos):
+DEPOIS:
+  first_half_videos = []
+  second_half_videos = []
+  is_full_match_video = False
+
+  for v in videos:
+      video_type = v.get('videoType', '')
+      half_type = v.get('halfType', 'first')
+
+      if video_type == 'full':
+          is_full_match_video = True
+          first_half_videos.append(v)
+          print(f"[ASYNC-PIPELINE] Video de jogo COMPLETO detectado")
+      elif half_type == 'second':
+          second_half_videos.append(v)
+      else:
+          first_half_videos.append(v)
 ```
-typeFilter === 'shots' -> event_type.includes('shot') || event_type === 'chance'
+
+### 3. server.py Phase 4 -- Analisar range 0-90 para jogo completo
+
+**Arquivo:** `video-processor/server.py` (linhas 8658-8659)
+
+Quando e jogo completo, a IA precisa analisar 0-90 min em vez de 0-45:
+
+```text
+ANTES:
+  events = ai_services.analyze_match_events(
+      first_half_text, home_team, away_team, 0, 45,
+      match_id=match_id,
+      ...
+  )
+
+DEPOIS:
+  game_end = 90 if is_full_match_video else 45
+  print(f"[ASYNC-PIPELINE] Analise 1T: range 0-{game_end} min (full_match={is_full_match_video})")
+  events = ai_services.analyze_match_events(
+      first_half_text, home_team, away_team, 0, game_end,
+      match_id=match_id,
+      ...
+  )
 ```
+
+### 4. server.py Phase 3 -- Log diagnostico de transcricao
+
+**Arquivo:** `video-processor/server.py` (apos linha 8566, depois de salvar o TXT)
+
+Adicionar log que detecta transcricoes suspeitamente curtas:
+
+```text
+  # Diagnostico: chars por segundo
+  first_dur = video_durations.get('first', 0)
+  if first_dur > 0:
+      chars_per_sec = len(first_half_text) / first_dur
+      print(f"[ASYNC-PIPELINE] Transcricao 1T: {len(first_half_text)} chars, "
+            f"video={first_dur:.0f}s, ratio={chars_per_sec:.1f} chars/s")
+      if chars_per_sec < 2 and first_dur > 600:
+          print(f"[ASYNC-PIPELINE] ALERTA: Transcricao parece PARCIAL! "
+                f"Esperado ~{int(first_dur * 8)} chars, recebido {len(first_half_text)}")
+```
+
+## Sobre Fatiamento (Video e Audio)
+
+O pipeline **ja tem** o fatiamento implementado e nao vai travar:
+
+| Phase | O que faz | Status |
+|-------|-----------|--------|
+| Phase 2 (linha 8226) | Divide video em N partes via FFmpeg se > 300MB | Ja funciona |
+| Phase 2.5 (linha 8263) | Extrai audio MP3 com 3 fallbacks (libmp3lame, mono 16kHz, WAV-to-MP3) | Ja funciona |
+| Phase 3 (linha 8500) | Transcreve partes em paralelo (4 workers) | Ja funciona |
+
+O unico risco de "parar" seria se o Whisper demorasse muito em videos longos. Para um video de 26 min, a transcricao leva ~3-8 minutos dependendo do hardware. Videos de 90 min podem levar 15-30 min, mas o pipeline mostra progresso em tempo real.
 
 ## Arquivos Modificados
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `video-processor/ai_services.py` | 1. Atualizar prompt com tipos especificos (remover "chance", incluir yellow/red_card) |
-| `video-processor/ai_services.py` | 2. Remover conversao yellow_card/red_card para foul |
-| `video-processor/ai_services.py` | 3. Reclassificar "chance" para tipos especificos baseado em descricao |
-| `video-processor/ai_services.py` | 4. Atualizar prompt legado (Gemini) com mesmos tipos |
-| `src/pages/Events.tsx` | 5. Incluir "chance" no filtro de shots para compatibilidade |
+| `src/pages/Upload.tsx` | Linha 2936: `firstHalfTranscription: undefined` |
+| `video-processor/server.py` | Linhas 8168-8170: Detectar `videoType: 'full'` e flag `is_full_match_video` |
+| `video-processor/server.py` | Linhas 8658-8659: Usar `game_end = 90` quando jogo completo |
+| `video-processor/server.py` | Apos linha 8566: Log diagnostico chars/segundo |
 
-## Resultado Esperado
+## Resultado
 
-- Cartoes amarelos e vermelhos aparecem com classificacao correta ("Cartao Amarelo" / "Cartao Vermelho")
-- Chutes na trave classificados como "Finalizacao" em vez de "Chance"
-- Cruzamentos classificados como "Cruzamento" em vez de "Chance"
-- Eventos antigos do tipo "chance" aparecem no filtro de finalizacoes
-- Novos eventos gerados pela IA terao sempre tipos especificos e claros
+- Whisper roda no video **inteiro** (nao apenas 5 min)
+- IA analisa **0-90 min** para jogos compactados (detecta todos os gols)
+- Pipeline nao trava -- fatiamento e audio ja funcionam
+- Log de chars/s permite detectar problemas rapidamente
