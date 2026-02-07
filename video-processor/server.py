@@ -7007,8 +7007,8 @@ def _transcribe_video_part_direct(video_path: str, time_offset: float, minute_of
             if result.returncode != 0 or not os.path.exists(audio_path):
                 return {'success': False, 'error': 'Failed to extract audio'}
             
-            # Transcribe with Whisper
-            transcription_result = ai_services._transcribe_audio_file(audio_path, None)
+            # Transcribe with Whisper (uses Local Whisper priority chain)
+            transcription_result = ai_services.transcribe_audio_file(audio_path, match_id=None, language='pt')
             
             if transcription_result.get('success'):
                 # Adjust timestamps by time_offset
