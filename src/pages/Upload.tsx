@@ -1894,24 +1894,18 @@ export default function VideoUpload() {
         console.log('⚠️ Sem transcrição disponível - partida será criada mas sem análise de eventos');
         setProcessingStage('complete');
         setProcessingProgress(100);
-        setProcessingMessage('Partida criada sem transcrição');
-        
-        // Check if this was a size issue
-        const hasLargeVideo = currentSegments.some(s => (s.size || 0) > 500 * 1024 * 1024);
+        setProcessingMessage('Partida criada — transcrição será feita depois');
         
         toast({
-          title: hasLargeVideo ? "🖥️ Vídeo muito grande para a nuvem" : "⚠️ Transcrição não disponível",
-          description: hasLargeVideo 
-            ? "Vídeos acima de 500MB precisam do servidor Python local. Inicie o servidor (cd video-processor && python server.py) e use o modo 'Arquivo Local'."
-            : "A partida foi criada. Use 'Analisar com Transcrição' na página de eventos para detectar eventos manualmente.",
-          variant: hasLargeVideo ? "destructive" : "default",
-          duration: 10000
+          title: "✓ Partida criada com sucesso",
+          description: "A transcrição não foi possível agora. Você pode importar um SRT ou reanalisar na página de Eventos.",
+          duration: 8000
         });
         
-        // Redirect to match anyway - user can add videos/transcription later
+        // Redirect to events page after a moment
         setTimeout(() => {
           navigate(`/events?match=${matchId}`);
-        }, 2000);
+        }, 2500);
         return;
       }
 

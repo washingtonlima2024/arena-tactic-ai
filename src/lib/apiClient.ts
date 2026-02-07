@@ -1779,12 +1779,12 @@ export const apiClient = {
   /**
    * Transcreve vídeo para importação inteligente.
    * Aceita arquivo (FormData) ou URL (JSON).
-   * Timeout: 5 minutos (transcrição pode demorar).
+   * Timeout: 15 minutos (YouTube pode demorar para baixar + transcrever).
    */
-  smartImportTranscribe: async (options: { file?: File; videoUrl?: string }): Promise<{ transcription: string }> => {
+  smartImportTranscribe: async (options: { file?: File; videoUrl?: string }): Promise<{ transcription: string; transcription_failed?: boolean; error_detail?: string }> => {
     const apiBase = getApiBase();
     const url = buildApiUrl(apiBase, '/api/smart-import/transcribe');
-    const timeoutMs = 300000; // 5 minutos
+    const timeoutMs = 900000; // 15 minutos
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -1821,7 +1821,7 @@ export const apiClient = {
         throw new Error('Forneça um arquivo ou URL de vídeo');
       }
 
-      console.log(`[API-SmartImport] POST ${url} (timeout: 5min)`);
+      console.log(`[API-SmartImport] POST ${url} (timeout: 15min)`);
       const response = await fetch(url, fetchOptions);
       clearTimeout(timeoutId);
 
@@ -1855,7 +1855,7 @@ export const apiClient = {
     } catch (error: any) {
       clearTimeout(timeoutId);
       if (error.name === 'AbortError') {
-        throw new Error('Transcrição expirou após 5 minutos - tente com um vídeo menor');
+        throw new Error('Transcrição expirou após 15 minutos - tente com um vídeo menor ou URL diferente');
       }
       console.error('[API-SmartImport] Erro:', error.message);
       throw error;
