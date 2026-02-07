@@ -12249,6 +12249,262 @@ def social_publish():
         session.close()
 
 
+# ============================================================================
+# SMART IMPORT - Transcrição e extração de metadados para importação inteligente
+# ============================================================================
+
+@app.route('/api/smart-import/transcribe', methods=['POST'])
+def smart_import_transcribe():
+    """
+    Transcreve vídeo para importação inteligente.
+    Aceita:
+      - Arquivo via multipart/form-data (campo 'file')
+      - URL de vídeo via JSON (campo 'video_url')
+    Retorna: { transcription: string, success: bool }
+    """
+    import tempfile
+    import shutil
+
+    video_path = None
+    tmp_dir = None
+
+    try:
+        tmp_dir = tempfile.mkdtemp(prefix='smart_import_')
+
+        # ── Determinar fonte do vídeo ──
+        if request.content_type and 'multipart' in request.content_type:
+            # Upload de arquivo
+            file = request.files.get('file')
+            if not file or not file.filename:
+                return jsonify({'error': 'Nenhum arquivo enviado'}), 400
+
+            # Salvar arquivo temporário
+            ext = os.path.splitext(file.filename)[1] or '.mp4'
+            video_path = os.path.join(tmp_dir, f'smart_import{ext}')
+            file.save(video_path)
+            print(f"[SmartImport] Arquivo recebido: {file.filename} ({os.path.getsize(video_path) / (1024*1024):.1f} MB)")
+
+        else:
+            # URL de vídeo via JSON
+            data = request.get_json(silent=True) or {}
+            video_url = data.get('video_url', '').strip()
+            if not video_url:
+                return jsonify({'error': 'Forneça um arquivo ou video_url'}), 400
+
+            print(f"[SmartImport] URL recebida: {video_url}")
+
+            # Se for URL local (/api/storage/...), resolver caminho no disco
+            resolved = resolve_video_path(video_url)
+            if resolved and os.path.exists(resolved):
+                video_path = resolved
+                print(f"[SmartImport] URL local resolvida: {video_path}")
+            else:
+                # Baixar vídeo externo
+                video_path = os.path.join(tmp_dir, 'smart_import.mp4')
+                print(f"[SmartImport] Baixando vídeo externo...")
+                resp = requests.get(video_url, stream=True, timeout=300)
+                resp.raise_for_status()
+                with open(video_path, 'wb') as f:
+                    for chunk in resp.iter_content(chunk_size=8192):
+                        f.write(chunk)
+                print(f"[SmartImport] Download concluído: {os.path.getsize(video_path) / (1024*1024):.1f} MB")
+
+        # ── Extrair áudio ──
+        audio_path = os.path.join(tmp_dir, 'audio.mp3')
+        print(f"[SmartImport] Extraindo áudio com FFmpeg...")
+        ffmpeg_cmd = [
+            'ffmpeg', '-i', video_path,
+            '-vn', '-acodec', 'libmp3lame', '-ar', '16000', '-ac', '1', '-q:a', '5',
+            '-y', audio_path
+        ]
+        result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True, timeout=300)
+        if result.returncode != 0:
+            print(f"[SmartImport] FFmpeg stderr: {result.stderr[-500:]}")
+            return jsonify({'error': f'Erro ao extrair áudio: {result.stderr[-200:]}'}), 500
+
+        audio_size_mb = os.path.getsize(audio_path) / (1024 * 1024)
+        print(f"[SmartImport] Áudio extraído: {audio_size_mb:.1f} MB")
+
+        # ── Transcrever ──
+        # Usar a mesma lógica de prioridade do pipeline principal
+        gemini_available = bool(ai_services.GOOGLE_API_KEY) or bool(getattr(ai_services, 'LOVABLE_API_KEY', None))
+        local_whisper_available = getattr(ai_services, 'LOCAL_WHISPER_ENABLED', False) and getattr(ai_services, '_FASTER_WHISPER_AVAILABLE', False)
+
+        transcription_text = ''
+
+        if gemini_available:
+            print(f"[SmartImport] Transcrevendo com Gemini...")
+            try:
+                result = ai_services._transcribe_with_gemini(audio_path)
+                if result.get('success'):
+                    transcription_text = result.get('text', '')
+                    print(f"[SmartImport] Gemini OK: {len(transcription_text)} chars")
+            except Exception as e:
+                print(f"[SmartImport] Gemini falhou: {e}")
+
+        if not transcription_text and local_whisper_available:
+            print(f"[SmartImport] Transcrevendo com Whisper Local...")
+            try:
+                result = ai_services._transcribe_with_local_whisper(audio_path)
+                if result.get('success'):
+                    transcription_text = result.get('text', '')
+                    print(f"[SmartImport] Whisper OK: {len(transcription_text)} chars")
+            except Exception as e:
+                print(f"[SmartImport] Whisper falhou: {e}")
+
+        if not transcription_text:
+            return jsonify({
+                'error': 'Nenhum provedor de transcrição disponível ou a transcrição falhou. '
+                         'Configure Gemini ou instale Whisper Local.'
+            }), 500
+
+        return jsonify({
+            'success': True,
+            'transcription': transcription_text
+        })
+
+    except Exception as e:
+        print(f"[SmartImport] ERRO: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+    finally:
+        # Limpar arquivos temporários
+        if tmp_dir and os.path.exists(tmp_dir):
+            try:
+                shutil.rmtree(tmp_dir)
+            except:
+                pass
+
+
+@app.route('/api/extract-match-info', methods=['POST'])
+def extract_match_info():
+    """
+    Recebe transcrição e usa IA (Ollama local) para extrair metadados da partida:
+    times, competição, estádio, data, placar.
+    """
+    data = request.get_json(silent=True) or {}
+    transcription = data.get('transcription', '').strip()
+
+    if not transcription:
+        return jsonify({'error': 'transcription é obrigatório'}), 400
+
+    if len(transcription) < 50:
+        return jsonify({'error': 'Transcrição muito curta para extrair informações'}), 400
+
+    print(f"[ExtractMatchInfo] Transcrição recebida: {len(transcription)} chars")
+
+    # ── Prompt para extração de metadados ──
+    extraction_prompt = f"""Analise a transcrição de uma transmissão de futebol e extraia os metadados da partida.
+
+TRANSCRIÇÃO:
+{transcription[:8000]}
+
+Retorne SOMENTE um JSON válido com esta estrutura exata (sem texto adicional):
+{{
+  "home_team": "nome do time da casa ou null",
+  "away_team": "nome do time visitante ou null",
+  "competition": "nome da competição ou null",
+  "venue": "nome do estádio ou null",
+  "match_date": "YYYY-MM-DD ou null",
+  "score": {{"home": 0, "away": 0}} ou null,
+  "confidence": 0.8
+}}
+
+Regras:
+- home_team: o time que joga em casa (geralmente mencionado primeiro)
+- away_team: o time visitante
+- competition: liga, campeonato ou torneio
+- venue: estádio onde a partida acontece
+- match_date: data da partida se mencionada (formato YYYY-MM-DD)
+- score: placar se mencionado (pode ser parcial)
+- confidence: 0.0 a 1.0 indicando sua confiança nos dados extraídos
+- Se não conseguir identificar um campo, use null
+"""
+
+    try:
+        # Tentar Ollama primeiro (100% local e gratuito)
+        response_text = None
+
+        if ai_services.OLLAMA_ENABLED:
+            print(f"[ExtractMatchInfo] Usando Ollama ({ai_services.OLLAMA_MODEL})...")
+            response_text = ai_services.call_ollama(
+                messages=[
+                    {'role': 'system', 'content': 'Você é um assistente especialista em futebol. Extraia metadados de partidas a partir de transcrições. Responda SOMENTE com JSON válido.'},
+                    {'role': 'user', 'content': extraction_prompt}
+                ],
+                format='json',
+                temperature=0.3,
+                max_tokens=1024
+            )
+
+        # Fallback: Gemini
+        if not response_text and (bool(ai_services.GOOGLE_API_KEY) or bool(getattr(ai_services, 'LOVABLE_API_KEY', None))):
+            print(f"[ExtractMatchInfo] Ollama indisponível, usando Gemini...")
+            response_text = ai_services.call_google_gemini(
+                messages=[
+                    {'role': 'user', 'content': extraction_prompt}
+                ],
+                temperature=0.3,
+                max_tokens=1024
+            )
+
+        if not response_text:
+            return jsonify({'error': 'Nenhum provedor de IA disponível (Ollama ou Gemini)'}), 500
+
+        # ── Parsear JSON da resposta ──
+        print(f"[ExtractMatchInfo] Resposta da IA ({len(response_text)} chars): {response_text[:300]}")
+
+        # Extrair JSON de dentro de markdown code blocks se necessário
+        clean_text = response_text.strip()
+        if clean_text.startswith('```'):
+            # Remove ```json ... ```
+            lines = clean_text.split('\n')
+            json_lines = []
+            in_block = False
+            for line in lines:
+                if line.strip().startswith('```') and not in_block:
+                    in_block = True
+                    continue
+                elif line.strip() == '```' and in_block:
+                    break
+                elif in_block:
+                    json_lines.append(line)
+            clean_text = '\n'.join(json_lines)
+
+        parsed = json_module.loads(clean_text)
+
+        # Validar e normalizar
+        result = {
+            'success': True,
+            'home_team': parsed.get('home_team'),
+            'away_team': parsed.get('away_team'),
+            'competition': parsed.get('competition'),
+            'venue': parsed.get('venue'),
+            'match_date': parsed.get('match_date'),
+            'score': parsed.get('score'),
+            'confidence': float(parsed.get('confidence', 0.5)),
+            'raw_response': response_text[:500]
+        }
+
+        print(f"[ExtractMatchInfo] ✓ Extraído: {result.get('home_team')} vs {result.get('away_team')} | Confiança: {result['confidence']}")
+        return jsonify(result)
+
+    except json_module.JSONDecodeError as e:
+        print(f"[ExtractMatchInfo] Erro ao parsear JSON: {e}")
+        print(f"[ExtractMatchInfo] Resposta bruta: {response_text[:500] if response_text else 'None'}")
+        return jsonify({
+            'success': False,
+            'error': 'IA retornou resposta inválida (não-JSON)',
+            'raw_response': response_text[:500] if response_text else None
+        }), 500
+    except Exception as e:
+        print(f"[ExtractMatchInfo] ERRO: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     print_startup_status()
     app.run(host='0.0.0.0', port=5000, debug=True)
