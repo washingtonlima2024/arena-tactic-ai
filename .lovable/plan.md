@@ -1,134 +1,110 @@
 
-# Plano: Pipeline Automatizado Completo no Smart Import
+# Pipeline Async do Smart Import: Etapas Faltantes
 
-## Problema Atual
+## Diagnostico
 
-O fluxo do Smart Import para na etapa de **gestao de videos** (`videos` step), exigindo que o usuario:
-1. Revise os videos adicionados manualmente
-2. Clique em "Continuar para Analise"
-3. Revise o resumo
-4. Clique em "Iniciar Analise"
-5. O sistema transcreve **novamente** o video inteiro
+O pipeline async (`_process_match_pipeline(job_id, data)` no `server.py`) esta incompleto em comparacao ao pipeline padrao. Quando a transcricao e fornecida pelo Smart Import, o sistema pula a chamada `transcribe_large_video()`, que era responsavel por:
 
-Isso contradiz o objetivo de automacao "zero-clique" do Smart Import.
+1. **Extrair audio** do video (FFmpeg -> `audio/{half}_audio.mp3`)
+2. **Gerar SRT** formatado com timestamps (via Gemini/Whisper)
+3. **Salvar audio na pasta correta** (`storage/{match_id}/audio/`)
 
-## Solucao Proposta
+Alem disso, o pipeline async tem outros problemas:
 
-Apos o Smart Import criar a partida e vincular o video, o sistema deve **automaticamente** iniciar o pipeline completo de analise, pulando as etapas intermediarias (videos, summary). A transcricao ja obtida sera reutilizada, e o backend cuidara de:
-- Extrair o audio
-- Gerar versao otimizada do video
-- Organizar os arquivos na estrutura de pastas existente (audio/, clips/, images/, json/, srt/, texts/, videos/)
-- Analisar eventos usando a transcricao ja existente
-- Gerar clips e thumbnails
+4. **Eventos sem `videoSecond`**: Os eventos sao salvos sem calcular o campo `videoSecond` nos metadados, impedindo que o `extract_event_clips_auto` encontre o ponto correto no video
+5. **Usa `metadata` em vez de `event_metadata`**: O campo correto no modelo e `event_metadata`, mas o async usa `metadata`
+6. **Sem `second` no evento**: O pipeline padrao salva o campo `second`, o async nao
+7. **Sem `clip_pending = True`**: O pipeline padrao marca eventos para geracao de clips
 
-```text
-FLUXO ATUAL:
-  Smart Import (transcricao 5min)
-    --> Cria partida
-    --> Vai para tela de Videos (manual)
-    --> Usuario clica "Continuar"
-    --> Resumo (manual)
-    --> Usuario clica "Iniciar Analise"
-    --> Transcreve NOVAMENTE + Analisa
+## Solucao
 
-FLUXO NOVO:
-  Smart Import (transcricao 5min)
-    --> Cria partida + vincula video
-    --> Inicia pipeline async AUTOMATICAMENTE
-    --> Mostra progresso (AsyncProcessingProgress)
-    --> Redireciona para pagina de Eventos quando completo
-```
+Modificar a funcao `_process_match_pipeline(job_id, data)` no `video-processor/server.py` para incluir as etapas faltantes:
 
-## Mudancas por Arquivo
+### Mudanca 1: Extrair audio do video (nova fase entre preparacao e transcricao)
 
-### 1. src/pages/Upload.tsx
-
-**No callback `onMatchInfoExtracted` (linhas ~2657-2825):**
-
-Apos criar a partida e vincular o video com sucesso, em vez de ir para `setCurrentStep('videos')`, o sistema:
-
-1. Monta os `videoInputs` a partir do video vinculado (file ou URL)
-2. Chama `asyncProcessing.startProcessing()` passando:
-   - `matchId` recem-criado
-   - `videoInputs` com os dados do video
-   - `homeTeam` / `awayTeam` dos times criados/encontrados
-   - `firstHalfTranscription` com a transcricao do Smart Import
-   - `autoClip: true` e `autoAnalysis: true`
-3. Muda para um novo step `'auto-processing'` que mostra o `AsyncProcessingProgress`
-
-**Novo step `'auto-processing'`:**
-
-Adicionar um novo bloco de renderizacao condicional para `currentStep === 'auto-processing'` que exibe:
-- O componente `AsyncProcessingProgress` ja existente
-- Um indicador de que o processo foi iniciado automaticamente
-- Redirecionamento automatico para `/events?match={matchId}` quando o status for `complete`
-
-**Para upload de arquivo (videoFile):**
-
-Quando o Smart Import fornece um `videoFile`, o upload precisa completar antes de iniciar o pipeline. O fluxo sera:
-1. Fazer upload do arquivo (reutilizar `uploadFile()` existente)
-2. Aguardar conclusao do upload
-3. Usar a URL resultante para montar o `videoInput`
-4. Iniciar o pipeline async
-
-**Para URL/link (videoUrl):**
-
-Quando e uma URL, nao precisa de upload. Montar o `videoInput` diretamente com a URL.
-
-### 2. src/components/upload/SmartImportCard.tsx
-
-Sem alteracoes adicionais necessarias. O componente ja passa corretamente a transcricao, video e dados da partida para o callback.
-
-## Detalhes Tecnicos
-
-### Montagem do VideoInput
+Apos baixar/linkar o video, extrair o audio usando FFmpeg e salvar em `storage/{match_id}/audio/`:
 
 ```text
-videoInputs = [{
-  url: <url do video apos upload ou URL direta>,
-  halfType: 'first',
-  videoType: 'full',
-  startMinute: 0,
-  endMinute: 90,
-  sizeMB: <tamanho em MB se conhecido>,
-}]
+ffmpeg -y -i video.mp4 -vn -acodec libmp3lame -ab 128k audio.mp3
 ```
 
-### Reutilizacao da Transcricao
+O audio extraido sera salvo como `first_audio.mp3` ou `full_audio.mp3` na pasta `audio/`.
 
-O parametro `firstHalfTranscription` no `startAsyncProcessing` ja e suportado pelo backend (server.py linhas 8043-8055). Ao recebe-lo, o backend pula o Whisper automaticamente e usa a transcricao fornecida.
+### Mudanca 2: Gerar SRT a partir da transcricao texto
 
-### Fluxo de Upload + Pipeline
+Quando a transcricao e fornecida como texto puro (sem formato SRT), gerar um SRT sintetico distribuindo o texto proporcionalmente a duracao do video. Isso garante que a pasta `srt/` tenha arquivos usaveis para legendas e sincronia visual.
 
-Para arquivos locais (videoFile), o upload precisa completar primeiro. A logica sera:
+### Mudanca 3: Corrigir salvamento de eventos
 
-```text
-1. Criar partida (createMatch)
-2. Se videoFile:
-   a. Upload do arquivo via apiClient
-   b. Obter URL resultante
-3. Se videoUrl:
-   a. Usar URL diretamente
-4. Iniciar asyncProcessing.startProcessing()
-5. Mudar para step 'auto-processing'
-```
+Alinhar o salvamento de eventos com o pipeline padrao:
+- Usar `event_metadata` em vez de `metadata`
+- Calcular `videoSecond` para cada evento
+- Salvar campo `second`
+- Marcar `clip_pending = True`
 
-### Novo Step de Renderizacao
+### Mudanca 4: Garantir que clips e thumbnails sejam gerados
 
-O step `'auto-processing'` reutilizara o componente `AsyncProcessingProgress` ja existente, adicionando:
-- Um banner informando que o processamento foi iniciado automaticamente
-- Um `useEffect` que monitora `asyncProcessing.isComplete` para redirecionar
+Com `videoSecond` corretamente calculado, o `extract_event_clips_auto` podera encontrar o ponto exato no video. A funcao ja gera thumbnails automaticamente para cada clip extraido, entao corrigir o `videoSecond` resolve tanto clips quanto imagens.
 
-## Arquivos Modificados
+## Arquivo Modificado
 
 | Arquivo | Mudanca |
 |---------|---------|
-| `src/pages/Upload.tsx` | Novo step `'auto-processing'`; callback do Smart Import inicia pipeline automaticamente |
+| `video-processor/server.py` | Adicionar extracao de audio, geracao de SRT, corrigir salvamento de eventos no pipeline async |
 
-## Beneficios
+## Detalhes Tecnicos
 
-- Elimina 3 cliques manuais do fluxo (videos, continuar, iniciar)
-- Transcricao feita apenas uma vez (reutilizada do Smart Import)
-- Backend cuida de toda a organizacao de arquivos na estrutura existente
-- Usuario ve apenas o progresso e e redirecionado automaticamente ao final
-- Fluxo manual continua disponivel para quem preferir (opcao "Nova Partida" no choice)
+### Extracao de Audio (entre linhas ~7970-8005)
+
+Inserir apos a fase de "splitting" e antes da transcricao:
+
+```text
+Para cada video em video_paths:
+  1. Obter duracao via ffprobe
+  2. Extrair audio: ffmpeg -y -i video.mp4 -vn -acodec libmp3lame -ab 128k tmpdir/audio_{half}.mp3
+  3. Copiar para storage/{match_id}/audio/{half}_audio.mp3
+```
+
+### Geracao de SRT Sintetico (apos salvar transcricao, ~linhas 8138-8164)
+
+Quando a transcricao pre-carregada nao esta em formato SRT:
+
+```text
+1. Obter duracao do video (via video_paths)
+2. Dividir texto em blocos de ~10 palavras
+3. Distribuir proporcionalmente pela duracao
+4. Gerar formato SRT (numero, timestamp --> timestamp, texto)
+5. Salvar em storage/{match_id}/srt/{half}_half.srt
+```
+
+### Correcao do Salvamento de Eventos (linhas ~8200-8270)
+
+Para o primeiro tempo (e equivalente para o segundo):
+
+```text
+Para cada evento:
+  1. raw_minute = evento.minute
+  2. Se segundo tempo e minuto < 45: raw_minute += 45
+  3. second = evento.second ou 0
+  4. video_second = (raw_minute - segment_start) * 60 + second
+  5. Criar MatchEvent com:
+     - event_metadata (nao metadata)
+     - second = second
+     - clip_pending = True
+     - event_metadata inclui videoSecond e eventMs
+```
+
+## Resultado Esperado
+
+Apos a implementacao, a estrutura de pastas sera preenchida completamente:
+
+```text
+storage/{match_id}/
+  audio/        -> first_audio.mp3 (extraido do video)
+  clips/        -> clips de cada evento (gerados pelo extract_event_clips_auto)
+  images/       -> thumbnails de cada clip (gerados automaticamente)
+  json/         -> detected_events_first.json (ja funciona)
+  srt/          -> first_half.srt (gerado sinteticamente ou real)
+  texts/        -> first_half_transcription.txt (ja funciona)
+  videos/       -> video original (ja funciona)
+```
