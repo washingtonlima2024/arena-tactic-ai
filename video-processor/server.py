@@ -12293,53 +12293,57 @@ def smart_import_transcribe():
 
             print(f"[SmartImport] URL recebida: {video_url}")
 
-            # Se for URL local (/api/storage/...), resolver caminho no disco
-            resolved = resolve_video_path(video_url)
-            if resolved and os.path.exists(resolved):
-                video_path = resolved
-                print(f"[SmartImport] URL local resolvida: {video_path}")
-            else:
-                # Baixar vídeo externo
+            # Detectar YouTube/plataformas de vídeo PRIMEIRO (antes de resolve_video_path)
+            if is_youtube_url(video_url):
                 video_path = os.path.join(tmp_dir, 'smart_import.mp4')
+                print(f"[SmartImport] Detectado YouTube, usando yt-dlp...")
+                try:
+                    import shutil
+                    yt_dlp_path = shutil.which('yt-dlp')
+                    if not yt_dlp_path:
+                        return jsonify({'error': 'yt-dlp não encontrado. Execute: pip install yt-dlp'}), 500
+                    
+                    cmd = [
+                        yt_dlp_path,
+                        '-f', 'bestaudio/best[height<=480]',
+                        '--merge-output-format', 'mp4',
+                        '-o', video_path,
+                        '--no-playlist',
+                        '--socket-timeout', '60',
+                        video_url
+                    ]
+                    print(f"[SmartImport] yt-dlp cmd: {' '.join(cmd)}")
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+                    if result.returncode != 0:
+                        print(f"[SmartImport] yt-dlp stderr: {result.stderr[-500:]}")
+                        return jsonify({'error': f'Erro ao baixar do YouTube: {result.stderr[-200:]}'}), 500
+                    
+                    # yt-dlp pode adicionar extensão diferente
+                    if not os.path.exists(video_path) or os.path.getsize(video_path) < 1000:
+                        base = os.path.splitext(video_path)[0]
+                        for ext in ['.mp4', '.mkv', '.webm', '.m4a']:
+                            candidate = base + ext
+                            if os.path.exists(candidate) and os.path.getsize(candidate) > 1000:
+                                video_path = candidate
+                                break
+                    
+                    print(f"[SmartImport] YouTube download OK: {os.path.getsize(video_path) / (1024*1024):.1f} MB")
+                except subprocess.TimeoutExpired:
+                    return jsonify({'error': 'Timeout ao baixar vídeo do YouTube (10 min)'}), 500
+            else:
+                # URLs locais ou diretas
+                resolved = None
+                try:
+                    resolved = resolve_video_path(video_url)
+                except Exception as e:
+                    print(f"[SmartImport] resolve_video_path falhou: {e}")
                 
-                if is_youtube_url(video_url):
-                    # YouTube: usar yt-dlp para baixar
-                    print(f"[SmartImport] Detectado YouTube, usando yt-dlp...")
-                    try:
-                        import shutil
-                        yt_dlp_path = shutil.which('yt-dlp')
-                        if not yt_dlp_path:
-                            return jsonify({'error': 'yt-dlp não encontrado. Execute: pip install yt-dlp'}), 500
-                        
-                        cmd = [
-                            yt_dlp_path,
-                            '-f', 'bestaudio/best[height<=480]',
-                            '--merge-output-format', 'mp4',
-                            '-o', video_path,
-                            '--no-playlist',
-                            '--socket-timeout', '60',
-                            video_url
-                        ]
-                        print(f"[SmartImport] yt-dlp cmd: {' '.join(cmd)}")
-                        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-                        if result.returncode != 0:
-                            print(f"[SmartImport] yt-dlp stderr: {result.stderr[-500:]}")
-                            return jsonify({'error': f'Erro ao baixar do YouTube: {result.stderr[-200:]}'}), 500
-                        
-                        # yt-dlp pode adicionar extensão - procurar arquivo
-                        if not os.path.exists(video_path) or os.path.getsize(video_path) < 1000:
-                            base = os.path.splitext(video_path)[0]
-                            for ext in ['.mp4', '.mkv', '.webm', '.m4a']:
-                                candidate = base + ext
-                                if os.path.exists(candidate) and os.path.getsize(candidate) > 1000:
-                                    video_path = candidate
-                                    break
-                        
-                        print(f"[SmartImport] YouTube download OK: {os.path.getsize(video_path) / (1024*1024):.1f} MB")
-                    except subprocess.TimeoutExpired:
-                        return jsonify({'error': 'Timeout ao baixar vídeo do YouTube (10 min)'}), 500
+                if resolved and os.path.exists(resolved):
+                    video_path = resolved
+                    print(f"[SmartImport] URL local resolvida: {video_path}")
                 else:
-                    # Download direto para URLs não-YouTube
+                    # Download direto
+                    video_path = os.path.join(tmp_dir, 'smart_import.mp4')
                     print(f"[SmartImport] Baixando vídeo externo...")
                     resp = requests.get(video_url, stream=True, timeout=300)
                     resp.raise_for_status()
