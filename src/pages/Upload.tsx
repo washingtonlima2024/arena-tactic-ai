@@ -2746,6 +2746,34 @@ export default function VideoUpload() {
                     setCurrentStep('videos');
                     if (videoFile) {
                       setTimeout(() => uploadFile(videoFile), 300);
+                    } else if (videoUrl) {
+                      // Auto-add URL as a link segment
+                      setTimeout(() => {
+                        const embedUrl = extractEmbedUrl(videoUrl);
+                        const validation = isValidVideoUrl(embedUrl);
+                        const newSegment: VideoSegment = {
+                          id: generateUUID(),
+                          name: `${validation.platform}: ${embedUrl.slice(0, 40)}...`,
+                          url: embedUrl,
+                          videoType: 'full' as VideoType,
+                          title: 'Partida Completa',
+                          durationSeconds: null,
+                          startMinute: 0,
+                          endMinute: 90,
+                          progress: 100,
+                          status: 'ready',
+                          isLink: true,
+                          half: undefined,
+                        };
+                        setSegments(prev => {
+                          if (prev.some(s => s.url === newSegment.url)) return prev;
+                          return [...prev, newSegment];
+                        });
+                        toast({
+                          title: `✓ ${validation.platform} adicionado`,
+                          description: 'Link do vídeo vinculado automaticamente.',
+                        });
+                      }, 300);
                     }
                   } catch (error: any) {
                     console.error('[SmartImport] Error creating match:', error);
