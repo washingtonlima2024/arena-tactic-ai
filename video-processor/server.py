@@ -8077,6 +8077,146 @@ def _update_async_job(job_id: str, status: str, progress: int, message: str = ''
         session.close()
 
 
+def _detect_halftime_split_point(video_path: str, duration_seconds: float) -> float:
+    """
+    Detect the halftime interval in a full-match video using FFmpeg silencedetect.
+    Searches for silence >= 8 seconds in the 35%-65% region of the video.
+    Returns the split point in seconds, or duration/2 as fallback.
+    """
+    try:
+        search_start = duration_seconds * 0.35
+        search_duration = duration_seconds * 0.30  # 35% to 65%
+        
+        print(f"[HALFTIME-DETECT] Searching for silence in region {search_start:.0f}s - {search_start + search_duration:.0f}s "
+              f"(video duration: {duration_seconds:.0f}s)")
+        
+        cmd = [
+            'ffmpeg', '-i', video_path,
+            '-ss', str(search_start),
+            '-t', str(search_duration),
+            '-af', 'silencedetect=noise=-40dB:d=8',
+            '-f', 'null', '-'
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        
+        # Parse silencedetect output from stderr
+        silence_periods = []
+        for line in result.stderr.split('\n'):
+            if 'silence_start:' in line:
+                try:
+                    start_val = float(line.split('silence_start:')[1].strip().split()[0])
+                    silence_periods.append({'start': search_start + start_val})
+                except (ValueError, IndexError):
+                    pass
+            elif 'silence_end:' in line and silence_periods:
+                try:
+                    parts = line.split('silence_end:')[1].strip().split()
+                    end_val = float(parts[0])
+                    # Update the last period with end time
+                    silence_periods[-1]['end'] = search_start + end_val
+                    # Extract duration if available
+                    for p in parts:
+                        if 'silence_duration:' in line:
+                            try:
+                                dur_str = line.split('silence_duration:')[1].strip().split()[0]
+                                silence_periods[-1]['duration'] = float(dur_str)
+                            except:
+                                pass
+                except (ValueError, IndexError):
+                    pass
+        
+        # Find the best silence period (longest, closest to center)
+        if silence_periods:
+            center = duration_seconds / 2
+            best = None
+            best_score = float('inf')
+            
+            for period in silence_periods:
+                if 'end' not in period:
+                    continue
+                mid = (period['start'] + period['end']) / 2
+                duration = period['end'] - period['start']
+                # Score: distance from center, weighted by duration (prefer longer silence closer to center)
+                score = abs(mid - center) - (duration * 2)
+                if score < best_score:
+                    best_score = score
+                    best = period
+            
+            if best and 'end' in best:
+                split_point = (best['start'] + best['end']) / 2
+                print(f"[HALFTIME-DETECT] ✓ Silence detected: {best['start']:.1f}s - {best['end']:.1f}s "
+                      f"(duration: {best['end'] - best['start']:.1f}s). Split at: {split_point:.1f}s")
+                return split_point
+        
+        print(f"[HALFTIME-DETECT] No suitable silence found, using midpoint fallback")
+        
+    except Exception as e:
+        print(f"[HALFTIME-DETECT] Error detecting silence: {e}")
+    
+    # Fallback: exact midpoint
+    fallback = duration_seconds / 2
+    print(f"[HALFTIME-DETECT] Using fallback split point: {fallback:.1f}s")
+    return fallback
+
+
+def _split_full_match_into_halves(video_path: str, split_point: float, output_dir: str) -> dict:
+    """
+    Split a full-match video into two halves at the given split point.
+    Returns {'first': path_to_first_half, 'second': path_to_second_half}.
+    """
+    first_half_path = os.path.join(output_dir, 'first_half_split.mp4')
+    second_half_path = os.path.join(output_dir, 'second_half_split.mp4')
+    
+    # Resolve symlinks
+    resolved_path = os.path.realpath(video_path) if os.path.islink(video_path) else video_path
+    
+    # Split first half: from start to split_point
+    cmd1 = [
+        'ffmpeg', '-y', '-i', resolved_path,
+        '-t', str(split_point),
+        '-c', 'copy',
+        '-avoid_negative_ts', 'make_zero',
+        first_half_path
+    ]
+    
+    print(f"[HALFTIME-SPLIT] Extracting first half: 0s - {split_point:.1f}s")
+    result1 = subprocess.run(cmd1, capture_output=True, text=True, timeout=600)
+    
+    if result1.returncode != 0:
+        raise Exception(f"Failed to extract first half: {result1.stderr[-200:]}")
+    
+    # Split second half: from split_point to end
+    cmd2 = [
+        'ffmpeg', '-y', '-i', resolved_path,
+        '-ss', str(split_point),
+        '-c', 'copy',
+        '-avoid_negative_ts', 'make_zero',
+        second_half_path
+    ]
+    
+    print(f"[HALFTIME-SPLIT] Extracting second half: {split_point:.1f}s - end")
+    result2 = subprocess.run(cmd2, capture_output=True, text=True, timeout=600)
+    
+    if result2.returncode != 0:
+        raise Exception(f"Failed to extract second half: {result2.stderr[-200:]}")
+    
+    # Verify files exist and have size
+    first_size = os.path.getsize(first_half_path) if os.path.exists(first_half_path) else 0
+    second_size = os.path.getsize(second_half_path) if os.path.exists(second_half_path) else 0
+    
+    print(f"[HALFTIME-SPLIT] ✓ First half: {first_size / (1024*1024):.1f} MB")
+    print(f"[HALFTIME-SPLIT] ✓ Second half: {second_size / (1024*1024):.1f} MB")
+    
+    if first_size < 10000 or second_size < 10000:
+        raise Exception(f"Split produced empty files (first={first_size}, second={second_size})")
+    
+    return {
+        'first': first_half_path,
+        'second': second_half_path,
+    }
+
+
 def _split_video_parallel(video_path: str, num_parts: int, output_dir: str, half_type: str):
     """Split a video into parts - used by ThreadPoolExecutor."""
     try:
@@ -8252,6 +8392,65 @@ def _process_match_pipeline(job_id: str, data: dict):
             
             if not video_paths:
                 raise Exception("Nenhum vídeo válido encontrado")
+            
+            # ========== PHASE 1.5: AUTO-SPLIT FULL MATCH VIDEO ==========
+            # If we have a full-match video (>50 min), detect halftime and split
+            if is_full_match_video and 'first' in video_paths and 'second' not in video_paths:
+                full_video_path = video_paths['first']
+                resolved_full = os.path.realpath(full_video_path) if os.path.islink(full_video_path) else full_video_path
+                full_duration = get_video_duration_seconds(resolved_full)
+                
+                if full_duration > 3000:  # > 50 minutes
+                    _update_async_job(job_id, 'splitting', 12, 
+                                     f'Detectando intervalo no vídeo completo ({full_duration/60:.0f} min)...', 
+                                     'splitting')
+                    
+                    try:
+                        split_point = _detect_halftime_split_point(resolved_full, full_duration)
+                        
+                        _update_async_job(job_id, 'splitting', 13, 
+                                         f'Separando 1º e 2º tempo (corte em {split_point/60:.1f} min)...', 
+                                         'splitting')
+                        
+                        split_dir = os.path.join(tmpdir, 'halftime_split')
+                        os.makedirs(split_dir, exist_ok=True)
+                        
+                        split_result = _split_full_match_into_halves(resolved_full, split_point, split_dir)
+                        
+                        # Replace video_paths with the two halves
+                        video_paths = {
+                            'first': split_result['first'],
+                            'second': split_result['second'],
+                        }
+                        
+                        # Recalculate parts for both halves
+                        first_size_mb = os.path.getsize(split_result['first']) / (1024 * 1024)
+                        second_size_mb = os.path.getsize(split_result['second']) / (1024 * 1024)
+                        
+                        first_parts_count = 4 if first_size_mb > 800 else 2 if first_size_mb > 300 else 1
+                        second_parts_count = 4 if second_size_mb > 800 else 2 if second_size_mb > 300 else 1
+                        total_parts = first_parts_count + second_parts_count
+                        
+                        # Rebuild parts_status
+                        parts_status = []
+                        for i in range(first_parts_count):
+                            parts_status.append({'part': i + 1, 'halfType': 'first', 'status': 'pending', 'progress': 0})
+                        for i in range(second_parts_count):
+                            parts_status.append({'part': i + 1, 'halfType': 'second', 'status': 'pending', 'progress': 0})
+                        
+                        print(f"[ASYNC-PIPELINE] ✓ Video split: 1st half={first_size_mb:.0f}MB ({first_parts_count} parts), "
+                              f"2nd half={second_size_mb:.0f}MB ({second_parts_count} parts)")
+                        
+                        _update_async_job(job_id, 'splitting', 14, 
+                                         f'Vídeo separado em dois tempos',
+                                         'splitting', 0, total_parts, parts_status)
+                        
+                    except Exception as split_err:
+                        print(f"[ASYNC-PIPELINE] ⚠ Auto-split failed: {split_err}")
+                        print(f"[ASYNC-PIPELINE] Continuing with full video as single block...")
+                        # Continue without splitting — process as before
+                else:
+                    print(f"[ASYNC-PIPELINE] Full video is {full_duration/60:.1f} min — too short for split, processing as single block")
             
             # ========== PHASE 2: PARALLEL SPLITTING (15%) ==========
             _update_async_job(job_id, 'splitting', 15, 'Dividindo vídeos...', 'splitting')

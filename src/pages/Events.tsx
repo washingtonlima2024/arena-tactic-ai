@@ -45,12 +45,13 @@ import {
   CloudUpload,
   Server,
   Stethoscope,
-  Brain
+  Brain,
+  FilePlus
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
 import { getEventLabel } from '@/lib/eventLabels';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { EventEditDialog } from '@/components/events/EventEditDialog';
 import { ReanalyzeHalfDialog } from '@/components/events/ReanalyzeHalfDialog';
 import { ResetMatchDialog } from '@/components/events/ResetMatchDialog';
@@ -229,6 +230,7 @@ const SyncToCloudButton = ({ matchId, eventsCount }: SyncToCloudButtonProps) => 
 
 export default function Events() {
   const { isAdmin } = useAuth();
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { analyzeWithTranscription, isAnalyzing: isRefining, ensureMatchSynced } = useMatchAnalysis();
   const { 
@@ -1171,6 +1173,17 @@ export default function Events() {
             <Button variant="arena" size="sm" onClick={handleCreateEvent}>
               <Plus className="mr-2 h-4 w-4" />
               Novo Evento
+            </Button>
+
+            {/* Add Video Button - Incremental import */}
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={() => navigate(`/upload?match=${currentMatchId}&mode=new`)}
+              title="Adicionar vídeo sem perder eventos existentes"
+            >
+              <FilePlus className="mr-2 h-4 w-4" />
+              Adicionar Vídeo
             </Button>
 
             {/* Clips Dropdown - Main clip actions */}

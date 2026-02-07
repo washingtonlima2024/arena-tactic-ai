@@ -56,7 +56,7 @@ import arenaPlayWordmark from '@/assets/arena-play-wordmark.png';
 import { MatchSetupCard, MatchSetupData } from '@/components/upload/MatchSetupCard';
 import { useMatchDefaults } from '@/hooks/useMatchDefaults';
 import { VideoSegmentCard, VideoSegment, VideoType } from '@/components/upload/VideoSegmentCard';
-import { SmartImportCard } from '@/components/upload/SmartImportCard';
+import { SmartImportCard, SmartImportVideo } from '@/components/upload/SmartImportCard';
 import { CoverageTimeline } from '@/components/upload/CoverageTimeline';
 import { AnalysisSummary } from '@/components/upload/AnalysisSummary';
 import { MatchTimesConfig, defaultMatchTimes, MatchTimes } from '@/components/upload/MatchTimesConfig';
@@ -2734,7 +2734,7 @@ export default function VideoUpload() {
               </Button>
               
               <SmartImportCard
-                onMatchInfoExtracted={async (extractedData, videoFile, videoUrl, transcription) => {
+                onMatchInfoExtracted={async (extractedData, videoFile, videoUrl, transcription, allVideos) => {
                   // Salvar transcrição do Smart Import para reutilizar na análise
                   if (transcription && transcription.length > 50) {
                     console.log('[SmartImport] Transcrição salva para reutilização:', transcription.length, 'chars');
@@ -2856,71 +2856,74 @@ export default function VideoUpload() {
                     });
 
                     // === PIPELINE AUTOMATIZADO: Iniciar processamento direto ===
-                    // Em vez de ir para 'videos', montar videoInputs e disparar o pipeline async
+                    // Suporte a múltiplos vídeos (1º tempo + 2º tempo ou jogo completo)
+                    const videosToProcess = allVideos && allVideos.length > 0 ? allVideos : [
+                      { file: videoFile, url: videoUrl, halfType: 'first' as const, videoType: 'full' }
+                    ];
                     
-                    // Determinar URL do vídeo
-                    let videoInputUrl = '';
+                    const videoInputs: VideoInput[] = [];
                     
-                    if (videoUrl) {
-                      // URL direta — usar imediatamente
-                      videoInputUrl = extractEmbedUrl(videoUrl);
-                    } else if (videoFile) {
-                      // Arquivo local — fazer upload primeiro
-                      toast({
-                        title: "📦 Enviando vídeo...",
-                        description: `${videoFile.name} — aguarde o upload antes do processamento.`,
-                      });
+                    for (const vid of videosToProcess) {
+                      let vidUrl = '';
                       
-                      try {
-                        const sanitizedName = videoFile.name
-                          .normalize('NFD')
-                          .replace(/[\u0300-\u036f]/g, '')
-                          .replace(/[^a-zA-Z0-9._-]/g, '_');
-                        const fileName = `${Date.now()}-${sanitizedName}`;
+                      if (vid.url) {
+                        vidUrl = extractEmbedUrl(vid.url);
+                      } else if (vid.file) {
+                        toast({
+                          title: "📦 Enviando vídeo...",
+                          description: `${vid.file.name} — aguarde o upload.`,
+                        });
                         
-                        // Upload para o servidor local
-                        if (isLocalServerOnline) {
-                          const result = await apiClient.uploadBlobWithProgress(
-                            match.id,
-                            'videos',
-                            videoFile,
-                            fileName,
-                            () => {} // Progress silencioso — já temos o toast
-                          );
-                          videoInputUrl = result.url;
-                        } else {
-                          // Fallback — sem servidor local, ir para fluxo manual
+                        try {
+                          const sanitizedName = vid.file.name
+                            .normalize('NFD')
+                            .replace(/[\u0300-\u036f]/g, '')
+                            .replace(/[^a-zA-Z0-9._-]/g, '_');
+                          const fileName = `${Date.now()}-${sanitizedName}`;
+                          
+                          if (isLocalServerOnline) {
+                            const result = await apiClient.uploadBlobWithProgress(
+                              match.id,
+                              'videos',
+                              vid.file,
+                              fileName,
+                              () => {}
+                            );
+                            vidUrl = result.url;
+                          } else {
+                            setCurrentStep('videos');
+                            if (vid.file) setTimeout(() => uploadFile(vid.file!), 300);
+                            return;
+                          }
+                        } catch (uploadErr: any) {
+                          console.error('[SmartImport] Upload error:', uploadErr);
+                          toast({
+                            title: "Erro no upload",
+                            description: uploadErr.message || "Falha ao enviar o vídeo.",
+                            variant: "destructive",
+                          });
                           setCurrentStep('videos');
-                          setTimeout(() => uploadFile(videoFile), 300);
                           return;
                         }
-                      } catch (uploadErr: any) {
-                        console.error('[SmartImport] Upload error:', uploadErr);
-                        toast({
-                          title: "Erro no upload",
-                          description: uploadErr.message || "Falha ao enviar o vídeo. Tente o fluxo manual.",
-                          variant: "destructive",
+                      }
+                      
+                      if (vidUrl) {
+                        const isSecond = vid.halfType === 'second';
+                        videoInputs.push({
+                          url: vidUrl,
+                          halfType: vid.halfType,
+                          videoType: vid.videoType,
+                          startMinute: isSecond ? 45 : 0,
+                          endMinute: isSecond ? 90 : (vid.videoType === 'full' ? 90 : 45),
+                          sizeMB: vid.file ? vid.file.size / (1024 * 1024) : undefined,
                         });
-                        setCurrentStep('videos');
-                        return;
                       }
                     }
                     
-                    if (!videoInputUrl) {
-                      // Sem vídeo — ir para fluxo manual
+                    if (videoInputs.length === 0) {
                       setCurrentStep('videos');
                       return;
                     }
-                    
-                    // Montar videoInputs
-                    const videoInputs: VideoInput[] = [{
-                      url: videoInputUrl,
-                      halfType: 'first',
-                      videoType: 'full',
-                      startMinute: 0,
-                      endMinute: 90,
-                      sizeMB: videoFile ? videoFile.size / (1024 * 1024) : undefined,
-                    }];
                     
                     // Iniciar pipeline assíncrono automaticamente
                     setCurrentStep('auto-processing');
