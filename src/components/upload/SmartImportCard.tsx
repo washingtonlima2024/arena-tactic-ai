@@ -5,8 +5,7 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Progress } from '@/components/ui/progress';
 import { 
-  Sparkles, Upload, Link as LinkIcon, Loader2, CheckCircle2, 
-  AlertCircle, ArrowRight, FileVideo 
+  Sparkles, Upload, Link as LinkIcon, Loader2, FileVideo 
 } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
@@ -18,25 +17,13 @@ interface SmartImportCardProps {
   onCancel: () => void;
 }
 
-type SmartImportStep = 'video' | 'processing' | 'review';
-
-interface ExtractionResult {
-  home_team: string | null;
-  away_team: string | null;
-  competition: string | null;
-  venue: string | null;
-  match_date: string | null;
-  score: { home: number; away: number } | null;
-  confidence: number;
-}
+type SmartImportStep = 'video' | 'processing';
 
 export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportCardProps) {
   const [step, setStep] = useState<SmartImportStep>('video');
   const [videoFile, setVideoFile] = useState<File | null>(null);
   const [videoUrl, setVideoUrl] = useState('');
   const [progress, setProgress] = useState({ message: '', percent: 0 });
-  const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null);
-  const [savedTranscription, setSavedTranscription] = useState<string>('');
 
   const handleFileChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -74,15 +61,13 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
         transcriptionFailed = true;
       }
       
-      // Se transcrição falhou ou está vazia, pular extração de metadados
-      // e ir direto para formulário manual
+      // Se transcrição falhou ou está vazia, ir direto para formulário manual
       if (!transcriptionText || transcriptionFailed) {
         console.log('[SmartImport] Sem transcrição - pulando para formulário manual');
         toast.info('A IA não conseguiu detectar os dados automaticamente. Preencha manualmente.', {
           duration: 6000,
         });
         
-        // Ir direto para o formulário manual com dados vazios
         const emptyMatchData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
           homeTeamId: '',
           awayTeamId: '',
@@ -96,7 +81,7 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
           emptyMatchData,
           videoFile || undefined,
           videoUrl || undefined,
-          undefined // sem transcrição
+          undefined
         );
         return;
       }
@@ -112,7 +97,6 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
       }
       
       if (!extractResult?.success) {
-        // Extração falhou, mas temos a transcrição - ir para formulário manual
         toast.info('IA não conseguiu interpretar os dados da partida. Preencha manualmente.', {
           duration: 5000,
         });
@@ -130,19 +114,34 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
           emptyMatchData,
           videoFile || undefined,
           videoUrl || undefined,
-          transcriptionText || undefined // passar transcrição mesmo sem metadados
+          transcriptionText || undefined
         );
         return;
       }
 
+      // Sucesso — ir direto para o formulário com dados preenchidos pela IA
       setProgress({ message: 'Metadados extraídos com sucesso!', percent: 100 });
-      setExtractionResult(extractResult);
-      setSavedTranscription(transcriptionText);
-      setStep('review');
+      
+      const matchData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
+        homeTeamId: '',
+        awayTeamId: '',
+        competition: extractResult.competition || '',
+        matchDate: extractResult.match_date || new Date().toISOString().split('T')[0],
+        matchTime: '',
+        venue: extractResult.venue || '',
+        _homeTeamName: extractResult.home_team || undefined,
+        _awayTeamName: extractResult.away_team || undefined,
+      };
+
+      onMatchInfoExtracted(
+        matchData,
+        videoFile || undefined,
+        videoUrl || undefined,
+        transcriptionText || undefined
+      );
       
     } catch (error: any) {
       console.error('[SmartImport] Erro inesperado:', error);
-      // NUNCA parar no erro - ir para formulário manual
       toast.error('Erro na importação. Preencha os dados manualmente.', {
         duration: 5000,
       });
@@ -156,37 +155,13 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
         venue: '',
       };
       
-        onMatchInfoExtracted(
-          emptyMatchData,
-          videoFile || undefined,
-          videoUrl || undefined,
-          undefined // erro inesperado, sem transcrição
-        );
+      onMatchInfoExtracted(
+        emptyMatchData,
+        videoFile || undefined,
+        videoUrl || undefined,
+        undefined
+      );
     }
-  };
-
-  const handleConfirm = () => {
-    if (!extractionResult) return;
-    
-    // Build MatchSetupData from extraction - user will correct in the form
-    // Include _homeTeamName and _awayTeamName for fuzzy matching in parent
-    const matchData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
-      homeTeamId: '',
-      awayTeamId: '',
-      competition: extractionResult.competition || '',
-      matchDate: extractionResult.match_date || new Date().toISOString().split('T')[0],
-      matchTime: '',
-      venue: extractionResult.venue || '',
-      _homeTeamName: extractionResult.home_team || undefined,
-      _awayTeamName: extractionResult.away_team || undefined,
-    };
-
-    onMatchInfoExtracted(
-      matchData, 
-      videoFile || undefined,
-      videoUrl || undefined,
-      savedTranscription || undefined
-    );
   };
 
   return (
@@ -291,76 +266,6 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
             <p className="text-xs text-muted-foreground text-center">
               Isso pode levar alguns minutos dependendo da duração do vídeo
             </p>
-          </div>
-        )}
-
-        {/* Step 3: Review */}
-        {step === 'review' && extractionResult && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 text-sm">
-              <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-              <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                IA identificou os dados da partida
-              </span>
-              <Badge variant="secondary" className="ml-auto">
-                Confiança: {Math.round(extractionResult.confidence * 100)}%
-              </Badge>
-            </div>
-
-            <div className="grid gap-3">
-              {extractionResult.home_team && (
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                  <span className="text-sm text-muted-foreground">Time Casa</span>
-                  <span className="font-medium">{extractionResult.home_team}</span>
-                </div>
-              )}
-              {extractionResult.away_team && (
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                  <span className="text-sm text-muted-foreground">Time Visitante</span>
-                  <span className="font-medium">{extractionResult.away_team}</span>
-                </div>
-              )}
-              {extractionResult.competition && (
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                  <span className="text-sm text-muted-foreground">Competição</span>
-                  <span className="font-medium">{extractionResult.competition}</span>
-                </div>
-              )}
-              {extractionResult.venue && (
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                  <span className="text-sm text-muted-foreground">Estádio</span>
-                  <span className="font-medium">{extractionResult.venue}</span>
-                </div>
-              )}
-              {extractionResult.score && (
-                <div className="flex items-center justify-between p-3 rounded-lg bg-muted/50">
-                  <span className="text-sm text-muted-foreground">Placar detectado</span>
-                  <span className="font-bold text-lg">
-                    {extractionResult.score.home} × {extractionResult.score.away}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-lg border border-yellow-500/20 bg-yellow-500/5 p-3">
-              <div className="flex gap-2">
-                <AlertCircle className="h-4 w-4 text-yellow-500 flex-shrink-0 mt-0.5" />
-                <p className="text-sm text-muted-foreground">
-                  Esses dados serão usados para preencher o cadastro. 
-                  Você poderá <strong>revisar e corrigir</strong> todos os campos antes de confirmar.
-                </p>
-              </div>
-            </div>
-
-            <div className="flex gap-3 pt-2">
-              <Button variant="outline" onClick={() => setStep('video')} className="flex-1">
-                Voltar
-              </Button>
-              <Button onClick={handleConfirm} className="flex-1 gap-2">
-                Continuar para Revisão
-                <ArrowRight className="h-4 w-4" />
-              </Button>
-            </div>
           </div>
         )}
       </CardContent>
