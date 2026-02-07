@@ -3,10 +3,11 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Upload, Image, Loader2 } from 'lucide-react';
+import { Upload, Image, Loader2, Search } from 'lucide-react';
 import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 import type { Team, TeamInsert, TeamUpdate } from '@/hooks/useTeams';
+import { LogoSearchDialog } from './LogoSearchDialog';
 
 interface TeamFormDialogProps {
   open: boolean;
@@ -29,6 +30,7 @@ export function TeamFormDialog({
   const [secondaryColor, setSecondaryColor] = useState('#ffffff');
   const [logoUrl, setLogoUrl] = useState('');
   const [isUploading, setIsUploading] = useState(false);
+  const [logoSearchOpen, setLogoSearchOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -182,7 +184,7 @@ export function TeamFormDialog({
           {/* Logo Upload Section */}
           <div className="space-y-2">
             <Label>Logo do Time</Label>
-            <div className="flex gap-3">
+            <div className="flex gap-2">
               <input
                 ref={fileInputRef}
                 type="file"
@@ -193,25 +195,27 @@ export function TeamFormDialog({
               <Button
                 type="button"
                 variant="outline"
-                onClick={() => fileInputRef.current?.click()}
-                disabled={isUploading}
+                onClick={() => setLogoSearchOpen(true)}
                 className="flex-1"
               >
+                <Search className="h-4 w-4 mr-2" />
+                Buscar Logo
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => fileInputRef.current?.click()}
+                disabled={isUploading}
+              >
                 {isUploading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Enviando...
-                  </>
+                  <Loader2 className="h-4 w-4 animate-spin" />
                 ) : (
-                  <>
-                    <Upload className="h-4 w-4 mr-2" />
-                    Upload de Imagem
-                  </>
+                  <Upload className="h-4 w-4" />
                 )}
               </Button>
               
               {logoUrl && (
-                <div className="h-10 w-10 rounded border border-border overflow-hidden bg-muted flex items-center justify-center">
+                <div className="h-10 w-10 rounded border border-border overflow-hidden bg-muted flex items-center justify-center shrink-0">
                   <img 
                     src={logoUrl} 
                     alt="Logo preview" 
@@ -233,6 +237,16 @@ export function TeamFormDialog({
               type="url"
             />
           </div>
+
+          <LogoSearchDialog
+            open={logoSearchOpen}
+            onOpenChange={setLogoSearchOpen}
+            onSelect={(logo) => {
+              setLogoUrl(logo.logoUrl);
+              if (!name && logo.name) setName(logo.name);
+              if (!shortName && logo.shortName) setShortName(logo.shortName);
+            }}
+          />
 
           {/* Preview */}
           {(logoUrl || primaryColor) && (
