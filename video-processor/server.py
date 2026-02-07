@@ -3813,14 +3813,18 @@ def analyze_match():
             # ═══════════════════════════════════════════════════════════════
             print(f"[ANALYZE-MATCH] 🤖 Usando análise de IA (modo: {analysis_mode})...")
             local_settings = get_local_settings()
-            ai_events = ai_services.analyze_match_events(
-                transcription, home_team, away_team, game_start_minute, game_end_minute,
-                match_id=match_id,
-                use_dual_verification=(analysis_mode == 'text'),
-                settings=local_settings
-            )
-            
-            events = ai_events
+            try:
+                ai_events = ai_services.analyze_match_events(
+                    transcription, home_team, away_team, game_start_minute, game_end_minute,
+                    match_id=match_id,
+                    use_dual_verification=(analysis_mode == 'text'),
+                    settings=local_settings
+                )
+                events = ai_events or []
+            except Exception as ai_err:
+                print(f"[ANALYZE-MATCH] ⚠ Análise de IA falhou: {ai_err}")
+                print(f"[ANALYZE-MATCH] ℹ️ Continuando com 0 eventos - análise manual disponível")
+                events = []
             print(f"[ANALYZE-MATCH] ✓ IA: {len(events)} eventos detectados")
         
         # Determine match_half based on halfType
@@ -5447,12 +5451,18 @@ def _process_match_pipeline(data: dict, full_pipeline: bool = False):
                 
                 # Analyze transcription (100% LOCAL)
                 local_settings = get_local_settings()
-                events = ai_services.analyze_match_events(
-                    transcription, home_team, away_team, start_minute, end_minute,
-                    match_id=match_id,
-                    use_dual_verification=True,
-                    settings=local_settings
-                )
+                try:
+                    events = ai_services.analyze_match_events(
+                        transcription, home_team, away_team, start_minute, end_minute,
+                        match_id=match_id,
+                        use_dual_verification=True,
+                        settings=local_settings
+                    )
+                    events = events or []
+                except Exception as ai_err:
+                    print(f"[PIPELINE] ⚠ Análise de IA falhou: {ai_err}")
+                    print(f"[PIPELINE] ℹ️ Continuando com 0 eventos")
+                    events = []
                 
                 if not events:
                     results['warnings'].append(f"Nenhum evento detectado para {video_type}")
@@ -6675,16 +6685,20 @@ def transcribe_large_video_endpoint():
                     analysis_half = half_type or 'first'
                     
                     # Executar análise de eventos
-                    events = ai_services.analyze_match_events(
-                        transcription_text,
-                        home_team,
-                        away_team,
-                        game_start_minute=game_start_minute,
-                        game_end_minute=game_end_minute,
-                        match_id=match_id,
-                        match_half=analysis_half,
-                        settings=get_local_settings()
-                    )
+                    try:
+                        events = ai_services.analyze_match_events(
+                            transcription_text,
+                            home_team,
+                            away_team,
+                            game_start_minute=game_start_minute,
+                            game_end_minute=game_end_minute,
+                            match_id=match_id,
+                            settings=get_local_settings()
+                        )
+                        events = events or []
+                    except Exception as ai_err:
+                        print(f"[TRANSCRIBE] ⚠ Análise automática falhou: {ai_err}")
+                        events = []
                     
                     # Salvar eventos no banco de dados
                     if events:
@@ -8172,12 +8186,17 @@ def _process_match_pipeline(job_id: str, data: dict):
                     session.close()
                 
                 local_settings = get_local_settings()
-                events = ai_services.analyze_match_events(
-                    first_half_text, home_team, away_team, 0, 45,
-                    match_id=match_id,
-                    use_dual_verification=True,
-                    settings=local_settings
-                )
+                try:
+                    events = ai_services.analyze_match_events(
+                        first_half_text, home_team, away_team, 0, 45,
+                        match_id=match_id,
+                        use_dual_verification=True,
+                        settings=local_settings
+                    )
+                    events = events or []
+                except Exception as ai_err:
+                    print(f"[ASYNC-PIPELINE] ⚠ Análise 1º tempo falhou: {ai_err}")
+                    events = []
                 if events:
                     # Save events
                     session = get_session()
@@ -8217,12 +8236,17 @@ def _process_match_pipeline(job_id: str, data: dict):
                     session.close()
                 
                 local_settings = get_local_settings()
-                events = ai_services.analyze_match_events(
-                    second_half_text, home_team, away_team, 45, 90,
-                    match_id=match_id,
-                    use_dual_verification=True,
-                    settings=local_settings
-                )
+                try:
+                    events = ai_services.analyze_match_events(
+                        second_half_text, home_team, away_team, 45, 90,
+                        match_id=match_id,
+                        use_dual_verification=True,
+                        settings=local_settings
+                    )
+                    events = events or []
+                except Exception as ai_err:
+                    print(f"[ASYNC-PIPELINE] ⚠ Análise 2º tempo falhou: {ai_err}")
+                    events = []
                 if events:
                     session = get_session()
                     try:
