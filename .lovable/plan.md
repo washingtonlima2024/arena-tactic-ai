@@ -1,66 +1,77 @@
 
-# Corrigir Transcricao Parcial no Pipeline Assincrono
+
+# Corrigir Conexao de Redes Sociais - user_id Ausente
 
 ## Problema
 
-O Smart Import transcreve apenas os primeiros 5 minutos do video para identificacao rapida dos times. Essa transcricao parcial esta sendo passada ao pipeline assincrono como `firstHalfTranscription`, que a trata como transcricao completa e **pula o Whisper inteiramente**.
+Ao tentar conectar uma rede social (ex: Instagram), a requisicao POST para `/api/social/connections` retorna erro 400 com a mensagem "user_id e platform sao obrigatorios". O payload enviado pelo frontend nao inclui o campo `user_id`.
 
-Fluxo do bug:
-
+Evidencia dos logs de rede:
 ```text
-Smart Import (5 min) --> Frontend envia como firstHalfTranscription
-                     --> Backend: len > 100? Sim --> has_preloaded_first = True
-                     --> PULA WHISPER
-                     --> Analise so encontra eventos nos primeiros 5-6 min
+POST /api/social/connections -> 400
+Request Body: {"platform":"instagram","access_token":"...","account_id":"...","account_name":"@wahington_.lima","is_connected":true}
+Response: {"error": "user_id e platform sao obrigatorios"}
 ```
 
-A validacao de densidade (chars/segundo) que detecta transcricoes parciais so e aplicada a transcricoes carregadas do **storage**, nunca as enviadas pelo **frontend**.
+## Causa
+
+No arquivo `Social.tsx`, a funcao `handleConnect` (linha 223) monta o payload sem incluir o `user_id` do usuario autenticado. O hook `useAuth` e importado no arquivo mas o `user` nao e extraido nem utilizado no payload.
 
 ## Solucao
 
-Duas mudancas complementares para garantir que a transcricao parcial do Smart Import nao seja confundida com uma transcricao completa:
+### Arquivo: `src/pages/Social.tsx`
 
-### 1. Frontend: Nao enviar transcricao parcial do Smart Import (Upload.tsx)
-
-**Linha ~2958-2960**: Remover o envio da transcricao do Smart Import como `firstHalfTranscription` no pipeline assincrono. O Smart Import so transcreve 5 minutos -- isso nunca deveria ser tratado como transcricao final.
+1. **Extrair `user` do hook `useAuth`** no componente `Social`:
 
 ```text
 ANTES:
-  firstHalfTranscription: transcription && transcription.length > 50 ? transcription : undefined,
+  // useAuth nao e utilizado dentro do componente
 
 DEPOIS:
-  // Smart Import transcription is only 5min - never pass as full transcription
-  // The async pipeline will run Whisper for the complete video
-  firstHalfTranscription: undefined,
+  const { user } = useAuth();
 ```
 
-### 2. Backend: Validar densidade da transcricao fornecida pelo frontend (server.py)
-
-**Linhas ~8830-8833**: Aplicar a mesma validacao de densidade (`chars_per_sec >= 3`) as transcricoes enviadas pelo frontend, como segunda camada de protecao. Se o video tem 45+ minutos mas a transcricao cobre so 5 minutos, a densidade sera muito baixa e o Whisper sera acionado automaticamente.
+2. **Adicionar `user_id` ao payload** na funcao `handleConnect` (linha ~230):
 
 ```text
 ANTES:
-  has_preloaded_first = bool(first_half_transcription and len(first_half_transcription.strip()) > 100)
+  const payload = {
+    platform: selectedNetwork.id,
+    access_token: credentials.access_token || credentials.api_key,
+    refresh_token: credentials.refresh_token || credentials.access_token_secret,
+    account_id: credentials.account_id,
+    account_name: credentials.account_name || selectedNetwork.name,
+    is_connected: true,
+  };
 
 DEPOIS:
-  has_preloaded_first = bool(first_half_transcription and len(first_half_transcription.strip()) > 100)
-  # Validar se transcricao fornecida e proporcional ao video (evita parciais do Smart Import)
-  if has_preloaded_first:
-      first_dur = video_durations.get('first', 0)
-      if first_dur > 300:
-          chars_per_sec = len(first_half_transcription.strip()) / first_dur
-          if chars_per_sec < 3:
-              print(f"[ASYNC-PIPELINE] Transcricao do frontend DESCARTADA (parcial): "
-                    f"{len(first_half_transcription.strip())} chars / {first_dur:.0f}s = {chars_per_sec:.1f} chars/s")
-              has_preloaded_first = False
-              first_half_transcription = ''
+  const payload = {
+    platform: selectedNetwork.id,
+    access_token: credentials.access_token || credentials.api_key,
+    refresh_token: credentials.refresh_token || credentials.access_token_secret,
+    account_id: credentials.account_id,
+    account_name: credentials.account_name || selectedNetwork.name,
+    is_connected: true,
+    user_id: user?.id,
+  };
 ```
 
-A mesma logica sera aplicada para `has_preloaded_second`.
+3. **Adicionar validacao de usuario logado** antes de enviar (protecao extra):
+
+```text
+if (!user?.id) {
+  toast({
+    title: 'Erro',
+    description: 'Voce precisa estar logado para conectar redes sociais.',
+    variant: 'destructive',
+  });
+  return;
+}
+```
 
 ## Resultado Esperado
 
-- Transcricao parcial do Smart Import (5 min) nao e mais enviada como transcricao completa
-- Mesmo se enviada acidentalmente, o backend detecta a baixa densidade e aciona o Whisper
-- Pipeline assincrono roda o Whisper Local completo para o video inteiro
-- Analise encontra eventos ao longo de toda a partida (90 minutos)
+- O payload enviado ao backend incluira o `user_id` do usuario autenticado
+- A conexao da rede social sera salva corretamente no banco de dados
+- Caso o usuario nao esteja logado, uma mensagem de erro clara sera exibida
+
