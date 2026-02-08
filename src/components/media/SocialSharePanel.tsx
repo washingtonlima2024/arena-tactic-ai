@@ -210,24 +210,51 @@ export function SocialSharePanel({
         toast.success(`${posts.length} publicação(ões) agendada(s) para ${format(scheduledAt, "dd/MM/yyyy 'às' HH:mm", { locale: ptBR })} em: ${networkNames}`);
       } else {
         // Publish immediately via local API
+        const platformLabels: Record<string, string> = {
+          instagram: 'Instagram',
+          facebook: 'Facebook',
+          tiktok: 'TikTok',
+          youtube: 'YouTube',
+          x: 'X (Twitter)',
+          linkedin: 'LinkedIn',
+        };
+
+        const successes: string[] = [];
+        const failures: { platform: string; error: string }[] = [];
+
         for (const platform of selectedNetworks) {
           try {
-            const result = await apiClient.post('/api/social/publish', {
+            const result = await apiClient.post<{ success?: boolean; error?: string }>('/api/social/publish', {
               platform,
               content: caption || `⚽ Melhores momentos: ${matchTitle}`,
               mediaUrl: clipUrl || null,
               userId: user.id,
             });
 
-            if (!result.success) {
-              console.error(`Error publishing to ${platform}:`, result.error);
+            if (result.success === false) {
+              failures.push({ platform, error: result.error || 'Erro desconhecido' });
+            } else {
+              successes.push(platform);
             }
-          } catch (e) {
-            console.error(`Error publishing to ${platform}:`, e);
+          } catch (e: any) {
+            failures.push({ platform, error: e.message || 'Erro de conexão' });
           }
         }
 
-        toast.success(`Conteúdo compartilhado em: ${networkNames}`);
+        // Feedback correto baseado nos resultados reais
+        if (successes.length > 0) {
+          const names = successes.map(p => platformLabels[p] || p).join(', ');
+          toast.success(`Conteúdo compartilhado em: ${names}`);
+        }
+        if (failures.length > 0) {
+          const failDetails = failures.map(f => `${platformLabels[f.platform] || f.platform}: ${f.error}`).join('\n');
+          toast.error(`Falha ao publicar:\n${failDetails}`);
+        }
+        if (successes.length === 0 && failures.length > 0) {
+          // Não fechar o painel se tudo falhou
+          setIsSharing(false);
+          return;
+        }
       }
 
       onClose();
