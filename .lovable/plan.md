@@ -1,82 +1,162 @@
 
 
-# Corrigir Prioridade de URL no getApiBase() - Acesso Direto vs Proxy
+# Correcao: Fallback por Keywords no Pipeline Kakttus
 
-## Problema Identificado
+## Problema
 
-A correcao anterior eliminou a duplicacao `/api/api/`, mas o erro persiste por uma razao diferente:
+O pipeline Kakttus em `video-processor/ai_services.py` (linha 5057-5277) aceita qualquer quantidade de eventos como sucesso e retorna imediatamente. Quando o modelo retorna apenas 2 gols, o sistema para por ali sem buscar outros eventos (cartoes, penaltis, substituicoes) que existem na transcricao.
 
-```text
-Servidor descoberto: http://10.0.0.20:5000   (correto, porta 5000)
-API Base: /api                                (VITE_API_BASE_URL sobrepoe)
-POST http://10.0.0.20:8080/api/auth/login     (relativo resolve contra porta 8080)
-```
-
-A funcao `getApiBase()` no `apiMode.ts` tem esta prioridade:
-1. Dominio `arenaplay.kakttus.com` -- retorna `""` (OK)
-2. `VITE_API_BASE_URL=/api` -- retorna `/api` (PROBLEMA: sobrepoe o servidor descoberto)
-3. Servidor descoberto -- `http://10.0.0.20:5000` (nunca alcancado)
-
-O `/api` e um caminho relativo que depende de proxy reverso (Nginx) na frente. Quando o usuario acessa `http://10.0.0.20:8080` diretamente (via PM2 ou Vite), nao ha proxy, e a requisicao vai para `http://10.0.0.20:8080/api/auth/login` que retorna 404.
+O pipeline Ollama (linhas 4751-4835) ja tem essa logica de fallback funcionando corretamente.
 
 ## Causa Raiz
 
-Na producao com PM2, o app e compilado com `.env.production` que define `VITE_API_BASE_URL=/api`. Esse valor e pensado para funcionar com Nginx (que faz proxy de `/api/` para porta 5000). Porem, quando acessado diretamente pela porta 8080, nao existe proxy -- a requisicao bate no proprio servidor estático que serve o frontend.
+```text
+Linha 5057:  if events:           --> Se tem 1+ eventos, pula direto pro return
+Linha 5277:      return final_events  --> Retorna sem verificar se < 3 eventos
+```
+
+Nao existe bloco `else` para quando `events` esta vazio, e nao existe verificacao de quantidade minima.
 
 ## Solucao
 
-Adicionar deteccao inteligente em `getApiBase()`: quando `VITE_API_BASE_URL` e um caminho relativo (comeca com `/`), verificar se estamos realmente atras de um proxy reverso. Se nao (porta nao-padrao como 8080), preferir o servidor descoberto.
+Reestruturar o fluxo do pipeline Kakttus para:
 
-### Arquivo: `src/lib/apiMode.ts`
+1. Manter o bloco `if events:` para enriquecimento e salvamento (linhas 5057-5276)
+2. **Remover** o `return final_events` da linha 5277
+3. Adicionar bloco `else: final_events = []` para quando nenhum evento e detectado
+4. Adicionar verificacao `if len(final_events) < 3:` com fallback por keywords (mesma logica do Ollama)
+5. Retornar `final_events` somente apos o fallback
 
-**Mudanca 1** - Nova funcao helper `isBehindreverseProxy()`:
+## Detalhes Tecnicos
 
-```typescript
-function isBehindReverseProxy(): boolean {
-  const port = window.location.port;
-  // Portas padrao HTTP/HTTPS indicam proxy reverso
-  return !port || port === '80' || port === '443';
-}
+### Arquivo: `video-processor/ai_services.py`
+
+**Mudanca 1** - Linha 5277: Remover o `return final_events` prematuro
+
+De:
+```python
+                return final_events
+```
+Para: (remover esta linha completamente)
+
+**Mudanca 2** - Apos o bloco `if events:` (apos linha 5276), adicionar `else` e fallback:
+
+```python
+            else:
+                final_events = []
+                print(f"[Kakttus] ⚠️ Nenhum evento extraído pela IA")
+
+            # FALLBACK KAKTTUS: Se retornou poucos eventos, complementar com keywords
+            if len(final_events) < 3:
+                print(f"[Kakttus] ⚠️ Poucos eventos ({len(final_events)}), acionando fallback por keywords...")
+                keyword_events = []
+
+                if match_id:
+                    try:
+                        from storage import get_subfolder_path
+                        srt_folder = get_subfolder_path(match_id, 'srt')
+                        srt_files = list(srt_folder.glob('*.srt')) if srt_folder.exists() else []
+
+                        print(f"[Kakttus] SRTs disponíveis: {[f.name for f in srt_files]}")
+                        print(f"[Kakttus] Buscando SRT para tempo: {match_half}")
+
+                        target_srt = None
+                        if srt_files:
+                            srt_patterns = [
+                                f'{match_half}_half.srt',
+                                f'{match_half}_transcription.srt',
+                                f'{match_half}.srt',
+                            ]
+                            for pattern in srt_patterns:
+                                for srt_file in srt_files:
+                                    if pattern in srt_file.name.lower():
+                                        target_srt = srt_file
+                                        break
+                                if target_srt:
+                                    break
+                            if not target_srt and len(srt_files) == 1:
+                                target_srt = srt_files[0]
+
+                        if target_srt:
+                            print(f"[Kakttus] Usando SRT: {target_srt.name}")
+                            keyword_events = detect_events_by_keywords(
+                                srt_path=str(target_srt),
+                                home_team=home_team,
+                                away_team=away_team,
+                                half=match_half,
+                                segment_start_minute=game_start_minute
+                            )
+                        else:
+                            print(f"[Kakttus] SRT não encontrado, usando texto bruto...")
+                            keyword_events = detect_events_by_keywords_from_text(
+                                transcription=transcription,
+                                home_team=home_team,
+                                away_team=away_team,
+                                game_start_minute=game_start_minute,
+                                video_duration=None
+                            )
+                    except Exception as e:
+                        print(f"[Kakttus] Erro ao buscar SRT: {e}, usando texto bruto...")
+                        keyword_events = detect_events_by_keywords_from_text(
+                            transcription=transcription,
+                            home_team=home_team,
+                            away_team=away_team,
+                            game_start_minute=game_start_minute,
+                            video_duration=None
+                        )
+                else:
+                    keyword_events = detect_events_by_keywords_from_text(
+                        transcription=transcription,
+                        home_team=home_team,
+                        away_team=away_team,
+                        game_start_minute=game_start_minute,
+                        video_duration=None
+                    )
+
+                # Merge com deduplicação (mesma lógica do Ollama)
+                for ke in keyword_events:
+                    already_exists = any(
+                        abs(e.get('minute', 0) - ke.get('minute', 0)) < 2
+                        and e.get('event_type') == ke.get('event_type')
+                        for e in final_events
+                    )
+                    if not already_exists:
+                        final_events.append(ke)
+
+                print(f"[Kakttus] Total após fallback: {len(final_events)} eventos")
+
+            return final_events
 ```
 
-**Mudanca 2** - Atualizar `getApiBase()` para considerar acesso direto:
+## Estrutura Final do Fluxo
 
-```typescript
-export const getApiBase = (): string => {
-  // 1. Dominio de producao Kakttus
-  if (isKakttusProduction()) return '';
-
-  // 2. Variavel de ambiente
-  const envApiUrl = import.meta.env.VITE_API_BASE_URL;
-  if (envApiUrl) {
-    // Se e caminho relativo (/api), so funciona atras de proxy
-    // Quando acessado diretamente (porta 8080), preferir servidor descoberto
-    if (envApiUrl.startsWith('/') && !isBehindReverseProxy()) {
-      const discovered = getDiscoveredServer();
-      if (discovered) return discovered;
-    }
-    return envApiUrl.replace(/\/$/, '');
-  }
-
-  // 3-5 permanecem iguais
-  // ...
-};
+```text
+analyze_with_kakttus() retorna events
+    |
+    +-- if events:
+    |       Enriquecer timestamps (TXT -> SRT)
+    |       Salvar JSONs
+    |       final_events = deduplicate(events)
+    |
+    +-- else:
+    |       final_events = []
+    |
+    +-- if len(final_events) < 3:     <-- NOVO
+    |       Buscar SRT do tempo correto
+    |       detect_events_by_keywords() ou detect_events_by_keywords_from_text()
+    |       Merge com deduplicação (tolerância 2 min + mesmo event_type)
+    |
+    +-- return final_events
 ```
-
-## Resultado por Cenario
-
-| Cenario | Porta | Proxy? | getApiBase() | URL final |
-|---|---|---|---|---|
-| Nginx (`arenaplay.kakttus.com`) | 443 | Sim | `""` | `/api/auth/login` |
-| Nginx (outro dominio) | 80/443 | Sim | `/api` | `/api/auth/login` |
-| PM2 direto (`10.0.0.20:8080`) | 8080 | Nao | `http://10.0.0.20:5000` | `http://10.0.0.20:5000/api/auth/login` |
-| Vite dev (`localhost:8080`) | 8080 | Nao | `http://10.0.0.20:5000` | `http://10.0.0.20:5000/api/auth/login` |
-| Cloudflare Tunnel | 443 | Sim | `/api` | `/api/auth/login` |
 
 ## Resumo das Alteracoes
 
-- **1 arquivo** modificado: `src/lib/apiMode.ts`
-- **1 funcao** adicionada: `isBehindReverseProxy()` (~4 linhas)
-- **4 linhas** alteradas em `getApiBase()` (adicionar verificacao de proxy)
-- **Zero** impacto na interface publica -- todos os outros arquivos continuam funcionando
+| Linha | Acao | Descricao |
+|---|---|---|
+| 5277 | Remover | `return final_events` prematuro |
+| 5276+ | Adicionar | Bloco `else: final_events = []` |
+| 5276+ | Adicionar | Verificacao `if len(final_events) < 3:` com fallback por keywords |
+| 5276+ | Adicionar | Merge com deduplicacao (mesma logica do Ollama linhas 4826-4835) |
+
+**Nota**: Este arquivo esta no servidor local (`video-processor/ai_services.py`). Apos a alteracao, reiniciar com `pm2 restart arena-backend`.
 
