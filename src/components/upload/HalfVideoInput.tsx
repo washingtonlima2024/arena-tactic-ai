@@ -135,15 +135,20 @@ export function HalfVideoInput({
         </TabsContent>
 
         <TabsContent value="link" className="mt-2">
-          <div className="flex items-center gap-2">
-            <LinkIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-            <Input
-              value={value.url || ''}
-              onChange={(e) => onChange({ url: e.target.value, file: undefined })}
-              placeholder="URL do vídeo"
-              className="text-xs h-8"
-              disabled={disabled}
-            />
+          <div className="space-y-1.5">
+            <div className="flex items-center gap-2">
+              <LinkIcon className="h-4 w-4 text-muted-foreground shrink-0" />
+              <Input
+                value={value.url || ''}
+                onChange={(e) => onChange({ url: e.target.value, file: undefined })}
+                placeholder="Cole o link do vídeo (YouTube, Instagram, Facebook...)"
+                className="text-xs h-8"
+                disabled={disabled}
+              />
+            </div>
+            <p className="text-[10px] text-muted-foreground pl-6">
+              YouTube, Instagram, Facebook, TikTok, Vimeo, Twitter/X, Twitch e mais
+            </p>
           </div>
         </TabsContent>
       </Tabs>

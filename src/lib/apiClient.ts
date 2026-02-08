@@ -1627,6 +1627,30 @@ export const apiClient = {
     return apiRequest(`/api/storage/download-jobs${matchId ? `?match_id=${matchId}` : ''}`);
   },
 
+  /**
+   * Verifica se uma URL é suportada pelo yt-dlp e retorna informações da plataforma.
+   */
+  checkUrl: async (url: string, fetchInfo: boolean = false): Promise<{
+    url: string;
+    supported: boolean;
+    platform: string | null;
+    method: 'yt-dlp' | 'direct';
+    supported_platforms: string[];
+    video_info?: {
+      title: string;
+      duration: number | null;
+      thumbnail: string;
+      uploader: string;
+      resolution: string;
+    };
+  }> => {
+    await ensureServerAvailable();
+    return apiRequest('/api/check-url', {
+      method: 'POST',
+      body: JSON.stringify({ url, fetch_info: fetchInfo })
+    });
+  },
+
   // ============== Live Match Finalization ==============
   /**
    * Merge live recording video chunks into a single optimized MP4.
