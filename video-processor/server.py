@@ -8385,10 +8385,11 @@ def _process_match_pipeline(job_id: str, data: dict):
                             video_paths[half_type] = video_path
                         else:
                             raise Exception(f"Arquivo local não encontrado: {local_path}")
-                elif is_youtube_url(video_url):
-                    # YouTube URLs need yt-dlp with Popen for progress + robust format fallback
-                    print(f"[ASYNC-PIPELINE] YouTube URL detectada, usando yt-dlp: {video_url[:60]}...")
-                    _update_async_job(job_id, 'preparing', 8, 'Baixando vídeo do YouTube via yt-dlp...', 'preparing')
+                elif is_ytdlp_supported_url(video_url):
+                    # Platform URLs need yt-dlp with Popen for progress + robust format fallback
+                    platform = detect_video_platform(video_url)
+                    print(f"[ASYNC-PIPELINE] {platform} URL detectada, usando yt-dlp: {video_url[:60]}...")
+                    _update_async_job(job_id, 'preparing', 8, f'Baixando vídeo de {platform} via yt-dlp...', 'preparing')
                     try:
                         import shutil as _shutil
                         yt_dlp_path = _shutil.which('yt-dlp')
@@ -8429,7 +8430,7 @@ def _process_match_pipeline(job_id: str, data: dict):
                             # Timeout check
                             if _time.time() - dl_start > dl_timeout:
                                 process.kill()
-                                raise Exception("Download do YouTube expirou após 30 minutos")
+                                raise Exception(f"Download de {platform} expirou após 30 minutos")
                             
                             line = line.strip()
                             if not line:
@@ -8442,7 +8443,7 @@ def _process_match_pipeline(job_id: str, data: dict):
                                 dl_pct = min(int(pct), 99)
                                 # Map download progress to job progress (8-25% range)
                                 job_pct = 8 + int(dl_pct * 0.17)  # 8% to ~25%
-                                _update_async_job(job_id, 'preparing', job_pct, f'Baixando do YouTube ({dl_pct}%)...', 'preparing')
+                                _update_async_job(job_id, 'preparing', job_pct, f'Baixando de {platform} ({dl_pct}%)...', 'preparing')
                             
                             # Detect merge phase
                             if '[Merger]' in line or 'Merging' in line:
@@ -8489,12 +8490,12 @@ def _process_match_pipeline(job_id: str, data: dict):
                             if not found_alt and os.path.exists(part_file):
                                 print(f"[ASYNC-PIPELINE] ⚠ Arquivo .part encontrado - download incompleto")
                                 os.remove(part_file)
-                                raise Exception("Download do YouTube incompleto (arquivo .part)")
+                                raise Exception(f"Download de {platform} incompleto (arquivo .part)")
                         
                         if os.path.exists(video_path) and os.path.getsize(video_path) > 1000:
                             video_paths[half_type] = video_path
                             size_mb = os.path.getsize(video_path) / (1024 * 1024)
-                            print(f"[ASYNC-PIPELINE] ✓ YouTube download concluído: {size_mb:.1f} MB")
+                            print(f"[ASYNC-PIPELINE] ✓ {platform} download concluído: {size_mb:.1f} MB")
                             
                             # CRITICAL: Save to storage (mandatory - not in try/except)
                             storage_video_dir = get_subfolder_path(match_id, 'videos')
@@ -8543,10 +8544,10 @@ def _process_match_pipeline(job_id: str, data: dict):
                             tmp_dir_path = os.path.dirname(video_path)
                             files_in_tmp = os.listdir(tmp_dir_path) if os.path.exists(tmp_dir_path) else []
                             print(f"[ASYNC-PIPELINE] Arquivos no tmp: {files_in_tmp}")
-                            raise Exception("Download do YouTube completou mas arquivo não encontrado")
+                                raise Exception(f"Download de {platform} completou mas arquivo não encontrado")
                     except Exception as yt_err:
-                        print(f"[ASYNC-PIPELINE] ✗ Erro no download YouTube: {yt_err}")
-                        raise Exception(f"Falha ao baixar do YouTube: {yt_err}")
+                        print(f"[ASYNC-PIPELINE] ✗ Erro no download {platform}: {yt_err}")
+                        raise Exception(f"Falha ao baixar de {platform}: {yt_err}")
                 else:
                     if download_video(video_url, video_path):
                         video_paths[half_type] = video_path
@@ -9671,12 +9672,75 @@ def list_temp_folders():
 
 
 # ============================================================================
-# URL DOWNLOAD SYSTEM
+# URL DOWNLOAD SYSTEM - Multi-platform yt-dlp support
 # ============================================================================
 
+# Platforms supported by yt-dlp (subset of most common video platforms)
+YTDLP_SUPPORTED_DOMAINS = [
+    # YouTube
+    r'youtube\.com', r'youtu\.be', r'm\.youtube\.com',
+    # Instagram
+    r'instagram\.com', r'instagr\.am',
+    # Facebook
+    r'facebook\.com', r'fb\.watch', r'fb\.com', r'fbcdn\.net',
+    # Twitter/X
+    r'twitter\.com', r'x\.com', r't\.co',
+    # TikTok
+    r'tiktok\.com', r'vm\.tiktok\.com',
+    # Vimeo
+    r'vimeo\.com', r'player\.vimeo\.com',
+    # Dailymotion
+    r'dailymotion\.com', r'dai\.ly',
+    # Twitch (clips/VODs)
+    r'twitch\.tv', r'clips\.twitch\.tv',
+    # Streamable / Loom / other common platforms
+    r'streamable\.com', r'loom\.com', r'vidyard\.com',
+    # Kwai / Likee
+    r'kwai\.com', r'likee\.video',
+    # Globo / ESPN / SportTV (Brazilian sports)
+    r'globoplay\.globo\.com', r'ge\.globo\.com', r'espn\.com',
+]
+
+_YTDLP_PATTERN = re.compile(
+    r'(' + '|'.join(YTDLP_SUPPORTED_DOMAINS) + r')',
+    re.IGNORECASE
+)
+
+
 def is_youtube_url(url: str) -> bool:
-    """Verifica se a URL é do YouTube."""
-    return bool(re.search(r'(youtube\.com|youtu\.be)', url, re.IGNORECASE))
+    """Verifica se a URL é do YouTube (backward compat)."""
+    return bool(re.search(r'(youtube\.com|youtu\.be|m\.youtube\.com)', url, re.IGNORECASE))
+
+
+def is_ytdlp_supported_url(url: str) -> bool:
+    """Verifica se a URL é de uma plataforma suportada pelo yt-dlp."""
+    return bool(_YTDLP_PATTERN.search(url))
+
+
+def detect_video_platform(url: str) -> str:
+    """Detecta a plataforma de vídeo a partir da URL."""
+    url_lower = url.lower()
+    platforms = {
+        'YouTube': ['youtube.com', 'youtu.be', 'm.youtube.com'],
+        'Instagram': ['instagram.com', 'instagr.am'],
+        'Facebook': ['facebook.com', 'fb.watch', 'fb.com'],
+        'Twitter/X': ['twitter.com', 'x.com', 't.co'],
+        'TikTok': ['tiktok.com', 'vm.tiktok.com'],
+        'Vimeo': ['vimeo.com', 'player.vimeo.com'],
+        'Dailymotion': ['dailymotion.com', 'dai.ly'],
+        'Twitch': ['twitch.tv', 'clips.twitch.tv'],
+        'Streamable': ['streamable.com'],
+        'Loom': ['loom.com'],
+        'Kwai': ['kwai.com'],
+        'Globoplay': ['globoplay.globo.com'],
+        'GE Globo': ['ge.globo.com'],
+        'ESPN': ['espn.com'],
+    }
+    for platform, domains in platforms.items():
+        for domain in domains:
+            if domain in url_lower:
+                return platform
+    return 'Link direto'
 
 
 def convert_to_direct_url(url: str) -> str:
@@ -9706,7 +9770,8 @@ def convert_to_direct_url(url: str) -> str:
 
 
 def download_youtube_with_progress(url: str, output_path: str, job_id: str):
-    """Baixa vídeo do YouTube usando yt-dlp com progresso em tempo real."""
+    """Baixa vídeo de qualquer plataforma suportada pelo yt-dlp com progresso em tempo real."""
+    platform = detect_video_platform(url)
     try:
         import shutil
         yt_dlp_path = shutil.which('yt-dlp')
@@ -9730,7 +9795,7 @@ def download_youtube_with_progress(url: str, output_path: str, job_id: str):
         ]
         
         print(f"[yt-dlp] Executando: {' '.join(cmd)}")
-        download_jobs[job_id]['message'] = 'Iniciando download do YouTube...'
+        download_jobs[job_id]['message'] = f'Iniciando download de {platform}...'
         
         process = subprocess.Popen(
             cmd,
@@ -9750,7 +9815,7 @@ def download_youtube_with_progress(url: str, output_path: str, job_id: str):
             if progress_match:
                 pct = float(progress_match.group(1))
                 download_jobs[job_id]['progress'] = min(int(pct), 99)
-                download_jobs[job_id]['message'] = f'Baixando do YouTube ({int(pct)}%)'
+                download_jobs[job_id]['message'] = f'Baixando de {platform} ({int(pct)}%)'
                 
                 # Tentar extrair tamanho total
                 size_match = re.search(r'of\s+~?([\d.]+)(\w+)', line)
@@ -9800,12 +9865,13 @@ def download_youtube_with_progress(url: str, output_path: str, job_id: str):
 
 
 def download_video_with_progress(url: str, output_path: str, job_id: str, match_id: str, video_type: str):
-    """Baixa vídeo com tracking de progresso."""
+    """Baixa vídeo com tracking de progresso. Usa yt-dlp para plataformas suportadas."""
     try:
-        # Verificar se é URL do YouTube
-        if is_youtube_url(url):
-            print(f"[download-url] Job {job_id}: Detectado YouTube, usando yt-dlp...")
-            download_jobs[job_id]['source'] = 'youtube'
+        # Verificar se é URL de plataforma suportada pelo yt-dlp
+        if is_ytdlp_supported_url(url):
+            platform = detect_video_platform(url)
+            print(f"[download-url] Job {job_id}: Detectado {platform}, usando yt-dlp...")
+            download_jobs[job_id]['source'] = platform.lower().replace('/', '_')
             download_youtube_with_progress(url, output_path, job_id)
         else:
             # Download direto para URLs normais
@@ -10007,6 +10073,57 @@ def list_download_jobs():
         'jobs': jobs_list,
         'count': len(jobs_list)
         })
+
+
+@app.route('/api/check-url', methods=['POST'])
+def check_url_endpoint():
+    """
+    Verifica se uma URL é suportada pelo yt-dlp e retorna informações da plataforma.
+    Útil para o frontend saber se um link pode ser importado automaticamente.
+    """
+    data = request.json or {}
+    url = data.get('url', '').strip()
+    
+    if not url:
+        return jsonify({'error': 'URL é obrigatória'}), 400
+    
+    supported = is_ytdlp_supported_url(url)
+    platform = detect_video_platform(url) if supported else None
+    
+    result = {
+        'url': url,
+        'supported': supported,
+        'platform': platform,
+        'method': 'yt-dlp' if supported else 'direct',
+        'supported_platforms': [
+            'YouTube', 'Instagram', 'Facebook', 'Twitter/X', 'TikTok',
+            'Vimeo', 'Dailymotion', 'Twitch', 'Streamable', 'Loom',
+            'Kwai', 'Globoplay', 'GE Globo', 'ESPN'
+        ]
+    }
+    
+    # Opcionalmente verificar metadados do vídeo via yt-dlp --dump-json (rápido)
+    if supported and data.get('fetch_info', False):
+        try:
+            import shutil
+            yt_dlp_path = shutil.which('yt-dlp')
+            if yt_dlp_path:
+                cmd = [yt_dlp_path, '--dump-json', '--no-download', '--no-playlist', url]
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                if proc.returncode == 0:
+                    import json
+                    info = json.loads(proc.stdout)
+                    result['video_info'] = {
+                        'title': info.get('title', ''),
+                        'duration': info.get('duration'),
+                        'thumbnail': info.get('thumbnail', ''),
+                        'uploader': info.get('uploader', ''),
+                        'resolution': info.get('resolution', ''),
+                    }
+        except Exception as e:
+            print(f"[check-url] Erro ao obter info: {e}")
+    
+    return jsonify(result)
 
 
 @app.route('/api/detect-cloudflare', methods=['GET'])
@@ -13380,10 +13497,11 @@ def smart_import_transcribe():
 
             print(f"[SmartImport] URL recebida: {video_url}")
 
-            # Detectar YouTube/plataformas de vídeo PRIMEIRO (antes de resolve_video_path)
-            if is_youtube_url(video_url):
+            # Detectar plataformas de vídeo suportadas pelo yt-dlp PRIMEIRO (antes de resolve_video_path)
+            if is_ytdlp_supported_url(video_url):
+                platform = detect_video_platform(video_url)
                 video_path = os.path.join(tmp_dir, 'smart_import.mp4')
-                print(f"[SmartImport] Detectado YouTube, usando yt-dlp...")
+                print(f"[SmartImport] Detectado {platform}, usando yt-dlp...")
                 try:
                     import shutil
                     yt_dlp_path = shutil.which('yt-dlp')
@@ -13397,13 +13515,14 @@ def smart_import_transcribe():
                         '-o', video_path,
                         '--no-playlist',
                         '--socket-timeout', '60',
+                        '--retries', '3',
                         video_url
                     ]
                     print(f"[SmartImport] yt-dlp cmd: {' '.join(cmd)}")
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
                     if result.returncode != 0:
                         print(f"[SmartImport] yt-dlp stderr: {result.stderr[-500:]}")
-                        return jsonify({'error': f'Erro ao baixar do YouTube: {result.stderr[-200:]}'}), 500
+                        return jsonify({'error': f'Erro ao baixar de {platform}: {result.stderr[-200:]}'}), 500
                     
                     # yt-dlp pode adicionar extensão diferente
                     if not os.path.exists(video_path) or os.path.getsize(video_path) < 1000:
@@ -13414,9 +13533,9 @@ def smart_import_transcribe():
                                 video_path = candidate
                                 break
                     
-                    print(f"[SmartImport] YouTube download OK: {os.path.getsize(video_path) / (1024*1024):.1f} MB")
+                    print(f"[SmartImport] {platform} download OK: {os.path.getsize(video_path) / (1024*1024):.1f} MB")
                 except subprocess.TimeoutExpired:
-                    return jsonify({'error': 'Timeout ao baixar vídeo do YouTube (10 min)'}), 500
+                    return jsonify({'error': f'Timeout ao baixar vídeo de {platform} (10 min)'}), 500
             else:
                 # URLs locais ou diretas
                 resolved = None

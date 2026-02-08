@@ -385,13 +385,13 @@ export function TransferCommandsDialog({
                     <div className="space-y-2">
                       <Label>URL do Vídeo</Label>
                       <Input
-                        placeholder="https://drive.google.com/file/d/.../view ou link direto .mp4"
+                        placeholder="Cole o link: YouTube, Instagram, Facebook, TikTok, Google Drive..."
                         value={videoUrl}
                         onChange={(e) => setVideoUrl(e.target.value)}
                         disabled={isDownloading}
                       />
                       <p className="text-xs text-muted-foreground">
-                        Suporta: Google Drive, Dropbox, links diretos (.mp4, .mov, .mkv)
+                        Suporta: YouTube, Instagram, Facebook, TikTok, Vimeo, Twitter/X, Twitch, Google Drive, Dropbox, links diretos
                       </p>
                     </div>
 
