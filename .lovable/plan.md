@@ -1,162 +1,125 @@
 
 
-# Correcao: Fallback por Keywords no Pipeline Kakttus
+# Correcao: Aumentar Deteccao de Eventos no Pipeline Kakttus
 
 ## Problema
 
-O pipeline Kakttus em `video-processor/ai_services.py` (linha 5057-5277) aceita qualquer quantidade de eventos como sucesso e retorna imediatamente. Quando o modelo retorna apenas 2 gols, o sistema para por ali sem buscar outros eventos (cartoes, penaltis, substituicoes) que existem na transcricao.
+Um primeiro tempo gera apenas 6 eventos quando o esperado seria ~15. A investigacao revelou 3 causas raiz:
 
-O pipeline Ollama (linhas 4751-4835) ja tem essa logica de fallback funcionando corretamente.
-
-## Causa Raiz
-
-```text
-Linha 5057:  if events:           --> Se tem 1+ eventos, pula direto pro return
-Linha 5277:      return final_events  --> Retorna sem verificar se < 3 eventos
+### Causa 1: Prompt do Kakttus muito vago
+O prompt atual diz apenas:
+```
+"event_type": "goal" ou outro
 ```
 
-Nao existe bloco `else` para quando `events` esta vazio, e nao existe verificacao de quantidade minima.
+O modelo nao sabe quais tipos buscar. Compare com o `EVENT_KEYWORDS` completo que lista: goal, foul, corner, penalty, save, chance, shot, cross, offside, free_kick, substitution.
+
+### Causa 2: Threshold do fallback muito baixo
+O fallback so aciona quando `len(final_events) < 3`. Com 6 eventos, o fallback nunca e chamado. Para um tempo de jogo, o esperado e 12-18 eventos.
+
+### Causa 3: `detect_events_by_keywords_from_text` muito limitado
+Essa funcao (usada como fallback quando nao ha SRT) so busca 3 tipos de eventos:
+- goal
+- penalty
+- save
+
+Enquanto a versao SRT (`detect_events_by_keywords`) busca: goal, foul, corner, penalty, save, chance. O fallback por texto cru esta muito restrito.
 
 ## Solucao
 
-Reestruturar o fluxo do pipeline Kakttus para:
-
-1. Manter o bloco `if events:` para enriquecimento e salvamento (linhas 5057-5276)
-2. **Remover** o `return final_events` da linha 5277
-3. Adicionar bloco `else: final_events = []` para quando nenhum evento e detectado
-4. Adicionar verificacao `if len(final_events) < 3:` com fallback por keywords (mesma logica do Ollama)
-5. Retornar `final_events` somente apos o fallback
-
-## Detalhes Tecnicos
-
 ### Arquivo: `video-processor/ai_services.py`
 
-**Mudanca 1** - Linha 5277: Remover o `return final_events` prematuro
+**Mudanca 1** - Prompt do Kakttus (linhas 580-607): Listar explicitamente os tipos de eventos
 
 De:
 ```python
-                return final_events
+"event_type": "goal" ou outro,
 ```
-Para: (remover esta linha completamente)
-
-**Mudanca 2** - Apos o bloco `if events:` (apos linha 5276), adicionar `else` e fallback:
-
+Para:
 ```python
-            else:
-                final_events = []
-                print(f"[Kakttus] ⚠️ Nenhum evento extraído pela IA")
-
-            # FALLBACK KAKTTUS: Se retornou poucos eventos, complementar com keywords
-            if len(final_events) < 3:
-                print(f"[Kakttus] ⚠️ Poucos eventos ({len(final_events)}), acionando fallback por keywords...")
-                keyword_events = []
-
-                if match_id:
-                    try:
-                        from storage import get_subfolder_path
-                        srt_folder = get_subfolder_path(match_id, 'srt')
-                        srt_files = list(srt_folder.glob('*.srt')) if srt_folder.exists() else []
-
-                        print(f"[Kakttus] SRTs disponíveis: {[f.name for f in srt_files]}")
-                        print(f"[Kakttus] Buscando SRT para tempo: {match_half}")
-
-                        target_srt = None
-                        if srt_files:
-                            srt_patterns = [
-                                f'{match_half}_half.srt',
-                                f'{match_half}_transcription.srt',
-                                f'{match_half}.srt',
-                            ]
-                            for pattern in srt_patterns:
-                                for srt_file in srt_files:
-                                    if pattern in srt_file.name.lower():
-                                        target_srt = srt_file
-                                        break
-                                if target_srt:
-                                    break
-                            if not target_srt and len(srt_files) == 1:
-                                target_srt = srt_files[0]
-
-                        if target_srt:
-                            print(f"[Kakttus] Usando SRT: {target_srt.name}")
-                            keyword_events = detect_events_by_keywords(
-                                srt_path=str(target_srt),
-                                home_team=home_team,
-                                away_team=away_team,
-                                half=match_half,
-                                segment_start_minute=game_start_minute
-                            )
-                        else:
-                            print(f"[Kakttus] SRT não encontrado, usando texto bruto...")
-                            keyword_events = detect_events_by_keywords_from_text(
-                                transcription=transcription,
-                                home_team=home_team,
-                                away_team=away_team,
-                                game_start_minute=game_start_minute,
-                                video_duration=None
-                            )
-                    except Exception as e:
-                        print(f"[Kakttus] Erro ao buscar SRT: {e}, usando texto bruto...")
-                        keyword_events = detect_events_by_keywords_from_text(
-                            transcription=transcription,
-                            home_team=home_team,
-                            away_team=away_team,
-                            game_start_minute=game_start_minute,
-                            video_duration=None
-                        )
-                else:
-                    keyword_events = detect_events_by_keywords_from_text(
-                        transcription=transcription,
-                        home_team=home_team,
-                        away_team=away_team,
-                        game_start_minute=game_start_minute,
-                        video_duration=None
-                    )
-
-                # Merge com deduplicação (mesma lógica do Ollama)
-                for ke in keyword_events:
-                    already_exists = any(
-                        abs(e.get('minute', 0) - ke.get('minute', 0)) < 2
-                        and e.get('event_type') == ke.get('event_type')
-                        for e in final_events
-                    )
-                    if not already_exists:
-                        final_events.append(ke)
-
-                print(f"[Kakttus] Total após fallback: {len(final_events)} eventos")
-
-            return final_events
+"event_type": "goal", "shot", "save", "corner", "foul", "penalty", "yellow_card", "red_card", "chance", "offside", "free_kick" ou "substitution",
 ```
 
-## Estrutura Final do Fluxo
+E adicionar instrucao explicita no prompt:
+```
+EXTRAIA TODOS os eventos relevantes: gols, finalizacoes, defesas, escanteios, faltas, penaltis, cartoes amarelos, cartoes vermelhos, impedimentos, cobranças de falta, substituicoes e chances claras de gol.
+Um primeiro tempo tipico tem entre 10 e 20 eventos.
+```
+
+**Mudanca 2** - Threshold do fallback (linha 5282): Aumentar de 3 para 10
+
+De:
+```python
+if len(final_events) < 3:
+```
+Para:
+```python
+if len(final_events) < 10:
+```
+
+**Mudanca 3** - Patterns do `detect_events_by_keywords_from_text` (linhas 4401-4407): Adicionar mais tipos
+
+De:
+```python
+patterns = {
+    'goal': [r'go+l', r'golaço', r'bola na rede', r'abre o placar', r'empata'],
+    'penalty': [r'pênalti', r'penalidade'],
+    'save': [r'grande defesa', r'salvou', r'espalmou'],
+}
+```
+Para:
+```python
+patterns = {
+    'goal': [r'go+l', r'golaço', r'bola na rede', r'abre o placar', r'empata'],
+    'penalty': [r'pênalti', r'penalidade'],
+    'save': [r'grande defesa', r'salvou', r'espalmou'],
+    'foul': [r'falta de', r'falta para', r'cometeu falta', r'falta perigosa'],
+    'corner': [r'escanteio', r'córner', r'bate o escanteio'],
+    'chance': [r'quase gol', r'por pouco', r'na trave', r'passou perto', r'que chance', r'perdeu o gol'],
+    'shot': [r'chutou', r'finalizou', r'bateu forte', r'chute', r'finalização'],
+    'offside': [r'impedimento', r'fora de jogo', r'posição irregular'],
+    'free_kick': [r'falta cobrada', r'cobrança de falta', r'bate a falta'],
+}
+```
+
+**Mudanca 4** - Threshold do fallback no Ollama tambem (linha 4751): Manter consistencia
+
+De:
+```python
+if len(events) < 3:
+```
+Para:
+```python
+if len(events) < 10:
+```
+
+## Estrutura Final
 
 ```text
-analyze_with_kakttus() retorna events
+analyze_with_kakttus()
     |
-    +-- if events:
-    |       Enriquecer timestamps (TXT -> SRT)
-    |       Salvar JSONs
-    |       final_events = deduplicate(events)
+    +-- Prompt com tipos explícitos (12 tipos listados)
     |
-    +-- else:
-    |       final_events = []
+    +-- Kakttus retorna eventos (ex: 6)
     |
-    +-- if len(final_events) < 3:     <-- NOVO
-    |       Buscar SRT do tempo correto
-    |       detect_events_by_keywords() ou detect_events_by_keywords_from_text()
-    |       Merge com deduplicação (tolerância 2 min + mesmo event_type)
+    +-- if events: enriquecer + deduplicar
+    |   else: final_events = []
     |
-    +-- return final_events
+    +-- if len(final_events) < 10:    <-- THRESHOLD AUMENTADO
+    |       Buscar SRT ou texto bruto
+    |       detect_events_by_keywords() ou _from_text()  <-- COM MAIS TIPOS
+    |       Merge com deduplicacao (2 min)
+    |
+    +-- return final_events  (esperado: 12-18 eventos)
 ```
 
 ## Resumo das Alteracoes
 
-| Linha | Acao | Descricao |
+| Linha | Arquivo | Mudanca |
 |---|---|---|
-| 5277 | Remover | `return final_events` prematuro |
-| 5276+ | Adicionar | Bloco `else: final_events = []` |
-| 5276+ | Adicionar | Verificacao `if len(final_events) < 3:` com fallback por keywords |
-| 5276+ | Adicionar | Merge com deduplicacao (mesma logica do Ollama linhas 4826-4835) |
+| 580-607 | ai_services.py | Prompt com tipos de eventos explicitos |
+| 4401-4407 | ai_services.py | Adicionar foul, corner, chance, shot, offside, free_kick ao fallback por texto |
+| 4751 | ai_services.py | Threshold Ollama: 3 -> 10 |
+| 5282 | ai_services.py | Threshold Kakttus: 3 -> 10 |
 
-**Nota**: Este arquivo esta no servidor local (`video-processor/ai_services.py`). Apos a alteracao, reiniciar com `pm2 restart arena-backend`.
-
+**Nota**: Todas as mudancas sao no `video-processor/ai_services.py` (servidor local). Apos aplicar, reiniciar com `pm2 restart arena-backend`.
