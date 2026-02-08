@@ -9012,81 +9012,49 @@ def _process_match_pipeline(job_id: str, data: dict):
                             'minuteOffset': minute_offset
                         })
                 
-                # Process in parallel (limit to 4 workers to not overload Whisper)
-                with ThreadPoolExecutor(max_workers=4) as executor:
-                    transcribe_futures = {}
+                # Process parts SEQUENTIALLY (Whisper/ctranslate2 is NOT thread-safe on GPU)
+                for idx, item in enumerate(all_parts_flat):
+                    half_type_part = item['halfType']
+                    part_info = item['partInfo']
+                    minute_offset = item['minuteOffset']
                     
-                    for item in all_parts_flat:
-                        # Atualizar status da parte para "transcribing" imediatamente
-                        for ps in parts_status:
-                            if ps['halfType'] == item['halfType'] and ps['part'] == item['partInfo']['part']:
-                                ps['status'] = 'transcribing'
-                                ps['progress'] = 10
-                                break
-                        
-                        future = executor.submit(
-                            _transcribe_part_parallel,
-                            item['partInfo'],
-                            item['halfType'],
-                            match_id,
-                            item['minuteOffset']
-                        )
-                        transcribe_futures[future] = item
+                    # Update part status to "transcribing"
+                    for ps in parts_status:
+                        if ps['halfType'] == half_type_part and ps['part'] == part_info['part']:
+                            ps['status'] = 'transcribing'
+                            ps['progress'] = 10
+                            break
                     
-                    # Atualizar job com status "transcribing" nas partes
-                    _update_async_job(job_id, 'transcribing', 25, 
-                                    f'Whisper processando audio{gpu_info}...',
-                                    'transcribing', 0, total_parts, parts_status)
+                    progress = 20 + int(((idx) / len(all_parts_flat)) * 60)
+                    _update_async_job(job_id, 'transcribing', progress, 
+                                    f'Transcrevendo parte {idx + 1}/{len(all_parts_flat)}{gpu_info}...',
+                                    'transcribing', completed_parts, total_parts, parts_status)
                     
-                    # Heartbeat loop - incrementa progresso enquanto Whisper processa
-                    last_heartbeat = time_module.time()
-                    pipeline_start = time_module.time()
-                    heartbeat_progress = 25
+                    result = _transcribe_part_parallel(part_info, half_type_part, match_id, minute_offset)
+                    completed_parts += 1
                     
-                    while transcribe_futures:
-                        # Verificar futures completas
-                        done_futures = []
-                        for future in list(transcribe_futures.keys()):
-                            if future.done():
-                                done_futures.append(future)
-                        
-                        for future in done_futures:
-                            item = transcribe_futures.pop(future)
-                            result = future.result()
-                            completed_parts += 1
-                            
-                            # Update part status
-                            for ps in parts_status:
-                                if ps['halfType'] == item['halfType'] and ps['part'] == item['partInfo']['part']:
-                                    ps['status'] = 'done' if result['success'] else 'error'
-                                    ps['progress'] = 100
-                                    break
-                            
-                            # Calculate progress (20% to 80%)
-                            progress = 20 + int((completed_parts / len(all_parts_flat)) * 60)
-                            heartbeat_progress = max(heartbeat_progress, progress)
-                            
-                            if result['success']:
-                                transcription_results[item['halfType']].append(result)
-                                print(f"[ASYNC-PIPELINE] ✓ Transcribed {item['halfType']} part {result['part']}: {len(result['text'])} chars")
-                                _update_async_job(job_id, 'transcribing', progress, 
-                                                f'Parte {completed_parts}/{len(all_parts_flat)} transcrita',
-                                                'transcribing', completed_parts, total_parts, parts_status)
-                            else:
-                                print(f"[ASYNC-PIPELINE] ✗ Failed {item['halfType']} part: {result.get('error')}")
-                        
-                        # Heartbeat a cada 15 segundos para mostrar progresso
-                        now = time_module.time()
-                        if now - last_heartbeat > 15 and not done_futures:
-                            heartbeat_progress = min(heartbeat_progress + 2, 75)
-                            elapsed = int(now - pipeline_start)
-                            _update_async_job(job_id, 'transcribing', heartbeat_progress, 
-                                            f'Whisper processando... ({elapsed}s)',
-                                            'transcribing', completed_parts, total_parts, parts_status)
-                            last_heartbeat = now
-                        
-                        if transcribe_futures:
-                            time_module.sleep(2)
+                    # Update part status
+                    for ps in parts_status:
+                        if ps['halfType'] == half_type_part and ps['part'] == part_info['part']:
+                            ps['status'] = 'done' if result['success'] else 'error'
+                            ps['progress'] = 100
+                            if not result['success']:
+                                ps['message'] = result.get('error', '')[:100]
+                            break
+                    
+                    progress = 20 + int((completed_parts / len(all_parts_flat)) * 60)
+                    
+                    if result['success']:
+                        transcription_results[half_type_part].append(result)
+                        print(f"[ASYNC-PIPELINE] ✓ Transcribed {half_type_part} part {result['part']}: {len(result['text'])} chars")
+                        _update_async_job(job_id, 'transcribing', progress, 
+                                        f'Parte {completed_parts}/{len(all_parts_flat)} transcrita',
+                                        'transcribing', completed_parts, total_parts, parts_status)
+                    else:
+                        print(f"[ASYNC-PIPELINE] ✗ Failed {half_type_part} part: {result.get('error')}")
+                        _update_async_job(job_id, 'transcribing', progress, 
+                                        f'Parte {completed_parts}/{len(all_parts_flat)} (erro)',
+                                        'transcribing', completed_parts, total_parts, parts_status)
                 
                 # Combine transcriptions from Whisper
                 first_half_text = '\n\n'.join([r['text'] for r in sorted(transcription_results['first'], key=lambda x: x['part'])])
