@@ -2092,6 +2092,10 @@ print(f"[AI Services] =====================================\n")
 _whisper_model = None
 _whisper_model_name = None
 
+# Thread-safety lock for Whisper model (ctranslate2/faster-whisper is NOT thread-safe)
+import threading
+_whisper_lock = threading.Lock()
+
 
 def set_api_keys(
     lovable_key: str = None, 
@@ -3022,34 +3026,36 @@ def _transcribe_single_file(audio_path: str, match_id: str = None) -> Dict[str, 
     
     print(f"[LocalWhisper] Transcrevendo arquivo único...")
     
-    segments_gen, info = _whisper_model.transcribe(
-        audio_path, 
-        language="pt",
-        beam_size=5,
-        vad_filter=True,  # Voice Activity Detection for better accuracy
-        vad_parameters=dict(min_silence_duration_ms=500)
-    )
-    
-    print(f"[LocalWhisper] Idioma detectado: {info.language} (probabilidade: {info.language_probability:.2%})")
-    
-    # Build SRT and text output
-    srt_lines = []
-    full_text = []
-    segments_list = []
-    
-    for i, seg in enumerate(segments_gen, 1):
-        start_str = _format_srt_time(seg.start)
-        end_str = _format_srt_time(seg.end)
-        text = seg.text.strip()
+    # Use lock to prevent GPU deadlock (ctranslate2 is NOT thread-safe)
+    with _whisper_lock:
+        segments_gen, info = _whisper_model.transcribe(
+            audio_path, 
+            language="pt",
+            beam_size=5,
+            vad_filter=True,  # Voice Activity Detection for better accuracy
+            vad_parameters=dict(min_silence_duration_ms=500)
+        )
         
-        if text:
-            srt_lines.append(f"{i}\n{start_str} --> {end_str}\n{text}\n")
-            full_text.append(text)
-            segments_list.append({
-                'start': seg.start,
-                'end': seg.end,
-                'text': text
-            })
+        print(f"[LocalWhisper] Idioma detectado: {info.language} (probabilidade: {info.language_probability:.2%})")
+        
+        # Build SRT and text output - MUST consume generator INSIDE the lock
+        srt_lines = []
+        full_text = []
+        segments_list = []
+        
+        for i, seg in enumerate(segments_gen, 1):
+            start_str = _format_srt_time(seg.start)
+            end_str = _format_srt_time(seg.end)
+            text = seg.text.strip()
+            
+            if text:
+                srt_lines.append(f"{i}\n{start_str} --> {end_str}\n{text}\n")
+                full_text.append(text)
+                segments_list.append({
+                    'start': seg.start,
+                    'end': seg.end,
+                    'text': text
+                })
     
     srt_content = '\n'.join(srt_lines)
     text_content = ' '.join(full_text)
@@ -3127,28 +3133,31 @@ def _transcribe_chunked(
         # Retry logic for each chunk
         for retry in range(max_retries):
             try:
-                segments_gen, info = _whisper_model.transcribe(
-                    chunk_path,
-                    language="pt",
-                    beam_size=5,
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
-                )
-                
-                chunk_text = []
-                for seg in segments_gen:
-                    text = seg.text.strip()
-                    if text:
-                        # Adjust timestamps to global time
-                        adjusted_start = start_time + seg.start
-                        adjusted_end = start_time + seg.end
-                        
-                        all_segments.append({
-                            'start': adjusted_start,
-                            'end': adjusted_end,
-                            'text': text
-                        })
-                        chunk_text.append(text)
+                # Use lock to prevent GPU deadlock (ctranslate2 is NOT thread-safe)
+                with _whisper_lock:
+                    segments_gen, info = _whisper_model.transcribe(
+                        chunk_path,
+                        language="pt",
+                        beam_size=5,
+                        vad_filter=True,
+                        vad_parameters=dict(min_silence_duration_ms=500)
+                    )
+                    
+                    # MUST consume generator INSIDE the lock
+                    chunk_text = []
+                    for seg in segments_gen:
+                        text = seg.text.strip()
+                        if text:
+                            # Adjust timestamps to global time
+                            adjusted_start = start_time + seg.start
+                            adjusted_end = start_time + seg.end
+                            
+                            all_segments.append({
+                                'start': adjusted_start,
+                                'end': adjusted_end,
+                                'text': text
+                            })
+                            chunk_text.append(text)
                 
                 text_parts.append(' '.join(chunk_text))
                 
@@ -3345,20 +3354,22 @@ def transcribe_upload_segments(
         
         for retry in range(max_retries):
             try:
-                segments_gen, info = _whisper_model.transcribe(
-                    segment_path,
-                    language="pt",
-                    beam_size=5,
-                    vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
-                )
-                
-                # Collect text from generator
-                texts = []
-                for seg_result in segments_gen:
-                    text = seg_result.text.strip()
-                    if text:
-                        texts.append(text)
+                # Use lock to prevent GPU deadlock (ctranslate2 is NOT thread-safe)
+                with _whisper_lock:
+                    segments_gen, info = _whisper_model.transcribe(
+                        segment_path,
+                        language="pt",
+                        beam_size=5,
+                        vad_filter=True,
+                        vad_parameters=dict(min_silence_duration_ms=500)
+                    )
+                    
+                    # MUST consume generator INSIDE the lock
+                    texts = []
+                    for seg_result in segments_gen:
+                        text = seg_result.text.strip()
+                        if text:
+                            texts.append(text)
                 
                 segment_text = ' '.join(texts)
                 
