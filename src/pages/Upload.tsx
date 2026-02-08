@@ -2955,9 +2955,9 @@ export default function VideoUpload() {
                         awayTeam: awayLabel,
                         autoClip: true,
                         autoAnalysis: true,
-                        // Transcrição parcial do Smart Import (5 min) como fallback
-                        // O backend tentará Whisper completo primeiro, usando esta se falhar
-                        firstHalfTranscription: transcription && transcription.length > 50 ? transcription : undefined,
+                        // Smart Import transcription is only 5min partial - never pass as full transcription
+                        // The async pipeline will run Whisper for the complete video
+                        firstHalfTranscription: undefined,
                       });
                       
                       toast({

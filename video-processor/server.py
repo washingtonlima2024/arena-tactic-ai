@@ -8832,6 +8832,33 @@ def _process_match_pipeline(job_id: str, data: dict):
             has_preloaded_first = bool(first_half_transcription and len(first_half_transcription.strip()) > 100)
             has_preloaded_second = bool(second_half_transcription and len(second_half_transcription.strip()) > 100)
             
+            # Validar densidade da transcrição fornecida pelo frontend (evita parciais do Smart Import)
+            if has_preloaded_first:
+                first_dur = video_durations.get('first', 0)
+                if first_dur > 300:
+                    chars_per_sec = len(first_half_transcription.strip()) / first_dur
+                    if chars_per_sec < 3:
+                        print(f"[ASYNC-PIPELINE] Transcricao do frontend DESCARTADA (parcial): "
+                              f"{len(first_half_transcription.strip())} chars / {first_dur:.0f}s = {chars_per_sec:.1f} chars/s")
+                        has_preloaded_first = False
+                        first_half_transcription = ''
+                    else:
+                        print(f"[ASYNC-PIPELINE] Transcricao do frontend ACEITA: "
+                              f"{len(first_half_transcription.strip())} chars / {first_dur:.0f}s = {chars_per_sec:.1f} chars/s")
+            
+            if has_preloaded_second:
+                second_dur = video_durations.get('second', 0)
+                if second_dur > 300:
+                    chars_per_sec_2 = len(second_half_transcription.strip()) / second_dur
+                    if chars_per_sec_2 < 3:
+                        print(f"[ASYNC-PIPELINE] Transcricao 2T do frontend DESCARTADA (parcial): "
+                              f"{len(second_half_transcription.strip())} chars / {second_dur:.0f}s = {chars_per_sec_2:.1f} chars/s")
+                        has_preloaded_second = False
+                        second_half_transcription = ''
+                    else:
+                        print(f"[ASYNC-PIPELINE] Transcricao 2T do frontend ACEITA: "
+                              f"{len(second_half_transcription.strip())} chars / {second_dur:.0f}s = {chars_per_sec_2:.1f} chars/s")
+            
             # 🆕 Log detalhado quando transcrição é ignorada
             if second_half_transcription and not has_preloaded_second:
                 print(f"[ASYNC-PIPELINE] ⚠️ 2nd half transcription too short ({len(second_half_transcription.strip())} chars < 100) - checking storage fallback...")
