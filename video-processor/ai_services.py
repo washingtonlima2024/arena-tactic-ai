@@ -589,11 +589,14 @@ IMPORTANTE: Para cada evento, extraia o minuto do jogo baseado no contexto da na
 Se a transcrição mencionar timestamps como [00:15:30], [MM:SS] ou "aos 23 minutos", use-os.
 Se não houver timestamp explícito, estime baseado na sequência da narrativa.
 
+EXTRAIA TODOS os eventos relevantes: gols, finalizações, defesas, escanteios, faltas, pênaltis, cartões amarelos, cartões vermelhos, impedimentos, cobranças de falta, substituições e chances claras de gol.
+Um primeiro tempo típico tem entre 10 e 20 eventos. Seja detalhista.
+
 Retorne neste formato:
 {{
   "events": [
     {{
-      "event_type": "goal" ou outro,
+      "event_type": "goal", "shot", "save", "corner", "foul", "penalty", "yellow_card", "red_card", "chance", "offside", "free_kick" ou "substitution",
       "team": "home" ou "away" ou "unknown",
       "minute": número do minuto do jogo (0-90),
       "second": segundos (0-59),
@@ -4400,10 +4403,14 @@ def detect_events_by_keywords_from_text(
     # 2. Padrões de eventos
     patterns = {
         'goal': [r'go+l', r'golaço', r'bola na rede', r'abre o placar', r'empata'],
-        # 🔧 yellow_card REMOVIDO - menções de cartão amarelo serão ignoradas
-        # 🔧 red_card REMOVIDO - menções de cartão vermelho serão ignoradas
         'penalty': [r'pênalti', r'penalidade'],
         'save': [r'grande defesa', r'salvou', r'espalmou'],
+        'foul': [r'falta de', r'falta para', r'cometeu falta', r'falta perigosa'],
+        'corner': [r'escanteio', r'córner', r'bate o escanteio'],
+        'chance': [r'quase gol', r'por pouco', r'na trave', r'passou perto', r'que chance', r'perdeu o gol'],
+        'shot': [r'chutou', r'finalizou', r'bateu forte', r'chute', r'finalização'],
+        'offside': [r'impedimento', r'fora de jogo', r'posição irregular'],
+        'free_kick': [r'falta cobrada', r'cobrança de falta', r'bate a falta'],
     }
     
     # 3. Para cada keyword encontrada, associar ao timestamp mais próximo
@@ -4748,7 +4755,7 @@ Formato obrigatório:
             print(f"[Ollama] ⚠️ Nenhum evento extraído!")
         
         # FALLBACK: Se Ollama retornou poucos eventos, usar SRT keywords (mais preciso)
-        if len(events) < 3:
+        if len(events) < 10:
             print(f"[Ollama] ⚠️ Poucos eventos ({len(events)}), usando fallback por SRT...")
             keyword_events = []
             
@@ -5279,7 +5286,7 @@ def analyze_match_events(
                 print(f"[Kakttus] ⚠️ Nenhum evento extraído pela IA")
 
             # FALLBACK KAKTTUS: Se retornou poucos eventos, complementar com keywords
-            if len(final_events) < 3:
+            if len(final_events) < 10:
                 print(f"[Kakttus] ⚠️ Poucos eventos ({len(final_events)}), acionando fallback por keywords...")
                 keyword_events = []
 
