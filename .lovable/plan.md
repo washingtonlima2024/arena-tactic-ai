@@ -1,62 +1,66 @@
 
-
-# Corrigir Download do YouTube no Pipeline Assincrono
+# Corrigir Transcricao Parcial no Pipeline Assincrono
 
 ## Problema
 
-O download do YouTube no pipeline assincrono (`_process_match_pipeline`) esta falhando. A causa raiz esta na combinacao de varios problemas no comando `yt-dlp` utilizado:
+O Smart Import transcreve apenas os primeiros 5 minutos do video para identificacao rapida dos times. Essa transcricao parcial esta sendo passada ao pipeline assincrono como `firstHalfTranscription`, que a trata como transcricao completa e **pula o Whisper inteiramente**.
 
-1. **Formato restritivo**: O seletor `-f 'bestvideo[height<=720]+bestaudio/best[height<=720]'` exige merge de streams separados via `ffmpeg`. Se o formato exato nao esta disponivel ou o merge falha, nenhum arquivo e gerado.
+Fluxo do bug:
 
-2. **Deadlock potencial com `subprocess.run` + `capture_output=True`**: Para videos grandes, os buffers de stdout/stderr enchem e o processo trava indefinidamente (deadlock).
+```text
+Smart Import (5 min) --> Frontend envia como firstHalfTranscription
+                     --> Backend: len > 100? Sim --> has_preloaded_first = True
+                     --> PULA WHISPER
+                     --> Analise so encontra eventos nos primeiros 5-6 min
+```
 
-3. **Sem fallback de formato**: Se o formato especifico nao esta disponivel para o video, o yt-dlp falha completamente ao inves de tentar alternativas.
-
-4. **Sem `--force-overwrites`**: Se existe um arquivo parcial de tentativa anterior, o yt-dlp pode pular o download.
-
-Note-se que o Smart Import (que funciona) usa um formato muito mais simples: `-f 'bestaudio/best[height<=480]'` — porque so precisa de audio para transcrever.
+A validacao de densidade (chars/segundo) que detecta transcricoes parciais so e aplicada a transcricoes carregadas do **storage**, nunca as enviadas pelo **frontend**.
 
 ## Solucao
 
-Reescrever a secao de download do YouTube no pipeline assincrono para usar `subprocess.Popen` com streaming de output (igual ao `download_youtube_with_progress` que ja funciona), formato com fallback robusto, e atualizacao de progresso em tempo real.
+Duas mudancas complementares para garantir que a transcricao parcial do Smart Import nao seja confundida com uma transcricao completa:
 
-## Mudancas
+### 1. Frontend: Nao enviar transcricao parcial do Smart Import (Upload.tsx)
 
-### Arquivo: `video-processor/server.py`
-
-**1. Substituir o bloco de download YouTube no `_process_match_pipeline` (linhas ~8392-8475)**
-
-Trocar `subprocess.run` por `subprocess.Popen` com parsing de progresso em tempo real, e usar formato com fallback:
+**Linha ~2958-2960**: Remover o envio da transcricao do Smart Import como `firstHalfTranscription` no pipeline assincrono. O Smart Import so transcreve 5 minutos -- isso nunca deveria ser tratado como transcricao final.
 
 ```text
 ANTES:
-  subprocess.run(cmd, capture_output=True, text=True, timeout=1800)
-  # formato: 'bestvideo[height<=720]+bestaudio/best[height<=720]'
+  firstHalfTranscription: transcription && transcription.length > 50 ? transcription : undefined,
 
 DEPOIS:
-  subprocess.Popen(cmd, stdout=PIPE, stderr=STDOUT, text=True)
-  # formato: 'bestvideo[height<=720]+bestaudio/best[height<=720]/best[height<=720]/best'
-  # com --force-overwrites e --newline para parsing de progresso
+  // Smart Import transcription is only 5min - never pass as full transcription
+  // The async pipeline will run Whisper for the complete video
+  firstHalfTranscription: undefined,
 ```
 
-Mudancas especificas:
+### 2. Backend: Validar densidade da transcricao fornecida pelo frontend (server.py)
 
-- **Formato com fallback**: `'-f', 'bestvideo[height<=720]+bestaudio/best[height<=720]/best[height<=720]/best'` — se o merge falha, tenta formato unico, e se nao encontra 720p, aceita qualquer formato disponivel.
-- **`--newline`**: Para que cada atualizacao de progresso fique em uma linha separada (necessario para parsing com Popen).
-- **`--force-overwrites`**: Para sobrescrever arquivos parciais de tentativas anteriores.
-- **`subprocess.Popen`** ao inves de `subprocess.run`: Evita deadlock por buffer cheio e permite atualizar o progresso do job em tempo real.
-- **Atualizacao de progresso**: Parse da saida do yt-dlp para atualizar `_update_async_job` com porcentagem de download, mostrando progresso real na interface.
-- **Timeout manual**: Controle de timeout via loop ao inves de parametro do subprocess (que nao funciona com Popen).
+**Linhas ~8830-8833**: Aplicar a mesma validacao de densidade (`chars_per_sec >= 3`) as transcricoes enviadas pelo frontend, como segunda camada de protecao. Se o video tem 45+ minutos mas a transcricao cobre so 5 minutos, a densidade sera muito baixa e o Whisper sera acionado automaticamente.
 
-**2. Verificacao adicional de arquivo apos download**
+```text
+ANTES:
+  has_preloaded_first = bool(first_half_transcription and len(first_half_transcription.strip()) > 100)
 
-Apos o download, alem de verificar `.mp4`, tambem buscar `.mkv`, `.webm` e `.mp4.part` na pasta temporaria, e converter para `.mp4` se necessario usando `ffmpeg`.
+DEPOIS:
+  has_preloaded_first = bool(first_half_transcription and len(first_half_transcription.strip()) > 100)
+  # Validar se transcricao fornecida e proporcional ao video (evita parciais do Smart Import)
+  if has_preloaded_first:
+      first_dur = video_durations.get('first', 0)
+      if first_dur > 300:
+          chars_per_sec = len(first_half_transcription.strip()) / first_dur
+          if chars_per_sec < 3:
+              print(f"[ASYNC-PIPELINE] Transcricao do frontend DESCARTADA (parcial): "
+                    f"{len(first_half_transcription.strip())} chars / {first_dur:.0f}s = {chars_per_sec:.1f} chars/s")
+              has_preloaded_first = False
+              first_half_transcription = ''
+```
+
+A mesma logica sera aplicada para `has_preloaded_second`.
 
 ## Resultado Esperado
 
-- Downloads do YouTube funcionam de forma confiavel no pipeline assincrono
-- Progresso do download e visivel na interface (ao inves de ficar parado em "Baixando do YouTube...")
-- Videos com formatos variados no YouTube sao tratados pelo fallback automatico
-- Sem risco de deadlock por buffer cheio
-- Compativel com videos de qualquer tamanho/duracao
-
+- Transcricao parcial do Smart Import (5 min) nao e mais enviada como transcricao completa
+- Mesmo se enviada acidentalmente, o backend detecta a baixa densidade e aciona o Whisper
+- Pipeline assincrono roda o Whisper Local completo para o video inteiro
+- Analise encontra eventos ao longo de toda a partida (90 minutos)
