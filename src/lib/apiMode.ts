@@ -203,10 +203,20 @@ export const autoDiscoverServer = async (): Promise<string | null> => {
 };
 
 /**
+ * Detecta se estamos atrás de um proxy reverso (Nginx, Cloudflare, etc.)
+ * Portas padrão HTTP/HTTPS indicam presença de proxy
+ */
+const isBehindReverseProxy = (): boolean => {
+  const port = window.location.port;
+  return !port || port === '80' || port === '443';
+};
+
+/**
  * Retorna a URL base da API
  * Prioridade:
  * 1. Domínio de produção Kakttus (proxy Nginx /api)
  * 2. Variável de ambiente VITE_API_BASE_URL (produção PM2)
+ *    - Se relativo (/api) e sem proxy, prefere servidor descoberto
  * 3. Servidor descoberto automaticamente
  * 4. Cloudflare Tunnel (fallback remoto)
  * 5. IP local padrão
@@ -221,6 +231,12 @@ export const getApiBase = (): string => {
   // 2. Variável de ambiente (produção PM2 local)
   const envApiUrl = import.meta.env.VITE_API_BASE_URL;
   if (envApiUrl) {
+    // Se é caminho relativo (/api), só funciona atrás de proxy reverso
+    // Quando acessado diretamente (porta 8080), preferir servidor descoberto
+    if (envApiUrl.startsWith('/') && !isBehindReverseProxy()) {
+      const discovered = getDiscoveredServer();
+      if (discovered) return discovered;
+    }
     return envApiUrl.replace(/\/$/, '');
   }
   
