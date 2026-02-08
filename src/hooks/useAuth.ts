@@ -4,7 +4,8 @@
  * Sem dependência do Supabase para autenticação
  */
 import { useState, useEffect, useCallback } from 'react';
-import { apiClient } from '@/lib/apiClient';
+import { apiClient, buildApiUrl } from '@/lib/apiClient';
+import { getApiBase } from '@/lib/apiMode';
 
 export type AppRole = 'superadmin' | 'org_admin' | 'manager' | 'uploader' | 'viewer' | 'admin' | 'user';
 
@@ -126,7 +127,7 @@ export function useAuth() {
       
       try {
         // Verificar se o token ainda é válido chamando /api/auth/me
-        const response = await fetch(`${getApiBaseUrl()}/api/auth/me`, {
+        const response = await fetch(buildApiUrl(getApiBase(), '/api/auth/me'), {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Accept': 'application/json',
@@ -186,7 +187,7 @@ export function useAuth() {
     }
   ): Promise<{ data: any; error: { message: string } | null }> => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/auth/register`, {
+      const response = await fetch(buildApiUrl(getApiBase(), '/api/auth/register'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -224,7 +225,7 @@ export function useAuth() {
     password: string
   ): Promise<{ data: any; error: { message: string } | null }> => {
     try {
-      const response = await fetch(`${getApiBaseUrl()}/api/auth/login`, {
+      const response = await fetch(buildApiUrl(getApiBase(), '/api/auth/login'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -268,7 +269,7 @@ export function useAuth() {
       
       if (token) {
         // Tentar invalidar sessão no servidor
-        await fetch(`${getApiBaseUrl()}/api/auth/logout`, {
+        await fetch(buildApiUrl(getApiBase(), '/api/auth/logout'), {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
@@ -315,16 +316,3 @@ export function useAuth() {
   };
 }
 
-// Helper to get API base URL
-function getApiBaseUrl(): string {
-  // Import dinamicamente para evitar dependência circular
-  const stored = localStorage.getItem('arena_api_base');
-  if (stored) return stored;
-  
-  // Check for production env variable
-  const envUrl = import.meta.env.VITE_API_BASE_URL;
-  if (envUrl) return envUrl;
-  
-  // Default para desenvolvimento local
-  return 'http://localhost:5000';
-}

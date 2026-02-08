@@ -12,7 +12,7 @@ export { getApiBase };
  * Monta URL da API normalizando prefixos para evitar duplicação de /api/
  * Funciona em todos os cenários: local, produção, túnel
  */
-function buildApiUrl(apiBase: string, endpoint: string): string {
+export function buildApiUrl(apiBase: string, endpoint: string): string {
   // Limpar trailing slashes do base
   const base = (apiBase || "").replace(/\/+$/, "");
   // Garantir que endpoint começa com /
