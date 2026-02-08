@@ -164,7 +164,12 @@ const Live = () => {
     const activeVideoElement = getActiveVideoElement();
     
     // Validate that we have a video source
-    if (!activeVideoElement && !cameraStream) {
+    // For stream mode: accept video element OR a stream URL (iframe embeds like YouTube/Twitch don't provide a video element)
+    const hasValidSource = inputMode === 'stream' 
+      ? (activeVideoElement || streamUrl) 
+      : (activeVideoElement || cameraStream);
+    
+    if (!hasValidSource) {
       console.warn('[Live] No video source available');
       toast({
         title: "Fonte de vídeo não disponível",
@@ -177,10 +182,11 @@ const Live = () => {
     }
     
     console.log('[Live] Starting recording with video element:', activeVideoElement ? 'available' : 'null');
+    console.log('[Live] Stream URL:', streamUrl || 'none');
     console.log('[Live] Camera stream:', cameraStream ? 'available' : 'null');
     
     startRecording(activeVideoElement, selectedMatchId);
-  }, [startRecording, getActiveVideoElement, selectedMatchId, cameraStream, inputMode, toast]);
+  }, [startRecording, getActiveVideoElement, selectedMatchId, cameraStream, streamUrl, inputMode, toast]);
 
   // Handle finish button click - show confirmation dialog
   const handleFinishClick = useCallback(() => {
