@@ -167,6 +167,7 @@ interface Connection {
 }
 
 export default function Social() {
+  const { user } = useAuth();
   const [connections, setConnections] = useState<Connection[]>([]);
   const [loading, setLoading] = useState(true);
   const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
@@ -223,6 +224,15 @@ export default function Social() {
   const handleConnect = async () => {
     if (!selectedNetwork) return;
 
+    if (!user?.id) {
+      toast({
+        title: 'Erro',
+        description: 'Você precisa estar logado para conectar redes sociais.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     setConnectingPlatform(selectedNetwork.id);
 
     try {
@@ -234,6 +244,7 @@ export default function Social() {
         account_id: credentials.account_id,
         account_name: credentials.account_name || selectedNetwork.name,
         is_connected: true,
+        user_id: user.id,
       };
 
       if (existingConnection) {
