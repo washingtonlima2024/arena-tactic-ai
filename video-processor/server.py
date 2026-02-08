@@ -8544,7 +8544,7 @@ def _process_match_pipeline(job_id: str, data: dict):
                             tmp_dir_path = os.path.dirname(video_path)
                             files_in_tmp = os.listdir(tmp_dir_path) if os.path.exists(tmp_dir_path) else []
                             print(f"[ASYNC-PIPELINE] Arquivos no tmp: {files_in_tmp}")
-                                raise Exception(f"Download de {platform} completou mas arquivo não encontrado")
+                            raise Exception(f"Download de {platform} completou mas arquivo não encontrado")
                     except Exception as yt_err:
                         print(f"[ASYNC-PIPELINE] ✗ Erro no download {platform}: {yt_err}")
                         raise Exception(f"Falha ao baixar de {platform}: {yt_err}")
