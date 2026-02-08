@@ -1,108 +1,50 @@
 
-
-# Corrigir Feedback de Publicacao Social e Tratar Erros da API
+# Corrigir Login em Producao - URL Incorreta no useAuth.ts
 
 ## Problema
+O login falha com **404** porque `useAuth.ts` usa uma funcao propria (`getApiBaseUrl()`) que le diretamente do `localStorage('arena_api_base')`, ignorando toda a logica centralizada do `apiMode.ts`.
 
-O toast "Conteudo compartilhado em: Instagram, Facebook" e exibido mesmo quando AMBAS as publicacoes falham com erro 400. Os erros sao capturados e logados apenas no console, sem nenhum feedback visual ao usuario.
+Resultado: a URL montada aponta para `http://10.0.0.20:8080/api/auth/login` em vez de usar o caminho correto do ambiente.
 
-Erros reais da Meta API:
-- **Instagram**: O `account_id` armazenado na conexao nao e valido ou o token nao tem permissoes (`instagram_content_publish`, `pages_read_engagement`)
-- **Facebook**: O token nao tem a permissao `publish_video`
+## Causa Raiz
+O arquivo `src/hooks/useAuth.ts` tem uma funcao local `getApiBaseUrl()` (linhas 318-330) que:
+1. Le `localStorage('arena_api_base')` -- pode conter uma URL antiga/incorreta como `http://10.0.0.20:8080`
+2. Le `VITE_API_BASE_URL` -- retorna `/api`  
+3. Concatena com `/api/auth/login` -- gerando `/api/api/auth/login` (duplicado)
+
+Enquanto isso, o `apiClient.ts` ja tem a funcao `buildApiUrl()` que resolve exatamente esse cenario de duplicacao, mas `useAuth.ts` nao a utiliza.
 
 ## Solucao
 
-### 1. Corrigir feedback de sucesso/falha no `SocialSharePanel.tsx`
+### Arquivo 1: `src/lib/apiClient.ts`
+- Exportar a funcao `buildApiUrl` (adicionar `export` na linha 15)
+- Atualmente e `function buildApiUrl(...)`, mudar para `export function buildApiUrl(...)`
 
-**Arquivo**: `src/components/media/SocialSharePanel.tsx` (linhas 211-230)
+### Arquivo 2: `src/hooks/useAuth.ts`
+- Adicionar imports: `getApiBase` de `apiMode.ts` e `buildApiUrl` de `apiClient.ts`
+- Atualizar os 4 endpoints de autenticacao para usar `buildApiUrl(getApiBase(), endpoint)`:
 
-Rastrear quais plataformas tiveram sucesso e quais falharam, e exibir o toast correto:
+| Endpoint | Linha | Antes | Depois |
+|---|---|---|---|
+| Verificar token | 129 | `getApiBaseUrl() + /api/auth/me` | `buildApiUrl(getApiBase(), '/api/auth/me')` |
+| Cadastro | 189 | `getApiBaseUrl() + /api/auth/register` | `buildApiUrl(getApiBase(), '/api/auth/register')` |
+| Login | 227 | `getApiBaseUrl() + /api/auth/login` | `buildApiUrl(getApiBase(), '/api/auth/login')` |
+| Logout | 271 | `getApiBaseUrl() + /api/auth/logout` | `buildApiUrl(getApiBase(), '/api/auth/logout')` |
 
-```text
-ANTES (linhas 211-230):
-  // Publish immediately - loop com try/catch individual que engole erros
-  for (const platform of selectedNetworks) {
-    try {
-      const result = await apiClient.post('/api/social/publish', {...});
-      if (!result.success) {
-        console.error(...); // <-- so loga no console
-      }
-    } catch (e) {
-      console.error(...); // <-- engole o erro
-    }
-  }
-  toast.success(`Conteudo compartilhado em: ${networkNames}`); // <-- SEMPRE mostra sucesso
+- Remover a funcao local `getApiBaseUrl()` (linhas 318-330), que se torna desnecessaria
 
-DEPOIS:
-  const successes: string[] = [];
-  const failures: { platform: string; error: string }[] = [];
+## Resultado Esperado por Ambiente
 
-  for (const platform of selectedNetworks) {
-    try {
-      const result = await apiClient.post('/api/social/publish', {...});
-      if (result.success) {
-        successes.push(platform);
-      } else {
-        failures.push({ platform, error: result.error || 'Erro desconhecido' });
-      }
-    } catch (e: any) {
-      failures.push({ platform, error: e.message || 'Erro de conexao' });
-    }
-  }
+| Ambiente | getApiBase() | URL final do login |
+|---|---|---|
+| arenaplay.kakttus.com (Nginx) | `""` | `/api/auth/login` |
+| PM2 producao (VITE_API_BASE_URL=/api) | `/api` | `/api/auth/login` |
+| Desenvolvimento local | `http://10.0.0.20:5000` | `http://10.0.0.20:5000/api/auth/login` |
+| Cloudflare Tunnel | `https://xxx.trycloudflare.com` | `https://xxx.trycloudflare.com/api/auth/login` |
 
-  // Feedback correto baseado nos resultados reais
-  if (successes.length > 0) {
-    const names = successes.map(p => platformLabels[p]).join(', ');
-    toast.success(`Conteudo compartilhado em: ${names}`);
-  }
-  if (failures.length > 0) {
-    const failNames = failures.map(f => `${platformLabels[f.platform]}: ${f.error}`).join('\n');
-    toast.error(`Falha ao publicar:\n${failNames}`);
-  }
-  if (successes.length === 0 && failures.length > 0) {
-    // Nao fechar o painel se tudo falhou, para o usuario poder tentar novamente
-    setIsSharing(false);
-    return; // Nao chamar onClose()
-  }
-```
-
-### 2. Tratar erro 400 do apiClient.post corretamente
-
-O `apiClient.post` lanca excecao quando o HTTP status nao e OK (400). Isso significa que o bloco `if (!result.success)` na linha 222 **nunca e executado** — o erro vai direto para o `catch`. Precisamos tratar ambos os caminhos:
-
-- **catch**: erro HTTP (status 400) — extrair mensagem da API
-- **result.success === false**: resposta OK mas com sucesso false (improvavel mas possivel)
-
-### 3. Mapear nomes de plataformas para labels visiveis
-
-Adicionar um mapa de labels para que o toast mostre "Instagram" ao inves de "instagram":
-
-```typescript
-const platformLabels: Record<string, string> = {
-  instagram: 'Instagram',
-  facebook: 'Facebook',
-  tiktok: 'TikTok',
-  youtube: 'YouTube',
-  twitter: 'X (Twitter)',
-};
-```
-
-## Sobre os erros da Meta API
-
-Os erros reais indicam problemas de permissoes no token/conta:
-
-1. **Instagram**: O `account_id` (`24726023243656371`) precisa ser o ID da **Pagina Instagram Business** vinculada a uma pagina do Facebook. Para publicar Reels, o token precisa das permissoes: `instagram_content_publish`, `pages_read_engagement`, `instagram_basic`.
-
-2. **Facebook**: O token precisa da permissao `publish_video` e `pages_manage_posts` para publicar videos na pagina.
-
-Esses erros sao do lado da Meta e nao podem ser corrigidos no codigo — o usuario precisa:
-- Verificar se a conta do Instagram e Business/Creator (nao pessoal)
-- Re-gerar o token com as permissoes corretas no Meta Business Suite
-- Usar o ID correto da Instagram Business Account (nao o ID do usuario)
-
-## Resultado Esperado
-
-- Toast de ERRO quando a publicacao falha, mostrando a mensagem da API
-- Toast de SUCESSO apenas quando pelo menos uma plataforma publicou com exito
-- Painel nao fecha automaticamente se todas as publicacoes falharam
-- Usuario consegue identificar claramente o problema e reconectar com permissoes corretas
+## Resumo das Alteracoes
+- **2 arquivos** modificados
+- **1 palavra** adicionada no `apiClient.ts` (export)
+- **4 URLs** corrigidas no `useAuth.ts`
+- **1 funcao** removida do `useAuth.ts` (getApiBaseUrl)
+- **Zero** impacto em outros arquivos -- a interface publica do hook nao muda
