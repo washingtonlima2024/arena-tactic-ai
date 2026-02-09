@@ -46,6 +46,7 @@ interface AnalysisEventTimelineProps {
   awayTeamName: string;
   onPlayEvent?: (eventId: string) => void;
   getThumbnail?: (eventId: string) => { imageUrl: string } | null;
+  onPlayClip?: (clipUrl: string) => void;
 }
 
 const EVENT_TYPE_COLORS: Record<string, string> = {
@@ -69,6 +70,7 @@ export function AnalysisEventTimeline({
   awayTeamName,
   onPlayEvent,
   getThumbnail,
+  onPlayClip,
 }: AnalysisEventTimelineProps) {
   const [filterType, setFilterType] = useState<string>('all');
   const [filterTeam, setFilterTeam] = useState<string>('all');
@@ -206,9 +208,15 @@ export function AnalysisEventTimeline({
                           </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
-                          <DropdownMenuItem onClick={() => window.open(event.clip_url!, '_blank')}>
-                            <ExternalLink className="mr-2 h-4 w-4" />
-                            Abrir
+                          <DropdownMenuItem onClick={() => {
+                            if (onPlayClip) {
+                              onPlayClip(event.clip_url!);
+                            } else {
+                              window.open(event.clip_url!, '_blank');
+                            }
+                          }}>
+                            <Play className="mr-2 h-4 w-4" />
+                            Assistir
                           </DropdownMenuItem>
                           <DropdownMenuItem onClick={() => {
                             navigator.clipboard.writeText(event.clip_url!);
