@@ -33,6 +33,7 @@ import { ReimportMatchDialog } from '@/components/events/ReimportMatchDialog';
 import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
 import { getEventLabel } from '@/lib/eventLabels';
 import { useMatchReport } from '@/hooks/useMatchReport';
+import { normalizeStorageUrl } from '@/lib/apiClient';
 
 // Analysis components
 import { TeamComparisonPanel } from '@/components/analysis/TeamComparisonPanel';
@@ -51,6 +52,7 @@ export default function Analysis() {
   const [videoDialogOpen, setVideoDialogOpen] = useState(false);
   const [playingEventId, setPlayingEventId] = useState<string | null>(null);
   const [reimportDialogOpen, setReimportDialogOpen] = useState(false);
+  const [clipDialogUrl, setClipDialogUrl] = useState<string | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
 
   const { data: analysis, isLoading: analysisLoading } = useMatchAnalysis(currentMatchId);
@@ -570,7 +572,7 @@ export default function Analysis() {
               awayTeamName={awayTeamName}
               homeTeamColor={homeTeamColor}
               awayTeamColor={awayTeamColor}
-              onPlayClip={(clipUrl) => window.open(clipUrl, '_blank')}
+              onPlayClip={(clipUrl) => setClipDialogUrl(normalizeStorageUrl(clipUrl))}
             />
 
             {/* ============================================================ */}
@@ -713,11 +715,12 @@ export default function Analysis() {
               awayTeamName={awayTeamName}
               onPlayEvent={handlePlayVideo}
               getThumbnail={getThumbnail}
+              onPlayClip={(clipUrl) => setClipDialogUrl(normalizeStorageUrl(clipUrl))}
             />
           </>
         )}
 
-        {/* Video Dialog */}
+        {/* Video Dialog (event-based) */}
         <Dialog open={videoDialogOpen} onOpenChange={setVideoDialogOpen}>
           <DialogContent className="max-w-[95vw] sm:max-w-4xl">
             <DialogHeader>
@@ -790,6 +793,28 @@ export default function Analysis() {
                 </div>
               );
             })()}
+          </DialogContent>
+        </Dialog>
+
+        {/* Clip Dialog (direct video URL) */}
+        <Dialog open={!!clipDialogUrl} onOpenChange={(open) => { if (!open) setClipDialogUrl(null); }}>
+          <DialogContent className="max-w-[95vw] sm:max-w-4xl">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Film className="h-5 w-5 text-primary" />
+                Clip do Evento
+              </DialogTitle>
+            </DialogHeader>
+            {clipDialogUrl && (
+              <div className="aspect-video relative">
+                <video
+                  src={clipDialogUrl}
+                  controls
+                  autoPlay
+                  className="w-full h-full rounded-lg"
+                />
+              </div>
+            )}
           </DialogContent>
         </Dialog>
       </div>

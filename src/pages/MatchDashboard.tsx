@@ -481,13 +481,20 @@ function DualLineChart({
   title, 
   data, 
   onPickMinute,
-  icon
+  icon,
+  homeColor = '#10b981',
+  awayColor = '#3b82f6',
 }: { 
   title: string;
   data: MinutePoint[];
   onPickMinute: (minute: number) => void;
   icon?: React.ReactNode;
+  homeColor?: string;
+  awayColor?: string;
 }) {
+  // Ensure contrast: if colors are too similar, use fallback for away
+  const effectiveAwayColor = homeColor === awayColor ? '#3b82f6' : awayColor;
+
   return (
     <Card className="h-[250px]">
       <CardHeader className="pb-2">
@@ -518,8 +525,8 @@ function DualLineChart({
               type="monotone" 
               dataKey="a" 
               stackId="1"
-              stroke="hsl(var(--primary))" 
-              fill="hsl(var(--primary))" 
+              stroke={homeColor} 
+              fill={homeColor} 
               fillOpacity={0.3}
               name="Casa" 
             />
@@ -527,8 +534,8 @@ function DualLineChart({
               type="monotone" 
               dataKey="b" 
               stackId="2"
-              stroke="hsl(var(--destructive))" 
-              fill="hsl(var(--destructive))" 
+              stroke={effectiveAwayColor} 
+              fill={effectiveAwayColor} 
               fillOpacity={0.3}
               name="Visitante" 
             />
@@ -991,6 +998,8 @@ export default function MatchDashboard() {
   const dynamicStats = useDynamicMatchStats(events, homeTeamName, awayTeamName);
   const homeScore = dynamicStats.score.home;
   const awayScore = dynamicStats.score.away;
+  const homeTeamColor = matchDetails?.home_team?.primary_color || '#10b981';
+  const awayTeamColor = matchDetails?.away_team?.primary_color || '#3b82f6';
 
   if (loadingMatches) {
     return (
@@ -1104,12 +1113,16 @@ export default function MatchDashboard() {
                 data={chartData}
                 onPickMinute={handlePickMinute}
                 icon={<Activity className="h-4 w-4" />}
+                homeColor={homeTeamColor}
+                awayColor={awayTeamColor}
               />
               <DualLineChart
                 title="Posse de Bola"
                 data={possessionData}
                 onPickMinute={handlePickMinute}
                 icon={<TrendingUp className="h-4 w-4" />}
+                homeColor={homeTeamColor}
+                awayColor={awayTeamColor}
               />
             </div>
             <div className="grid sm:grid-cols-2 gap-4">
@@ -1118,6 +1131,8 @@ export default function MatchDashboard() {
                 data={intensityData}
                 onPickMinute={handlePickMinute}
                 icon={<Zap className="h-4 w-4" />}
+                homeColor={homeTeamColor}
+                awayColor={awayTeamColor}
               />
               <Card className="h-[250px]">
                 <CardHeader className="pb-2">
