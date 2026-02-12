@@ -132,6 +132,8 @@ export const autoDiscoverServer = async (): Promise<string | null> => {
             if (response.ok) {
               console.log(`[ApiMode] ✅ Conectado via Cloudflare Tunnel: ${cloudflare}`);
               setDiscoveredServer(cloudflare);
+              // Sync manual key so useAuth and other consumers stay in sync
+              localStorage.setItem(CLOUDFLARE_STORAGE_KEY, cloudflare);
               discoveryInProgress = false;
               return cloudflare;
             }

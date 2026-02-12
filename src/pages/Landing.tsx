@@ -236,10 +236,19 @@ export default function Landing() {
       toast.success('Bem-vindo ao Arena Play!', {
         description: 'Redirecionando para o dashboard...',
       });
-    } catch (err) {
-      toast.error('Erro inesperado', {
-        description: 'Tente novamente em alguns instantes.',
-      });
+    } catch (err: any) {
+      const isFetchError = err?.message?.includes('Failed to fetch') || err?.message?.includes('NetworkError');
+      if (isFetchError) {
+        toast.error('Servidor inacessível', {
+          description: 'Verifique o túnel Cloudflare ou atualize a URL na seção "Configurar Servidor".',
+          duration: 8000,
+        });
+        setShowServerConfig(true);
+      } else {
+        toast.error('Erro inesperado', {
+          description: 'Tente novamente em alguns instantes.',
+        });
+      }
     } finally {
       setIsLoading(false);
     }
