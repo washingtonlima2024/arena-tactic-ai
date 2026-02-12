@@ -837,23 +837,68 @@ def analyze_with_kakttus(
 ) -> Dict[str, Any]:
     """
     Analisa transcrição com modelo Kakttus.
+    
+    NOVO: Usa pipeline multi-eventos do event_detector.py quando disponível.
+    Faz pré-filtro local por janela deslizante antes de chamar a IA,
+    enviando apenas trechos candidatos (não a transcrição inteira).
+    
     Retorna eventos detectados, resumo do tempo e análise tática.
     """
     # Converter SRT para texto corrido se necessario
     transcript_clean = strip_srt_to_text(transcript)
 
-    max_chars = 50000  # Limite aumentado para cobrir jogo completo
+    # ═══════════════════════════════════════════════════════════════
+    # TENTAR PIPELINE MULTI-EVENTOS (event_detector.py)
+    # ═══════════════════════════════════════════════════════════════
+    try:
+        from event_detector import run_multitype_pipeline, find_all_candidates
+
+        # Verificar se há candidatos locais antes de chamar IA
+        candidates = find_all_candidates(transcript_clean, home_team, away_team)
+        
+        if candidates:
+            total_candidates = sum(len(v) for v in candidates.values())
+            print(f"[Kakttus] 🎯 Pipeline Multi-Eventos: {total_candidates} candidatos em {len(candidates)} tipos")
+            
+            result = run_multitype_pipeline(
+                transcript=transcript_clean,
+                home_team=home_team,
+                away_team=away_team,
+                ollama_url=OLLAMA_URL,
+                model=OLLAMA_MODEL,
+            )
+            
+            if result and result.get('events'):
+                events = result.get('events', [])
+                goals = [e for e in events if e.get('event_type') == 'goal']
+                cards = [e for e in events if e.get('event_type') in ('yellow_card', 'red_card')]
+                others = [e for e in events if e.get('event_type') not in ('goal', 'yellow_card', 'red_card')]
+                
+                print(f"[Kakttus] ✓ Multi-Eventos: {len(events)} eventos ({len(goals)} gols, {len(cards)} cartões, {len(others)} outros)")
+                return result
+            else:
+                print(f"[Kakttus] ⚠ Pipeline multi-eventos retornou vazio, usando fallback legado...")
+        else:
+            print(f"[Kakttus] ⚠ Nenhum candidato local encontrado, usando prompt completo...")
+
+    except ImportError:
+        print(f"[Kakttus] ℹ event_detector.py não disponível, usando pipeline legado")
+    except Exception as e:
+        print(f"[Kakttus] ⚠ Erro no pipeline multi-eventos: {e}, usando fallback legado...")
+
+    # ═══════════════════════════════════════════════════════════════
+    # FALLBACK: Pipeline legado (transcrição inteira)
+    # ═══════════════════════════════════════════════════════════════
+    max_chars = 50000
     transcript_truncated = transcript_clean[:max_chars] if len(transcript_clean) > max_chars else transcript_clean
     if len(transcript_clean) > max_chars:
         print(f"[Kakttus] Transcrição truncada: {len(transcript)} → {max_chars} chars")
     
-    # System prompt simples igual ao script
     system_prompt = (
         "Você é a IA Kakttus, especialista em futebol, usando raciocínio tático e contextual. "
         "Interprete a transcrição e retorne SOMENTE JSON."
     )
 
-    # User prompt exatamente igual ao script
     user_prompt = f"""
 Times:
 home = {home_team}
@@ -905,7 +950,7 @@ Retorne neste formato:
     
     goals = [e for e in events if e.get('event_type') == 'goal']
     print(f"[Kakttus] ✓ Detectados: {len(events)} eventos, {len(goals)} gols")
-    for g in goals[:5]:  # Limitar log
+    for g in goals[:5]:
         print(f"[Kakttus] ⚽ GOL: {g.get('team', 'unknown')} - {g.get('detail', '')[:50]}")
     
     return {"events": events, "summary": summary, "tactical": tactical}
