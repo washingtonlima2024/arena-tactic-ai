@@ -3811,6 +3811,33 @@ def analyze_match():
                 print(f"[ANALYZE-MATCH] ⚠ Arquivos SRT disponíveis: {[f.name for f in available_srts]}")
             
             # ═══════════════════════════════════════════════════════════════
+            # DETECTAR BOUNDARIES DA PARTIDA (início, halftime, 2T, fim)
+            # ═══════════════════════════════════════════════════════════════
+            boundaries = {}
+            
+            # Tentar detectar boundaries pelo SRT (mais preciso) ou transcrição
+            boundary_source = None
+            if srt_path:
+                try:
+                    with open(srt_path, 'r', encoding='utf-8') as f:
+                        srt_content = f.read()
+                    boundaries = ai_services.detect_match_periods_from_transcription(srt_content)
+                    boundary_source = 'srt'
+                except Exception as bd_err:
+                    print(f"[ANALYZE-MATCH] ⚠ Erro ao detectar boundaries do SRT: {bd_err}")
+            
+            if not boundaries.get('game_start_second') and transcription:
+                boundaries = ai_services.detect_match_periods_from_transcription(transcription)
+                boundary_source = 'transcription'
+            
+            if boundaries.get('game_start_second') is not None:
+                print(f"[ANALYZE-MATCH] ⚽ Boundaries detectados via {boundary_source}: "
+                      f"início={boundaries['game_start_second']:.0f}s, "
+                      f"halftime={boundaries.get('halftime_timestamp_seconds', 'N/A')}, "
+                      f"2T={boundaries.get('second_half_start_second', 'N/A')}, "
+                      f"fim={boundaries.get('game_end_second', 'N/A')}")
+            
+            # ═══════════════════════════════════════════════════════════════
             # CALCULAR VIDEO OFFSET (pré-jogo)
             # ═══════════════════════════════════════════════════════════════
             video_game_start_second = 0
@@ -3819,6 +3846,10 @@ def analyze_match():
             if video_game_start_second_override is not None:
                 video_game_start_second = int(video_game_start_second_override)
                 print(f"[ANALYZE-MATCH] 📐 Video offset (override manual): {video_game_start_second}s")
+            elif boundaries.get('game_start_second') is not None:
+                # Usar offset detectado automaticamente pela transcrição
+                video_game_start_second = int(boundaries['game_start_second'])
+                print(f"[ANALYZE-MATCH] 📐 Video offset (auto-boundaries): {video_game_start_second}s")
             else:
                 try:
                     session_voffset = get_session()
@@ -3829,11 +3860,16 @@ def analyze_match():
                            (half_type == 'second' and vtype in ['second_half', 'full']):
                             v_start = v.start_minute or 0
                             video_game_start_second = v_start * 60
-                            print(f"[ANALYZE-MATCH] 📐 Video offset (auto): {video_game_start_second}s (start_minute={v_start}, type={vtype})")
+                            print(f"[ANALYZE-MATCH] 📐 Video offset (db): {video_game_start_second}s (start_minute={v_start}, type={vtype})")
                             break
                     session_voffset.close()
                 except Exception as offset_err:
                     print(f"[ANALYZE-MATCH] ⚠ Erro ao calcular offset: {offset_err}")
+            
+            # Para segundo tempo de vídeo full, usar second_half_start_second dos boundaries
+            if half_type == 'second' and boundaries.get('second_half_start_second') is not None:
+                video_game_start_second = int(boundaries['second_half_start_second'])
+                print(f"[ANALYZE-MATCH] 📐 Video offset 2T (auto-boundaries): {video_game_start_second}s")
             
             # ═══════════════════════════════════════════════════════════════
             # PRIORIDADE ÚNICA: Análise por IA (mais confiável, menos duplicatas)
@@ -3846,7 +3882,8 @@ def analyze_match():
                     match_id=match_id,
                     use_dual_verification=(analysis_mode == 'text'),
                     settings=local_settings,
-                    video_game_start_second=video_game_start_second
+                    video_game_start_second=video_game_start_second,
+                    boundaries=boundaries
                 )
                 events = ai_events or []
             except Exception as ai_err:

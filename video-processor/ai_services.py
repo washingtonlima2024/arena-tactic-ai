@@ -620,6 +620,37 @@ _EXTRA_TIME_PATTERNS = [
     re.compile(r'vamos\s+para\s+a?\s*prorroga[cç][aã]o', re.IGNORECASE),
 ]
 
+_GAME_START_PATTERNS = [
+    re.compile(r'rola\s+a\s+bola', re.IGNORECASE),
+    re.compile(r'bola\s+rolando', re.IGNORECASE),
+    re.compile(r'come[cç]a\s+o\s+jogo', re.IGNORECASE),
+    re.compile(r'come[cç]a\s+a\s+partida', re.IGNORECASE),
+    re.compile(r'apito\s+inicial', re.IGNORECASE),
+    re.compile(r'bola\s+em\s+jogo', re.IGNORECASE),
+    re.compile(r'o\s+jogo\s+come[cç]ou', re.IGNORECASE),
+    re.compile(r'sa[ií]da\s+de\s+bola', re.IGNORECASE),
+    re.compile(r'pontap[eé]\s+inicial', re.IGNORECASE),
+    re.compile(r'primeiro\s+toque', re.IGNORECASE),
+    re.compile(r'come[cç]a\s+o\s+primeiro\s+tempo', re.IGNORECASE),
+    re.compile(r'bola\s+rolando\s+para\s+o\s+primeiro\s+tempo', re.IGNORECASE),
+]
+
+_GAME_END_PATTERNS = [
+    re.compile(r'fim\s+de\s+jogo', re.IGNORECASE),
+    re.compile(r'final\s+de\s+jogo', re.IGNORECASE),
+    re.compile(r'acabou\s+o\s+jogo', re.IGNORECASE),
+    re.compile(r'termina\s+a\s+partida', re.IGNORECASE),
+    re.compile(r'apito\s+final', re.IGNORECASE),
+    re.compile(r'encerra\s+o\s+jogo', re.IGNORECASE),
+    re.compile(r'termina\s+o\s+jogo', re.IGNORECASE),
+    re.compile(r'encerrada\s+a\s+partida', re.IGNORECASE),
+    re.compile(r'acabou\s+a\s+partida', re.IGNORECASE),
+    re.compile(r'terminou\s+o\s+jogo', re.IGNORECASE),
+    re.compile(r'termina\s+o\s+segundo\s+tempo', re.IGNORECASE),
+    re.compile(r'acabou\s+o\s+segundo\s+tempo', re.IGNORECASE),
+    re.compile(r'fim\s+do\s+segundo\s+tempo', re.IGNORECASE),
+]
+
 
 def _parse_srt_timestamp_to_seconds(ts: str) -> float:
     """Converte timestamp SRT (HH:MM:SS,mmm) para segundos."""
@@ -630,16 +661,41 @@ def _parse_srt_timestamp_to_seconds(ts: str) -> float:
         return 0.0
 
 
+def calculate_game_minute(video_second: float, boundaries: dict, game_start_minute: int = 0) -> tuple:
+    """
+    Converte segundo absoluto do vídeo para minuto de jogo.
+    
+    Usa os limites detectados:
+    - Se video_second >= second_half_start -> minuto do 2T (base 45)
+    - Senão -> minuto do 1T (base game_start_minute)
+    
+    Returns:
+        (minute, second) do jogo
+    """
+    game_start = boundaries.get('game_start_second', 0)
+    second_half_start = boundaries.get('second_half_start_second')
+    
+    if second_half_start and video_second >= second_half_start:
+        # Evento no 2T
+        elapsed = max(0, video_second - second_half_start)
+        return 45 + int(elapsed // 60), int(elapsed % 60)
+    
+    # Evento no 1T (ou sem deteccao de halves)
+    elapsed = max(0, video_second - game_start)
+    return game_start_minute + int(elapsed // 60), int(elapsed % 60)
+
+
 def detect_match_periods_from_transcription(
     transcription_text: str,
     video_duration_seconds: float = 0
 ) -> dict:
     """
-    Detecta periodos da partida (1T, 2T, prorrogacao) a partir da transcricao.
+    Detecta periodos da partida (inicio, 1T, 2T, fim, prorrogacao) a partir da transcricao.
     Busca padroes de narracao brasileira para encontrar marcadores de transicao.
 
     Returns:
-        dict com halftime_detected, halftime_index, extra_time_detected, confidence, markers_found
+        dict com halftime_detected, halftime_index, game_start_second, game_end_second,
+        second_half_start_second, extra_time_detected, confidence, markers_found
     """
     result = {
         'halftime_detected': False,
@@ -647,6 +703,10 @@ def detect_match_periods_from_transcription(
         'halftime_position': 0.0,
         'halftime_timestamp_seconds': None,
         'second_half_start_index': -1,
+        'second_half_start_second': None,
+        'game_start_second': None,
+        'game_end_second': None,
+        'first_half_duration_min': None,
         'extra_time_detected': False,
         'extra_time_index': -1,
         'extra_time_timestamp_seconds': None,
@@ -660,12 +720,43 @@ def detect_match_periods_from_transcription(
     text_len = len(transcription_text)
     is_srt = '-->' in transcription_text[:1000]
 
-    # Regiao de busca: halftime entre 25% e 75% do texto
+    # ═══════════════════════════════════════════════════════════════
+    # DETECTAR INÍCIO DO JOGO (primeiros 25% do texto)
+    # ═══════════════════════════════════════════════════════════════
+    game_start_search_end = int(text_len * 0.25)
+    game_start_region = transcription_text[:game_start_search_end]
+    game_start_matches = []
+    for pattern in _GAME_START_PATTERNS:
+        for m in pattern.finditer(game_start_region):
+            abs_pos = m.start()
+            game_start_matches.append({
+                'pattern': pattern.pattern,
+                'position': abs_pos / text_len,
+                'index': abs_pos,
+                'text': transcription_text[max(0, abs_pos - 30):abs_pos + 50],
+            })
+
+    if game_start_matches:
+        # Pegar a primeira ocorrência (mais cedo no texto)
+        best_start = min(game_start_matches, key=lambda m: m['index'])
+        result['markers_found'].append({'type': 'game_start', **best_start})
+
+        if is_srt:
+            ts_pat = re.compile(r'(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->')
+            before_text = transcription_text[max(0, best_start['index'] - 500):best_start['index'] + 100]
+            ts_matches = list(ts_pat.finditer(before_text))
+            if ts_matches:
+                last_ts = ts_matches[-1].group(1)
+                result['game_start_second'] = _parse_srt_timestamp_to_seconds(last_ts)
+                print(f"[PERIOD-DETECT] ⚽ Início do jogo detectado: {result['game_start_second']:.0f}s ({last_ts})")
+
+    # ═══════════════════════════════════════════════════════════════
+    # DETECTAR FIM DO 1T (halftime) - entre 25% e 75% do texto
+    # ═══════════════════════════════════════════════════════════════
     search_start = int(text_len * 0.25)
     search_end = int(text_len * 0.75)
     search_region = transcription_text[search_start:search_end]
 
-    # Buscar marcadores de fim do 1T
     halftime_matches = []
     for pattern in _HALFTIME_END_PATTERNS:
         for m in pattern.finditer(search_region):
@@ -686,7 +777,6 @@ def detect_match_periods_from_transcription(
         result['halftime_position'] = best['position']
         result['markers_found'].append({'type': 'halftime_end', **best})
 
-        # Se SRT, tentar extrair timestamp
         if is_srt:
             ts_pat = re.compile(r'(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->')
             before_text = transcription_text[max(0, best['index'] - 500):best['index']]
@@ -695,7 +785,15 @@ def detect_match_periods_from_transcription(
                 last_ts = ts_matches[-1].group(1)
                 result['halftime_timestamp_seconds'] = _parse_srt_timestamp_to_seconds(last_ts)
 
-    # Buscar marcadores de inicio do 2T (apos o halftime)
+        # Calcular duração real do 1T
+        if result['game_start_second'] is not None and result['halftime_timestamp_seconds'] is not None:
+            first_half_secs = result['halftime_timestamp_seconds'] - result['game_start_second']
+            result['first_half_duration_min'] = round(first_half_secs / 60, 1)
+            print(f"[PERIOD-DETECT] ⏱ Duração real do 1T: {result['first_half_duration_min']} min")
+
+    # ═══════════════════════════════════════════════════════════════
+    # DETECTAR INÍCIO DO 2T (após o halftime)
+    # ═══════════════════════════════════════════════════════════════
     if result['halftime_detected']:
         after_ht_start = result['halftime_index']
         after_ht_end = min(text_len, after_ht_start + int(text_len * 0.2))
@@ -713,9 +811,51 @@ def detect_match_periods_from_transcription(
                     'index': abs_pos,
                     'text': snippet,
                 })
+
+                # Extrair timestamp SRT do início do 2T
+                if is_srt:
+                    ts_pat = re.compile(r'(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->')
+                    before_text = transcription_text[max(0, abs_pos - 500):abs_pos + 100]
+                    ts_matches = list(ts_pat.finditer(before_text))
+                    if ts_matches:
+                        last_ts = ts_matches[-1].group(1)
+                        result['second_half_start_second'] = _parse_srt_timestamp_to_seconds(last_ts)
+                        print(f"[PERIOD-DETECT] ⚽ Início do 2T detectado: {result['second_half_start_second']:.0f}s ({last_ts})")
                 break
 
-    # Buscar prorrogacao (parte final, >70%)
+    # ═══════════════════════════════════════════════════════════════
+    # DETECTAR FIM DO JOGO (últimos 25% do texto)
+    # ═══════════════════════════════════════════════════════════════
+    game_end_search_start = int(text_len * 0.75)
+    game_end_region = transcription_text[game_end_search_start:]
+    game_end_matches = []
+    for pattern in _GAME_END_PATTERNS:
+        for m in pattern.finditer(game_end_region):
+            abs_pos = game_end_search_start + m.start()
+            game_end_matches.append({
+                'pattern': pattern.pattern,
+                'position': abs_pos / text_len,
+                'index': abs_pos,
+                'text': transcription_text[max(0, abs_pos - 30):abs_pos + 50],
+            })
+
+    if game_end_matches:
+        # Pegar a última ocorrência (mais tarde no texto)
+        best_end = max(game_end_matches, key=lambda m: m['index'])
+        result['markers_found'].append({'type': 'game_end', **best_end})
+
+        if is_srt:
+            ts_pat = re.compile(r'(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->')
+            before_text = transcription_text[max(0, best_end['index'] - 500):best_end['index'] + 100]
+            ts_matches = list(ts_pat.finditer(before_text))
+            if ts_matches:
+                last_ts = ts_matches[-1].group(1)
+                result['game_end_second'] = _parse_srt_timestamp_to_seconds(last_ts)
+                print(f"[PERIOD-DETECT] 🏁 Fim do jogo detectado: {result['game_end_second']:.0f}s ({last_ts})")
+
+    # ═══════════════════════════════════════════════════════════════
+    # DETECTAR PRORROGAÇÃO (parte final, >70%)
+    # ═══════════════════════════════════════════════════════════════
     extra_search_start = int(text_len * 0.70)
     extra_region = transcription_text[extra_search_start:]
     for pattern in _EXTRA_TIME_PATTERNS:
@@ -744,18 +884,25 @@ def detect_match_periods_from_transcription(
 
     # Calcular confianca
     confidence = 0.0
+    if result['game_start_second'] is not None:
+        confidence += 0.3
     if result['halftime_detected']:
-        confidence += 0.5
-        if result['second_half_start_index'] >= 0:
-            confidence += 0.3
-        if 0.35 <= result['halftime_position'] <= 0.65:
+        confidence += 0.3
+        if result['second_half_start_second'] is not None:
             confidence += 0.2
+        if 0.35 <= result['halftime_position'] <= 0.65:
+            confidence += 0.1
+    if result['game_end_second'] is not None:
+        confidence += 0.1
     result['confidence'] = min(confidence, 1.0)
 
     markers_count = len(result['markers_found'])
     print(f"[PERIOD-DETECT] {markers_count} marcadores encontrados. "
+          f"Game start: {result['game_start_second']}s, "
           f"Halftime: {'SIM' if result['halftime_detected'] else 'NAO'} "
           f"(pos={result['halftime_position']:.1%}), "
+          f"2T start: {result['second_half_start_second']}s, "
+          f"Game end: {result['game_end_second']}s, "
           f"Extra time: {'SIM' if result['extra_time_detected'] else 'NAO'}, "
           f"Confianca: {result['confidence']:.0%}")
 
@@ -1872,7 +2019,8 @@ def refine_event_timestamp_from_srt(
     srt_path: str,
     window_seconds: int = 30,
     video_game_start_second: int = 0,
-    game_start_minute: int = 0
+    game_start_minute: int = 0,
+    boundaries: dict = None
 ) -> Dict[str, Any]:
     """
     Refine event timestamp by finding the exact keyword in SRT.
@@ -1942,10 +2090,15 @@ def refine_event_timestamp_from_srt(
         if best_match:
             original_time = f"{ai_minute}:{ai_second:02d}"
             
-            # Calcular minuto de jogo descontando offset de pré-jogo
-            game_second = max(0, best_match['srt_seconds'] - video_game_start_second)
-            refined_minute = game_start_minute + (game_second // 60)
-            refined_second = game_second % 60
+            # Usar boundaries se disponível, senão fallback para offset simples
+            if boundaries and (boundaries.get('game_start_second') is not None or boundaries.get('second_half_start_second') is not None):
+                refined_minute, refined_second = calculate_game_minute(
+                    best_match['srt_seconds'], boundaries, game_start_minute
+                )
+            else:
+                game_second = max(0, best_match['srt_seconds'] - video_game_start_second)
+                refined_minute = game_start_minute + (game_second // 60)
+                refined_second = game_second % 60
             new_time = f"{refined_minute}:{refined_second:02d}"
             
             event['minute'] = refined_minute
@@ -1955,7 +2108,7 @@ def refine_event_timestamp_from_srt(
             event['refinement_method'] = 'keyword'
             event['refinement_delta'] = best_distance
             
-            print(f"[AI] 🎯 Refinado {event_type}: {original_time} → {new_time} (Δ{best_distance}s, keyword: {best_match['keyword']}, offset={video_game_start_second}s)")
+            print(f"[AI] 🎯 Refinado {event_type}: {original_time} → {new_time} (Δ{best_distance}s, keyword: {best_match['keyword']}, boundaries={bool(boundaries)})")
         
     except Exception as e:
         print(f"[AI] ⚠ Erro ao refinar timestamp: {e}")
@@ -4861,7 +5014,8 @@ def detect_events_by_keywords_from_text(
     away_team: str,
     game_start_minute: int = 0,
     video_duration: float = None,
-    video_game_start_second: int = 0
+    video_game_start_second: int = 0,
+    boundaries: dict = None
 ) -> List[Dict[str, Any]]:
     """
     Detecta eventos por keywords em texto bruto (não-SRT).
@@ -4907,11 +5061,16 @@ def detect_events_by_keywords_from_text(
             secs = int(groups[4])
         
         total_seconds = hours * 3600 + mins * 60 + secs
-        # Calcular minuto de jogo descontando offset de pré-jogo
-        game_second = max(0, total_seconds - video_game_start_second)
+        # Usar boundaries se disponível, senão fallback para offset simples
+        if boundaries and (boundaries.get('game_start_second') is not None or boundaries.get('second_half_start_second') is not None):
+            calc_minute, calc_second = calculate_game_minute(total_seconds, boundaries, game_start_minute)
+        else:
+            game_second = max(0, total_seconds - video_game_start_second)
+            calc_minute = game_start_minute + (game_second // 60)
+            calc_second = game_second % 60
         timestamp_map[position] = {
-            'minute': game_start_minute + (game_second // 60),
-            'second': game_second % 60,
+            'minute': calc_minute,
+            'second': calc_second,
             'videoSecond': total_seconds  # absoluto para seek no player
         }
     
@@ -5289,7 +5448,8 @@ Formato obrigatório:
                     away_team=away_team,
                     game_start_minute=game_start_minute,
                     video_duration=None,
-                    video_game_start_second=video_game_start_second
+                    video_game_start_second=video_game_start_second,
+                    boundaries=boundaries
                 )
                 print(f"[Ollama] Detecção por keywords: {len(keyword_events)} eventos encontrados")
                 return keyword_events
@@ -5408,7 +5568,8 @@ Formato obrigatório:
                             away_team=away_team,
                             game_start_minute=game_start_minute,
                             video_duration=None,
-                            video_game_start_second=video_game_start_second
+                            video_game_start_second=video_game_start_second,
+                            boundaries=boundaries
                         )
                 except Exception as e:
                     print(f"[Ollama] Erro ao buscar SRT: {e}, usando texto bruto...")
@@ -5418,7 +5579,8 @@ Formato obrigatório:
                         away_team=away_team,
                         game_start_minute=game_start_minute,
                         video_duration=None,
-                        video_game_start_second=video_game_start_second
+                        video_game_start_second=video_game_start_second,
+                        boundaries=boundaries
                     )
             else:
                 # Sem match_id, usar texto bruto
@@ -5428,7 +5590,8 @@ Formato obrigatório:
                     away_team=away_team,
                     game_start_minute=game_start_minute,
                     video_duration=None,
-                    video_game_start_second=video_game_start_second
+                    video_game_start_second=video_game_start_second,
+                    boundaries=boundaries
                 )
             
             # Merge eventos novos (deduplicação)
@@ -5540,7 +5703,8 @@ def analyze_match_events(
     match_id: str = None,
     use_dual_verification: bool = True,
     settings: Dict[str, str] = None,
-    video_game_start_second: int = 0
+    video_game_start_second: int = 0,
+    boundaries: dict = None
 ) -> List[Dict[str, Any]]:
     """
     Analyze match transcription to extract events using dual AI verification.
@@ -5708,7 +5872,8 @@ def analyze_match_events(
                                 home_team=home_team,
                                 away_team=away_team,
                                 game_start_minute=game_start_minute,
-                                video_game_start_second=video_game_start_second
+                                video_game_start_second=video_game_start_second,
+                                boundaries=boundaries
                             )
                             
                             keyword_goals = [e for e in keyword_events if e.get('event_type') == 'goal']
