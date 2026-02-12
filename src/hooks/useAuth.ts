@@ -5,7 +5,10 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import { apiClient, buildApiUrl } from '@/lib/apiClient';
-import { getApiBase } from '@/lib/apiMode';
+import { getApiBase, getDiscoveredServer } from '@/lib/apiMode';
+
+/** Prefer discovered server over potentially stale arena_api_base */
+const getAuthBase = () => getDiscoveredServer() || getApiBase();
 
 export type AppRole = 'superadmin' | 'org_admin' | 'manager' | 'uploader' | 'viewer' | 'admin' | 'user';
 
@@ -127,7 +130,7 @@ export function useAuth() {
       
       try {
         // Verificar se o token ainda é válido chamando /api/auth/me
-        const response = await fetch(buildApiUrl(getApiBase(), '/api/auth/me'), {
+        const response = await fetch(buildApiUrl(getAuthBase(), '/api/auth/me'), {
           headers: {
             'Authorization': `Bearer ${token}`,
             'Accept': 'application/json',
@@ -187,7 +190,7 @@ export function useAuth() {
     }
   ): Promise<{ data: any; error: { message: string } | null }> => {
     try {
-      const response = await fetch(buildApiUrl(getApiBase(), '/api/auth/register'), {
+      const response = await fetch(buildApiUrl(getAuthBase(), '/api/auth/register'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -225,7 +228,7 @@ export function useAuth() {
     password: string
   ): Promise<{ data: any; error: { message: string } | null }> => {
     try {
-      const response = await fetch(buildApiUrl(getApiBase(), '/api/auth/login'), {
+      const response = await fetch(buildApiUrl(getAuthBase(), '/api/auth/login'), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -269,7 +272,7 @@ export function useAuth() {
       
       if (token) {
         // Tentar invalidar sessão no servidor
-        await fetch(buildApiUrl(getApiBase(), '/api/auth/logout'), {
+        await fetch(buildApiUrl(getAuthBase(), '/api/auth/logout'), {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${token}`,
