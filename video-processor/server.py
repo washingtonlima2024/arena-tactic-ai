@@ -3603,6 +3603,7 @@ def analyze_match():
     auto_clip = data.get('autoClip', True)  # Corte automático de clips
     include_subtitles = data.get('includeSubtitles', True)
     skip_validation = data.get('skipValidation', False)  # Allow bypassing validation
+    video_game_start_second_override = data.get('videoGameStartSecond', None)  # Override manual do offset
     
     # NOVO: Modo de análise - 'text' (transcrição), 'vision' (visual), 'hybrid' (ambos)
     analysis_mode = data.get('analysisMode', 'text')  # default: 'text' para backward compatibility
@@ -3810,6 +3811,31 @@ def analyze_match():
                 print(f"[ANALYZE-MATCH] ⚠ Arquivos SRT disponíveis: {[f.name for f in available_srts]}")
             
             # ═══════════════════════════════════════════════════════════════
+            # CALCULAR VIDEO OFFSET (pré-jogo)
+            # ═══════════════════════════════════════════════════════════════
+            video_game_start_second = 0
+            
+            # Override manual do frontend tem prioridade
+            if video_game_start_second_override is not None:
+                video_game_start_second = int(video_game_start_second_override)
+                print(f"[ANALYZE-MATCH] 📐 Video offset (override manual): {video_game_start_second}s")
+            else:
+                try:
+                    session_voffset = get_session()
+                    videos_for_offset = session_voffset.query(Video).filter_by(match_id=match_id).all()
+                    for v in videos_for_offset:
+                        vtype = v.video_type or 'full'
+                        if (half_type == 'first' and vtype in ['first_half', 'full']) or \
+                           (half_type == 'second' and vtype in ['second_half', 'full']):
+                            v_start = v.start_minute or 0
+                            video_game_start_second = v_start * 60
+                            print(f"[ANALYZE-MATCH] 📐 Video offset (auto): {video_game_start_second}s (start_minute={v_start}, type={vtype})")
+                            break
+                    session_voffset.close()
+                except Exception as offset_err:
+                    print(f"[ANALYZE-MATCH] ⚠ Erro ao calcular offset: {offset_err}")
+            
+            # ═══════════════════════════════════════════════════════════════
             # PRIORIDADE ÚNICA: Análise por IA (mais confiável, menos duplicatas)
             # ═══════════════════════════════════════════════════════════════
             print(f"[ANALYZE-MATCH] 🤖 Usando análise de IA (modo: {analysis_mode})...")
@@ -3819,7 +3845,8 @@ def analyze_match():
                     transcription, home_team, away_team, game_start_minute, game_end_minute,
                     match_id=match_id,
                     use_dual_verification=(analysis_mode == 'text'),
-                    settings=local_settings
+                    settings=local_settings,
+                    video_game_start_second=video_game_start_second
                 )
                 events = ai_events or []
             except Exception as ai_err:
@@ -3998,10 +4025,13 @@ def analyze_match():
                     continue
                 
                 # Calculate videoSecond for precise clip extraction
+                # Preferir videoSecond já calculado pelo ai_services (com offset correto)
                 original_minute = event_data.get('minute', 0)
-                # videoSecond is the position in the video file (relative to segment start)
-                video_second = (original_minute - segment_start_minute) * 60 + event_second
-                print(f"[ANALYZE-MATCH] ⏱️ Evento {event_data.get('event_type')}: {original_minute}:{event_second:02d} → videoSecond={video_second}")
+                video_second = event_data.get('videoSecond')
+                if video_second is None or video_second == 0:
+                    # Fallback: calcular a partir do minuto se ai_services não forneceu
+                    video_second = (original_minute - segment_start_minute) * 60 + event_second
+                print(f"[ANALYZE-MATCH] ⏱️ Evento {event_data.get('event_type')}: min={original_minute} raw_min={raw_minute} → videoSecond={video_second}")
                 
                 event = MatchEvent(
                     match_id=match_id,
