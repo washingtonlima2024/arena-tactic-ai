@@ -1870,7 +1870,9 @@ EVENT_KEYWORDS = {
 def refine_event_timestamp_from_srt(
     event: Dict[str, Any],
     srt_path: str,
-    window_seconds: int = 30
+    window_seconds: int = 30,
+    video_game_start_second: int = 0,
+    game_start_minute: int = 0
 ) -> Dict[str, Any]:
     """
     Refine event timestamp by finding the exact keyword in SRT.
@@ -1939,16 +1941,21 @@ def refine_event_timestamp_from_srt(
         # Update event if we found a better timestamp
         if best_match:
             original_time = f"{ai_minute}:{ai_second:02d}"
-            new_time = f"{best_match['srt_minute']}:{best_match['srt_second']:02d}"
             
-            event['minute'] = best_match['srt_minute']
-            event['second'] = best_match['srt_second']
-            event['videoSecond'] = best_match['srt_seconds']
+            # Calcular minuto de jogo descontando offset de pré-jogo
+            game_second = max(0, best_match['srt_seconds'] - video_game_start_second)
+            refined_minute = game_start_minute + (game_second // 60)
+            refined_second = game_second % 60
+            new_time = f"{refined_minute}:{refined_second:02d}"
+            
+            event['minute'] = refined_minute
+            event['second'] = refined_second
+            event['videoSecond'] = best_match['srt_seconds']  # absoluto para seek
             event['refined'] = True
             event['refinement_method'] = 'keyword'
             event['refinement_delta'] = best_distance
             
-            print(f"[AI] 🎯 Refinado {event_type}: {original_time} → {new_time} (Δ{best_distance}s, keyword: {best_match['keyword']})")
+            print(f"[AI] 🎯 Refinado {event_type}: {original_time} → {new_time} (Δ{best_distance}s, keyword: {best_match['keyword']}, offset={video_game_start_second}s)")
         
     except Exception as e:
         print(f"[AI] ⚠ Erro ao refinar timestamp: {e}")
@@ -4853,12 +4860,14 @@ def detect_events_by_keywords_from_text(
     home_team: str,
     away_team: str,
     game_start_minute: int = 0,
-    video_duration: float = None
+    video_duration: float = None,
+    video_game_start_second: int = 0
 ) -> List[Dict[str, Any]]:
     """
     Detecta eventos por keywords em texto bruto (não-SRT).
     
     MELHORADO: Usa mapa de timestamps para associar keywords ao tempo correto.
+    Usa video_game_start_second para calcular minuto de jogo corretamente.
     
     Args:
         transcription: Texto bruto da transcrição
@@ -4866,6 +4875,7 @@ def detect_events_by_keywords_from_text(
         away_team: Time visitante
         game_start_minute: Minuto inicial (0 ou 45)
         video_duration: Duração do vídeo em segundos (para validação)
+        video_game_start_second: Segundo do vídeo onde o jogo realmente começa (offset pré-jogo)
     
     Returns:
         Lista de eventos detectados com timestamps
@@ -4897,10 +4907,12 @@ def detect_events_by_keywords_from_text(
             secs = int(groups[4])
         
         total_seconds = hours * 3600 + mins * 60 + secs
+        # Calcular minuto de jogo descontando offset de pré-jogo
+        game_second = max(0, total_seconds - video_game_start_second)
         timestamp_map[position] = {
-            'minute': game_start_minute + mins + (hours * 60),
-            'second': secs,
-            'videoSecond': total_seconds
+            'minute': game_start_minute + (game_second // 60),
+            'second': game_second % 60,
+            'videoSecond': total_seconds  # absoluto para seek no player
         }
     
     print(f"[Keywords-Text] Mapa de timestamps: {len(timestamp_map)} encontrados")
@@ -5276,7 +5288,8 @@ Formato obrigatório:
                     home_team=home_team,
                     away_team=away_team,
                     game_start_minute=game_start_minute,
-                    video_duration=None  # Sem duração disponível neste contexto
+                    video_duration=None,
+                    video_game_start_second=video_game_start_second
                 )
                 print(f"[Ollama] Detecção por keywords: {len(keyword_events)} eventos encontrados")
                 return keyword_events
@@ -5394,7 +5407,8 @@ Formato obrigatório:
                             home_team=home_team,
                             away_team=away_team,
                             game_start_minute=game_start_minute,
-                            video_duration=None
+                            video_duration=None,
+                            video_game_start_second=video_game_start_second
                         )
                 except Exception as e:
                     print(f"[Ollama] Erro ao buscar SRT: {e}, usando texto bruto...")
@@ -5403,7 +5417,8 @@ Formato obrigatório:
                         home_team=home_team,
                         away_team=away_team,
                         game_start_minute=game_start_minute,
-                        video_duration=None
+                        video_duration=None,
+                        video_game_start_second=video_game_start_second
                     )
             else:
                 # Sem match_id, usar texto bruto
@@ -5412,7 +5427,8 @@ Formato obrigatório:
                     home_team=home_team,
                     away_team=away_team,
                     game_start_minute=game_start_minute,
-                    video_duration=None
+                    video_duration=None,
+                    video_game_start_second=video_game_start_second
                 )
             
             # Merge eventos novos (deduplicação)
@@ -5523,7 +5539,8 @@ def analyze_match_events(
     max_retries: int = 3,
     match_id: str = None,
     use_dual_verification: bool = True,
-    settings: Dict[str, str] = None
+    settings: Dict[str, str] = None,
+    video_game_start_second: int = 0
 ) -> List[Dict[str, Any]]:
     """
     Analyze match transcription to extract events using dual AI verification.
@@ -5690,7 +5707,8 @@ def analyze_match_events(
                                 transcription=transcription,
                                 home_team=home_team,
                                 away_team=away_team,
-                                game_start_minute=game_start_minute
+                                game_start_minute=game_start_minute,
+                                video_game_start_second=video_game_start_second
                             )
                             
                             keyword_goals = [e for e in keyword_events if e.get('event_type') == 'goal']
