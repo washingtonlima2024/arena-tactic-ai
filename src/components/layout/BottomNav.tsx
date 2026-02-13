@@ -3,7 +3,7 @@ import { Home, Video, Radio, Calendar, Menu } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useIsMobile } from '@/hooks/use-mobile';
 
-const MATCH_CONTEXT_PAGES = ['/events', '/analysis', '/media', '/audio', '/field', '/dashboard'];
+const MATCH_CONTEXT_PAGES = ['/events', '/analysis', '/media', '/audio', '/field', '/dashboard', '/match-center'];
 
 const navItems = [
   { icon: Home, label: 'Início', path: '/home' },
