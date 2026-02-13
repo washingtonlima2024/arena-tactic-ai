@@ -21,6 +21,7 @@ import { MatchCenterHeader } from '@/components/match-center/MatchCenterHeader';
 import { FuturisticVideoPlayer } from '@/components/match-center/FuturisticVideoPlayer';
 import { EventsFeed } from '@/components/match-center/EventsFeed';
 import { ClipsGallery } from '@/components/match-center/ClipsGallery';
+import { PlaylistBuilder } from '@/components/match-center/PlaylistBuilder';
 import { MatchAnalyticsSection } from '@/components/match-center/MatchAnalyticsSection';
 import { FanForumSection } from '@/components/match-center/FanForumSection';
 
@@ -244,6 +245,9 @@ export default function MatchCenter() {
 
         {/* 4. Clips Gallery */}
         <ClipsGallery events={events} thumbnails={thumbnails} onPlayClip={handlePlayClip} />
+
+        {/* 4.5. Playlist Builder */}
+        <PlaylistBuilder events={events} thumbnails={thumbnails} matchId={currentMatchId} />
 
         {/* 5. Analytics & Stats */}
         <MatchAnalyticsSection
