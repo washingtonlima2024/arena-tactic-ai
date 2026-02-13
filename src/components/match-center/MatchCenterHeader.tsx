@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Badge } from '@/components/ui/badge';
 import { Trophy, Calendar, MapPin } from 'lucide-react';
 import { normalizeStorageUrl } from '@/lib/apiClient';
@@ -20,35 +21,37 @@ interface MatchCenterHeaderProps {
   totalEvents: number;
 }
 
-export function MatchCenterHeader({
-  homeTeamName, awayTeamName, homeTeamShort, awayTeamShort,
-  homeTeamColor, awayTeamColor, homeTeamLogo, awayTeamLogo,
-  homeScore, awayScore, competition, matchDate, venue, totalEvents
-}: MatchCenterHeaderProps) {
-  const renderTeamBadge = (
-    name: string, short: string | undefined, color: string, logo: string | null | undefined, side: 'home' | 'away'
-  ) => (
+function HeaderTeamBadge({ name, short, color, logo }: {
+  name: string; short?: string; color: string; logo?: string | null;
+}) {
+  const [imgError, setImgError] = useState(false);
+  const normalizedLogo = logo ? normalizeStorageUrl(logo) : null;
+  const hasLogo = normalizedLogo && !imgError;
+
+  return (
     <div className="flex flex-col items-center gap-3">
       <div
         className={cn(
-          "w-20 h-20 md:w-24 md:h-24 rounded-full flex items-center justify-center text-3xl font-black border-[3px] overflow-hidden",
+          "w-20 h-20 md:w-24 md:h-24 rounded-full flex items-center justify-center overflow-hidden border-[3px]",
           "shadow-[0_0_20px_rgba(0,0,0,0.3)] transition-all duration-500"
         )}
         style={{
           borderColor: color,
-          backgroundColor: `${color}15`,
+          backgroundColor: hasLogo ? '#000000' : color,
           boxShadow: `0 0 25px ${color}40, inset 0 0 15px ${color}10`,
         }}
       >
-        {logo ? (
+        {hasLogo ? (
           <img
-            src={normalizeStorageUrl(logo) || ''}
+            src={normalizedLogo || ''}
             alt={name}
             className="w-16 h-16 md:w-20 md:h-20 object-contain"
-            onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
+            onError={() => setImgError(true)}
           />
         ) : (
-          <span style={{ color }}>{name.charAt(0)}</span>
+          <span className="text-3xl font-black text-white">
+            {(short || name).slice(0, 3).toUpperCase()}
+          </span>
         )}
       </div>
       <span className="font-bold text-sm md:text-base tracking-wide text-foreground">
@@ -56,6 +59,13 @@ export function MatchCenterHeader({
       </span>
     </div>
   );
+}
+
+export function MatchCenterHeader({
+  homeTeamName, awayTeamName, homeTeamShort, awayTeamShort,
+  homeTeamColor, awayTeamColor, homeTeamLogo, awayTeamLogo,
+  homeScore, awayScore, competition, matchDate, venue, totalEvents
+}: MatchCenterHeaderProps) {
 
   return (
     <header
@@ -70,7 +80,7 @@ export function MatchCenterHeader({
       />
 
       <div className="flex items-center justify-center gap-6 md:gap-12">
-        {renderTeamBadge(homeTeamName, homeTeamShort, homeTeamColor, homeTeamLogo, 'home')}
+        <HeaderTeamBadge name={homeTeamName} short={homeTeamShort} color={homeTeamColor} logo={homeTeamLogo} />
 
         {/* Score */}
         <div className="flex items-center gap-3 md:gap-5">
@@ -94,7 +104,7 @@ export function MatchCenterHeader({
           </span>
         </div>
 
-        {renderTeamBadge(awayTeamName, awayTeamShort, awayTeamColor, awayTeamLogo, 'away')}
+        <HeaderTeamBadge name={awayTeamName} short={awayTeamShort} color={awayTeamColor} logo={awayTeamLogo} />
       </div>
 
       {/* Match info */}
