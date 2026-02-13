@@ -37,8 +37,22 @@ function parseSrt(srt: string): SrtBlock[] {
     if (!timeMatch) continue;
     const start = +timeMatch[1]*3600 + +timeMatch[2]*60 + +timeMatch[3] + +timeMatch[4]/1000;
     const end = +timeMatch[5]*3600 + +timeMatch[6]*60 + +timeMatch[7] + +timeMatch[8]/1000;
-    const text = lines.slice(2).join(' ').replace(/<[^>]*>/g, '');
-    blocks.push({ start, end, text });
+    const rawText = lines.slice(2).join(' ').replace(/<[^>]*>/g, '').trim();
+    // Split long text into sentences and create sub-blocks with evenly distributed time
+    const sentences = rawText.split(/(?<=[.!?])\s+/).filter(s => s.length > 0);
+    if (sentences.length <= 1) {
+      blocks.push({ start, end, text: rawText });
+    } else {
+      const duration = end - start;
+      const sliceDur = duration / sentences.length;
+      sentences.forEach((sentence, i) => {
+        blocks.push({
+          start: start + i * sliceDur,
+          end: start + (i + 1) * sliceDur,
+          text: sentence,
+        });
+      });
+    }
   }
   return blocks;
 }
@@ -149,9 +163,9 @@ export function FuturisticVideoPlayer({
 
             {/* SRT Subtitle overlay */}
             {subtitle && (
-              <div className="absolute bottom-16 left-1/2 -translate-x-1/2 max-w-[85%] pointer-events-none">
-                <div className="bg-black/75 backdrop-blur-sm px-4 py-2 rounded-lg">
-                  <p className="text-white text-sm md:text-base text-center leading-relaxed font-medium">
+              <div className="absolute bottom-16 left-1/2 -translate-x-1/2 max-w-[80%] pointer-events-none">
+                <div className="bg-black/80 backdrop-blur-sm px-4 py-1.5 rounded-md">
+                  <p className="text-white text-sm text-center leading-snug font-medium line-clamp-2">
                     {subtitle}
                   </p>
                 </div>
