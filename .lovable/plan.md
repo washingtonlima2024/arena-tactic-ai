@@ -1,98 +1,186 @@
 
-# Corrigir URLs Quebradas das Logos de Times
 
-## Causa Raiz
+# Auto-Download de Logos com Cache Local e Fontes Alternativas
 
-A funcao `buildLogoUrl` na edge function `fetch-football-logos` constroi URLs usando o hash completo (72 caracteres) do campo `h` dos Astro props. Porem, o site football-logos.cc usa apenas **8 caracteres** do hash, especificamente `hash.slice(32, 40)` para imagens 256x256.
+## Resumo
 
-**URL gerada (quebrada):**
-`brazil-national-team.52842f3d85d32216caceec49004213f2fd8ca234b1d7c3ce33ef5cfe6843ffa0da85c6e1.png`
+Criar um sistema que automaticamente busca, baixa e armazena logos de times no storage local (`video-processor/storage/logos/`), usando o nome do time como identificador para evitar downloads duplicados. Adicionar fontes alternativas alem do football-logos.cc para cobrir selecoes nacionais e times nao encontrados.
 
-**URL correta (funciona):**
-`brazil-national-team.fd8ca234.png` (caracteres 32-39 do hash)
+## Alteracoes
 
-O hash completo na verdade contem os hashes de cada tamanho concatenados em blocos de 8 caracteres:
-- index 0 (3000): `hash.slice(0,8)`
-- index 1 (1500): `hash.slice(8,16)`
-- index 2 (700): `hash.slice(16,24)`
-- index 3 (512): `hash.slice(24,32)`
-- index 4 (256): `hash.slice(32,40)` -- este e o que precisamos
-- index 5 (128): `hash.slice(40,48)`
-- index 6 (64): `hash.slice(48,56)`
-- index 7 (svg): `hash.slice(64,72)`
+### 1. Novo arquivo: `src/lib/autoTeamLogo.ts`
 
-## Correcao
+Funcao utilitaria reutilizavel que:
 
-### 1. `supabase/functions/fetch-football-logos/index.ts` - Corrigir `buildLogoUrl`
+- Recebe nome do time e retorna `{ logoUrl, shortName } | null`
+- **Verifica cache local primeiro**: checa se ja existe arquivo em `storage/logos/{nome-normalizado}.png` via `GET /api/storage/teams/logos/{slug}.png` (HEAD request para verificar existencia)
+- Se ja existe, retorna URL local sem baixar novamente
+- Se nao existe, busca em multiplas fontes na ordem:
+  1. `fetch-football-logos` (football-logos.cc) - busca em brazil, argentina, portugal, spain, england, italy, germany, france
+  2. **API alternativa**: Wikipedia/Wikimedia Commons via URL previsivel para selecoes e clubes famosos
+  3. **Fallback**: Logo Clearbit (`https://logo.clearbit.com/{domain}`) para times com site oficial
+- Ao encontrar, baixa como blob e faz upload via `apiClient.uploadBlob('teams', 'logos', blob, '{slug}.png')`
+- Retorna URL local armazenada
 
-Alterar a funcao de construcao de URL para usar o slice correto do hash:
-
-**Antes:**
 ```typescript
-function buildLogoUrl(categoryId: string, id: string, hash: string): string {
-  return `https://assets.football-logos.cc/logos/${categoryId}/256x256/${id}.${hash}.png`;
+export async function autoFetchTeamLogo(teamName: string): Promise<{
+  logoUrl: string;
+  shortName: string | null;
+} | null> {
+  const slug = normalizeSlug(teamName);
+  
+  // 1. Verificar se ja existe localmente
+  try {
+    const checkUrl = buildApiUrl(getApiBase(), `/api/storage/teams/logos/${slug}.png`);
+    const headResp = await fetch(checkUrl, { method: 'HEAD' });
+    if (headResp.ok) {
+      return { logoUrl: checkUrl, shortName: null };
+    }
+  } catch {}
+  
+  // 2. Buscar no football-logos.cc via edge function
+  const countries = ['brazil', 'argentina', 'portugal', 'spain', 'england', ...];
+  for (const country of countries) {
+    const { data } = await supabase.functions.invoke('fetch-football-logos', {
+      body: { mode: 'search', country, query: teamName },
+    });
+    if (data?.success && data.logos?.length > 0) {
+      const best = findBestMatch(teamName, data.logos);
+      if (best) {
+        const localUrl = await downloadAndStore(best.logoUrl, slug);
+        return { logoUrl: localUrl, shortName: best.shortName };
+      }
+    }
+  }
+  
+  // 3. Tentar fontes alternativas (Wikipedia, etc)
+  const altUrl = await tryAlternativeSources(teamName, slug);
+  if (altUrl) return { logoUrl: altUrl, shortName: null };
+  
+  return null;
 }
 ```
 
-**Depois:**
+### 2. Modificar `supabase/functions/fetch-football-logos/index.ts`
+
+Adicionar um modo `'national'` que busca logos de selecoes nacionais. O site football-logos.cc ja tem selecoes listadas junto com clubes, mas adicionar tambem busca direta por nomes como "Brasil", "Argentina", "Selecao Brasileira" mapeando para o slug correto.
+
+Adicionar mapeamento de nomes comuns de selecoes:
 ```typescript
-function buildLogoUrl(categoryId: string, id: string, hash: string): string {
-  // O hash completo contem hashes por tamanho em blocos de 8 chars
-  // 256x256 esta no index 4 -> slice(32, 40)
-  const shortHash = hash.slice(32, 40);
-  return `https://assets.football-logos.cc/logos/${categoryId}/256x256/${id}.${shortHash}.png`;
+const NATIONAL_TEAM_ALIASES: Record<string, string> = {
+  'brasil': 'brazil-national-team',
+  'selecao brasileira': 'brazil-national-team',
+  'argentina': 'argentina-national-team',
+  'selecao argentina': 'argentina-national-team',
+  // ... mais selecoes
+};
+```
+
+### 3. Modificar `src/hooks/useTeams.ts` - `useCreateTeam`
+
+No `onSuccess`, disparar `autoFetchTeamLogo` em background (nao-bloqueante):
+
+```typescript
+onSuccess: async (newTeam) => {
+  queryClient.invalidateQueries({ queryKey: ['teams'] });
+  
+  if (newTeam?.name && !newTeam?.logo_url) {
+    autoFetchTeamLogo(newTeam.name).then(async (result) => {
+      if (result) {
+        await apiClient.updateTeam(newTeam.id, {
+          logo_url: result.logoUrl,
+          short_name: result.shortName || newTeam.short_name,
+        });
+        queryClient.invalidateQueries({ queryKey: ['teams'] });
+      }
+    }).catch(console.warn);
+  }
 }
 ```
 
-Tambem remover a propriedade `countryName` duplicada no objeto de retorno de `fetchLogos` (linha 178 tem `countryName` duas vezes).
+Isso cobre automaticamente:
+- SmartImport (que chama `createTeamMutation.mutateAsync`)
+- Criacao manual de time
+- Qualquer outro lugar que use `useCreateTeam`
 
-### 2. `src/components/teams/TeamBadge.tsx` - Fallback com cor do time
+### 4. Modificar `src/components/teams/BulkImportTeamsDialog.tsx`
 
-Adicionar estado `imgError` para que, se a logo falhar ao carregar, mostre um circulo com a cor primaria do time e as iniciais:
+Na funcao `handleImport`, baixar cada logo para storage local antes de importar:
 
 ```typescript
-const [imgError, setImgError] = useState(false);
-
-if (logoUrl && !imgError) {
-  return (
-    <img 
-      src={logoUrl} 
-      alt={team.name}
-      onError={() => setImgError(true)}
-      className={...}
-    />
-  );
+for (const l of selected) {
+  let logoUrl = l.logoUrl;
+  try {
+    const slug = l.slug || l.name.toLowerCase().replace(/\s+/g, '-');
+    // Verificar se ja existe
+    const checkResp = await fetch(
+      buildApiUrl(getApiBase(), `/api/storage/teams/logos/${slug}.png`),
+      { method: 'HEAD' }
+    );
+    if (checkResp.ok) {
+      logoUrl = buildApiUrl(getApiBase(), `/api/storage/teams/logos/${slug}.png`);
+    } else {
+      const resp = await fetch(l.logoUrl);
+      const blob = await resp.blob();
+      const result = await apiClient.uploadBlob('teams', 'logos', blob, `${slug}.png`);
+      logoUrl = result.url;
+    }
+  } catch { /* fallback: URL externa */ }
+  
+  teamsToImport.push({ name: l.name, short_name: l.shortName, logo_url: logoUrl });
 }
-// Fallback existente com circulo colorido + iniciais
 ```
 
-### 3. `src/components/teams/TeamCard.tsx` - Fallback com cor do time
+### 5. Modificar `src/components/teams/LogoSearchDialog.tsx`
 
-Adicionar estado `imgError` para que a logo quebrada mostre as iniciais com cor:
+No `onSelect`, baixar logo para storage local:
 
 ```typescript
-const [imgError, setImgError] = useState(false);
-
-{team.logo_url && !imgError ? (
-  <img 
-    src={team.logo_url} 
-    alt={team.name}
-    onError={() => setImgError(true)}
-    className="h-12 w-12 object-contain"
-  />
-) : (
-  team.short_name?.slice(0, 2) || team.name.slice(0, 2)
-)}
+const handleSelect = async (logo: LogoResult) => {
+  try {
+    const slug = logo.slug || logo.name.toLowerCase().replace(/\s+/g, '-');
+    const response = await fetch(logo.logoUrl);
+    const blob = await response.blob();
+    const result = await apiClient.uploadBlob('teams', 'logos', blob, `${slug}.png`);
+    onSelect({ name: logo.name, shortName: logo.shortName, logoUrl: result.url });
+  } catch {
+    onSelect({ name: logo.name, shortName: logo.shortName, logoUrl: logo.logoUrl });
+  }
+  onOpenChange(false);
+};
 ```
 
-## Resultado
+### 6. Endpoint no servidor Python (video-processor/server.py)
 
-- Todas as URLs de logo vao funcionar corretamente (hash de 8 chars)
-- Logos existentes que ainda estao com URL antiga vao mostrar fallback com cor do time
-- Novos imports vao usar URLs corretas
+O endpoint `POST /api/storage/<match_id>/<subfolder>` ja funciona para qualquer `match_id`. Usando `match_id='teams'` e `subfolder='logos'`, os arquivos ficam em `storage/teams/logos/`. Nao precisa de alteracao no servidor -- o endpoint generico ja suporta isso.
 
-## Arquivos a Modificar
+## Fontes de Logo (ordem de prioridade)
 
-1. **`supabase/functions/fetch-football-logos/index.ts`** - Corrigir `buildLogoUrl` (1 linha)
-2. **`src/components/teams/TeamBadge.tsx`** - Adicionar `onError` fallback
-3. **`src/components/teams/TeamCard.tsx`** - Adicionar `onError` fallback
+1. **Cache local** (`storage/teams/logos/{slug}.png`) - verificacao HEAD antes de qualquer busca
+2. **football-logos.cc** (via edge function existente) - clubes e selecoes de 180+ paises
+3. **Wikipedia/Wikimedia** - URLs previsiveis para selecoes (`https://upload.wikimedia.org/...`) 
+4. **Fallback UI** - circulo com cor primaria do time + iniciais (ja implementado)
+
+## Fluxo SmartImport (exemplo)
+
+```text
+1. SmartImport detecta "Flamengo vs Palmeiras"
+2. createTeamMutation("Flamengo") -> time criado sem logo
+3. [background] autoFetchTeamLogo("Flamengo")
+   -> HEAD /api/storage/teams/logos/flamengo.png -> 404
+   -> busca football-logos.cc/brazil?query=flamengo -> encontra!
+   -> fetch imagem -> upload para storage/teams/logos/flamengo.png
+   -> updateTeam(logo_url: "/api/storage/teams/logos/flamengo.png")
+4. Proximo import com "Flamengo":
+   -> HEAD /api/storage/teams/logos/flamengo.png -> 200 (ja existe!)
+   -> usa URL local sem baixar novamente
+```
+
+## Arquivos a Criar/Modificar
+
+1. **NOVO: `src/lib/autoTeamLogo.ts`** - Funcao de auto-busca com cache e fontes alternativas
+2. **`supabase/functions/fetch-football-logos/index.ts`** - Aliases de selecoes nacionais
+3. **`src/hooks/useTeams.ts`** - Disparar auto-busca no onSuccess do useCreateTeam
+4. **`src/components/teams/BulkImportTeamsDialog.tsx`** - Download local com verificacao de cache
+5. **`src/components/teams/LogoSearchDialog.tsx`** - Download local ao selecionar
+
