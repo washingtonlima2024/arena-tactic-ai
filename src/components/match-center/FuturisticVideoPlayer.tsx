@@ -41,6 +41,19 @@ export function FuturisticVideoPlayer({
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
 
+  // Seek to selected event
+  useEffect(() => {
+    if (!selectedEventId) return;
+    const event = events.find(e => e.id === selectedEventId);
+    if (!event) return;
+    const sec = event.metadata?.videoSecond ?? ((event.minute || 0) * 60);
+    const v = videoRef.current;
+    if (v && sec > 0) {
+      v.currentTime = Math.max(0, sec - 5);
+      v.play().catch(() => {});
+    }
+  }, [selectedEventId, events]);
+
   // Video listeners
   useEffect(() => {
     const v = videoRef.current;
