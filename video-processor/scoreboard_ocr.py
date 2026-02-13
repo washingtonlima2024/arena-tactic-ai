@@ -139,6 +139,18 @@ def read_scoreboard_ocr(frame: np.ndarray) -> Dict[str, Any]:
             result['game_second'] = second
             result['half'] = '1st' if minute < 46 else ('2nd' if minute < 91 else 'extra')
             result['confidence'] = sum(r[2] for r in results) / len(results) if results else 0
+            
+            # Classificar período com base no cronômetro
+            if minute <= 45:
+                result['period'] = 'first_half'
+            elif minute <= 90:
+                result['period'] = 'second_half'
+            elif minute <= 105:
+                result['period'] = 'extra_time_1'
+            elif minute <= 120:
+                result['period'] = 'extra_time_2'
+            else:
+                result['period'] = 'penalty_shootout'
     
     if score_match:
         sh = int(score_match.group(1))
@@ -196,6 +208,10 @@ def detect_match_boundaries_ocr(
         'game_end_second': None,
         'stoppage_time_1st': None,
         'stoppage_time_2nd': None,
+        'has_extra_time': False,
+        'has_penalties': False,
+        'extra_time_1_start_second': None,
+        'extra_time_2_start_second': None,
         'confidence': 0.0,
         'source': 'ocr_scoreboard',
         'readings_count': len(visible_readings),
@@ -231,7 +247,25 @@ def detect_match_boundaries_ocr(
             elif r['half'] == '2nd':
                 boundaries['stoppage_time_2nd'] = max(boundaries.get('stoppage_time_2nd') or 0, r['stoppage_time'])
     
-    # 4. Placar final (último frame visível)
+    # 4. Detectar prorrogação e pênaltis
+    late_readings = [r for r in visible_readings if r['video_second'] > duration_seconds * 0.7]
+    for r in late_readings:
+        gm = r.get('game_minute', 0)
+        if gm and gm > 90:
+            boundaries['has_extra_time'] = True
+            if gm <= 105 and boundaries['extra_time_1_start_second'] is None:
+                boundaries['extra_time_1_start_second'] = r['video_second'] - (gm - 91) * 60 - (r.get('game_second') or 0)
+            elif gm > 105 and boundaries['extra_time_2_start_second'] is None:
+                boundaries['extra_time_2_start_second'] = r['video_second'] - (gm - 106) * 60 - (r.get('game_second') or 0)
+        if gm and gm > 120:
+            boundaries['has_penalties'] = True
+    
+    if boundaries['has_extra_time']:
+        print(f"[OCR] ⚽ Prorrogação detectada! ET1={boundaries['extra_time_1_start_second']}, ET2={boundaries['extra_time_2_start_second']}")
+    if boundaries['has_penalties']:
+        print(f"[OCR] ⚽ Pênaltis detectados!")
+    
+    # 5. Placar final (último frame visível)
     last_reading = visible_readings[-1]
     if last_reading.get('score_home') is not None:
         boundaries['final_score'] = {

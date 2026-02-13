@@ -3,8 +3,9 @@ import { MatchEvent, Team } from '@/types/arena';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '@/components/ui/tooltip';
 import { TeamBadge } from '@/components/teams/TeamBadge';
-import { Star, Pencil, Play, Volume2, VolumeX, Loader2 } from 'lucide-react';
+import { Star, Pencil, Play, Volume2, VolumeX, Loader2, ScanEye, FileText, PenLine } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { getEventTeam, getEventTimeMs, formatEventTime } from '@/lib/eventHelpers';
 import { apiClient } from '@/lib/apiClient';
@@ -219,6 +220,21 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
                   <Badge variant={isHighlight ? 'highlight' : (eventBadgeVariants[event.type] || 'secondary')}>
                     {getEventLabel(event.type === 'red_card' ? 'foul' : event.type)}
                   </Badge>
+                  {/* Time source indicator */}
+                  {(() => {
+                    const timeSource = (event as any).time_source || (event.metadata as any)?.time_source;
+                    if (timeSource === 'ocr_scoreboard') return (
+                      <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                        <span className="inline-flex items-center gap-0.5 text-xs text-emerald-500"><ScanEye className="h-3 w-3" /></span>
+                      </TooltipTrigger><TooltipContent><p>Tempo verificado por OCR</p></TooltipContent></Tooltip></TooltipProvider>
+                    );
+                    if (timeSource === 'manual_edit') return (
+                      <TooltipProvider><Tooltip><TooltipTrigger asChild>
+                        <span className="inline-flex items-center gap-0.5 text-xs text-blue-400"><PenLine className="h-3 w-3" /></span>
+                      </TooltipTrigger><TooltipContent><p>Editado manualmente</p></TooltipContent></Tooltip></TooltipProvider>
+                    );
+                    return null;
+                  })()}
                   {team && (
                     <div className="flex items-center gap-1.5">
                       <TeamBadge team={team as any} size="xs" />
