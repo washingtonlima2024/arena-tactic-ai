@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
-import { Edit, Trash2, Users } from 'lucide-react';
+import { Edit, Trash2 } from 'lucide-react';
 import type { Team } from '@/hooks/useTeams';
 
 interface TeamCardProps {
@@ -10,6 +11,8 @@ interface TeamCardProps {
 }
 
 export function TeamCard({ team, onEdit, onDelete }: TeamCardProps) {
+  const [imgError, setImgError] = useState(false);
+
   return (
     <Card variant="glass" className="group hover:border-primary/30 transition-all duration-300">
       <CardContent className="p-4">
@@ -21,10 +24,11 @@ export function TeamCard({ team, onEdit, onDelete }: TeamCardProps) {
               color: team.secondary_color || '#ffffff'
             }}
           >
-            {team.logo_url ? (
+            {team.logo_url && !imgError ? (
               <img 
                 src={team.logo_url} 
                 alt={team.name} 
+                onError={() => setImgError(true)}
                 className="h-12 w-12 object-contain"
               />
             ) : (
