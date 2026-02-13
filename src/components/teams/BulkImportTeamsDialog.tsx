@@ -9,6 +9,7 @@ import { Loader2, Download, Globe, CheckCircle2 } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 import type { Team, TeamInsert } from '@/hooks/useTeams';
+import { downloadLogoToLocal } from '@/lib/autoTeamLogo';
 
 interface LogoResult {
   name: string;
@@ -127,21 +128,34 @@ export function BulkImportTeamsDialog({
   };
 
   const handleImport = async () => {
-    const teamsToImport: TeamInsert[] = logos
-      .filter((l) => selectedSlugs.has(l.slug))
-      .map((l) => ({
-        name: l.name,
-        short_name: l.shortName || null,
-        logo_url: l.logoUrl,
-      }));
+    const selected = logos.filter((l) => selectedSlugs.has(l.slug));
 
-    if (teamsToImport.length === 0) {
+    if (selected.length === 0) {
       toast.warning('Selecione pelo menos um time');
       return;
     }
 
     setIsImporting(true);
     try {
+      const teamsToImport: TeamInsert[] = [];
+      
+      for (const l of selected) {
+        let logoUrl = l.logoUrl;
+        try {
+          // Tenta baixar para storage local com verificação de cache
+          logoUrl = await downloadLogoToLocal(l.logoUrl, l.name);
+        } catch (err) {
+          console.warn(`[BulkImport] Fallback URL externa para ${l.name}:`, err);
+          // Mantém URL externa como fallback
+        }
+        
+        teamsToImport.push({
+          name: l.name,
+          short_name: l.shortName || null,
+          logo_url: logoUrl,
+        });
+      }
+
       await onImport(teamsToImport);
       toast.success(`${teamsToImport.length} time(s) importado(s) com sucesso!`);
       onOpenChange(false);

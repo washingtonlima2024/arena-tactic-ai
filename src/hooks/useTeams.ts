@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { apiClient } from '@/lib/apiClient';
+import { autoFetchTeamLogo } from '@/lib/autoTeamLogo';
 
 export interface Team {
   id: string;
@@ -45,8 +46,28 @@ export function useCreateTeam() {
     mutationFn: async (team: TeamInsert) => {
       return await apiClient.createTeam(team);
     },
-    onSuccess: () => {
+    onSuccess: (newTeam: any) => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
+      
+      // Auto-buscar logo em background se o time não tem logo
+      if (newTeam?.name && !newTeam?.logo_url) {
+        autoFetchTeamLogo(newTeam.name).then(async (result) => {
+          if (result && newTeam.id) {
+            try {
+              await apiClient.updateTeam(newTeam.id, {
+                logo_url: result.logoUrl,
+                ...(result.shortName && !newTeam.short_name ? { short_name: result.shortName } : {}),
+              });
+              queryClient.invalidateQueries({ queryKey: ['teams'] });
+              console.log(`[useCreateTeam] Logo auto-atribuída para "${newTeam.name}"`);
+            } catch (err) {
+              console.warn(`[useCreateTeam] Falha ao atualizar logo:`, err);
+            }
+          }
+        }).catch((err) => {
+          console.warn(`[useCreateTeam] Auto-fetch logo falhou para "${newTeam.name}":`, err);
+        });
+      }
     },
   });
 }
