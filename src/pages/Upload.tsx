@@ -208,6 +208,7 @@ export default function VideoUpload() {
   const [newLinkInput, setNewLinkInput] = useState('');
   const [isValidatingLink, setIsValidatingLink] = useState(false);
   const [linkValidationTime, setLinkValidationTime] = useState(0);
+  const [linkHalfType, setLinkHalfType] = useState<'first' | 'second' | 'full'>('full');
 
   // Analysis state
   const [currentJobId, setCurrentJobId] = useState<string | null>(null);
@@ -754,39 +755,28 @@ export default function VideoUpload() {
       setIsValidatingLink(false);
       setLinkValidationTime(0);
 
-      // Auto-detect video type from URL
-      const autoType: VideoType = 'full';
-      
-      const defaultConfig = {
-        full: { start: 0, end: 90 },
-        first_half: { start: 0, end: 45 },
-        second_half: { start: 45, end: 90 },
-        clip: { start: 0, end: 10 },
-      };
-      
-      const typeLabels = {
-        full: 'Partida Completa',
-        first_half: '1º Tempo',
-        second_half: '2º Tempo',
-        clip: 'Trecho'
+      // Use linkHalfType selection to determine video type
+      const typeConfig = {
+        first: { type: 'first_half' as VideoType, half: 'first' as const, start: 0, end: 45, title: '1º Tempo' },
+        second: { type: 'second_half' as VideoType, half: 'second' as const, start: 45, end: 90, title: '2º Tempo' },
+        full: { type: 'full' as VideoType, half: undefined as undefined, start: 0, end: 90, title: 'Partida Completa' },
       };
 
-      const startMinute = defaultConfig[autoType].start;
-      const endMinute = defaultConfig[autoType].end;
+      const config = typeConfig[linkHalfType];
 
       const newSegment: VideoSegment = {
         id: generateUUID(),
         name: `${validation.platform}: ${embedUrl.slice(0, 40)}...`,
         url: embedUrl,
-        videoType: autoType,
-        title: typeLabels[autoType],
+        videoType: config.type,
+        title: config.title,
         durationSeconds: null,
-        startMinute,
-        endMinute,
+        startMinute: config.start,
+        endMinute: config.end,
         progress: 100,
         status: 'ready',
         isLink: true,
-        half: undefined,
+        half: config.half,
       };
 
       // Verificar duplicatas antes de adicionar
@@ -3340,6 +3330,41 @@ export default function VideoUpload() {
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="space-y-4">
+                      <div className="space-y-2">
+                        <Label className="text-sm font-medium">Selecione o período do vídeo</Label>
+                        <div className="flex gap-2">
+                          <Button
+                            type="button"
+                            variant={linkHalfType === 'first' ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => setLinkHalfType('first')}
+                            className={linkHalfType === 'first' ? 'bg-blue-500 hover:bg-blue-600 text-white' : ''}
+                          >
+                            <Clock className="mr-1 h-3 w-3" />
+                            1º Tempo
+                          </Button>
+                          <Button
+                            type="button"
+                            variant={linkHalfType === 'second' ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => setLinkHalfType('second')}
+                            className={linkHalfType === 'second' ? 'bg-orange-500 hover:bg-orange-600 text-white' : ''}
+                          >
+                            <Clock className="mr-1 h-3 w-3" />
+                            2º Tempo
+                          </Button>
+                          <Button
+                            type="button"
+                            variant={linkHalfType === 'full' ? 'default' : 'outline'}
+                            size="sm"
+                            onClick={() => setLinkHalfType('full')}
+                            className={linkHalfType === 'full' ? 'bg-emerald-500 hover:bg-emerald-600 text-white' : ''}
+                          >
+                            <Clock className="mr-1 h-3 w-3" />
+                            Jogo Completo
+                          </Button>
+                        </div>
+                      </div>
                       <div className="space-y-2">
                         <Textarea
                           placeholder='Cole o link do vídeo (YouTube, Google Drive, Dropbox, URL direta...)'
