@@ -1,159 +1,142 @@
 
-# Implementação de Campo para Trocar Senha na Área de Usuários
+# Unificar Regras de Importação por Link para o 2º Tempo
 
-## Resumo
-Adicionar funcionalidade de reset de senha na interface de administração de usuários, permitindo que o SuperAdmin altere a senha de qualquer usuário sem a necessidade de conhecer a senha anterior.
+## Problema Identificado
 
-## Análise Atual
-- ✅ **Backend Python** (`server.py`): Endpoint `/api/admin/users/<user_id>/profile` já existe e suporta atualizar qualquer campo de perfil
-- ✅ **CLI Python** (`manage_users.py`): Já possui comando `reset-password email nova_senha` para resetar senhas via terminal
-- ❌ **Frontend**: Atualmente **NÃO** há campo de senha no dialog de edição de usuários
-- ❌ **API Client**: Não há método específico para trocar senha (precisa criar um)
+Na aba **"Upload"** (file upload), o sistema oferece seletores para escolher entre:
+- **1º Tempo** (0-45 min, videoType: 'first_half')
+- **2º Tempo** (45-90 min, videoType: 'second_half')
+- **Partida Completa** (0-90 min, videoType: 'full')
 
-## O Que Será Implementado
+Porém, na aba **"Link/Embed"**, o código sempre define:
+- `autoType: 'full'` (linha 758 de Upload.tsx)
+- `half: undefined` (linha 789)
+- Não há seletor para o usuário escolher o período
 
-### 1. **Novo Endpoint no Backend** (Recomendado)
-Criar endpoint dedicado para trocar senha com melhor validação:
-- **Endpoint**: `PUT /api/admin/users/<user_id>/password`
-- **Body**: `{ "new_password": "string" }`
-- **Resposta**: Confirmação ou erro
-- **Segurança**: Validar que a senha tem comprimento mínimo (8 caracteres), sem espaços extras
+Isso causa inconsistência: vídeos importados por link são sempre tratados como "Partida Completa", impossibilitando a importação incremental do 2º tempo via URL.
 
-**Benefício**: Separação de responsabilidades, melhor auditoria, validação específica de senha.
+## Solução Proposta
 
-### 2. **Atualizar `src/lib/apiClient.ts`**
-Adicionar método na seção `admin`:
+Adicionar um **ToggleGroup** (ou botões) na aba Link/Embed **antes do textarea**, permitindo ao usuário selecionar qual período o link representa. O mapeamento será idêntico ao da aba "Upload":
+
+| Seleção | videoType | half | startMinute | endMinute |
+|---------|-----------|------|-------------|-----------|
+| 1º Tempo | `first_half` | `'first'` | 0 | 45 |
+| 2º Tempo | `second_half` | `'second'` | 45 | 90 |
+| Jogo Completo | `full` | `undefined` | 0 | 90 |
+
+## Mudanças Necessárias
+
+### 1. **`src/pages/Upload.tsx` - Adicionar Estado**
+
+Criar novo estado para rastrear a seleção de tempo no link:
 ```typescript
-resetUserPassword: (userId: string, newPassword: string) => apiRequest<any>(
-  `/api/admin/users/${userId}/password`,
-  { method: 'PUT', body: JSON.stringify({ new_password: newPassword }) }
-)
+const [linkHalfType, setLinkHalfType] = useState<'first' | 'second' | 'full'>('full');
 ```
 
-### 3. **Atualizar `src/hooks/useAdminUsers.ts`**
-Adicionar mutation para trocar senha:
+### 2. **`src/pages/Upload.tsx` - Modificar Função `addVideoLink`**
+
+Alterar a lógica de atribuição de videoType (linhas 757-790):
+
+**Antes:**
 ```typescript
-const resetPasswordMutation = useMutation({
-  mutationFn: async ({ userId, newPassword }: { userId: string; newPassword: string }) => {
-    return await apiClient.admin.resetUserPassword(userId, newPassword);
-  },
-  onSuccess: () => {
-    queryClient.invalidateQueries({ queryKey: ['admin-users'] });
-  }
-});
-
-// Exportar função no return
-resetUserPassword: (userId: string, newPassword: string) => 
-  resetPasswordMutation.mutateAsync({ userId, newPassword }),
-isResettingPassword: resetPasswordMutation.isPending,
+const autoType: VideoType = 'full';
+// ... sempre 'full'
+const newSegment: VideoSegment = {
+  // ...
+  videoType: autoType,
+  half: undefined,
+  startMinute: 0,
+  endMinute: 90,
+};
 ```
 
-### 4. **Refatorar `src/components/admin/UsersManager.tsx`**
-Modificar o dialog de edição:
+**Depois:**
+```typescript
+const typeConfig = {
+  first: { type: 'first_half' as VideoType, half: 'first' as const, start: 0, end: 45 },
+  second: { type: 'second_half' as VideoType, half: 'second' as const, start: 45, end: 90 },
+  full: { type: 'full' as VideoType, half: undefined, start: 0, end: 90 }
+};
 
-**Adicionar campos**:
-- Campo de input para nova senha (tipo `password`)
-- Botão "Gerar Senha Aleatória" (opcional, para facilitar)
-- Checkbox "Enviar senha por email" (placeholder, pode ser implementado depois)
-- Validação: exigir mínimo 8 caracteres, mostrar aviso se está vazio
+const config = typeConfig[linkHalfType];
 
-**Lógica**:
-- Ao salvar, se o campo de senha foi preenchido, chamar `resetUserPassword()`
-- Mostrar toast de sucesso/erro específico para a operação de senha
-- Limpar o campo de senha após salvar com sucesso
-
-**UI Structure**:
+const newSegment: VideoSegment = {
+  // ...
+  videoType: config.type,
+  half: config.half,
+  startMinute: config.start,
+  endMinute: config.end,
+  title: {
+    first: '1º Tempo',
+    second: '2º Tempo',
+    full: 'Partida Completa'
+  }[linkHalfType],
+};
 ```
-Dialog "Editar Usuário"
-├── Nome
-├── Email
-├── CPF/CNPJ
-├── Papel
-├── Organização
-├── [NEW] ------- Seção de Segurança -------
-├── [NEW] Nova Senha (password input, opcional)
-├── [NEW] Gerar Senha Aleatória (button)
-└── [Footers] Cancelar | Salvar
+
+### 3. **`src/pages/Upload.tsx` - Adicionar UI na Aba Link (linhas 3342-3350)**
+
+Inserir ToggleGroup **antes do Textarea**, com três opções:
+
+```text
+Aba Link/Embed
+├── [NEW] ------- Selecione o Período -------
+├── [NEW] ToggleGroup: [1º Tempo] [2º Tempo] [Jogo Completo]
+├── Textarea: "Cole o link do vídeo..."
+└── Button: "Adicionar Vídeo"
 ```
+
+Usar componentes já existentes no projeto:
+- `ToggleGroup` e `ToggleGroupItem` (src/components/ui/toggle-group.tsx)
+- Cores consistentes: Azul para 1º, Laranja para 2º, Verde para Completo
+- Similar ao layout dos botões na aba "Local File Mode" (linhas 3226-3275)
 
 ## Fluxo de Uso
-1. Super Admin abre o dialog de edição de um usuário
-2. Navega até a seção "Segurança" (ou campo de senha)
-3. Preenche a nova senha (ou clica em "Gerar Aleatória")
-4. Clica "Salvar"
-5. Sistema valida (mínimo 8 caracteres)
-6. API chama `PUT /api/admin/users/<id>/password` com a nova senha
-7. Backend faz hash com bcrypt e atualiza o banco
-8. Frontend mostra confirmação: "Senha alterada com sucesso!"
+
+1. Usuário acessa a aba **"Link/Embed"**
+2. Seleciona o período (1º Tempo, 2º Tempo ou Jogo Completo)
+3. Cola o link do vídeo
+4. Clica "Adicionar Vídeo"
+5. Sistema cria o segmento com:
+   - `videoType`, `half`, `startMinute`, `endMinute` corretos
+   - Matching automático de transcrição (SRT) baseado em `half`
+   - Envio ao backend com informação correta do período
+
+## Benefícios
+
+✅ Uniformidade: Link funciona identicamente ao upload por arquivo
+✅ Suporte ao 2º tempo: Permite importação incremental via URL
+✅ Transcrição automática: Sistema encontra SRT correto baseado em `half`
+✅ Pipeline robusto: Backend recebe informação consistente de período
+✅ UX melhorada: Usuário tem controle explícito sobre classificação do vídeo
+
+## Arquivos a Modificar
+
+1. **`src/pages/Upload.tsx`**
+   - Adicionar estado `linkHalfType`
+   - Modificar função `addVideoLink` para usar a seleção
+   - Adicionar UI (ToggleGroup) antes do textarea na aba Link
 
 ## Detalhes Técnicos
 
-### Backend - Novo Endpoint (server.py, linha ~12060)
-```python
-@app.route('/api/admin/users/<user_id>/password', methods=['PUT'])
-def reset_user_password(user_id):
-    """Reset a user's password (SuperAdmin only)."""
-    session = get_session()
-    try:
-        data = request.get_json()
-        new_password = data.get('new_password', '').strip()
-        
-        if not new_password or len(new_password) < 8:
-            return jsonify({'error': 'Senha deve ter no mínimo 8 caracteres'}), 400
-        
-        user = session.query(User).filter_by(id=user_id).first()
-        if not user:
-            return jsonify({'error': 'Usuário não encontrado'}), 404
-        
-        user.password_hash = hash_password(new_password)
-        user.updated_at = datetime.utcnow()
-        session.commit()
-        
-        return jsonify({'message': 'Senha alterada com sucesso'})
-    except Exception as e:
-        session.rollback()
-        return jsonify({'error': str(e)}), 400
-    finally:
-        session.close()
+### Posição do ToggleGroup (linha 3342-3350)
+```
+TabsContent value="link"
+├── CardHeader
+├── CardContent
+│   ├── [NEW] Label "Selecione o período do vídeo"
+│   ├── [NEW] ToggleGroup (3 opções)
+│   ├── Textarea (newLinkInput)
+│   └── Button (addVideoLink)
+└── ...
 ```
 
-### Frontend - Validação
-```typescript
-const validatePassword = (password: string): string | null => {
-  if (!password) return null; // Campo opcional
-  if (password.length < 8) return 'Mínimo 8 caracteres';
-  if (password !== password.trim()) return 'Sem espaços extras';
-  return null;
-};
-```
+### Estilos dos Botões de Período
+Reutilizar estilos existentes do projeto:
+- **1º Tempo**: Azul (blue-500)
+- **2º Tempo**: Laranja (orange-500)
+- **Jogo Completo**: Verde (emerald-500)
 
-### Gerador de Senha Aleatória (Opcional)
-```typescript
-const generateRandomPassword = (): string => {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
-  let password = '';
-  for (let i = 0; i < 12; i++) {
-    password += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return password;
-};
-```
+Usar ToggleGroup com valores: `'first' | 'second' | 'full'`
 
-## Arquivos a Modificar
-1. **`video-processor/server.py`** - Adicionar endpoint `/api/admin/users/<user_id>/password` (backend)
-2. **`src/lib/apiClient.ts`** - Adicionar `admin.resetUserPassword()`
-3. **`src/hooks/useAdminUsers.ts`** - Adicionar mutation `resetPasswordMutation`
-4. **`src/components/admin/UsersManager.tsx`** - Adicionar campo senha no dialog
-
-## Segurança
-- ✅ Apenas SuperAdmin pode chamar o endpoint (requer autenticação)
-- ✅ Senha é hasheada com bcrypt antes de salvar
-- ✅ Validação de mínimo 8 caracteres
-- ✅ Campo é do tipo `password` (não exibe texto)
-- ✅ Após reset, o usuário pode fazer login com a nova senha
-
-## Próximas Melhorias (Futuro)
-- Envio de email com senha temporária ao usuário
-- Log de auditoria: "Senha de X alterada por Y em Z"
-- Exigir troca de senha no primeiro login após reset
-- Histórico de mudanças de senha
