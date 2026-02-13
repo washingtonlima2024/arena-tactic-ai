@@ -28,6 +28,7 @@ import Auth from "./pages/Auth";
 import Field from "./pages/Field";
 import Admin from "./pages/Admin";
 import NotFound from "./pages/NotFound";
+import MatchCenter from "./pages/MatchCenter";
 import { ArenaChatbot } from "./components/chatbot/ArenaChatbot";
 import { RequireAuth } from "./components/auth/RequireAuth";
 
@@ -98,6 +99,7 @@ const App = () => {
                 <Route path="/social" element={<RequireAuth requireUploader><Social /></RequireAuth>} />
                 <Route path="/settings" element={<RequireAuth requireManager><Settings /></RequireAuth>} />
                 <Route path="/field" element={<RequireAuth><Field /></RequireAuth>} />
+                <Route path="/match-center" element={<RequireAuth><MatchCenter /></RequireAuth>} />
                 <Route path="/admin" element={<RequireAuth requireSuperAdmin><Admin /></RequireAuth>} />
                 <Route path="*" element={<NotFound />} />
               </Routes>

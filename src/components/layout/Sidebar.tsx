@@ -13,7 +13,8 @@ import {
   ShieldCheck,
   Ruler,
   Layers,
-  Share2
+  Share2,
+  Globe
 } from 'lucide-react';
 import { NavLink, Link, useSearchParams } from 'react-router-dom';
 import { cn } from '@/lib/utils';
@@ -27,7 +28,7 @@ import arenaWordmark from '@/assets/arena-play-wordmark.png';
 import kakttusLogo from '@/assets/logo-kakttus.png';
 
 // Pages that should preserve the match parameter
-const MATCH_CONTEXT_PAGES = ['/events', '/analysis', '/media', '/audio', '/field', '/dashboard'];
+const MATCH_CONTEXT_PAGES = ['/events', '/analysis', '/media', '/audio', '/field', '/dashboard', '/match-center'];
 
 // Itens visíveis para todos (Espectador+)
 const viewerItems = [
@@ -39,6 +40,7 @@ const viewerItems = [
   { icon: Scissors, label: 'Cortes & Mídia', path: '/media' },
   { icon: Mic, label: 'Podcast & Locução', path: '/audio' },
   { icon: Ruler, label: 'Campo FIFA', path: '/field' },
+  { icon: Globe, label: 'Match Center', path: '/match-center' },
 ];
 
 // Itens visíveis para Operador+ (nível 40+)

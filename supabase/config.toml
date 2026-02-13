@@ -35,3 +35,6 @@ verify_jwt = false
 
 [functions.fetch-football-logos]
 verify_jwt = false
+
+[functions.generate-event-comments]
+verify_jwt = false
