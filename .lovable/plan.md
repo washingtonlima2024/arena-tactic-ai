@@ -1,142 +1,98 @@
 
-# Unificar Regras de Importação por Link para o 2º Tempo
+# Corrigir URLs Quebradas das Logos de Times
 
-## Problema Identificado
+## Causa Raiz
 
-Na aba **"Upload"** (file upload), o sistema oferece seletores para escolher entre:
-- **1º Tempo** (0-45 min, videoType: 'first_half')
-- **2º Tempo** (45-90 min, videoType: 'second_half')
-- **Partida Completa** (0-90 min, videoType: 'full')
+A funcao `buildLogoUrl` na edge function `fetch-football-logos` constroi URLs usando o hash completo (72 caracteres) do campo `h` dos Astro props. Porem, o site football-logos.cc usa apenas **8 caracteres** do hash, especificamente `hash.slice(32, 40)` para imagens 256x256.
 
-Porém, na aba **"Link/Embed"**, o código sempre define:
-- `autoType: 'full'` (linha 758 de Upload.tsx)
-- `half: undefined` (linha 789)
-- Não há seletor para o usuário escolher o período
+**URL gerada (quebrada):**
+`brazil-national-team.52842f3d85d32216caceec49004213f2fd8ca234b1d7c3ce33ef5cfe6843ffa0da85c6e1.png`
 
-Isso causa inconsistência: vídeos importados por link são sempre tratados como "Partida Completa", impossibilitando a importação incremental do 2º tempo via URL.
+**URL correta (funciona):**
+`brazil-national-team.fd8ca234.png` (caracteres 32-39 do hash)
 
-## Solução Proposta
+O hash completo na verdade contem os hashes de cada tamanho concatenados em blocos de 8 caracteres:
+- index 0 (3000): `hash.slice(0,8)`
+- index 1 (1500): `hash.slice(8,16)`
+- index 2 (700): `hash.slice(16,24)`
+- index 3 (512): `hash.slice(24,32)`
+- index 4 (256): `hash.slice(32,40)` -- este e o que precisamos
+- index 5 (128): `hash.slice(40,48)`
+- index 6 (64): `hash.slice(48,56)`
+- index 7 (svg): `hash.slice(64,72)`
 
-Adicionar um **ToggleGroup** (ou botões) na aba Link/Embed **antes do textarea**, permitindo ao usuário selecionar qual período o link representa. O mapeamento será idêntico ao da aba "Upload":
+## Correcao
 
-| Seleção | videoType | half | startMinute | endMinute |
-|---------|-----------|------|-------------|-----------|
-| 1º Tempo | `first_half` | `'first'` | 0 | 45 |
-| 2º Tempo | `second_half` | `'second'` | 45 | 90 |
-| Jogo Completo | `full` | `undefined` | 0 | 90 |
+### 1. `supabase/functions/fetch-football-logos/index.ts` - Corrigir `buildLogoUrl`
 
-## Mudanças Necessárias
-
-### 1. **`src/pages/Upload.tsx` - Adicionar Estado**
-
-Criar novo estado para rastrear a seleção de tempo no link:
-```typescript
-const [linkHalfType, setLinkHalfType] = useState<'first' | 'second' | 'full'>('full');
-```
-
-### 2. **`src/pages/Upload.tsx` - Modificar Função `addVideoLink`**
-
-Alterar a lógica de atribuição de videoType (linhas 757-790):
+Alterar a funcao de construcao de URL para usar o slice correto do hash:
 
 **Antes:**
 ```typescript
-const autoType: VideoType = 'full';
-// ... sempre 'full'
-const newSegment: VideoSegment = {
-  // ...
-  videoType: autoType,
-  half: undefined,
-  startMinute: 0,
-  endMinute: 90,
-};
+function buildLogoUrl(categoryId: string, id: string, hash: string): string {
+  return `https://assets.football-logos.cc/logos/${categoryId}/256x256/${id}.${hash}.png`;
+}
 ```
 
 **Depois:**
 ```typescript
-const typeConfig = {
-  first: { type: 'first_half' as VideoType, half: 'first' as const, start: 0, end: 45 },
-  second: { type: 'second_half' as VideoType, half: 'second' as const, start: 45, end: 90 },
-  full: { type: 'full' as VideoType, half: undefined, start: 0, end: 90 }
-};
-
-const config = typeConfig[linkHalfType];
-
-const newSegment: VideoSegment = {
-  // ...
-  videoType: config.type,
-  half: config.half,
-  startMinute: config.start,
-  endMinute: config.end,
-  title: {
-    first: '1º Tempo',
-    second: '2º Tempo',
-    full: 'Partida Completa'
-  }[linkHalfType],
-};
+function buildLogoUrl(categoryId: string, id: string, hash: string): string {
+  // O hash completo contem hashes por tamanho em blocos de 8 chars
+  // 256x256 esta no index 4 -> slice(32, 40)
+  const shortHash = hash.slice(32, 40);
+  return `https://assets.football-logos.cc/logos/${categoryId}/256x256/${id}.${shortHash}.png`;
+}
 ```
 
-### 3. **`src/pages/Upload.tsx` - Adicionar UI na Aba Link (linhas 3342-3350)**
+Tambem remover a propriedade `countryName` duplicada no objeto de retorno de `fetchLogos` (linha 178 tem `countryName` duas vezes).
 
-Inserir ToggleGroup **antes do Textarea**, com três opções:
+### 2. `src/components/teams/TeamBadge.tsx` - Fallback com cor do time
 
-```text
-Aba Link/Embed
-├── [NEW] ------- Selecione o Período -------
-├── [NEW] ToggleGroup: [1º Tempo] [2º Tempo] [Jogo Completo]
-├── Textarea: "Cole o link do vídeo..."
-└── Button: "Adicionar Vídeo"
+Adicionar estado `imgError` para que, se a logo falhar ao carregar, mostre um circulo com a cor primaria do time e as iniciais:
+
+```typescript
+const [imgError, setImgError] = useState(false);
+
+if (logoUrl && !imgError) {
+  return (
+    <img 
+      src={logoUrl} 
+      alt={team.name}
+      onError={() => setImgError(true)}
+      className={...}
+    />
+  );
+}
+// Fallback existente com circulo colorido + iniciais
 ```
 
-Usar componentes já existentes no projeto:
-- `ToggleGroup` e `ToggleGroupItem` (src/components/ui/toggle-group.tsx)
-- Cores consistentes: Azul para 1º, Laranja para 2º, Verde para Completo
-- Similar ao layout dos botões na aba "Local File Mode" (linhas 3226-3275)
+### 3. `src/components/teams/TeamCard.tsx` - Fallback com cor do time
 
-## Fluxo de Uso
+Adicionar estado `imgError` para que a logo quebrada mostre as iniciais com cor:
 
-1. Usuário acessa a aba **"Link/Embed"**
-2. Seleciona o período (1º Tempo, 2º Tempo ou Jogo Completo)
-3. Cola o link do vídeo
-4. Clica "Adicionar Vídeo"
-5. Sistema cria o segmento com:
-   - `videoType`, `half`, `startMinute`, `endMinute` corretos
-   - Matching automático de transcrição (SRT) baseado em `half`
-   - Envio ao backend com informação correta do período
+```typescript
+const [imgError, setImgError] = useState(false);
 
-## Benefícios
+{team.logo_url && !imgError ? (
+  <img 
+    src={team.logo_url} 
+    alt={team.name}
+    onError={() => setImgError(true)}
+    className="h-12 w-12 object-contain"
+  />
+) : (
+  team.short_name?.slice(0, 2) || team.name.slice(0, 2)
+)}
+```
 
-✅ Uniformidade: Link funciona identicamente ao upload por arquivo
-✅ Suporte ao 2º tempo: Permite importação incremental via URL
-✅ Transcrição automática: Sistema encontra SRT correto baseado em `half`
-✅ Pipeline robusto: Backend recebe informação consistente de período
-✅ UX melhorada: Usuário tem controle explícito sobre classificação do vídeo
+## Resultado
+
+- Todas as URLs de logo vao funcionar corretamente (hash de 8 chars)
+- Logos existentes que ainda estao com URL antiga vao mostrar fallback com cor do time
+- Novos imports vao usar URLs corretas
 
 ## Arquivos a Modificar
 
-1. **`src/pages/Upload.tsx`**
-   - Adicionar estado `linkHalfType`
-   - Modificar função `addVideoLink` para usar a seleção
-   - Adicionar UI (ToggleGroup) antes do textarea na aba Link
-
-## Detalhes Técnicos
-
-### Posição do ToggleGroup (linha 3342-3350)
-```
-TabsContent value="link"
-├── CardHeader
-├── CardContent
-│   ├── [NEW] Label "Selecione o período do vídeo"
-│   ├── [NEW] ToggleGroup (3 opções)
-│   ├── Textarea (newLinkInput)
-│   └── Button (addVideoLink)
-└── ...
-```
-
-### Estilos dos Botões de Período
-Reutilizar estilos existentes do projeto:
-- **1º Tempo**: Azul (blue-500)
-- **2º Tempo**: Laranja (orange-500)
-- **Jogo Completo**: Verde (emerald-500)
-
-Usar ToggleGroup com valores: `'first' | 'second' | 'full'`
-
+1. **`supabase/functions/fetch-football-logos/index.ts`** - Corrigir `buildLogoUrl` (1 linha)
+2. **`src/components/teams/TeamBadge.tsx`** - Adicionar `onError` fallback
+3. **`src/components/teams/TeamCard.tsx`** - Adicionar `onError` fallback
