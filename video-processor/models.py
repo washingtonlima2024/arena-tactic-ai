@@ -202,6 +202,7 @@ class MatchEvent(Base):
     approved_by = Column(String(36))
     approved_at = Column(DateTime)
     event_metadata = Column(JSON, default=dict)
+    time_source = Column(String(30), default='transcription')  # transcription, ocr_scoreboard, manual_edit
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -229,6 +230,7 @@ class MatchEvent(Base):
             'approved_by': self.approved_by,
             'approved_at': self.approved_at.isoformat() if self.approved_at else None,
             'metadata': self.event_metadata,
+            'time_source': self.time_source,
             'created_at': self.created_at.isoformat() if self.created_at else None
         }
 

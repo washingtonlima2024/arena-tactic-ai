@@ -13871,6 +13871,207 @@ Regras:
         return jsonify({'error': str(e)}), 500
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# SCOREBOARD OCR - Leitura do placar via EasyOCR + OpenCV (100% local)
+# ═══════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/matches/<match_id>/read-scoreboard', methods=['POST', 'OPTIONS'])
+def read_scoreboard(match_id):
+    """Lê o placar do vídeo via OCR local e detecta boundaries (início/fim de tempos)."""
+    if request.method == 'OPTIONS':
+        return app.make_default_options_response()
+    
+    try:
+        from scoreboard_ocr import detect_match_boundaries_ocr
+        
+        session = get_session()
+        try:
+            # Buscar vídeos da partida
+            videos = session.query(Video).filter(Video.match_id == match_id).all()
+            if not videos:
+                return jsonify({'error': 'Nenhum vídeo encontrado para esta partida'}), 404
+            
+            # Usar o primeiro vídeo disponível (preferencialmente full ou first_half)
+            video = None
+            for v in videos:
+                if v.video_type in ('full', 'first_half') and v.file_url:
+                    video = v
+                    break
+            if not video:
+                video = videos[0]
+            
+            video_path = resolve_video_path(video.file_url, match_id)
+            if not video_path or not os.path.exists(video_path):
+                return jsonify({'error': f'Arquivo de vídeo não encontrado: {video.file_url}'}), 404
+            
+            duration = video.duration_seconds or 0
+            if duration == 0:
+                # Tentar obter duração via FFprobe
+                try:
+                    probe_cmd = ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration', '-of', 'csv=p=0', video_path]
+                    probe_result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=15)
+                    duration = float(probe_result.stdout.strip())
+                except:
+                    duration = 5400  # fallback 90 min
+            
+            print(f"[OCR] Lendo placar do vídeo: {video_path} ({duration:.0f}s)")
+            boundaries = detect_match_boundaries_ocr(video_path, duration)
+            
+            return jsonify({
+                'success': True,
+                'boundaries': boundaries,
+                'source': 'ocr_local',
+                'video_used': video.file_name or os.path.basename(video_path),
+            })
+        finally:
+            session.close()
+            
+    except ImportError:
+        return jsonify({
+            'error': 'EasyOCR não instalado. Execute: pip install easyocr opencv-python-headless',
+            'install_command': 'pip install easyocr opencv-python-headless'
+        }), 500
+    except Exception as e:
+        print(f"[OCR] ERRO: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/matches/<match_id>/validate-event-times-ocr', methods=['POST', 'OPTIONS'])
+def validate_event_times_ocr(match_id):
+    """Valida os minutos de todos os eventos da partida lendo o cronômetro do vídeo."""
+    if request.method == 'OPTIONS':
+        return app.make_default_options_response()
+    
+    try:
+        from scoreboard_ocr import validate_events_batch_ocr
+        
+        session = get_session()
+        try:
+            # Buscar eventos da partida
+            events = session.query(MatchEvent).filter(
+                MatchEvent.match_id == match_id
+            ).order_by(MatchEvent.minute).all()
+            
+            if not events:
+                return jsonify({'error': 'Nenhum evento encontrado'}), 404
+            
+            # Buscar vídeos
+            videos = session.query(Video).filter(Video.match_id == match_id).all()
+            if not videos:
+                return jsonify({'error': 'Nenhum vídeo encontrado'}), 404
+            
+            # Separar eventos por tempo e associar ao vídeo correto
+            first_half_video = None
+            second_half_video = None
+            full_video = None
+            
+            for v in videos:
+                vpath = resolve_video_path(v.file_url, match_id)
+                if not vpath or not os.path.exists(vpath):
+                    continue
+                if v.video_type == 'full':
+                    full_video = (v, vpath)
+                elif v.video_type == 'first_half':
+                    first_half_video = (v, vpath)
+                elif v.video_type == 'second_half':
+                    second_half_video = (v, vpath)
+            
+            all_validations = []
+            
+            # Preparar eventos para validação
+            for event in events:
+                event_minute = event.minute or 0
+                event_half = event.match_half or ('first' if event_minute < 45 else 'second')
+                
+                # Selecionar vídeo correto
+                if event_half == 'first':
+                    vid = first_half_video or full_video
+                    start_min = 0
+                else:
+                    vid = second_half_video or full_video
+                    start_min = 45 if second_half_video else 0
+                
+                if not vid:
+                    continue
+                
+                video_obj, video_path = vid
+                video_start_minute = video_obj.start_minute or start_min
+                
+                event_dict = {
+                    'id': event.id,
+                    'event_type': event.event_type,
+                    'minute': event_minute,
+                    'second': event.second or 0,
+                    'metadata': event.metadata if isinstance(event.metadata, dict) else {},
+                }
+                
+                all_validations.append((event_dict, video_path, video_start_minute))
+            
+            # Agrupar por vídeo para eficiência
+            from collections import defaultdict
+            by_video = defaultdict(list)
+            for event_dict, vpath, start_min in all_validations:
+                by_video[(vpath, start_min)].append(event_dict)
+            
+            results = []
+            for (vpath, start_min), event_list in by_video.items():
+                batch_results = validate_events_batch_ocr(vpath, event_list, start_min)
+                results.extend(batch_results)
+                
+                # Atualizar eventos corrigidos no banco
+                for validation in batch_results:
+                    if validation.get('corrected') and validation.get('event_id') and validation.get('confidence', 0) > 0.5:
+                        try:
+                            db_event = session.query(MatchEvent).filter(
+                                MatchEvent.id == validation['event_id']
+                            ).first()
+                            if db_event:
+                                db_event.minute = validation['minute']
+                                if validation.get('second') is not None:
+                                    db_event.second = validation['second']
+                                db_event.time_source = 'ocr_scoreboard'
+                                # Preservar metadata existente e adicionar info OCR
+                                metadata = db_event.metadata if isinstance(db_event.metadata, dict) else {}
+                                metadata['ocr_validation'] = {
+                                    'original_minute': validation['claimed_minute'],
+                                    'ocr_minute': validation['ocr_minute'],
+                                    'confidence': validation['confidence'],
+                                    'validated_at': datetime.now().isoformat(),
+                                }
+                                db_event.metadata = metadata
+                        except Exception as e:
+                            print(f"[OCR] Erro ao atualizar evento {validation.get('event_id')}: {e}")
+                
+                session.commit()
+            
+            confirmed = sum(1 for r in results if not r['corrected'] and r.get('confidence', 0) > 0)
+            corrected = sum(1 for r in results if r['corrected'])
+            unreadable = sum(1 for r in results if r.get('confidence', 0) == 0)
+            
+            return jsonify({
+                'success': True,
+                'validations': results,
+                'confirmed': confirmed,
+                'corrected': corrected,
+                'unreadable': unreadable,
+                'total': len(results),
+            })
+        finally:
+            session.close()
+            
+    except ImportError:
+        return jsonify({
+            'error': 'EasyOCR não instalado. Execute: pip install easyocr opencv-python-headless',
+        }), 500
+    except Exception as e:
+        print(f"[OCR] ERRO validação: {e}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 if __name__ == '__main__':
     print_startup_status()
     app.run(host='0.0.0.0', port=5000, debug=True)

@@ -1950,6 +1950,25 @@ export const apiClient = {
     method: 'POST',
     body: JSON.stringify({ transcription }),
   }, 120000), // 2 min timeout
+
+  // ============== Scoreboard OCR ==============
+  readScoreboard: (matchId: string) => apiRequestLongRunning<{
+    success: boolean;
+    boundaries: any;
+    source: string;
+  }>(`/api/matches/${matchId}/read-scoreboard`, {
+    method: 'POST',
+  }, 120000),
+
+  validateEventTimesOCR: (matchId: string) => apiRequestLongRunning<{
+    success: boolean;
+    validations: any[];
+    confirmed: number;
+    corrected: number;
+    unreadable: number;
+  }>(`/api/matches/${matchId}/validate-event-times-ocr`, {
+    method: 'POST',
+  }, 300000),
 };
 
 export default apiClient;

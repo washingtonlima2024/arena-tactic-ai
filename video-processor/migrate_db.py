@@ -11,6 +11,13 @@ DATABASE_PATH = os.path.join(os.path.dirname(__file__), 'arena_play.db')
 # Lista de migrações pendentes
 # Cada migração define uma coluna que deve existir em uma tabela
 MIGRATIONS = [
+    # Match events - time_source for OCR validation
+    {
+        'table': 'match_events',
+        'column': 'time_source',
+        'type': 'TEXT',
+        'default': "'transcription'"
+    },
     # Match events
     {
         'table': 'match_events',
