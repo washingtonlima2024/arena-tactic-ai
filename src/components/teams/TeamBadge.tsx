@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
 interface TeamBadgeProps {
@@ -24,15 +25,17 @@ const sizeClasses = {
 };
 
 export function TeamBadge({ team, size = 'md', className, showGlow = false }: TeamBadgeProps) {
+  const [imgError, setImgError] = useState(false);
   const logoUrl = team.logo_url || team.logo;
   const shortName = team.short_name || team.shortName || team.name.slice(0, 3);
   const primaryColor = team.primary_color || team.primaryColor || '#10b981';
   
-  if (logoUrl) {
+  if (logoUrl && !imgError) {
     return (
       <img 
         src={logoUrl} 
         alt={team.name} 
+        onError={() => setImgError(true)}
         className={cn(
           sizeClasses[size], 
           'rounded-full object-contain',

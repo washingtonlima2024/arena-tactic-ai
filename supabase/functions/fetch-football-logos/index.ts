@@ -114,7 +114,9 @@ function parsePropsString(propsStr: string): Record<string, unknown>[] {
 }
 
 function buildLogoUrl(categoryId: string, id: string, hash: string): string {
-  return `https://assets.football-logos.cc/logos/${categoryId}/256x256/${id}.${hash}.png`;
+  // Hash contains size-specific hashes in 8-char blocks; index 4 (slice 32-40) = 256x256
+  const shortHash = hash.slice(32, 40);
+  return `https://assets.football-logos.cc/logos/${categoryId}/256x256/${id}.${shortHash}.png`;
 }
 
 function extractShortName(name: string): string | null {
@@ -218,7 +220,6 @@ async function fetchLogos(country: string, query?: string): Promise<LogoItem[]> 
         slug: id,
         logoUrl: buildLogoUrl(categoryId, id, hash),
         country: categoryId,
-        countryName: categoryName,
         countryName: categoryName,
       };
     });
