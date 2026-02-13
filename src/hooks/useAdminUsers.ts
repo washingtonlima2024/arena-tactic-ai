@@ -97,6 +97,13 @@ export function useAdminUsers() {
     },
   });
 
+  // Reset de senha
+  const resetPasswordMutation = useMutation({
+    mutationFn: async ({ userId, newPassword }: { userId: string; newPassword: string }) => {
+      return await apiClient.admin.resetUserPassword(userId, newPassword);
+    },
+  });
+
   // Aprovar usuário
   const approveMutation = useMutation({
     mutationFn: async (userId: string) => {
@@ -156,6 +163,11 @@ export function useAdminUsers() {
     isApproving: approveMutation.isPending,
     isRejecting: rejectMutation.isPending,
     
+    // Reset de senha
+    resetUserPassword: (userId: string, newPassword: string) =>
+      resetPasswordMutation.mutateAsync({ userId, newPassword }),
+    isResettingPassword: resetPasswordMutation.isPending,
+
     // Legacy - convite não disponível no modo local
     inviteUser: (data: InviteUserData) => inviteUserMutation.mutateAsync(data),
     isInviting: inviteUserMutation.isPending,
