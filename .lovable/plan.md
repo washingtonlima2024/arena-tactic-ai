@@ -1,126 +1,112 @@
 
+# Match Center - Portal Completo da Partida
 
-# Detectar limites completos da partida pela transcrição e corrigir minutos
+## Objetivo
 
-## Contexto
+Criar uma nova pagina `/match-center` que funciona como um portal completo e imersivo de uma partida, unificando video com eventos, analise tatica, estatisticas, graficos, chatbots de torcedores e galeria de clips -- tudo numa unica pagina.
 
-O sistema já possui `detect_match_periods_from_transcription()` em `ai_services.py` que detecta:
-- Fim do 1T (intervalo) -- com timestamp SRT
-- Início do 2T -- com posição no texto
-- Prorrogação -- com timestamp SRT
+## Base
 
-Faltam dois marcadores essenciais:
-- **Início do jogo** (apito inicial / "rola a bola")
-- **Fim do jogo** (apito final)
+O usuario enviou um arquivo `MatchCenter.tsx` com ~680 linhas que ja contem a estrutura base. Vamos usar esse arquivo como ponto de partida e aprimora-lo significativamente conforme solicitado.
 
-Com esses 4 pontos, a estrutura temporal da partida fica completamente mapeada:
+## Melhorias sobre o arquivo enviado
 
-```text
-|-- pré-jogo --|-- 1T (45+acresc) --|-- intervalo --|-- 2T (45+acresc) --|-- pós-jogo --|
-               ^                     ^                ^                    ^
-          game_start          1st_half_end      2nd_half_start        game_end
-```
+### 1. Header/Topo elaborado com escudos grandes
+- Escudos dos times maiores (80x80px) com bordas neon animadas
+- Placar com tipografia gigante e gradientes das cores dos times
+- Informacoes da partida (competicao, data, estadio) com icones
+- Background com gradiente sutil entre as cores dos times
 
-Cada evento detectado pode então ser posicionado corretamente:
-- Evento no 1T: `minute = (videoSecond - game_start_second) / 60`
-- Evento no 2T: `minute = 45 + (videoSecond - second_half_start_second) / 60`
+### 2. Player de video futurista
+- Barra de progresso customizada com marcadores de eventos (bolinhas coloridas na timeline)
+- Closed captions/legendas SRT sincronizadas sobre o video
+- Controles estilizados com glassmorphism
+- Eventos ao lado do video (layout side-by-side no desktop)
+- Indicador de evento atual pulsando na timeline
 
-## Mudanças
+### 3. Eventos com comentarios de IA (300 caracteres)
+- Cada evento na timeline tera um comentario tatico gerado por IA
+- Usar a edge function `arena-chatbot` existente para gerar comentarios via Lovable AI
+- Comentarios serao gerados em lote ao carregar a pagina (se ainda nao existirem)
+- Armazenados no campo `metadata.ai_comment` de cada evento
+- Textos maiores e bem formatados na timeline
 
-### 1. Novos patterns em `ai_services.py`
+### 4. Galeria de clips com capas e comentarios
+- Secao abaixo do video com grid de cards dos clips
+- Cada card mostra: thumbnail/capa do clip, tipo do evento, minuto, comentario de IA
+- Tipografia grande e legivel nos comentarios
+- Click abre o clip no player principal
 
-Adicionar `_GAME_START_PATTERNS` e `_GAME_END_PATTERNS`:
+### 5. Secao de Analise Tatica e Dashboard
+- Integrar componentes existentes: `TeamComparisonPanel`, `MatchStatsGrid`, `BestPlayerCard`
+- Graficos de recharts: timeline de eventos acumulados, comparativo por tipo
+- Cards de estatisticas (gols, chutes, faltas, escanteios, cartoes, defesas) por time
+- Formacao e posse de bola quando disponivel
 
-```text
-_GAME_START_PATTERNS = [
-    'rola a bola', 'bola rolando', 'começa o jogo', 'começa a partida',
-    'apito inicial', 'bola em jogo', 'o jogo começou',
-    'saída de bola', 'pontapé inicial', 'primeiro toque',
-    'começa o primeiro tempo', 'bola rolando para o primeiro tempo'
-]
+### 6. Forum de Torcedores com IA (2 chatbots)
+- Reutilizar `TeamChatbotCard` existente
+- Um chatbot para o time da casa, outro para o visitante
+- Texto e audio (Web Speech API como fallback)
+- Layout lado a lado no desktop
+- Os chatbots ja usam o servidor local com fallback para Lovable AI
 
-_GAME_END_PATTERNS = [
-    'fim de jogo', 'final de jogo', 'acabou o jogo',
-    'termina a partida', 'apito final', 'encerra o jogo',
-    'termina o jogo', 'encerrada a partida', 'acabou a partida',
-    'terminou o jogo', 'termina o segundo tempo',
-    'acabou o segundo tempo', 'fim do segundo tempo'
-]
-```
+### 7. Rota e navegacao
+- Nova rota `/match-center` no `App.tsx`
+- Link na sidebar/navegacao
 
-### 2. Expandir `detect_match_periods_from_transcription()`
+## Detalhes tecnicos
 
-Ampliar a funcao existente para retornar tambem:
-- `game_start_second`: timestamp SRT do inicio do jogo
-- `game_end_second`: timestamp SRT do fim do jogo
-- `second_half_start_second`: timestamp SRT do inicio do 2T (ja parcialmente existente)
-- `first_half_duration_min`: duracao real do 1T (incluindo acrescimos)
+### Arquivos a criar
+| Arquivo | Descricao |
+|---------|-----------|
+| `src/pages/MatchCenter.tsx` | Pagina principal (baseada no arquivo enviado, expandida) |
+| `src/components/match-center/MatchCenterHeader.tsx` | Header elaborado com escudos e placar |
+| `src/components/match-center/FuturisticVideoPlayer.tsx` | Player com legendas SRT e marcadores de eventos |
+| `src/components/match-center/EventsFeed.tsx` | Timeline de eventos com comentarios de IA |
+| `src/components/match-center/ClipsGallery.tsx` | Galeria de clips com capas e comentarios |
+| `src/components/match-center/MatchAnalyticsSection.tsx` | Estatisticas e graficos integrados |
+| `src/components/match-center/FanForumSection.tsx` | Secao dos 2 chatbots de torcedores |
+| `supabase/functions/generate-event-comments/index.ts` | Edge function para gerar comentarios de IA para eventos |
 
-Logica de busca:
-- Inicio do jogo: buscar nos primeiros 25% do texto
-- Fim do jogo: buscar nos ultimos 25% do texto
-- Halftime e 2T: ja existem (25%-75%)
-
-### 3. Nova funcao: `calculate_game_minute()`
-
-Funcao centralizada que converte videoSecond para minuto de jogo:
-
-```text
-def calculate_game_minute(video_second, boundaries):
-    """
-    Converte segundo absoluto do video para minuto de jogo.
-    
-    Usa os limites detectados:
-    - Se video_second < halftime -> minuto do 1T
-    - Se video_second > second_half_start -> minuto do 2T (base 45)
-    - Se entre halftime e 2T start -> intervalo (ignora)
-    """
-    game_start = boundaries.get('game_start_second', 0)
-    ht_end = boundaries.get('halftime_timestamp_seconds')
-    second_half_start = boundaries.get('second_half_start_second')
-    
-    if second_half_start and video_second >= second_half_start:
-        # Evento no 2T
-        elapsed = video_second - second_half_start
-        return 45 + (elapsed // 60), elapsed % 60
-    
-    # Evento no 1T (ou sem deteccao de halves)
-    elapsed = max(0, video_second - game_start)
-    return elapsed // 60, elapsed % 60
-```
-
-### 4. Integrar no pipeline de analise (`server.py`)
-
-No endpoint `/api/analyze-match`, chamar `detect_match_periods_from_transcription()` e usar os boundaries para:
-- Definir `video_game_start_second` automaticamente
-- Passar boundaries para `refine_event_timestamp_from_srt()` e `detect_events_by_keywords_from_text()`
-- Usar `calculate_game_minute()` em vez do calculo manual atual
-
-### 5. Atualizar funcoes existentes
-
-Em `detect_events_by_keywords_from_text()` e `refine_event_timestamp_from_srt()`:
-- Aceitar parametro `boundaries` (dict completo)
-- Usar `calculate_game_minute()` para derivar minute/second
-- Manter `videoSecond` absoluto (para seek no player)
-
-## Arquivos a modificar
-
+### Arquivos a editar
 | Arquivo | Alteracao |
 |---------|-----------|
-| `video-processor/ai_services.py` | Adicionar `_GAME_START_PATTERNS`, `_GAME_END_PATTERNS`, expandir `detect_match_periods_from_transcription()`, criar `calculate_game_minute()`, atualizar `detect_events_by_keywords_from_text()` e `refine_event_timestamp_from_srt()` |
-| `video-processor/server.py` | Chamar deteccao de boundaries antes da analise, passar resultado para as funcoes de deteccao de eventos |
+| `src/App.tsx` | Adicionar rota `/match-center` |
+| `src/components/layout/Sidebar.tsx` | Adicionar link para Match Center |
+| `src/components/layout/BottomNav.tsx` | Adicionar link no nav mobile |
+| `supabase/config.toml` | Registrar nova edge function |
+
+### Edge function: `generate-event-comments`
+- Recebe `match_id` e lista de eventos sem comentario
+- Para cada evento, gera um comentario tatico de 300 caracteres via Lovable AI (`google/gemini-3-flash-preview`)
+- Salva o comentario em `match_events.metadata.ai_comment`
+- Retorna os comentarios gerados
+- Trata erros 429 e 402
+
+### Legendas SRT no video
+- Buscar SRT do servidor local via `apiClient`
+- Parsear blocos SRT com timestamps
+- Exibir legenda atual como overlay no video sincronizado com `currentTime`
+- Estilo: fundo semi-transparente, texto branco, posicao inferior
+
+### Layout da pagina (de cima para baixo)
+1. **Header**: escudos + placar + info da partida (full width)
+2. **Video + Eventos**: grid 7/5 -- video a esquerda, timeline de eventos a direita
+3. **Momentos Importantes**: strip horizontal com thumbnails dos highlights
+4. **Galeria de Clips**: grid 3-4 colunas com capas, comentarios formatados
+5. **Analise Tatica**: tabs com resumo, times, MVP + graficos comparativos
+6. **Estatisticas**: grid de cards com numeros por time (home x away)
+7. **Forum de Torcedores**: 2 chatbots lado a lado com IA + voz
+
+### Dependencias existentes utilizadas
+- `recharts` para graficos
+- `useMatchSelection`, `useMatchEvents`, `useMatchAnalysis` para dados
+- `TeamChatbotCard` para chatbots
+- `useDynamicMatchStats` para estatisticas
+- `useEventBasedAnalysis` para analise derivada
+- `useClipGeneration` para geracao de clips
+- `useThumbnailGeneration` para capas
 
 ## Resultado esperado
 
-Para um video com 10 min de pre-jogo:
-- Sistema detecta "rola a bola" no SRT `00:10:12` -> `game_start_second = 612`
-- Gol de Coutinho no SRT `00:34:18` (videoSecond = 2058)
-- Calculo: `(2058 - 612) / 60 = minuto 24` (correto!)
-- Player de video ainda posiciona no segundo 2058 (correto!)
-
-Para segundo tempo:
-- Sistema detecta "começa o segundo tempo" no SRT `01:02:00` -> `second_half_start_second = 3720`
-- Evento no SRT `01:15:30` (videoSecond = 4530)
-- Calculo: `45 + (4530 - 3720) / 60 = minuto 58` (correto!)
-
-Intervalo com acrescimos detectado automaticamente (ex: 1T durou 48 min em vez de 45).
+Uma pagina unica e imersiva estilo portal esportivo profissional, onde o usuario tem acesso a tudo sobre uma partida: video com legendas, eventos comentados por IA, clips com capas, analise tatica completa, estatisticas com graficos, e forum interativo com dois chatbots representando cada time.
