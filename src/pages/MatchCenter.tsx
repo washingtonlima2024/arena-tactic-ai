@@ -63,8 +63,7 @@ export default function MatchCenter() {
     queryKey: ['thumbnails', currentMatchId],
     queryFn: async () => {
       if (!currentMatchId) return [];
-      const { data } = await supabase.from('thumbnails').select('*').eq('match_id', currentMatchId);
-      return data || [];
+      return await apiClient.getThumbnails(currentMatchId) || [];
     },
     enabled: !!currentMatchId,
   });
