@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Users, Search, MoreHorizontal, Edit, Shield, Building2, CreditCard, User, Eye, Upload, Pencil, Settings, Globe, AlertCircle, UserPlus, Loader2, Clock, CheckCircle, XCircle } from 'lucide-react';
+import { Users, Search, MoreHorizontal, Edit, Shield, Building2, CreditCard, User, Eye, Upload, Pencil, Settings, Globe, AlertCircle, UserPlus, Loader2, Clock, CheckCircle, XCircle, KeyRound, RefreshCw } from 'lucide-react';
 import { useAdminUsers } from '@/hooks/useAdminUsers';
 import { useOrganizations } from '@/hooks/useOrganizations';
 import { toast } from '@/hooks/use-toast';
@@ -39,7 +39,8 @@ export default function UsersManager() {
   const { 
     users, pendingUsers, isLoading, 
     updateUserRole, updateUserOrganization, updateUserProfile, 
-    approveUser, rejectUser, isApproving, isRejecting
+    approveUser, rejectUser, isApproving, isRejecting,
+    resetUserPassword, isResettingPassword
   } = useAdminUsers();
   const { organizations } = useOrganizations();
   const [searchTerm, setSearchTerm] = useState('');
@@ -61,12 +62,31 @@ export default function UsersManager() {
       phone: user.phone ? formatPhone(user.phone) : '',
       cpf_cnpj: user.cpf_cnpj ? formatCpfCnpj(user.cpf_cnpj) : '',
       credits_balance: user.credits_balance || 0,
+      new_password: '',
     });
+  };
+
+  const generateRandomPassword = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%';
+    let password = '';
+    for (let i = 0; i < 12; i++) {
+      password += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    setFormData((prev: any) => ({ ...prev, new_password: password }));
   };
 
   const handleSave = async () => {
     if (!editingUser) return;
     try {
+      // Validate password if provided
+      if (formData.new_password) {
+        if (formData.new_password.length < 8) {
+          toast({ title: 'Senha deve ter no mínimo 8 caracteres', variant: 'destructive' });
+          return;
+        }
+        await resetUserPassword(editingUser.user_id, formData.new_password);
+        toast({ title: 'Senha alterada com sucesso' });
+      }
       if (formData.role !== editingUser.role) {
         await updateUserRole(editingUser.user_id, formData.role);
       }
@@ -262,6 +282,26 @@ export default function UsersManager() {
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="border-t pt-4 mt-2">
+              <Label className="flex items-center gap-2 mb-2">
+                <KeyRound className="h-4 w-4" />
+                Alterar Senha
+              </Label>
+              <div className="flex gap-2">
+                <Input 
+                  type="password" 
+                  placeholder="Nova senha (mín. 8 caracteres)" 
+                  value={formData.new_password || ''} 
+                  onChange={(e) => setFormData({ ...formData, new_password: e.target.value })} 
+                />
+                <Button type="button" variant="outline" size="icon" onClick={generateRandomPassword} title="Gerar senha aleatória">
+                  <RefreshCw className="h-4 w-4" />
+                </Button>
+              </div>
+              {formData.new_password && formData.new_password.length > 0 && formData.new_password.length < 8 && (
+                <p className="text-sm text-destructive mt-1">Mínimo 8 caracteres</p>
+              )}
             </div>
           </div>
           <DialogFooter>

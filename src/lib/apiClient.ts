@@ -1827,6 +1827,10 @@ export const apiClient = {
       method: 'PUT', 
       body: JSON.stringify(data) 
     }),
+    resetUserPassword: (userId: string, newPassword: string) => apiRequest<any>(`/api/admin/users/${userId}/password`, { 
+      method: 'PUT', 
+      body: JSON.stringify({ new_password: newPassword }) 
+    }),
 
     // Credit Transactions
     getCreditTransactions: (limit?: number) => apiRequest<any[]>(`/api/admin/credit-transactions${limit ? `?limit=${limit}` : ''}`),
