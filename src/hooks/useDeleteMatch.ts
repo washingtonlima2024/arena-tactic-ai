@@ -18,10 +18,52 @@ interface DeleteResult {
   message?: string;
 }
 
+const STORAGE_BUCKETS = ['match-videos', 'generated-audio', 'thumbnails', 'event-clips'];
+
+async function cleanupSupabaseStorage(matchId: string) {
+  console.log('[useDeleteMatch] Limpando buckets Supabase Storage para:', matchId);
+
+  for (const bucket of STORAGE_BUCKETS) {
+    try {
+      const { data: files, error: listError } = await supabase.storage
+        .from(bucket)
+        .list(matchId);
+
+      if (listError) {
+        console.warn(`[useDeleteMatch] Erro ao listar ${bucket}/${matchId}:`, listError.message);
+        continue;
+      }
+
+      if (files && files.length > 0) {
+        const paths = files.map(f => `${matchId}/${f.name}`);
+        const { error: removeError } = await supabase.storage
+          .from(bucket)
+          .remove(paths);
+
+        if (removeError) {
+          console.warn(`[useDeleteMatch] Erro ao remover ${bucket}:`, removeError.message);
+        } else {
+          console.log(`[useDeleteMatch] ✅ ${bucket}: ${paths.length} arquivos removidos`);
+        }
+      }
+    } catch (err) {
+      console.warn(`[useDeleteMatch] Erro no bucket ${bucket}:`, err);
+    }
+  }
+}
+
+async function tryDeleteLocalStorage(matchId: string) {
+  try {
+    await apiClient.deleteMatchStorage(matchId);
+    console.log('[useDeleteMatch] ✅ Storage local deletado');
+  } catch (err) {
+    console.warn('[useDeleteMatch] Storage local indisponível (ignorado):', err);
+  }
+}
+
 async function deleteMatchViaSupabase(matchId: string) {
   console.log('[useDeleteMatch] Fallback Supabase para:', matchId);
 
-  // Delete related data in order (no FK cascades)
   const tables = [
     { name: 'match_events', col: 'match_id' },
     { name: 'videos', col: 'match_id' },
@@ -50,15 +92,25 @@ export function useDeleteMatch() {
     mutationFn: async (matchId: string) => {
       console.log('[useDeleteMatch] Iniciando deleção completa:', matchId);
 
+      let result: DeleteResult;
+      let usedLocal = false;
+
       try {
-        const result = await apiClient.deleteMatch(matchId) as DeleteResult;
+        result = await apiClient.deleteMatch(matchId) as DeleteResult;
+        usedLocal = true;
         console.log('[useDeleteMatch] Resultado servidor local:', result);
-        return { matchId, result };
       } catch (err) {
         console.warn('[useDeleteMatch] Servidor local indisponível, usando Cloud:', err);
-        const result = await deleteMatchViaSupabase(matchId);
-        return { matchId, result };
+        result = await deleteMatchViaSupabase(matchId);
       }
+
+      // Always cleanup both storages
+      await cleanupSupabaseStorage(matchId);
+      if (!usedLocal) {
+        await tryDeleteLocalStorage(matchId);
+      }
+
+      return { matchId, result };
     },
     onSuccess: ({ matchId, result }) => {
       queryClient.invalidateQueries({ queryKey: ['matches'] });
