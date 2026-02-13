@@ -46,8 +46,8 @@ export function EventsFeed({ events, selectedEventId, onSelectEvent, isGeneratin
   const needsComments = events.length > 0 && !hasAnyComment;
 
   return (
-    <Card className="overflow-hidden border-primary/20 flex flex-col h-full">
-      <CardHeader className="pb-2 border-b border-border">
+    <Card className="overflow-hidden border-primary/20 flex flex-col h-full max-h-full">
+      <CardHeader className="pb-2 border-b border-border flex-shrink-0">
         <div className="flex items-center justify-between gap-2">
           <CardTitle className="flex items-center gap-2 text-base">
             <Activity className="h-4 w-4 text-primary" />
@@ -70,7 +70,7 @@ export function EventsFeed({ events, selectedEventId, onSelectEvent, isGeneratin
         )}
       </CardHeader>
 
-      <ScrollArea className="flex-1 min-h-0">
+      <ScrollArea className="flex-1 min-h-0 overflow-hidden">
         <div className="p-3 space-y-2">
           {filtered.length > 0 ? filtered.map((event: any) => {
             const aiComment = (event.metadata as any)?.ai_comment;
@@ -97,7 +97,6 @@ export function EventsFeed({ events, selectedEventId, onSelectEvent, isGeneratin
                     <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
                       {event.description || 'Lance da partida'}
                     </p>
-                    {/* AI Comment */}
                     {aiComment && (
                       <div className="mt-2 p-2.5 rounded-md bg-gradient-to-r from-primary/5 to-transparent border-l-2 border-primary/50">
                         <div className="flex items-start gap-2">

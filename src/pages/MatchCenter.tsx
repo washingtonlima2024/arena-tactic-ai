@@ -182,7 +182,7 @@ export default function MatchCenter() {
           totalEvents={events.length}
         />
 
-        {/* 2. Video + Events side by side */}
+        {/* 2. Video + Events side by side — events locked to video height */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
           <div className="lg:col-span-7">
             <FuturisticVideoPlayer
@@ -193,7 +193,8 @@ export default function MatchCenter() {
               selectedEventId={selectedEventId}
             />
           </div>
-          <div className="lg:col-span-5 h-[400px] lg:h-auto">
+          {/* On mobile: fixed 350px. On desktop: match video aspect-ratio height via aspect-video trick */}
+          <div className="lg:col-span-5 h-[350px] lg:h-auto lg:max-h-none" style={{ maxHeight: 'calc(56.25vw * 7 / 12)' }}>
             <EventsFeed
               events={events}
               selectedEventId={selectedEventId}
