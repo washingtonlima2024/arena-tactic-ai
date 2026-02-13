@@ -150,7 +150,7 @@ export function FuturisticVideoPlayer({
   const resolvedUrl = videoUrl ? (videoUrl.startsWith('http') ? videoUrl : `${getApiBase()}${videoUrl}`) : null;
 
   return (
-    <div className="relative rounded-xl overflow-hidden bg-black border border-primary/20">
+    <div className="relative rounded-xl overflow-hidden bg-black border border-primary/20 shadow-xl shadow-black/20">
       <div className="relative aspect-video">
         {resolvedUrl ? (
           <>
@@ -160,6 +160,9 @@ export function FuturisticVideoPlayer({
               className="w-full h-full object-contain cursor-pointer"
               onClick={togglePlay}
             />
+
+            {/* Cinematic vignette overlay */}
+            <div className="absolute inset-0 pointer-events-none bg-[radial-gradient(ellipse_at_center,transparent_50%,rgba(0,0,0,0.35)_100%)]" />
 
             {/* SRT Subtitle overlay */}
             {subtitle && (
@@ -176,7 +179,7 @@ export function FuturisticVideoPlayer({
             <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black/90 via-black/40 to-transparent p-3 md:p-4">
               {/* Timeline with event markers */}
               <div
-                className="relative h-2 mb-3 rounded-full bg-white/20 cursor-pointer group"
+                className="relative h-1.5 mb-3 rounded-full bg-white/20 cursor-pointer group hover:h-2.5 transition-all"
                 onClick={(e) => {
                   const rect = e.currentTarget.getBoundingClientRect();
                   const pct = (e.clientX - rect.left) / rect.width;
@@ -184,22 +187,23 @@ export function FuturisticVideoPlayer({
                 }}
               >
                 <div
-                  className="absolute top-0 left-0 h-full rounded-full bg-primary transition-all"
+                  className="absolute top-0 left-0 h-full rounded-full bg-primary shadow-[0_0_10px_hsl(var(--primary)/0.5)] transition-all"
                   style={{ width: `${progress}%` }}
                 />
                 {/* Playhead */}
                 <div
-                  className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-primary shadow-lg opacity-0 group-hover:opacity-100 transition-opacity"
+                  className="absolute top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-primary shadow-[0_0_12px_hsl(var(--primary)/0.6)] opacity-0 group-hover:opacity-100 transition-opacity"
                   style={{ left: `calc(${progress}% - 8px)` }}
                 />
                 {/* Event dots */}
                 {eventMarkers.map((em) => (
                   <div
                     key={em.id}
-                    className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full border border-white/50 cursor-pointer hover:scale-150 transition-transform z-10"
+                    className="absolute top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full border border-white/50 cursor-pointer hover:scale-[2] transition-transform z-10"
                     style={{
                       left: `${em.pct}%`,
                       backgroundColor: EVENT_COLORS[em.event_type] || '#9ca3af',
+                      boxShadow: `0 0 6px ${EVENT_COLORS[em.event_type] || '#9ca3af'}80`,
                     }}
                     title={`${getEventIcon(em.event_type)} ${em.minute}'`}
                     onClick={(e) => { e.stopPropagation(); seekTo(Math.max(0, em.sec - 5)); onSeekToEvent?.(em); }}
@@ -210,23 +214,23 @@ export function FuturisticVideoPlayer({
               {/* Controls row */}
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1">
-                  <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 h-8 w-8" onClick={togglePlay}>
-                    {isPlaying ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                  <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 h-9 w-9" onClick={togglePlay}>
+                    {isPlaying ? <Pause className="h-5 w-5" /> : <Play className="h-5 w-5" />}
                   </Button>
-                  <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 h-8 w-8" onClick={() => skip(-10)}>
+                  <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 h-8 w-8" onClick={() => skip(-10)}>
                     <SkipBack className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 h-8 w-8" onClick={() => skip(10)}>
+                  <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 h-8 w-8" onClick={() => skip(10)}>
                     <SkipForward className="h-4 w-4" />
                   </Button>
-                  <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 h-8 w-8" onClick={toggleMute}>
+                  <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 h-8 w-8" onClick={toggleMute}>
                     {isMuted ? <VolumeX className="h-4 w-4" /> : <Volume2 className="h-4 w-4" />}
                   </Button>
                   <span className="text-xs text-white/70 ml-2 font-mono">
                     {formatTime(currentTime)} / {formatTime(duration || 0)}
                   </span>
                 </div>
-                <Button variant="ghost" size="icon" className="text-white hover:bg-white/10 h-8 w-8" onClick={() => videoRef.current?.requestFullscreen()}>
+                <Button variant="ghost" size="icon" className="text-white hover:bg-white/20 h-9 w-9" onClick={() => videoRef.current?.requestFullscreen()}>
                   <Maximize2 className="h-4 w-4" />
                 </Button>
               </div>

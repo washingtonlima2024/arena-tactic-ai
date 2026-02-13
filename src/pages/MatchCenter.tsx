@@ -197,6 +197,7 @@ export default function MatchCenter() {
           <div className="lg:col-span-5 h-[350px] lg:h-auto lg:max-h-none" style={{ maxHeight: 'calc(56.25vw * 7 / 12)' }}>
             <EventsFeed
               events={events}
+              thumbnails={thumbnails}
               selectedEventId={selectedEventId}
               onSelectEvent={seekToEvent}
               isGeneratingComments={isGeneratingComments}

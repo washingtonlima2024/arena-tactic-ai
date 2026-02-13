@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { normalizeStorageUrl } from '@/lib/apiClient';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -9,6 +10,7 @@ import { getEventLabel, getEventIcon } from '@/lib/eventLabels';
 
 interface EventsFeedProps {
   events: any[];
+  thumbnails?: any[];
   selectedEventId?: string | null;
   onSelectEvent: (event: any) => void;
   isGeneratingComments?: boolean;
@@ -37,8 +39,13 @@ const EVENT_TEXT: Record<string, string> = {
   shot: 'text-pink-400',
 };
 
-export function EventsFeed({ events, selectedEventId, onSelectEvent, isGeneratingComments, onGenerateComments }: EventsFeedProps) {
+export function EventsFeed({ events, thumbnails = [], selectedEventId, onSelectEvent, isGeneratingComments, onGenerateComments }: EventsFeedProps) {
   const [filter, setFilter] = useState<string>('all');
+
+  const getThumbnail = (eventId: string) => {
+    const thumb = thumbnails.find((t: any) => t.event_id === eventId);
+    return thumb?.image_url ? normalizeStorageUrl(thumb.image_url) : null;
+  };
 
   const filtered = filter === 'all' ? events : events.filter((e: any) => e.event_type === filter);
 
@@ -84,8 +91,15 @@ export function EventsFeed({ events, selectedEventId, onSelectEvent, isGeneratin
                 onClick={() => onSelectEvent(event)}
               >
                 <div className="flex items-start gap-3">
-                  <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0", EVENT_BG[event.event_type] || 'bg-muted')}>
-                    <span className="text-lg">{getEventIcon(event.event_type)}</span>
+                  <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden", EVENT_BG[event.event_type] || 'bg-muted')}>
+                    {(() => {
+                      const thumb = getThumbnail(event.id);
+                      return thumb ? (
+                        <img src={thumb} alt="" className="w-full h-full object-cover" />
+                      ) : (
+                        <span className="text-lg">{getEventIcon(event.event_type)}</span>
+                      );
+                    })()}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
