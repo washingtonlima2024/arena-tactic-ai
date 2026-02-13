@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Loader2, Search, Globe } from 'lucide-react';
 import { supabase } from '@/integrations/supabase/client';
 import { ScrollArea } from '@/components/ui/scroll-area';
+import { downloadLogoToLocal } from '@/lib/autoTeamLogo';
 
 interface LogoResult {
   name: string;
@@ -107,11 +108,19 @@ export function LogoSearchDialog({ open, onOpenChange, onSelect }: LogoSearchDia
     }
   };
 
-  const handleSelectLogo = (logo: LogoResult) => {
+  const handleSelectLogo = async (logo: LogoResult) => {
+    let finalLogoUrl = logo.logoUrl;
+    try {
+      // Baixar para storage local com verificação de cache
+      finalLogoUrl = await downloadLogoToLocal(logo.logoUrl, logo.name);
+    } catch (err) {
+      console.warn(`[LogoSearch] Fallback URL externa para ${logo.name}:`, err);
+    }
+    
     onSelect({
       name: logo.name,
       shortName: logo.shortName,
-      logoUrl: logo.logoUrl,
+      logoUrl: finalLogoUrl,
     });
     onOpenChange(false);
   };
