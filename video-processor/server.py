@@ -3830,12 +3830,38 @@ def analyze_match():
                 boundaries = ai_services.detect_match_periods_from_transcription(transcription)
                 boundary_source = 'transcription'
             
+            # Tentativa 3: OCR do placar (fallback automático)
+            if not boundaries.get('game_start_second') and video_path and os.path.exists(str(video_path)):
+                try:
+                    from scoreboard_ocr import detect_match_boundaries_ocr
+                    ocr_boundaries = detect_match_boundaries_ocr(str(video_path), duration_seconds or 5400)
+                    if ocr_boundaries.get('confidence', 0) > 0.3:
+                        boundaries = ocr_boundaries
+                        boundary_source = 'ocr_scoreboard'
+                        print(f"[ANALYZE-MATCH] ✓ OCR forneceu boundaries com confiança {ocr_boundaries['confidence']:.2f}")
+                    else:
+                        print(f"[ANALYZE-MATCH] ⚠ OCR confiança baixa: {ocr_boundaries.get('confidence', 0):.2f}")
+                except ImportError:
+                    print("[ANALYZE-MATCH] ⚠ EasyOCR não instalado, saltando detecção OCR")
+                except Exception as ocr_err:
+                    print(f"[ANALYZE-MATCH] ⚠ OCR falhou (não crítico): {ocr_err}")
+            
             if boundaries.get('game_start_second') is not None:
                 print(f"[ANALYZE-MATCH] ⚽ Boundaries detectados via {boundary_source}: "
                       f"início={boundaries['game_start_second']:.0f}s, "
                       f"halftime={boundaries.get('halftime_timestamp_seconds', 'N/A')}, "
                       f"2T={boundaries.get('second_half_start_second', 'N/A')}, "
                       f"fim={boundaries.get('game_end_second', 'N/A')}")
+            
+            # Ajustar gameEndMinute se prorrogação detectada pelo OCR
+            if boundaries.get('has_extra_time'):
+                if boundaries.get('extra_time_2_start_second'):
+                    game_end_minute = max(game_end_minute, 120)
+                else:
+                    game_end_minute = max(game_end_minute, 105)
+                print(f"[ANALYZE-MATCH] ⚽ Prorrogação detectada pelo OCR, gameEndMinute={game_end_minute}")
+            if boundaries.get('has_penalties'):
+                print(f"[ANALYZE-MATCH] ⚽ Pênaltis detectados pelo OCR")
             
             # ═══════════════════════════════════════════════════════════════
             # CALCULAR VIDEO OFFSET (pré-jogo)
@@ -4104,6 +4130,63 @@ def analyze_match():
                         
             session.commit()
             print(f"[ANALYZE-MATCH] Saved {len(events)} events with match_half={match_half}")
+            
+            # ═══════════════════════════════════════════════════════════════
+            # VALIDAÇÃO AUTOMÁTICA DE MINUTOS COM OCR
+            # ═══════════════════════════════════════════════════════════════
+            if video_path and os.path.exists(str(video_path)) and saved_events:
+                try:
+                    from scoreboard_ocr import validate_events_batch_ocr
+                    
+                    # Converter saved_events para formato esperado pelo OCR
+                    events_for_ocr = []
+                    for se in saved_events:
+                        events_for_ocr.append({
+                            'id': se['id'],
+                            'minute': se['minute'],
+                            'second': se.get('second', 0),
+                            'event_type': se['event_type'],
+                            'metadata': {'videoSecond': se.get('videoSecond')},
+                        })
+                    
+                    print(f"[ANALYZE-MATCH] 🎬 Validando {len(events_for_ocr)} eventos com OCR...")
+                    validations = validate_events_batch_ocr(str(video_path), events_for_ocr, segment_start_minute)
+                    
+                    session_ocr = get_session()
+                    try:
+                        corrected_count = 0
+                        for validation in validations:
+                            event_id = validation.get('event_id')
+                            if event_id and validation.get('corrected') and validation.get('confidence', 0) > 0.3:
+                                event = session_ocr.query(MatchEvent).filter_by(id=event_id).first()
+                                if event:
+                                    old_minute = event.minute
+                                    event.minute = validation['minute']
+                                    event.second = validation.get('second', 0)
+                                    event.time_source = 'ocr_scoreboard'
+                                    
+                                    metadata = event.event_metadata or {}
+                                    metadata['ocr_validation'] = {
+                                        'original_minute': old_minute,
+                                        'ocr_minute': validation['ocr_minute'],
+                                        'confidence': validation['confidence'],
+                                        'divergence': validation.get('divergence', 0),
+                                    }
+                                    event.event_metadata = metadata
+                                    corrected_count += 1
+                                    print(f"[ANALYZE-MATCH] ✓ OCR corrigiu {event.event_type}: {old_minute}' → {validation['minute']}'")
+                        
+                        session_ocr.commit()
+                        if corrected_count > 0:
+                            print(f"[ANALYZE-MATCH] ✓ OCR corrigiu {corrected_count} eventos")
+                        else:
+                            print(f"[ANALYZE-MATCH] ✓ OCR confirmou todos os minutos")
+                    finally:
+                        session_ocr.close()
+                except ImportError:
+                    print("[ANALYZE-MATCH] ⚠ EasyOCR não instalado, saltando validação automática")
+                except Exception as ocr_validate_err:
+                    print(f"[ANALYZE-MATCH] ⚠ Validação OCR falhou (não crítico): {ocr_validate_err}")
         finally:
             session.close()
         
