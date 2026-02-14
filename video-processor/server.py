@@ -2907,7 +2907,18 @@ def regenerate_clips(match_id: str):
         if second_half_events and second_video and os.path.exists(second_video):
             try:
                 # ✅ CRUCIAL: passar segment_start_minute=45 para o segundo tempo
-                segment_start = 45 if video_paths.get('second_half') else 0
+                # Usar duração real do 1T dos boundaries quando disponível
+                # Tentar carregar boundaries do analysis_job
+                _boundaries_clip = {}
+                try:
+                    from sqlalchemy import desc as _desc_clip
+                    _job_clip = session.query(AnalysisJob).filter_by(match_id=match_id).order_by(_desc_clip(AnalysisJob.created_at)).first()
+                    if _job_clip and _job_clip.result and isinstance(_job_clip.result, dict):
+                        _boundaries_clip = _job_clip.result.get('boundaries', {}) or {}
+                except Exception:
+                    pass
+                _first_half_min = _boundaries_clip.get('first_half_duration_min')
+                segment_start = int(round(_first_half_min)) if _first_half_min and _first_half_min > 40 else (45 if video_paths.get('second_half') else 0)
                 clips = extract_event_clips_auto(
                     match_id=match_id,
                     video_path=second_video,
@@ -3838,6 +3849,39 @@ def analyze_match():
                       f"fim={boundaries.get('game_end_second', 'N/A')}")
             
             # ═══════════════════════════════════════════════════════════════
+            # PERSISTIR BOUNDARIES NO ANALYSIS JOB (result JSON)
+            # ═══════════════════════════════════════════════════════════════
+            if boundaries.get('confidence', 0) > 0.3:
+                try:
+                    session_bd = get_session()
+                    # Salvar no analysis_job mais recente deste match
+                    from sqlalchemy import desc
+                    job = session_bd.query(AnalysisJob).filter_by(match_id=match_id).order_by(desc(AnalysisJob.created_at)).first()
+                    if job:
+                        job_result = job.result or {} if job.result else {}
+                        if isinstance(job_result, str):
+                            import json as _json
+                            try:
+                                job_result = _json.loads(job_result)
+                            except:
+                                job_result = {}
+                        job_result['boundaries'] = {
+                            'game_start_second': boundaries.get('game_start_second'),
+                            'halftime_second': boundaries.get('halftime_timestamp_seconds'),
+                            'second_half_start_second': boundaries.get('second_half_start_second'),
+                            'game_end_second': boundaries.get('game_end_second'),
+                            'first_half_duration_min': boundaries.get('first_half_duration_min'),
+                            'extra_time': boundaries.get('extra_time_detected', False),
+                            'confidence': boundaries.get('confidence'),
+                        }
+                        job.result = job_result
+                        session_bd.commit()
+                        print(f"[ANALYZE-MATCH] 💾 Boundaries salvos no analysis_job do match {match_id}")
+                    session_bd.close()
+                except Exception as bd_save_err:
+                    print(f"[ANALYZE-MATCH] ⚠ Erro ao salvar boundaries: {bd_save_err}")
+            
+            # ═══════════════════════════════════════════════════════════════
             # CALCULAR VIDEO OFFSET (pré-jogo)
             # ═══════════════════════════════════════════════════════════════
             video_game_start_second = 0
@@ -3897,7 +3941,12 @@ def analyze_match():
         
         # Define segment_start_minute EARLY for video second calculation
         # This ensures the variable is available throughout the analysis
-        segment_start_minute = game_start_minute if half_type == 'first' else 45
+        if half_type == 'first':
+            segment_start_minute = game_start_minute
+        else:
+            first_half_min = boundaries.get('first_half_duration_min')
+            segment_start_minute = int(round(first_half_min)) if first_half_min and first_half_min > 40 else 45
+            print(f"[ANALYZE-MATCH] ⏱ segment_start_minute 2T dinâmico: {segment_start_minute} (first_half_duration_min={first_half_min})")
         
         # SCORE VALIDATION: Calculate scores from detected goal events
         # This ensures score accuracy matches actual goals detected

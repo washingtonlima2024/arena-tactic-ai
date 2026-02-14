@@ -131,119 +131,154 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
     }
   };
 
+  // Determine phase label for event grouping
+  const getPhaseLabel = (event: MatchEvent) => {
+    const min = event.minute || 0;
+    const half = (event.metadata as any)?.half || (event.metadata as any)?.match_half;
+    
+    if (half === 'first_half' || half === 'first') {
+      return min > 45 ? 'Acréscimos 1T' : '1º Tempo';
+    }
+    if (half === 'second_half' || half === 'second') {
+      return min > 90 ? 'Acréscimos 2T' : '2º Tempo';
+    }
+    // Fallback by minute
+    if (min <= 45) return '1º Tempo';
+    if (min <= 50) return 'Acréscimos 1T';
+    if (min <= 90) return '2º Tempo';
+    return 'Acréscimos 2T';
+  };
+
+  let lastPhase = '';
+
   return (
     <div className={cn("space-y-3", className)}>
       {events.map((event, index) => {
         const team = getTeam(event);
         const isHighlight = isHighlightEvent(event.type);
         const timeDisplay = formatEventTimeDisplay(event);
+        const phase = getPhaseLabel(event);
+        const showSeparator = phase !== lastPhase;
+        lastPhase = phase;
 
         return (
-          <div 
-            key={event.id}
-            className={cn(
-              "group flex items-start gap-3 rounded-lg p-3 transition-all",
-              isHighlight 
-                ? "border border-yellow-500/30 bg-gradient-to-r from-yellow-500/10 via-amber-500/5 to-transparent shadow-[0_0_20px_rgba(234,179,8,0.1)]" 
-                : "hover:bg-muted/50"
-            )}
-            style={{ animationDelay: `${index * 50}ms` }}
-          >
-            {/* Play Video Button */}
-            {hasVideo && onPlayVideo && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className="h-8 w-8 shrink-0 hover:bg-primary/20"
-                onClick={() => onPlayVideo(event.id, event.minute)}
-                title="Reproduzir vídeo"
-              >
-                <Play className="h-4 w-4 text-primary" />
-              </Button>
+          <div key={event.id}>
+            {/* Phase separator */}
+            {showSeparator && (
+              <div className="flex items-center gap-2 py-2 mb-2">
+                <div className="flex-1 h-px bg-border" />
+                <Badge variant="outline" className="text-xs font-medium text-muted-foreground shrink-0">
+                  {phase}
+                </Badge>
+                <div className="flex-1 h-px bg-border" />
+              </div>
             )}
 
-            {/* Play Audio Button - shows whenever matchId exists (doesn't require video) */}
-            {matchId && (
-              <Button
-                variant="ghost"
-                size="icon"
-                className={cn(
-                  "h-8 w-8 shrink-0",
-                  playingAudioId === event.id 
-                    ? "bg-yellow-500/20 hover:bg-yellow-500/30" 
-                    : "hover:bg-primary/20"
-                )}
-                onClick={() => handlePlayAudio(event)}
-                title={playingAudioId === event.id ? "Pausar áudio" : "Ouvir narração"}
-                disabled={loadingAudioId === event.id}
-              >
-                {loadingAudioId === event.id ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                ) : playingAudioId === event.id ? (
-                  <VolumeX className="h-4 w-4 text-yellow-500" />
-                ) : (
-                  <Volume2 className="h-4 w-4 text-muted-foreground hover:text-primary" />
-                )}
-              </Button>
-            )}
-
-            <div className="flex w-14 flex-col items-center">
-              <span className={cn(
-                "text-base font-bold font-mono",
-                isHighlight ? "text-yellow-500" : "text-primary"
-              )}>{timeDisplay.formatted}</span>
-            </div>
-
-            {/* Line */}
-            <div className="relative flex flex-col items-center">
-              <div className={cn(
-                "flex h-8 w-8 items-center justify-center rounded-full text-lg",
+            <div 
+              className={cn(
+                "group flex items-start gap-3 rounded-lg p-3 transition-all",
                 isHighlight 
-                  ? "bg-yellow-500/20 ring-2 ring-yellow-500/50" 
-                  : "bg-muted group-hover:bg-primary/20"
-              )}>
-                {getEventIcon(normalizeEventType(event.type))}
-              </div>
-              {index < events.length - 1 && (
-                <div className="h-full w-px flex-1 bg-border" />
+                  ? "border border-yellow-500/30 bg-gradient-to-r from-yellow-500/10 via-amber-500/5 to-transparent shadow-[0_0_20px_rgba(234,179,8,0.1)]" 
+                  : "hover:bg-muted/50"
               )}
-            </div>
-
-            {/* Content */}
-            <div className="flex flex-1 items-start justify-between">
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  {isHighlight && (
-                    <Star className="h-4 w-4 fill-yellow-500 text-yellow-500" />
-                  )}
-                  <Badge variant={isHighlight ? 'highlight' : (eventBadgeVariants[event.type] || 'secondary')}>
-                    {getEventLabel(event.type === 'red_card' ? 'foul' : event.type)}
-                  </Badge>
-                  {team && (
-                    <div className="flex items-center gap-1.5">
-                      <TeamBadge team={team as any} size="xs" />
-                      <span className="text-xs font-medium text-muted-foreground">
-                        {team.short_name || team.name}
-                      </span>
-                    </div>
-                  )}
-                </div>
-                {event.description && (
-                  <p className="text-xs text-muted-foreground">{event.description}</p>
-                )}
-              </div>
-
-              {/* Admin Edit Button */}
-              {isAdmin && onEditEvent && (
+              style={{ animationDelay: `${index * 50}ms` }}
+            >
+              {/* Play Video Button */}
+              {hasVideo && onPlayVideo && (
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
-                  onClick={() => onEditEvent(event)}
+                  className="h-8 w-8 shrink-0 hover:bg-primary/20"
+                  onClick={() => onPlayVideo(event.id, event.minute)}
+                  title="Reproduzir vídeo"
                 >
-                  <Pencil className="h-4 w-4" />
+                  <Play className="h-4 w-4 text-primary" />
                 </Button>
               )}
+
+              {/* Play Audio Button */}
+              {matchId && (
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className={cn(
+                    "h-8 w-8 shrink-0",
+                    playingAudioId === event.id 
+                      ? "bg-yellow-500/20 hover:bg-yellow-500/30" 
+                      : "hover:bg-primary/20"
+                  )}
+                  onClick={() => handlePlayAudio(event)}
+                  title={playingAudioId === event.id ? "Pausar áudio" : "Ouvir narração"}
+                  disabled={loadingAudioId === event.id}
+                >
+                  {loadingAudioId === event.id ? (
+                    <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                  ) : playingAudioId === event.id ? (
+                    <VolumeX className="h-4 w-4 text-yellow-500" />
+                  ) : (
+                    <Volume2 className="h-4 w-4 text-muted-foreground hover:text-primary" />
+                  )}
+                </Button>
+              )}
+
+              <div className="flex w-14 flex-col items-center">
+                <span className={cn(
+                  "text-base font-bold font-mono",
+                  isHighlight ? "text-yellow-500" : "text-primary"
+                )}>{timeDisplay.formatted}</span>
+              </div>
+
+              {/* Line */}
+              <div className="relative flex flex-col items-center">
+                <div className={cn(
+                  "flex h-8 w-8 items-center justify-center rounded-full text-lg",
+                  isHighlight 
+                    ? "bg-yellow-500/20 ring-2 ring-yellow-500/50" 
+                    : "bg-muted group-hover:bg-primary/20"
+                )}>
+                  {getEventIcon(normalizeEventType(event.type))}
+                </div>
+                {index < events.length - 1 && (
+                  <div className="h-full w-px flex-1 bg-border" />
+                )}
+              </div>
+
+              {/* Content */}
+              <div className="flex flex-1 items-start justify-between">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    {isHighlight && (
+                      <Star className="h-4 w-4 fill-yellow-500 text-yellow-500" />
+                    )}
+                    <Badge variant={isHighlight ? 'highlight' : (eventBadgeVariants[event.type] || 'secondary')}>
+                      {getEventLabel(event.type === 'red_card' ? 'foul' : event.type)}
+                    </Badge>
+                    {team && (
+                      <div className="flex items-center gap-1.5">
+                        <TeamBadge team={team as any} size="xs" />
+                        <span className="text-xs font-medium text-muted-foreground">
+                          {team.short_name || team.name}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  {event.description && (
+                    <p className="text-xs text-muted-foreground">{event.description}</p>
+                  )}
+                </div>
+
+                {/* Admin Edit Button */}
+                {isAdmin && onEditEvent && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 opacity-0 transition-opacity group-hover:opacity-100"
+                    onClick={() => onEditEvent(event)}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
             </div>
           </div>
         );

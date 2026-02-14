@@ -63,6 +63,7 @@ RECIPES: Dict[str, EventRecipe] = {
         secondary_patterns=[
             r'pra\s+dentro', r'entrou', r'bola\s+na\s+rede',
             r'bateu\s+pro\s+gol', r'tá\s+lá', r'ta\s+la',
+            r'\bfez\b', r'chutou\s+pro\s+gol',
         ],
         confirmation_patterns=[
             r'rede', r'celebra', r'abraço', r'comemora',
