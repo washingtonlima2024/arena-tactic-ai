@@ -69,8 +69,6 @@ import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
 import { VideoUploadCard } from '@/components/events/VideoUploadCard';
 import { apiClient, normalizeStorageUrl } from '@/lib/apiClient';
 import { useDynamicMatchStats } from '@/hooks/useDynamicMatchStats';
-import { useScoreboardReader } from '@/hooks/useScoreboardReader';
-import { Eye } from 'lucide-react';
 
 // EventRow component for rendering individual events
 interface EventRowProps {
@@ -242,9 +240,6 @@ export default function Events() {
     cancel: cancelClipGeneration,
     reset: resetClipProgress 
   } = useClipGeneration();
-  
-  // Scoreboard OCR reader
-  const { validateEventTimes, isValidating: isValidatingOCR, validations: ocrValidations } = useScoreboardReader();
   
   // Live broadcast context for realtime updates
   const { isRecording, currentMatchId: liveMatchId } = useLiveBroadcastContext();
@@ -1312,39 +1307,6 @@ export default function Events() {
                   <Stethoscope className="mr-2 h-4 w-4" />
                 )}
                 Diagnosticar
-              </Button>
-            )}
-
-            {/* Validate Event Times with OCR */}
-            {events.length > 0 && (
-              <Button 
-                variant="outline" 
-                size="sm"
-                onClick={async () => {
-                  if (!currentMatchId) return;
-                  const results = await validateEventTimes(currentMatchId);
-                  if (results.length > 0) {
-                    const corrected = results.filter(r => r.corrected).length;
-                    const confirmed = results.filter(r => !r.corrected && r.confidence > 0).length;
-                    const unreadable = results.filter(r => r.confidence === 0).length;
-                    toast.success(
-                      `Validação OCR: ${confirmed} confirmados, ${corrected} corrigidos, ${unreadable} ilegíveis`,
-                      { duration: 5000 }
-                    );
-                    if (corrected > 0) {
-                      refetchEvents();
-                      queryClient.invalidateQueries({ queryKey: ['match', currentMatchId] });
-                    }
-                  }
-                }}
-                disabled={isValidatingOCR}
-              >
-                {isValidatingOCR ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Eye className="mr-2 h-4 w-4" />
-                )}
-                Validar Tempos (OCR)
               </Button>
             )}
 

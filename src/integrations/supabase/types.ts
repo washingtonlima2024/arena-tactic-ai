@@ -305,7 +305,6 @@ export type Database = {
           position_x: number | null
           position_y: number | null
           second: number | null
-          time_source: string | null
           video_id: string | null
         }
         Insert: {
@@ -327,7 +326,6 @@ export type Database = {
           position_x?: number | null
           position_y?: number | null
           second?: number | null
-          time_source?: string | null
           video_id?: string | null
         }
         Update: {
@@ -349,7 +347,6 @@ export type Database = {
           position_x?: number | null
           position_y?: number | null
           second?: number | null
-          time_source?: string | null
           video_id?: string | null
         }
         Relationships: [

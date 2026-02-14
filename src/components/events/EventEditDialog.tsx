@@ -183,8 +183,7 @@ export function EventEditDialog({
           approval_status: 'pending',
           approved_by: null,
           approved_at: null,
-          clip_pending: true,
-          time_source: 'manual_edit',
+          clip_pending: true, // Mark for clip regeneration
         });
         
         console.log('[EventEdit] Updated with isOwnGoal:', isOwnGoal, 'metadata:', updatedMetadata);

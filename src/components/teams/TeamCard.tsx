@@ -1,8 +1,8 @@
+import { useState } from 'react';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Edit, Trash2 } from 'lucide-react';
 import type { Team } from '@/hooks/useTeams';
-import { TeamBadge } from '@/components/teams/TeamBadge';
 
 interface TeamCardProps {
   team: Team;
@@ -11,11 +11,30 @@ interface TeamCardProps {
 }
 
 export function TeamCard({ team, onEdit, onDelete }: TeamCardProps) {
+  const [imgError, setImgError] = useState(false);
+
   return (
     <Card variant="glass" className="group hover:border-primary/30 transition-all duration-300">
       <CardContent className="p-4">
         <div className="flex items-center gap-4">
-          <TeamBadge team={team} size="xl" className="shrink-0 shadow-lg" />
+          <div 
+            className="h-14 w-14 rounded-full flex items-center justify-center text-lg font-bold shrink-0 shadow-lg"
+            style={{ 
+              backgroundColor: team.primary_color || '#10b981',
+              color: team.secondary_color || '#ffffff'
+            }}
+          >
+            {team.logo_url && !imgError ? (
+              <img 
+                src={team.logo_url} 
+                alt={team.name} 
+                onError={() => setImgError(true)}
+                className="h-12 w-12 object-contain"
+              />
+            ) : (
+              team.short_name?.slice(0, 2) || team.name.slice(0, 2)
+            )}
+          </div>
 
           <div className="flex-1 min-w-0">
             <h3 className="font-display font-semibold truncate">{team.name}</h3>
