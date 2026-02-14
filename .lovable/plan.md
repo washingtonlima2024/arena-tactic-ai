@@ -1,186 +1,166 @@
 
 
-# Auto-Download de Logos com Cache Local e Fontes Alternativas
+# Usar Tempo Real do Audio/Transcricao para Boundaries (sem tempo fixo)
 
-## Resumo
+## Problema Atual
 
-Criar um sistema que automaticamente busca, baixa e armazena logos de times no storage local (`video-processor/storage/logos/`), usando o nome do time como identificador para evitar downloads duplicados. Adicionar fontes alternativas alem do football-logos.cc para cobrir selecoes nacionais e times nao encontrados.
+O sistema ja detecta os 4 marcadores da partida via `detect_match_periods_from_transcription`, mas **nao usa esses dados completamente**. Em 3 pontos criticos, o valor `45` esta hardcoded:
 
-## Alteracoes
+1. **`calculate_game_minute()`** (ai_services.py:681): `return 45 + int(elapsed // 60)` -- ignora `first_half_duration_min`
+2. **`segment_start_minute`** (server.py:3900): `= game_start_minute if half_type == 'first' else 45` -- fixo
+3. **Clips do 2T** (server.py:2910): `segment_start = 45 if video_paths.get('second_half') else 0` -- fixo
 
-### 1. Novo arquivo: `src/lib/autoTeamLogo.ts`
+## Solucao
 
-Funcao utilitaria reutilizavel que:
+### 1. `video-processor/ai_services.py` - `calculate_game_minute`
 
-- Recebe nome do time e retorna `{ logoUrl, shortName } | null`
-- **Verifica cache local primeiro**: checa se ja existe arquivo em `storage/logos/{nome-normalizado}.png` via `GET /api/storage/teams/logos/{slug}.png` (HEAD request para verificar existencia)
-- Se ja existe, retorna URL local sem baixar novamente
-- Se nao existe, busca em multiplas fontes na ordem:
-  1. `fetch-football-logos` (football-logos.cc) - busca em brazil, argentina, portugal, spain, england, italy, germany, france
-  2. **API alternativa**: Wikipedia/Wikimedia Commons via URL previsivel para selecoes e clubes famosos
-  3. **Fallback**: Logo Clearbit (`https://logo.clearbit.com/{domain}`) para times com site oficial
-- Ao encontrar, baixa como blob e faz upload via `apiClient.uploadBlob('teams', 'logos', blob, '{slug}.png')`
-- Retorna URL local armazenada
+Usar `first_half_duration_min` dos boundaries quando disponivel:
 
-```typescript
-export async function autoFetchTeamLogo(teamName: string): Promise<{
-  logoUrl: string;
-  shortName: string | null;
-} | null> {
-  const slug = normalizeSlug(teamName);
-  
-  // 1. Verificar se ja existe localmente
-  try {
-    const checkUrl = buildApiUrl(getApiBase(), `/api/storage/teams/logos/${slug}.png`);
-    const headResp = await fetch(checkUrl, { method: 'HEAD' });
-    if (headResp.ok) {
-      return { logoUrl: checkUrl, shortName: null };
-    }
-  } catch {}
-  
-  // 2. Buscar no football-logos.cc via edge function
-  const countries = ['brazil', 'argentina', 'portugal', 'spain', 'england', ...];
-  for (const country of countries) {
-    const { data } = await supabase.functions.invoke('fetch-football-logos', {
-      body: { mode: 'search', country, query: teamName },
-    });
-    if (data?.success && data.logos?.length > 0) {
-      const best = findBestMatch(teamName, data.logos);
-      if (best) {
-        const localUrl = await downloadAndStore(best.logoUrl, slug);
-        return { logoUrl: localUrl, shortName: best.shortName };
-      }
-    }
-  }
-  
-  // 3. Tentar fontes alternativas (Wikipedia, etc)
-  const altUrl = await tryAlternativeSources(teamName, slug);
-  if (altUrl) return { logoUrl: altUrl, shortName: null };
-  
-  return null;
-}
+```python
+def calculate_game_minute(video_second, boundaries, game_start_minute=0):
+    game_start = boundaries.get('game_start_second', 0)
+    second_half_start = boundaries.get('second_half_start_second')
+    first_half_min = boundaries.get('first_half_duration_min')
+    
+    # Base do 2T: duracao real do 1T (arredondada) ou 45 como fallback
+    second_half_base = int(round(first_half_min)) if first_half_min and first_half_min > 40 else 45
+    
+    if second_half_start and video_second >= second_half_start:
+        elapsed = max(0, video_second - second_half_start)
+        return second_half_base + int(elapsed // 60), int(elapsed % 60)
+    
+    elapsed = max(0, video_second - game_start)
+    return game_start_minute + int(elapsed // 60), int(elapsed % 60)
 ```
 
-### 2. Modificar `supabase/functions/fetch-football-logos/index.ts`
+### 2. `video-processor/server.py` - `segment_start_minute` dinamico
 
-Adicionar um modo `'national'` que busca logos de selecoes nacionais. O site football-logos.cc ja tem selecoes listadas junto com clubes, mas adicionar tambem busca direta por nomes como "Brasil", "Argentina", "Selecao Brasileira" mapeando para o slug correto.
+Na linha 3900, usar a duracao real do 1T dos boundaries:
 
-Adicionar mapeamento de nomes comuns de selecoes:
+```python
+if half_type == 'first':
+    segment_start_minute = game_start_minute
+else:
+    first_half_min = boundaries.get('first_half_duration_min')
+    segment_start_minute = int(round(first_half_min)) if first_half_min and first_half_min > 40 else 45
+```
+
+Mesma correcao na linha 2910 (clips do 2T).
+
+### 3. `video-processor/ai_services.py` - Adicionar deteccao por TXT (sem SRT)
+
+A deteccao atual so extrai timestamps precisos de SRTs (`HH:MM:SS,mmm -->`). Para transcrições TXT puras, adicionar busca de timestamps em formatos como `[MM:SS]`, `MM:SS` ou mencoes textuais ("aos 45 minutos"):
+
+```python
+# Se nao e SRT, tentar extrair tempo de padroes de texto
+if not is_srt:
+    # Buscar [45:00] ou 45:00 proximo ao marcador
+    txt_ts = re.search(r'\[?(\d{1,2}):(\d{2})\]?', before_text)
+    if txt_ts:
+        result['game_start_second'] = int(txt_ts.group(1)) * 60 + int(txt_ts.group(2))
+    # Buscar "aos X minutos"
+    mention = re.search(r'aos?\s+(\d{1,3})\s*minutos?', before_text)
+    if mention:
+        result['game_start_second'] = int(mention.group(1)) * 60
+```
+
+Aplicar o mesmo padrao para halftime, 2T start e game end.
+
+### 4. `video-processor/ai_services.py` - Ampliar patterns de deteccao
+
+Adicionar mais frases comuns de narracao que indicam inicio/fim:
+
+```python
+# Game Start - adicionar:
+re.compile(r'come[cç]ou\s+o\s+jogo', re.IGNORECASE),
+re.compile(r'vale\s*!', re.IGNORECASE),
+
+# Halftime End - adicionar:
+re.compile(r'intervalo', re.IGNORECASE),  # so a palavra, mas limitado a regiao 25-75%
+
+# Game End - adicionar:
+re.compile(r'encerrou', re.IGNORECASE),
+re.compile(r'acabou\s+tudo', re.IGNORECASE),
+```
+
+### 5. `video-processor/server.py` - Salvar boundaries nos metadados da partida
+
+Persistir os boundaries detectados no match para que o frontend possa usar na timeline:
+
+```python
+# Apos detectar boundaries, salvar nos metadados do match
+if boundaries.get('confidence', 0) > 0.3:
+    session = get_session()
+    match = session.query(Match).get(match_id)
+    if match:
+        meta = match.metadata or {}
+        meta['boundaries'] = {
+            'game_start_second': boundaries.get('game_start_second'),
+            'halftime_second': boundaries.get('halftime_timestamp_seconds'),
+            'second_half_start_second': boundaries.get('second_half_start_second'),
+            'game_end_second': boundaries.get('game_end_second'),
+            'first_half_duration_min': boundaries.get('first_half_duration_min'),
+            'extra_time': boundaries.get('extra_time_detected', False),
+            'confidence': boundaries.get('confidence'),
+        }
+        match.metadata = meta
+        session.commit()
+    session.close()
+```
+
+### 6. Frontend - Agrupar eventos por fase na timeline
+
+**`src/components/events/EventTimeline.tsx`** e **`src/components/analysis/AnalysisEventTimeline.tsx`**:
+
+Usar os boundaries salvos nos metadados para criar separadores visuais entre fases:
+
 ```typescript
-const NATIONAL_TEAM_ALIASES: Record<string, string> = {
-  'brasil': 'brazil-national-team',
-  'selecao brasileira': 'brazil-national-team',
-  'argentina': 'argentina-national-team',
-  'selecao argentina': 'argentina-national-team',
-  // ... mais selecoes
+const getPhaseLabel = (event: MatchEvent) => {
+  const min = event.minute || 0;
+  const half = (event.metadata as any)?.half || event.match_half;
+  
+  if (half === 'first_half' || half === 'first') {
+    return min > 45 ? 'Acrescimos 1T' : '1o Tempo';
+  }
+  if (min > 90) return 'Acrescimos 2T';
+  return '2o Tempo';
 };
 ```
 
-### 3. Modificar `src/hooks/useTeams.ts` - `useCreateTeam`
+Renderizar um separador visual (linha horizontal + badge) quando a fase muda entre eventos consecutivos.
 
-No `onSuccess`, disparar `autoFetchTeamLogo` em background (nao-bloqueante):
+### 7. `video-processor/event_detector.py` - Keywords de gol extras
 
-```typescript
-onSuccess: async (newTeam) => {
-  queryClient.invalidateQueries({ queryKey: ['teams'] });
-  
-  if (newTeam?.name && !newTeam?.logo_url) {
-    autoFetchTeamLogo(newTeam.name).then(async (result) => {
-      if (result) {
-        await apiClient.updateTeam(newTeam.id, {
-          logo_url: result.logoUrl,
-          short_name: result.shortName || newTeam.short_name,
-        });
-        queryClient.invalidateQueries({ queryKey: ['teams'] });
-      }
-    }).catch(console.warn);
-  }
-}
+Conforme documento aprovado anteriormente:
+
+```python
+secondary_patterns=[
+    ...,
+    r'\bfez\b',
+    r'chutou\s+pro\s+gol',
+],
 ```
 
-Isso cobre automaticamente:
-- SmartImport (que chama `createTeamMutation.mutateAsync`)
-- Criacao manual de time
-- Qualquer outro lugar que use `useCreateTeam`
-
-### 4. Modificar `src/components/teams/BulkImportTeamsDialog.tsx`
-
-Na funcao `handleImport`, baixar cada logo para storage local antes de importar:
-
-```typescript
-for (const l of selected) {
-  let logoUrl = l.logoUrl;
-  try {
-    const slug = l.slug || l.name.toLowerCase().replace(/\s+/g, '-');
-    // Verificar se ja existe
-    const checkResp = await fetch(
-      buildApiUrl(getApiBase(), `/api/storage/teams/logos/${slug}.png`),
-      { method: 'HEAD' }
-    );
-    if (checkResp.ok) {
-      logoUrl = buildApiUrl(getApiBase(), `/api/storage/teams/logos/${slug}.png`);
-    } else {
-      const resp = await fetch(l.logoUrl);
-      const blob = await resp.blob();
-      const result = await apiClient.uploadBlob('teams', 'logos', blob, `${slug}.png`);
-      logoUrl = result.url;
-    }
-  } catch { /* fallback: URL externa */ }
-  
-  teamsToImport.push({ name: l.name, short_name: l.shortName, logo_url: logoUrl });
-}
-```
-
-### 5. Modificar `src/components/teams/LogoSearchDialog.tsx`
-
-No `onSelect`, baixar logo para storage local:
-
-```typescript
-const handleSelect = async (logo: LogoResult) => {
-  try {
-    const slug = logo.slug || logo.name.toLowerCase().replace(/\s+/g, '-');
-    const response = await fetch(logo.logoUrl);
-    const blob = await response.blob();
-    const result = await apiClient.uploadBlob('teams', 'logos', blob, `${slug}.png`);
-    onSelect({ name: logo.name, shortName: logo.shortName, logoUrl: result.url });
-  } catch {
-    onSelect({ name: logo.name, shortName: logo.shortName, logoUrl: logo.logoUrl });
-  }
-  onOpenChange(false);
-};
-```
-
-### 6. Endpoint no servidor Python (video-processor/server.py)
-
-O endpoint `POST /api/storage/<match_id>/<subfolder>` ja funciona para qualquer `match_id`. Usando `match_id='teams'` e `subfolder='logos'`, os arquivos ficam em `storage/teams/logos/`. Nao precisa de alteracao no servidor -- o endpoint generico ja suporta isso.
-
-## Fontes de Logo (ordem de prioridade)
-
-1. **Cache local** (`storage/teams/logos/{slug}.png`) - verificacao HEAD antes de qualquer busca
-2. **football-logos.cc** (via edge function existente) - clubes e selecoes de 180+ paises
-3. **Wikipedia/Wikimedia** - URLs previsiveis para selecoes (`https://upload.wikimedia.org/...`) 
-4. **Fallback UI** - circulo com cor primaria do time + iniciais (ja implementado)
-
-## Fluxo SmartImport (exemplo)
+## Fluxo Corrigido
 
 ```text
-1. SmartImport detecta "Flamengo vs Palmeiras"
-2. createTeamMutation("Flamengo") -> time criado sem logo
-3. [background] autoFetchTeamLogo("Flamengo")
-   -> HEAD /api/storage/teams/logos/flamengo.png -> 404
-   -> busca football-logos.cc/brazil?query=flamengo -> encontra!
-   -> fetch imagem -> upload para storage/teams/logos/flamengo.png
-   -> updateTeam(logo_url: "/api/storage/teams/logos/flamengo.png")
-4. Proximo import com "Flamengo":
-   -> HEAD /api/storage/teams/logos/flamengo.png -> 200 (ja existe!)
-   -> usa URL local sem baixar novamente
+1. Transcricao/SRT chega no backend
+2. detect_match_periods_from_transcription() analisa o texto:
+   - Encontra "rola a bola" em 00:02:15 -> game_start = 135s
+   - Encontra "fim do primeiro tempo" em 00:50:30 -> halftime = 3030s
+   - Calcula: first_half_duration = (3030 - 135) / 60 = 48.3 min
+   - Encontra "comeca o segundo tempo" em 00:55:10 -> 2T start = 3310s
+   - Encontra "fim de jogo" em 01:48:00 -> game_end = 6480s
+3. calculate_game_minute() usa 48 (nao 45) como base do 2T
+4. Boundaries sao salvos nos metadados do match
+5. Frontend agrupa eventos: 1T (0-48'), Acrescimos 1T, 2T (48-96'), Acrescimos 2T
 ```
 
-## Arquivos a Criar/Modificar
+## Arquivos a Modificar
 
-1. **NOVO: `src/lib/autoTeamLogo.ts`** - Funcao de auto-busca com cache e fontes alternativas
-2. **`supabase/functions/fetch-football-logos/index.ts`** - Aliases de selecoes nacionais
-3. **`src/hooks/useTeams.ts`** - Disparar auto-busca no onSuccess do useCreateTeam
-4. **`src/components/teams/BulkImportTeamsDialog.tsx`** - Download local com verificacao de cache
-5. **`src/components/teams/LogoSearchDialog.tsx`** - Download local ao selecionar
+1. **`video-processor/ai_services.py`** - `calculate_game_minute` usar `first_half_duration_min`; ampliar patterns; deteccao TXT
+2. **`video-processor/server.py`** - `segment_start_minute` dinamico (linhas 3900 e 2910); salvar boundaries no match
+3. **`video-processor/event_detector.py`** - Keywords extras de gol
+4. **`src/components/events/EventTimeline.tsx`** - Separadores visuais por fase
+5. **`src/components/analysis/AnalysisEventTimeline.tsx`** - Separadores visuais por fase
 
