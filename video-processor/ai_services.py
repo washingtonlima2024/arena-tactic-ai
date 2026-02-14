@@ -600,6 +600,7 @@ _HALFTIME_END_PATTERNS = [
     re.compile(r'vamos\s+para\s+o\s+intervalo', re.IGNORECASE),
     re.compile(r'termina\s+o\s+primeiro\s+tempo', re.IGNORECASE),
     re.compile(r'acabou\s+o\s+primeiro\s+tempo', re.IGNORECASE),
+    re.compile(r'intervalo', re.IGNORECASE),
 ]
 
 _SECOND_HALF_START_PATTERNS = [
@@ -633,6 +634,8 @@ _GAME_START_PATTERNS = [
     re.compile(r'primeiro\s+toque', re.IGNORECASE),
     re.compile(r'come[cç]a\s+o\s+primeiro\s+tempo', re.IGNORECASE),
     re.compile(r'bola\s+rolando\s+para\s+o\s+primeiro\s+tempo', re.IGNORECASE),
+    re.compile(r'come[cç]ou\s+o\s+jogo', re.IGNORECASE),
+    re.compile(r'vale\s*!', re.IGNORECASE),
 ]
 
 _GAME_END_PATTERNS = [
@@ -649,6 +652,8 @@ _GAME_END_PATTERNS = [
     re.compile(r'termina\s+o\s+segundo\s+tempo', re.IGNORECASE),
     re.compile(r'acabou\s+o\s+segundo\s+tempo', re.IGNORECASE),
     re.compile(r'fim\s+do\s+segundo\s+tempo', re.IGNORECASE),
+    re.compile(r'encerrou', re.IGNORECASE),
+    re.compile(r'acabou\s+tudo', re.IGNORECASE),
 ]
 
 
@@ -666,7 +671,7 @@ def calculate_game_minute(video_second: float, boundaries: dict, game_start_minu
     Converte segundo absoluto do vídeo para minuto de jogo.
     
     Usa os limites detectados:
-    - Se video_second >= second_half_start -> minuto do 2T (base 45)
+    - Se video_second >= second_half_start -> minuto do 2T (base = duração real do 1T ou 45)
     - Senão -> minuto do 1T (base game_start_minute)
     
     Returns:
@@ -674,13 +679,17 @@ def calculate_game_minute(video_second: float, boundaries: dict, game_start_minu
     """
     game_start = boundaries.get('game_start_second', 0)
     second_half_start = boundaries.get('second_half_start_second')
+    first_half_min = boundaries.get('first_half_duration_min')
+    
+    # Base do 2T: duração real do 1T (arredondada) ou 45 como fallback
+    second_half_base = int(round(first_half_min)) if first_half_min and first_half_min > 40 else 45
     
     if second_half_start and video_second >= second_half_start:
         # Evento no 2T
         elapsed = max(0, video_second - second_half_start)
-        return 45 + int(elapsed // 60), int(elapsed % 60)
+        return second_half_base + int(elapsed // 60), int(elapsed % 60)
     
-    # Evento no 1T (ou sem deteccao de halves)
+    # Evento no 1T (ou sem detecção de halves)
     elapsed = max(0, video_second - game_start)
     return game_start_minute + int(elapsed // 60), int(elapsed % 60)
 
@@ -749,6 +758,18 @@ def detect_match_periods_from_transcription(
                 last_ts = ts_matches[-1].group(1)
                 result['game_start_second'] = _parse_srt_timestamp_to_seconds(last_ts)
                 print(f"[PERIOD-DETECT] ⚽ Início do jogo detectado: {result['game_start_second']:.0f}s ({last_ts})")
+        else:
+            # TXT: buscar timestamps [MM:SS] ou "aos X minutos" próximo ao marcador
+            before_text = transcription_text[max(0, best_start['index'] - 200):best_start['index'] + 100]
+            txt_ts = re.search(r'\[?(\d{1,2}):(\d{2})\]?', before_text)
+            if txt_ts:
+                result['game_start_second'] = int(txt_ts.group(1)) * 60 + int(txt_ts.group(2))
+                print(f"[PERIOD-DETECT] ⚽ Início do jogo detectado (TXT): {result['game_start_second']}s")
+            else:
+                mention = re.search(r'aos?\s+(\d{1,3})\s*minutos?', before_text, re.IGNORECASE)
+                if mention:
+                    result['game_start_second'] = int(mention.group(1)) * 60
+                    print(f"[PERIOD-DETECT] ⚽ Início do jogo detectado (menção): {result['game_start_second']}s")
 
     # ═══════════════════════════════════════════════════════════════
     # DETECTAR FIM DO 1T (halftime) - entre 25% e 75% do texto
@@ -784,6 +805,16 @@ def detect_match_periods_from_transcription(
             if ts_matches:
                 last_ts = ts_matches[-1].group(1)
                 result['halftime_timestamp_seconds'] = _parse_srt_timestamp_to_seconds(last_ts)
+        else:
+            # TXT: buscar timestamps próximo ao marcador de halftime
+            before_text = transcription_text[max(0, best['index'] - 200):best['index'] + 100]
+            txt_ts = re.search(r'\[?(\d{1,2}):(\d{2})\]?', before_text)
+            if txt_ts:
+                result['halftime_timestamp_seconds'] = int(txt_ts.group(1)) * 60 + int(txt_ts.group(2))
+            else:
+                mention = re.search(r'aos?\s+(\d{1,3})\s*minutos?', before_text, re.IGNORECASE)
+                if mention:
+                    result['halftime_timestamp_seconds'] = int(mention.group(1)) * 60
 
         # Calcular duração real do 1T
         if result['game_start_second'] is not None and result['halftime_timestamp_seconds'] is not None:
@@ -821,6 +852,13 @@ def detect_match_periods_from_transcription(
                         last_ts = ts_matches[-1].group(1)
                         result['second_half_start_second'] = _parse_srt_timestamp_to_seconds(last_ts)
                         print(f"[PERIOD-DETECT] ⚽ Início do 2T detectado: {result['second_half_start_second']:.0f}s ({last_ts})")
+                else:
+                    # TXT fallback
+                    before_text = transcription_text[max(0, abs_pos - 200):abs_pos + 100]
+                    txt_ts = re.search(r'\[?(\d{1,2}):(\d{2})\]?', before_text)
+                    if txt_ts:
+                        result['second_half_start_second'] = int(txt_ts.group(1)) * 60 + int(txt_ts.group(2))
+                        print(f"[PERIOD-DETECT] ⚽ Início do 2T detectado (TXT): {result['second_half_start_second']}s")
                 break
 
     # ═══════════════════════════════════════════════════════════════
@@ -852,6 +890,13 @@ def detect_match_periods_from_transcription(
                 last_ts = ts_matches[-1].group(1)
                 result['game_end_second'] = _parse_srt_timestamp_to_seconds(last_ts)
                 print(f"[PERIOD-DETECT] 🏁 Fim do jogo detectado: {result['game_end_second']:.0f}s ({last_ts})")
+        else:
+            # TXT fallback
+            before_text = transcription_text[max(0, best_end['index'] - 200):best_end['index'] + 100]
+            txt_ts = re.search(r'\[?(\d{1,2}):(\d{2})\]?', before_text)
+            if txt_ts:
+                result['game_end_second'] = int(txt_ts.group(1)) * 60 + int(txt_ts.group(2))
+                print(f"[PERIOD-DETECT] 🏁 Fim do jogo detectado (TXT): {result['game_end_second']}s")
 
     # ═══════════════════════════════════════════════════════════════
     # DETECTAR PRORROGAÇÃO (parte final, >70%)
