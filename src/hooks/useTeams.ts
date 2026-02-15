@@ -51,22 +51,33 @@ export function useCreateTeam() {
       
       // Auto-buscar logo em background se o time não tem logo
       if (newTeam?.name && !newTeam?.logo_url) {
-        autoFetchTeamLogo(newTeam.name).then(async (result) => {
-          if (result && newTeam.id) {
-            try {
+        const attemptLogoFetch = async (attempt: number) => {
+          try {
+            const result = await autoFetchTeamLogo(newTeam.name);
+            if (result && newTeam.id) {
               await apiClient.updateTeam(newTeam.id, {
                 logo_url: result.logoUrl,
                 ...(result.shortName && !newTeam.short_name ? { short_name: result.shortName } : {}),
               });
               queryClient.invalidateQueries({ queryKey: ['teams'] });
-              console.log(`[useCreateTeam] Logo auto-atribuída para "${newTeam.name}"`);
-            } catch (err) {
-              console.warn(`[useCreateTeam] Falha ao atualizar logo:`, err);
+              console.log(`[useCreateTeam] Logo auto-atribuída para "${newTeam.name}" (tentativa ${attempt})`);
+            } else if (attempt < 2) {
+              // Retry após 5s
+              console.log(`[useCreateTeam] Logo não encontrada para "${newTeam.name}", retry em 5s...`);
+              setTimeout(() => attemptLogoFetch(attempt + 1), 5000);
+            } else {
+              console.warn(`[useCreateTeam] Logo não encontrada para "${newTeam.name}" após ${attempt} tentativas`);
+            }
+          } catch (err) {
+            if (attempt < 2) {
+              console.warn(`[useCreateTeam] Falha ao buscar logo (tentativa ${attempt}), retry em 5s:`, err);
+              setTimeout(() => attemptLogoFetch(attempt + 1), 5000);
+            } else {
+              console.warn(`[useCreateTeam] Auto-fetch logo falhou para "${newTeam.name}" após ${attempt} tentativas:`, err);
             }
           }
-        }).catch((err) => {
-          console.warn(`[useCreateTeam] Auto-fetch logo falhou para "${newTeam.name}":`, err);
-        });
+        };
+        attemptLogoFetch(1);
       }
     },
   });

@@ -2760,16 +2760,19 @@ export default function VideoUpload() {
                   let awayTeamId = findTeamId(_awayTeamName || '');
                   
                   // Auto-create teams that don't exist in the database
+                  // Logo fetch is handled by useCreateTeam hook (with retry)
                   try {
                     if (!homeTeamId && _homeTeamName?.trim()) {
                       console.log('[SmartImport] Auto-creating home team:', _homeTeamName);
                       const newTeam = await createTeamMutation.mutateAsync({ name: _homeTeamName.trim() });
                       homeTeamId = (newTeam as any)?.id || '';
+                      console.log('[SmartImport] Home team created:', homeTeamId, '- logo fetch triggered by hook');
                     }
                     if (!awayTeamId && _awayTeamName?.trim()) {
                       console.log('[SmartImport] Auto-creating away team:', _awayTeamName);
                       const newTeam = await createTeamMutation.mutateAsync({ name: _awayTeamName.trim() });
                       awayTeamId = (newTeam as any)?.id || '';
+                      console.log('[SmartImport] Away team created:', awayTeamId, '- logo fetch triggered by hook');
                     }
                   } catch (err) {
                     console.warn('[SmartImport] Error auto-creating teams:', err);
