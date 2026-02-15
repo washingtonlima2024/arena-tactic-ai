@@ -28,20 +28,39 @@ type ImportMode = 'halves' | 'full';
 // Tenta extrair nomes de times a partir do nome do arquivo
 function extractTeamsFromFilename(filename: string): { home?: string; away?: string } {
   if (!filename) return {};
-  const name = filename.replace(/\.[^.]+$/, '').replace(/.*[/\\]/, '');
+  let name = filename.replace(/\.[^.]+$/, '').replace(/.*[/\\]/, '');
+  
+  // Limpar prefixos comuns de data/hora: "2024-01-15_", "20240115_", "jogo_"
+  name = name.replace(/^\d{4}[-_]\d{2}[-_]\d{2}[_\s-]*/g, '');
+  name = name.replace(/^\d{8}[_\s-]*/g, '');
+  name = name.replace(/^(jogo|game|match|partida)[_\s-]*/gi, '');
+  
   const separators = [
-    /[_\s]*[xX][_\s]*/,
-    /[_\s]*[vV][sS]\.?[_\s]*/,
+    /\s+x\s+/i,
+    /[_]x[_]/i,
+    /\s+vs\.?\s+/i,
+    /[_]vs[_]/i,
+    /\s*-\s*/,
     /\s+contra\s+/i,
+    /[_]contra[_]/i,
   ];
   for (const sep of separators) {
     const parts = name.split(sep);
     if (parts.length >= 2) {
-      const cleanName = (s: string) => s.replace(/[_-]?\d+.*$/, '').replace(/[_-]+/g, ' ').trim();
+      const cleanName = (s: string) => s
+        .replace(/[_-]?\d+.*$/, '')
+        .replace(/[_-]+/g, ' ')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-zA-Z0-9\s]/g, '')
+        .trim();
       const home = cleanName(parts[0]);
       const away = cleanName(parts[1]);
       if (home.length >= 2 && away.length >= 2) {
-        return { home, away };
+        // Restaurar nomes originais (com acentos) para busca de logos
+        const originalHome = parts[0].replace(/[_-]+/g, ' ').replace(/\d+.*$/, '').trim();
+        const originalAway = parts[1].replace(/[_-]+/g, ' ').replace(/\d+.*$/, '').trim();
+        return { home: originalHome, away: originalAway };
       }
     }
   }

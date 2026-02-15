@@ -13797,6 +13797,7 @@ def extract_match_info():
     """
     Recebe transcrição e usa IA (Ollama local) para extrair metadados da partida:
     times, competição, estádio, data, placar.
+    Inclui detecção por regex como fallback e dica para a IA.
     """
     data = request.get_json(silent=True) or {}
     transcription = data.get('transcription', '').strip()
@@ -13809,11 +13810,18 @@ def extract_match_info():
 
     print(f"[ExtractMatchInfo] Transcrição recebida: {len(transcription)} chars")
 
+    # ── Pré-detecção por regex para encontrar nomes de times ──
+    regex_hints = _extract_teams_by_regex(transcription)
+    hint_text = ''
+    if regex_hints.get('home') or regex_hints.get('away'):
+        hint_text = f"\n\nDICA: Padrões detectados no texto sugerem os times: {regex_hints.get('home', '?')} vs {regex_hints.get('away', '?')}. Confirme ou corrija com base no contexto completo."
+        print(f"[ExtractMatchInfo] Regex hints: {regex_hints}")
+
     # ── Prompt para extração de metadados ──
     extraction_prompt = f"""Analise a transcrição de uma transmissão de futebol e extraia os metadados da partida.
 
 TRANSCRIÇÃO:
-{transcription[:8000]}
+{transcription[:12000]}
 
 Retorne SOMENTE um JSON válido com esta estrutura exata (sem texto adicional):
 {{
@@ -13827,14 +13835,23 @@ Retorne SOMENTE um JSON válido com esta estrutura exata (sem texto adicional):
 }}
 
 Regras:
-- home_team: o time que joga em casa (geralmente mencionado primeiro)
+- home_team: o time que joga em casa (geralmente mencionado primeiro pelo narrador)
 - away_team: o time visitante
-- competition: liga, campeonato ou torneio
+- Identifique times mesmo a partir de menções INDIRETAS: nomes de jogadores conhecidos, cores de uniforme, torcida, apelidos ("Timão", "Mengão", "Tricolor", "Alviverde", etc.)
+- Se o narrador mencionar "gol do [Time]", "posse do [Time]", "falta de [Time]", extraia o nome do time
+- competition: liga, campeonato ou torneio (ex: Brasileirão, Libertadores, Copa do Brasil)
 - venue: estádio onde a partida acontece
 - match_date: data da partida se mencionada (formato YYYY-MM-DD)
 - score: placar se mencionado (pode ser parcial)
 - confidence: 0.0 a 1.0 indicando sua confiança nos dados extraídos
 - Se não conseguir identificar um campo, use null
+
+EXEMPLOS de extração:
+- "Gol do Flamengo!" → home_team ou away_team = "Flamengo"
+- "Palmeiras tem a posse de bola" → um dos times é "Palmeiras"
+- "Bola com o goleiro do São Paulo" → um dos times é "São Paulo"
+- "Torcida do Corinthians faz a festa" → um dos times é "Corinthians"
+- "Neymar com a bola" → provavelmente Santos ou seleção brasileira{hint_text}
 """
 
     try:
@@ -13918,6 +13935,56 @@ Regras:
         import traceback
         traceback.print_exc()
         return jsonify({'error': str(e)}), 500
+
+
+def _extract_teams_by_regex(text: str) -> dict:
+    """
+    Tenta detectar nomes de times via padrões comuns na transcrição.
+    Retorna dict com 'home' e 'away' (podem ser None).
+    """
+    if not text:
+        return {}
+    
+    # Padrão: "Time A x Time B", "Time A versus Time B", "Time A contra Time B"
+    match_patterns = [
+        r'([A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+(?:\s+[A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+)*)\s+(?:x|X|vs\.?|versus|contra|VS)\s+([A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+(?:\s+[A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+)*)',
+    ]
+    
+    for pattern in match_patterns:
+        m = re.search(pattern, text[:5000])
+        if m:
+            home = m.group(1).strip()
+            away = m.group(2).strip()
+            if len(home) >= 3 and len(away) >= 3:
+                return {'home': home, 'away': away}
+    
+    # Padrão: "gol do [Time]", "posse do [Time]", "falta de [Time]"
+    context_patterns = [
+        r'gol\s+d[oae]\s+([A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+(?:\s+[A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+)*)',
+        r'posse\s+d[oae]\s+([A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+(?:\s+[A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+)*)',
+        r'falta\s+d[oae]\s+([A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+(?:\s+[A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+)*)',
+        r'escanteio\s+(?:para|pro|pra)\s+o\s+([A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+(?:\s+[A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+)*)',
+        r'lateral\s+(?:para|pro|pra)\s+o\s+([A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+(?:\s+[A-ZÀ-Ú][a-záàâãéèêíïóôõöúç]+)*)',
+    ]
+    
+    found_teams = []
+    for pattern in context_patterns:
+        matches = re.findall(pattern, text[:8000], re.IGNORECASE)
+        for team_name in matches:
+            clean = team_name.strip()
+            if len(clean) >= 3 and clean not in found_teams:
+                found_teams.append(clean)
+            if len(found_teams) >= 2:
+                break
+        if len(found_teams) >= 2:
+            break
+    
+    if len(found_teams) >= 2:
+        return {'home': found_teams[0], 'away': found_teams[1]}
+    elif len(found_teams) == 1:
+        return {'home': found_teams[0], 'away': None}
+    
+    return {}
 
 
 if __name__ == '__main__':
