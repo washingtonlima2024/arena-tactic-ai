@@ -51,7 +51,7 @@ export function MatchCenterHeader({
           <span style={{ color }}>{name.charAt(0)}</span>
         )}
       </div>
-      <span className="font-bold text-sm md:text-base tracking-wide text-foreground">
+      <span className="font-bold text-sm md:text-base tracking-wide text-foreground uppercase">
         {short || name}
       </span>
     </div>
