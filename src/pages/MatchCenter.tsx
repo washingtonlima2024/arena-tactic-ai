@@ -202,6 +202,8 @@ export default function MatchCenter() {
               onSelectEvent={seekToEvent}
               isGeneratingComments={isGeneratingComments}
               onGenerateComments={generateComments}
+              homeTeam={homeTeam}
+              awayTeam={awayTeam}
             />
           </div>
         </div>
@@ -244,7 +246,7 @@ export default function MatchCenter() {
         )}
 
         {/* 4. Clips Gallery */}
-        <ClipsGallery events={events} thumbnails={thumbnails} onPlayClip={handlePlayClip} />
+        <ClipsGallery events={events} thumbnails={thumbnails} onPlayClip={handlePlayClip} homeTeam={homeTeam} awayTeam={awayTeam} />
 
         {/* 4.5. Playlist Builder */}
         <PlaylistBuilder events={events} thumbnails={thumbnails} matchId={currentMatchId} />
