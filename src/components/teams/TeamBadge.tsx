@@ -27,7 +27,7 @@ const sizeClasses = {
 export function TeamBadge({ team, size = 'md', className, showGlow = false }: TeamBadgeProps) {
   const [imgError, setImgError] = useState(false);
   const logoUrl = team.logo_url || team.logo;
-  const shortName = team.short_name || team.shortName || team.name.slice(0, 3);
+  const shortName = (team.short_name || team.shortName || team.name.slice(0, 3)).toUpperCase();
   const primaryColor = team.primary_color || team.primaryColor || '#10b981';
   
   if (logoUrl && !imgError) {
