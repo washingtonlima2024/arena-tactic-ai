@@ -601,6 +601,12 @@ _HALFTIME_END_PATTERNS = [
     re.compile(r'termina\s+o\s+primeiro\s+tempo', re.IGNORECASE),
     re.compile(r'acabou\s+o\s+primeiro\s+tempo', re.IGNORECASE),
     re.compile(r'intervalo', re.IGNORECASE),
+    # Novos padrões do plano
+    re.compile(r'equipes\s+v[aã]o\s+para\s+o\s+vesti[aá]rio', re.IGNORECASE),
+    re.compile(r'v[aã]o\s+para\s+o\s+vesti[aá]rio', re.IGNORECASE),
+    re.compile(r'acabou\s+a\s+primeira\s+etapa', re.IGNORECASE),
+    re.compile(r'encerrada\s+a\s+primeira\s+etapa', re.IGNORECASE),
+    re.compile(r'fim\s+da\s+primeira\s+etapa', re.IGNORECASE),
 ]
 
 _SECOND_HALF_START_PATTERNS = [
@@ -610,6 +616,9 @@ _SECOND_HALF_START_PATTERNS = [
     re.compile(r'volta\s+a\s+bola', re.IGNORECASE),
     re.compile(r'segundo\s+tempo\s+come[cç]a', re.IGNORECASE),
     re.compile(r'bola\s+rola(ndo)?\s+novamente', re.IGNORECASE),
+    # Novos padrões do plano
+    re.compile(r'iniciado\s+o\s+segundo\s+tempo', re.IGNORECASE),
+    re.compile(r'autorizado\s+o\s+rein[ií]cio', re.IGNORECASE),
 ]
 
 _EXTRA_TIME_PATTERNS = [
@@ -619,6 +628,36 @@ _EXTRA_TIME_PATTERNS = [
     re.compile(r'segundo\s+tempo\s+da\s+prorroga[cç][aã]o', re.IGNORECASE),
     re.compile(r'jogo\s+vai\s+para\s+a?\s*prorroga[cç][aã]o', re.IGNORECASE),
     re.compile(r'vamos\s+para\s+a?\s*prorroga[cç][aã]o', re.IGNORECASE),
+]
+
+_EXTRA_TIME_1T_PATTERNS = [
+    re.compile(r'primeiro\s+tempo\s+(da\s+prorroga[cç][aã]o|extra)', re.IGNORECASE),
+    re.compile(r'come[cç]a\s+a\s+prorroga[cç][aã]o', re.IGNORECASE),
+    re.compile(r'in[ií]cio\s+da\s+prorroga[cç][aã]o', re.IGNORECASE),
+]
+
+_EXTRA_TIME_2T_PATTERNS = [
+    re.compile(r'segundo\s+tempo\s+(da\s+prorroga[cç][aã]o|extra)', re.IGNORECASE),
+    re.compile(r'come[cç]a\s+o\s+segundo\s+tempo\s+extra', re.IGNORECASE),
+]
+
+_ADDED_TIME_PATTERNS = [
+    re.compile(r'(\d+)\s*minutos?\s*(de\s+)?(acr[eé]scimo|adicional|compensa[cç][aã]o)', re.IGNORECASE),
+    re.compile(r'acr[eé]scimo\s+de\s+(\d+)\s*minutos?', re.IGNORECASE),
+    re.compile(r'[oó]\s*[aá]rbitro\s+deu\s+(\d+)\s*minutos?', re.IGNORECASE),
+    re.compile(r'teremos\s+mais\s+(\d+)\s*minutos?', re.IGNORECASE),
+    re.compile(r'tempo\s+adicional', re.IGNORECASE),
+    re.compile(r'minutos?\s+a\s+mais', re.IGNORECASE),
+    re.compile(r'stoppage\s+time', re.IGNORECASE),
+]
+
+_PENALTY_SHOOTOUT_PATTERNS = [
+    re.compile(r'disputa\s+de\s+p[eê]naltis', re.IGNORECASE),
+    re.compile(r'cobran[cç]as?\s+de\s+p[eê]naltis', re.IGNORECASE),
+    re.compile(r'vamos\s+para\s+os\s+p[eê]naltis', re.IGNORECASE),
+    re.compile(r'decis[aã]o\s+nos?\s+p[eê]naltis', re.IGNORECASE),
+    re.compile(r'primeira\s+cobran[cç]a', re.IGNORECASE),
+    re.compile(r'p[eê]naltis\s+m[aá]ximos', re.IGNORECASE),
 ]
 
 _GAME_START_PATTERNS = [
@@ -636,6 +675,11 @@ _GAME_START_PATTERNS = [
     re.compile(r'bola\s+rolando\s+para\s+o\s+primeiro\s+tempo', re.IGNORECASE),
     re.compile(r'come[cç]ou\s+o\s+jogo', re.IGNORECASE),
     re.compile(r'vale\s*!', re.IGNORECASE),
+    # Novos padrões do plano
+    re.compile(r'autorizado\s+o\s+in[ií]cio', re.IGNORECASE),
+    re.compile(r'iniciado\s+o\s+primeiro\s+tempo', re.IGNORECASE),
+    re.compile(r'toca\s+na\s+bola', re.IGNORECASE),
+    re.compile(r'valendo', re.IGNORECASE),
 ]
 
 _GAME_END_PATTERNS = [
@@ -654,6 +698,9 @@ _GAME_END_PATTERNS = [
     re.compile(r'fim\s+do\s+segundo\s+tempo', re.IGNORECASE),
     re.compile(r'encerrou', re.IGNORECASE),
     re.compile(r'acabou\s+tudo', re.IGNORECASE),
+    # Novos padrões do plano
+    re.compile(r'fim\s+da\s+partida', re.IGNORECASE),
+    re.compile(r'final\s+da\s+partida', re.IGNORECASE),
 ]
 
 
@@ -670,7 +717,10 @@ def calculate_game_minute(video_second: float, boundaries: dict, game_start_minu
     """
     Converte segundo absoluto do vídeo para minuto de jogo.
     
-    Usa os limites detectados:
+    Usa os limites detectados incluindo prorrogação e penaltis:
+    - Se video_second >= penalty_shootout_second -> minuto = 120+ (penaltis)
+    - Se video_second >= extra_time_2t_start_second -> base 105 (prorrogação 2T)
+    - Se video_second >= extra_time_1t_start_second -> base 90 (prorrogação 1T)
     - Se video_second >= second_half_start -> minuto do 2T (base = duração real do 1T ou 45)
     - Senão -> minuto do 1T (base game_start_minute)
     
@@ -680,9 +730,27 @@ def calculate_game_minute(video_second: float, boundaries: dict, game_start_minu
     game_start = boundaries.get('game_start_second', 0)
     second_half_start = boundaries.get('second_half_start_second')
     first_half_min = boundaries.get('first_half_duration_min')
+    penalty_second = boundaries.get('penalty_shootout_second')
+    extra_2t_second = boundaries.get('extra_time_2t_start_second')
+    extra_1t_second = boundaries.get('extra_time_1t_start_second')
     
     # Base do 2T: duração real do 1T (arredondada) ou 45 como fallback
     second_half_base = int(round(first_half_min)) if first_half_min and first_half_min > 40 else 45
+    
+    # Penaltis: base 120
+    if penalty_second and video_second >= penalty_second:
+        elapsed = max(0, video_second - penalty_second)
+        return 120 + int(elapsed // 60), int(elapsed % 60)
+    
+    # Prorrogação 2T: base 105
+    if extra_2t_second and video_second >= extra_2t_second:
+        elapsed = max(0, video_second - extra_2t_second)
+        return 105 + int(elapsed // 60), int(elapsed % 60)
+    
+    # Prorrogação 1T: base 90
+    if extra_1t_second and video_second >= extra_1t_second:
+        elapsed = max(0, video_second - extra_1t_second)
+        return 90 + int(elapsed // 60), int(elapsed % 60)
     
     if second_half_start and video_second >= second_half_start:
         # Evento no 2T
@@ -719,6 +787,13 @@ def detect_match_periods_from_transcription(
         'extra_time_detected': False,
         'extra_time_index': -1,
         'extra_time_timestamp_seconds': None,
+        # Novos campos do plano
+        'added_time_1t_minutes': None,
+        'added_time_2t_minutes': None,
+        'extra_time_1t_start_second': None,
+        'extra_time_2t_start_second': None,
+        'penalty_shootout_detected': False,
+        'penalty_shootout_second': None,
         'confidence': 0.0,
         'markers_found': [],
     }
@@ -927,6 +1002,151 @@ def detect_match_periods_from_transcription(
             })
             break
 
+    # ═══════════════════════════════════════════════════════════════
+    # DETECTAR ACRÉSCIMOS DO 1T (entre 30-55% do texto)
+    # ═══════════════════════════════════════════════════════════════
+    added_1t_start = int(text_len * 0.30)
+    added_1t_end = int(text_len * 0.55)
+    added_1t_region = transcription_text[added_1t_start:added_1t_end]
+    for pattern in _ADDED_TIME_PATTERNS:
+        m = pattern.search(added_1t_region)
+        if m:
+            # Tentar extrair valor numérico dos grupos capturados
+            for g in m.groups():
+                if g and g.isdigit():
+                    result['added_time_1t_minutes'] = int(g)
+                    break
+            if result['added_time_1t_minutes']:
+                abs_pos = added_1t_start + m.start()
+                result['markers_found'].append({
+                    'type': 'added_time_1t',
+                    'pattern': pattern.pattern,
+                    'position': abs_pos / text_len,
+                    'index': abs_pos,
+                    'text': transcription_text[max(0, abs_pos - 20):abs_pos + 40],
+                    'minutes': result['added_time_1t_minutes'],
+                })
+                print(f"[PERIOD-DETECT] ⏱ Acréscimos 1T: {result['added_time_1t_minutes']} min")
+                break
+
+    # ═══════════════════════════════════════════════════════════════
+    # DETECTAR ACRÉSCIMOS DO 2T (entre 75-95% do texto)
+    # ═══════════════════════════════════════════════════════════════
+    added_2t_start = int(text_len * 0.75)
+    added_2t_end = int(text_len * 0.95)
+    added_2t_region = transcription_text[added_2t_start:added_2t_end]
+    for pattern in _ADDED_TIME_PATTERNS:
+        m = pattern.search(added_2t_region)
+        if m:
+            for g in m.groups():
+                if g and g.isdigit():
+                    result['added_time_2t_minutes'] = int(g)
+                    break
+            if result['added_time_2t_minutes']:
+                abs_pos = added_2t_start + m.start()
+                result['markers_found'].append({
+                    'type': 'added_time_2t',
+                    'pattern': pattern.pattern,
+                    'position': abs_pos / text_len,
+                    'index': abs_pos,
+                    'text': transcription_text[max(0, abs_pos - 20):abs_pos + 40],
+                    'minutes': result['added_time_2t_minutes'],
+                })
+                print(f"[PERIOD-DETECT] ⏱ Acréscimos 2T: {result['added_time_2t_minutes']} min")
+                break
+
+    # ═══════════════════════════════════════════════════════════════
+    # DETECTAR PRORROGAÇÃO 1T (após >75% do texto)
+    # ═══════════════════════════════════════════════════════════════
+    ext1t_start = int(text_len * 0.75)
+    ext1t_region = transcription_text[ext1t_start:]
+    for pattern in _EXTRA_TIME_1T_PATTERNS:
+        m = pattern.search(ext1t_region)
+        if m:
+            abs_pos = ext1t_start + m.start()
+            result['markers_found'].append({
+                'type': 'extra_time_1t',
+                'pattern': pattern.pattern,
+                'position': abs_pos / text_len,
+                'index': abs_pos,
+                'text': transcription_text[max(0, abs_pos - 20):abs_pos + 40],
+            })
+            if is_srt:
+                ts_pat = re.compile(r'(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->')
+                before_text = transcription_text[max(0, abs_pos - 500):abs_pos + 100]
+                ts_matches = list(ts_pat.finditer(before_text))
+                if ts_matches:
+                    result['extra_time_1t_start_second'] = _parse_srt_timestamp_to_seconds(ts_matches[-1].group(1))
+            else:
+                before_text = transcription_text[max(0, abs_pos - 200):abs_pos + 100]
+                txt_ts = re.search(r'\[?(\d{1,2}):(\d{2})\]?', before_text)
+                if txt_ts:
+                    result['extra_time_1t_start_second'] = int(txt_ts.group(1)) * 60 + int(txt_ts.group(2))
+            print(f"[PERIOD-DETECT] ⏱ Prorrogação 1T detectada: {result['extra_time_1t_start_second']}s")
+            break
+
+    # ═══════════════════════════════════════════════════════════════
+    # DETECTAR PRORROGAÇÃO 2T (após prorrogação 1T)
+    # ═══════════════════════════════════════════════════════════════
+    ext2t_search_start = result.get('extra_time_index', int(text_len * 0.80))
+    if ext2t_search_start < text_len:
+        ext2t_region = transcription_text[ext2t_search_start:]
+        for pattern in _EXTRA_TIME_2T_PATTERNS:
+            m = pattern.search(ext2t_region)
+            if m:
+                abs_pos = ext2t_search_start + m.start()
+                result['markers_found'].append({
+                    'type': 'extra_time_2t',
+                    'pattern': pattern.pattern,
+                    'position': abs_pos / text_len,
+                    'index': abs_pos,
+                    'text': transcription_text[max(0, abs_pos - 20):abs_pos + 40],
+                })
+                if is_srt:
+                    ts_pat = re.compile(r'(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->')
+                    before_text = transcription_text[max(0, abs_pos - 500):abs_pos + 100]
+                    ts_matches = list(ts_pat.finditer(before_text))
+                    if ts_matches:
+                        result['extra_time_2t_start_second'] = _parse_srt_timestamp_to_seconds(ts_matches[-1].group(1))
+                else:
+                    before_text = transcription_text[max(0, abs_pos - 200):abs_pos + 100]
+                    txt_ts = re.search(r'\[?(\d{1,2}):(\d{2})\]?', before_text)
+                    if txt_ts:
+                        result['extra_time_2t_start_second'] = int(txt_ts.group(1)) * 60 + int(txt_ts.group(2))
+                print(f"[PERIOD-DETECT] ⏱ Prorrogação 2T detectada: {result['extra_time_2t_start_second']}s")
+                break
+
+    # ═══════════════════════════════════════════════════════════════
+    # DETECTAR DISPUTA DE PÊNALTIS (últimos 15% do texto)
+    # ═══════════════════════════════════════════════════════════════
+    pen_start = int(text_len * 0.85)
+    pen_region = transcription_text[pen_start:]
+    for pattern in _PENALTY_SHOOTOUT_PATTERNS:
+        m = pattern.search(pen_region)
+        if m:
+            abs_pos = pen_start + m.start()
+            result['penalty_shootout_detected'] = True
+            result['markers_found'].append({
+                'type': 'penalty_shootout',
+                'pattern': pattern.pattern,
+                'position': abs_pos / text_len,
+                'index': abs_pos,
+                'text': transcription_text[max(0, abs_pos - 20):abs_pos + 40],
+            })
+            if is_srt:
+                ts_pat = re.compile(r'(\d{2}:\d{2}:\d{2}[,.]\d{3})\s*-->')
+                before_text = transcription_text[max(0, abs_pos - 500):abs_pos + 100]
+                ts_matches = list(ts_pat.finditer(before_text))
+                if ts_matches:
+                    result['penalty_shootout_second'] = _parse_srt_timestamp_to_seconds(ts_matches[-1].group(1))
+            else:
+                before_text = transcription_text[max(0, abs_pos - 200):abs_pos + 100]
+                txt_ts = re.search(r'\[?(\d{1,2}):(\d{2})\]?', before_text)
+                if txt_ts:
+                    result['penalty_shootout_second'] = int(txt_ts.group(1)) * 60 + int(txt_ts.group(2))
+            print(f"[PERIOD-DETECT] 🎯 Disputa de pênaltis detectada: {result['penalty_shootout_second']}s")
+            break
+
     # Calcular confianca
     confidence = 0.0
     if result['game_start_second'] is not None:
@@ -949,6 +1169,11 @@ def detect_match_periods_from_transcription(
           f"2T start: {result['second_half_start_second']}s, "
           f"Game end: {result['game_end_second']}s, "
           f"Extra time: {'SIM' if result['extra_time_detected'] else 'NAO'}, "
+          f"ET 1T: {result['extra_time_1t_start_second']}s, "
+          f"ET 2T: {result['extra_time_2t_start_second']}s, "
+          f"Penaltis: {'SIM' if result['penalty_shootout_detected'] else 'NAO'} ({result['penalty_shootout_second']}s), "
+          f"Acrésc 1T: {result['added_time_1t_minutes']}min, "
+          f"Acrésc 2T: {result['added_time_2t_minutes']}min, "
           f"Confianca: {result['confidence']:.0%}")
 
     return result

@@ -18,7 +18,8 @@ export type PhaseLabel =
   | 'Intervalo'
   | '2º Tempo'
   | 'Acréscimos 2T'
-  | 'Prorrogação 2T';
+  | 'Prorrogação 2T'
+  | 'Pênaltis';
 
 const PHASE_ORDER: PhaseLabel[] = [
   '1º Tempo',
@@ -28,10 +29,12 @@ const PHASE_ORDER: PhaseLabel[] = [
   '2º Tempo',
   'Acréscimos 2T',
   'Prorrogação 2T',
+  'Pênaltis',
 ];
 
 const FIRST_HALF_PHASES: PhaseLabel[] = ['1º Tempo', 'Acréscimos 1T', 'Prorrogação 1T'];
 const SECOND_HALF_PHASES: PhaseLabel[] = ['2º Tempo', 'Acréscimos 2T', 'Prorrogação 2T'];
+const PENALTY_PHASES: PhaseLabel[] = ['Pênaltis'];
 
 export function getEventPhase(event: {
   minute?: number | null;
@@ -44,6 +47,10 @@ export function getEventPhase(event: {
     (event.metadata as any)?.half ||
     (event.metadata as any)?.match_half;
   const isExtraTime = (event.metadata as any)?.extra_time === true;
+  const isPenaltyShootout = (event.metadata as any)?.penalty_shootout === true;
+
+  // Pênaltis: flag explícita ou minuto > 130
+  if (isPenaltyShootout || min > 130) return 'Pênaltis';
 
   if (half === 'first_half' || half === 'first') {
     if (isExtraTime || min > 50) return 'Prorrogação 1T';
@@ -60,7 +67,9 @@ export function getEventPhase(event: {
   if (min <= 55) return 'Prorrogação 1T';
   if (min <= 90) return '2º Tempo';
   if (min <= 95) return 'Acréscimos 2T';
-  return 'Prorrogação 2T';
+  if (min <= 105) return 'Prorrogação 2T';
+  if (min <= 120) return 'Prorrogação 2T';
+  return 'Pênaltis';
 }
 
 /**
@@ -143,4 +152,4 @@ export function groupEventsByPhase<
   return groups;
 }
 
-export { PHASE_ORDER };
+export { PHASE_ORDER, PENALTY_PHASES };
