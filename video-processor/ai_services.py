@@ -5344,7 +5344,12 @@ def detect_events_by_keywords_from_text(
             'videoSecond': total_seconds  # absoluto para seek no player
         }
     
-    print(f"[Keywords-Text] Mapa de timestamps: {len(timestamp_map)} encontrados")
+    use_proportional = len(timestamp_map) == 0
+    est_duration = video_duration or 2700  # 45 min default
+    if use_proportional:
+        print(f"[Keywords-Text] Sem timestamps inline, usando estimativa proporcional (duração={est_duration}s)")
+    else:
+        print(f"[Keywords-Text] Mapa de timestamps: {len(timestamp_map)} encontrados")
     
     # 2. Padrões de eventos
     patterns = {
@@ -5445,58 +5450,78 @@ def detect_events_by_keywords_from_text(
                         min_distance = distance
                         closest_ts = ts_data
                 
+                # Determinar minute, second, video_second
                 if closest_ts:
-                    # Usar detect_goal_author para gols
-                    if event_type == 'goal':
-                        window_text = transcription[max(0, keyword_pos-200):keyword_pos+200]
-                        try:
-                            author = detect_goal_author(window_text, home_team, away_team)
-                            team = author['team']
-                            confidence = author['confidence']
-                        except Exception:
-                            team = detect_team_from_text(
-                                transcription[max(0, keyword_pos-100):keyword_pos+100],
-                                home_team, away_team
-                            )
-                            confidence = 0.7
+                    minute = closest_ts['minute']
+                    second = closest_ts['second']
+                    video_second = closest_ts['videoSecond']
+                    ts_source = 'proximity_map'
+                elif use_proportional:
+                    # FALLBACK: Estimar pela posição no texto
+                    text_len = len(transcription)
+                    if text_len > 0:
+                        position_ratio = keyword_pos / text_len
+                        video_second = int(position_ratio * est_duration)
+                        game_second = max(0, video_second - video_game_start_second)
+                        minute = game_start_minute + (game_second // 60)
+                        second = game_second % 60
+                        ts_source = 'proportional_estimate'
                     else:
-                        # VALIDAÇÃO: Verificar cartões antes de aceitar
-                        if event_type in ['red_card', 'yellow_card']:
-                            context_start = max(0, keyword_pos - 200)
-                            context_end = min(len(transcription), keyword_pos + 200)
-                            context = transcription[context_start:context_end]
-                            
-                            validation = validate_card_event(match.group(), context, event_type, home_team, away_team)
-                            if not validation['is_valid']:
-                                print(f"[Keywords-Text] ⚠ {event_type} ignorado: {validation['reason']}")
-                                continue
-                        
+                        continue
+                else:
+                    continue
+
+                # Detectar time/autor
+                if event_type == 'goal':
+                    window_text = transcription[max(0, keyword_pos-200):keyword_pos+200]
+                    try:
+                        author = detect_goal_author(window_text, home_team, away_team)
+                        team = author['team']
+                        confidence = author['confidence']
+                    except Exception:
                         team = detect_team_from_text(
                             transcription[max(0, keyword_pos-100):keyword_pos+100],
                             home_team, away_team
                         )
-                        confidence = 0.8
+                        confidence = 0.7
+                else:
+                    # VALIDAÇÃO: Verificar cartões antes de aceitar
+                    if event_type in ['red_card', 'yellow_card']:
+                        context_start = max(0, keyword_pos - 200)
+                        context_end = min(len(transcription), keyword_pos + 200)
+                        context = transcription[context_start:context_end]
+                        
+                        validation = validate_card_event(match.group(), context, event_type, home_team, away_team)
+                        if not validation['is_valid']:
+                            print(f"[Keywords-Text] ⚠ {event_type} ignorado: {validation['reason']}")
+                            continue
                     
-                    event = {
-                        'minute': closest_ts['minute'],
-                        'second': closest_ts['second'],
-                        'videoSecond': closest_ts['videoSecond'],
-                        'event_type': event_type,
-                        'event_name': event_display_name(event_type),
-                        'title': event_display_name(event_type),
-                        'team': team,
-                        'description': match.group()[:50],
-                        'confidence': confidence,
-                        'detection_method': 'keyword_text',
-                        'timestampSource': 'proximity_map'
-                    }
-                    
-                    # Adicionar janela de clip
-                    event = ensure_clip_window(event, back_seconds=20, forward_seconds=10)
-                    
-                    events.append(event)
-                    print(f"[Keywords-Text] ✓ {event_type} em {closest_ts['minute']}:{closest_ts['second']:02d}")
-                    continue  # Permitir múltiplas detecções do mesmo padrão
+                    team = detect_team_from_text(
+                        transcription[max(0, keyword_pos-100):keyword_pos+100],
+                        home_team, away_team
+                    )
+                    confidence = 0.8 if ts_source == 'proximity_map' else 0.6
+                
+                event = {
+                    'minute': minute,
+                    'second': second,
+                    'videoSecond': video_second,
+                    'event_type': event_type,
+                    'event_name': event_display_name(event_type),
+                    'title': event_display_name(event_type),
+                    'team': team,
+                    'description': match.group()[:50],
+                    'confidence': confidence,
+                    'detection_method': 'keyword_text',
+                    'timestampSource': ts_source
+                }
+                
+                # Adicionar janela de clip
+                event = ensure_clip_window(event, back_seconds=20, forward_seconds=10)
+                
+                events.append(event)
+                print(f"[Keywords-Text] ✓ {event_type} em {minute}:{second:02d} ({ts_source})")
+                continue  # Permitir múltiplas detecções do mesmo padrão
     
     # 4. Validar timestamps (remover zeros inválidos)
     events = validate_event_timestamps(events, video_duration)
