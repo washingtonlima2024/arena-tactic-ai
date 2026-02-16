@@ -2604,13 +2604,28 @@ def detect_goals_by_sliding_window(
             print(f"[SlidingWindow] ⏳ Bloco {i}: Gol ignorado (<{min_block_gap} blocos de distância do último {team})")
             continue
         
-        # É um gol real! Usar bloco central para timestamp
-        center_block = srt_blocks[i]
-        _, hours, minutes, seconds, _, text = center_block
-        timestamp_seconds = hours * 3600 + minutes * 60 + seconds
+        # Encontrar o PRIMEIRO bloco da janela que contém "gol"
+        first_goal_block = None
+        for wb in window:
+            wb_text = wb[5].lower()
+            if re.search(r'\bgol\b(?!eiro)', wb_text, re.IGNORECASE):
+                first_goal_block = wb
+                break
         
-        # Calcular minuto de jogo (para exibição)
-        game_minute = segment_start_minute + minutes + (hours * 60)
+        # Se não encontrou (improvável), usar bloco central como fallback
+        if not first_goal_block:
+            first_goal_block = srt_blocks[i]
+        
+        _, hours, minutes, seconds, _, text = first_goal_block
+        # Subtrair 3 segundos para compensar atraso da locução
+        raw_total = hours * 3600 + minutes * 60 + seconds
+        timestamp_seconds = max(0, raw_total - 3)
+        
+        # Recalcular minuto/segundo ajustados
+        adjusted_total = max(0, raw_total - 3)
+        adj_minutes = (adjusted_total % 3600) // 60
+        adj_seconds = adjusted_total % 60
+        game_minute = segment_start_minute + adj_minutes + ((adjusted_total // 3600) * 60)
         
         # Extrair jogador (se possível) - procurar nomes próprios na janela
         player = extract_player_from_window(window_text)
@@ -2625,8 +2640,8 @@ def detect_goals_by_sliding_window(
         
         goal_event = {
             'event_type': 'goal',
-            'minute': minutes,
-            'second': seconds,
+            'minute': adj_minutes,
+            'second': adj_seconds,
             'videoSecond': timestamp_seconds,
             'game_minute': game_minute,
             'team': team,
@@ -2638,16 +2653,17 @@ def detect_goals_by_sliding_window(
             'isOwnGoal': is_own_goal,
             'confidence': confidence,
             'goal_mentions': goal_count,
-            'detection_method': 'sliding_window',
-            'team_attribution_method': goal_method,  # pattern, proximity, count, fallback
-            'block_index': i
+            'detection_method': 'sliding_window_first_block',
+            'team_attribution_method': goal_method,
+            'block_index': i,
+            'narration_offset': -3,
         }
         
         goals.append(goal_event)
         
         # Registrar para evitar duplicatas
         last_goal_block[team] = i
-        print(f"[SlidingWindow] ✓ GOL detectado no bloco {i} [{minutes:02d}:{seconds:02d}] - {goal_count}x 'gol' - {team} ({goal_method}) - conf: {confidence:.2f}")
+        print(f"[SlidingWindow] ✓ GOL detectado no bloco {i} [{adj_minutes:02d}:{adj_seconds:02d}] (offset -3s) - {goal_count}x 'gol' - {team} ({goal_method}) - conf: {confidence:.2f}")
     
     print(f"[SlidingWindow] 📊 Total: {len(goals)} gols detectados por janela deslizante")
     return goals
