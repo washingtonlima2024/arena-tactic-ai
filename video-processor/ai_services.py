@@ -1261,8 +1261,18 @@ def analyze_with_kakttus(
     
     Retorna eventos detectados, resumo do tempo e análise tática.
     """
-    # Converter SRT para texto corrido se necessario
+    # Detectar se a transcrição está em formato SRT (com timestamps reais)
+    is_srt_format = bool(re.search(r'\d{2}:\d{2}:\d{2}[,\.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,\.]\d{3}', transcript))
+    
+    # Para o event_detector, sempre usar texto limpo (sem tags SRT)
     transcript_clean = strip_srt_to_text(transcript)
+    
+    # Para o prompt da IA, manter SRT se disponível (permite extrair timestamps reais)
+    transcript_for_ai = transcript if is_srt_format else transcript_clean
+    if is_srt_format:
+        print(f"[Kakttus] 📋 SRT detectado — mantendo timestamps reais para a IA ({len(transcript)} chars)")
+    else:
+        print(f"[Kakttus] 📝 Texto corrido — sem timestamps SRT ({len(transcript_clean)} chars)")
 
     # ═══════════════════════════════════════════════════════════════
     # TENTAR PIPELINE MULTI-EVENTOS (event_detector.py)
@@ -1270,7 +1280,7 @@ def analyze_with_kakttus(
     try:
         from event_detector import run_multitype_pipeline, find_all_candidates
 
-        # Verificar se há candidatos locais antes de chamar IA
+        # Verificar se há candidatos locais antes de chamar IA (sempre texto limpo)
         candidates = find_all_candidates(transcript_clean, home_team, away_team)
         
         if candidates:
@@ -1307,9 +1317,9 @@ def analyze_with_kakttus(
     # FALLBACK: Pipeline legado (transcrição inteira)
     # ═══════════════════════════════════════════════════════════════
     max_chars = 50000
-    transcript_truncated = transcript_clean[:max_chars] if len(transcript_clean) > max_chars else transcript_clean
-    if len(transcript_clean) > max_chars:
-        print(f"[Kakttus] Transcrição truncada: {len(transcript)} → {max_chars} chars")
+    transcript_truncated = transcript_for_ai[:max_chars] if len(transcript_for_ai) > max_chars else transcript_for_ai
+    if len(transcript_for_ai) > max_chars:
+        print(f"[Kakttus] Transcrição truncada: {len(transcript_for_ai)} → {max_chars} chars")
     
     system_prompt = (
         "Você é a IA Kakttus, especialista em futebol, usando raciocínio tático e contextual. "
@@ -5925,7 +5935,8 @@ Formato obrigatório:
 def _enrich_events(
     events: List[Dict[str, Any]],
     game_start_minute: int,
-    game_end_minute: int
+    game_end_minute: int,
+    transcription: str = ""
 ) -> List[Dict[str, Any]]:
     """
     Enrich events with required fields for database insertion.
@@ -5997,6 +6008,29 @@ def _enrich_events(
             continue
         
         enriched.append(event)
+    
+    # ═══════════════════════════════════════════════════════════════
+    # VALIDAÇÃO DE NOMES DE JOGADORES CONTRA A TRANSCRIÇÃO
+    # Remove nomes alucinados que não aparecem no texto original
+    # ═══════════════════════════════════════════════════════════════
+    if transcription and len(transcription) > 50:
+        transcription_lower = transcription.lower()
+        hallucinated_count = 0
+        for event in enriched:
+            player = event.get('player', '')
+            if player and len(player) > 2:
+                # Verificar se nome completo aparece na transcrição
+                if player.lower() not in transcription_lower:
+                    # Tentar partes do nome (sobrenome com min 4 chars)
+                    parts = player.split()
+                    found = any(p.lower() in transcription_lower for p in parts if len(p) > 3)
+                    if not found:
+                        event['metadata'] = event.get('metadata', {})
+                        event['metadata']['player_hallucinated'] = player
+                        event['player'] = ''
+                        hallucinated_count += 1
+        if hallucinated_count:
+            print(f"[Enrich] 🛡️ {hallucinated_count} nomes de jogadores removidos (alucinação)")
     
     return enriched
 
@@ -6125,9 +6159,36 @@ def analyze_match_events(
             # ═══════════════════════════════════════════════════════════
             print(f"[AI] 🚀 Usando Pipeline Kakttus para {match_half} tempo...")
             
+            # ═══════════════════════════════════════════════════════════
+            # PARTE 4: Priorizar SRT como entrada para o Kakttus
+            # Se existe SRT com timestamps reais, usar em vez de texto bruto
+            # ═══════════════════════════════════════════════════════════
+            kakttus_input = transcription
+            if match_id:
+                try:
+                    from storage import get_subfolder_path
+                    srt_folder = get_subfolder_path(match_id, 'srt')
+                    srt_priority_patterns = [
+                        f'{match_half}_transcription.srt',
+                        f'{match_half}_half.srt',
+                        f'{match_half}.srt',
+                    ]
+                    for pattern in srt_priority_patterns:
+                        candidate = srt_folder / pattern
+                        if candidate.exists():
+                            srt_content = candidate.read_text(encoding='utf-8')
+                            if '-->' in srt_content and len(srt_content) > 100:
+                                kakttus_input = srt_content
+                                print(f"[AI] 📋 SRT encontrado para Kakttus: {candidate.name} ({len(srt_content)} chars)")
+                                break
+                    else:
+                        print(f"[AI] 📝 Sem SRT disponível, usando transcrição bruta")
+                except Exception as srt_err:
+                    print(f"[AI] ⚠ Erro ao buscar SRT: {srt_err}")
+            
             # 1. Análise com Kakttus (retorna events + summary + tactical)
             kakttus_result = analyze_with_kakttus(
-                transcript=transcription,
+                transcript=kakttus_input,
                 home_team=home_team,
                 away_team=away_team,
                 match_half=match_half
@@ -6137,7 +6198,7 @@ def analyze_match_events(
             
             if events:
                 # Enrich and deduplicate
-                enriched_events = _enrich_events(events, game_start_minute, game_end_minute)
+                enriched_events = _enrich_events(events, game_start_minute, game_end_minute, transcription=transcription)
                 final_events = deduplicate_goal_events(enriched_events)
                 
                 # ═══════════════════════════════════════════════════════════
@@ -6164,10 +6225,10 @@ def analyze_match_events(
                                 target_srt = candidate
                                 break
                         
-                        # Contar eventos com timestamp zerado
+                        # Contar eventos com timestamp zerado (TODOS os tipos, não só gols)
                         events_needing_timestamps = [
                             e for e in final_events 
-                            if e.get('event_type') == 'goal' and e.get('minute', 0) == 0 and e.get('videoSecond', 0) == 0
+                            if e.get('minute', 0) in (0, game_start_minute) and e.get('videoSecond', 0) == 0
                         ]
                         
                         if events_needing_timestamps:
@@ -6184,29 +6245,29 @@ def analyze_match_events(
                                 boundaries=boundaries
                             )
                             
-                            keyword_goals = [e for e in keyword_events if e.get('event_type') == 'goal']
-                            print(f"[Kakttus] 📍 TXT detectou {len(keyword_goals)} gols com timestamps")
+                            print(f"[Kakttus] 📍 TXT detectou {len(keyword_events)} eventos com timestamps")
                             
-                            if keyword_goals:
-                                # Associar timestamps do TXT aos eventos
-                                for event in final_events:
-                                    if event.get('event_type') == 'goal' and event.get('minute', 0) == 0:
-                                        team = event.get('team', 'unknown')
-                                        for ke in keyword_goals:
-                                            if ke.get('team') == team:
-                                                event['minute'] = ke.get('minute', 0)
-                                                event['second'] = ke.get('second', 0)
-                                                event['videoSecond'] = ke.get('videoSecond', 0)
-                                                event['metadata'] = event.get('metadata', {})
-                                                event['metadata']['timestampSource'] = 'txt_keyword'
-                                                print(f"[Kakttus] ✓ TXT timestamp atribuído ({team}): {event['minute']}:{event['second']:02d} → videoSecond={event['videoSecond']}")
-                                                keyword_goals.remove(ke)
-                                                break
+                            if keyword_events:
+                                # Associar timestamps do TXT aos eventos — match por event_type + team
+                                keyword_pool = list(keyword_events)  # cópia para consumir
+                                for event in events_needing_timestamps:
+                                    etype = event.get('event_type')
+                                    team = event.get('team', 'unknown')
+                                    for ke in keyword_pool:
+                                        if ke.get('event_type') == etype and ke.get('team') == team:
+                                            event['minute'] = ke.get('minute', 0)
+                                            event['second'] = ke.get('second', 0)
+                                            event['videoSecond'] = ke.get('videoSecond', 0)
+                                            event['metadata'] = event.get('metadata', {})
+                                            event['metadata']['timestampSource'] = 'txt_keyword'
+                                            print(f"[Kakttus] ✓ TXT timestamp atribuído ({etype}/{team}): {event['minute']}:{event['second']:02d}")
+                                            keyword_pool.remove(ke)
+                                            break
                             
                             # 2. Se TXT não encontrou timestamps suficientes, tentar SRT como fallback
                             remaining_events = [
                                 e for e in final_events 
-                                if e.get('event_type') == 'goal' and e.get('minute', 0) == 0 and e.get('videoSecond', 0) == 0
+                                if e.get('minute', 0) in (0, game_start_minute) and e.get('videoSecond', 0) == 0
                             ]
                             
                             if remaining_events and target_srt:
@@ -6221,24 +6282,24 @@ def analyze_match_events(
                                     segment_start_minute=game_start_minute
                                 )
                                 
-                                srt_keyword_goals = [e for e in srt_keyword_events if e.get('event_type') == 'goal']
-                                print(f"[Kakttus] 📍 SRT detectou {len(srt_keyword_goals)} gols com timestamps")
+                                srt_pool = list(srt_keyword_events)
+                                print(f"[Kakttus] 📍 SRT detectou {len(srt_pool)} eventos com timestamps")
                                 
-                                # Associar timestamps dos keyword_events aos eventos do Kakttus
+                                # Associar timestamps — match por event_type + team
                                 for event in remaining_events:
-                                    if event.get('minute', 0) == 0:
-                                        team = event.get('team', 'unknown')
-                                        for ke in srt_keyword_goals:
-                                            if ke.get('team') == team:
-                                                event['minute'] = ke.get('minute', 0)
-                                                event['second'] = ke.get('second', 0)
-                                                event['videoSecond'] = ke.get('videoSecond', 0)
-                                                event['metadata'] = event.get('metadata', {})
-                                                event['metadata']['timestampSource'] = 'srt_fallback'
-                                                event['metadata']['srt_file'] = target_srt.name
-                                                print(f"[Kakttus] ✓ SRT fallback timestamp atribuído ({team}): {event['minute']}:{event['second']:02d} → videoSecond={event['videoSecond']}")
-                                                srt_keyword_goals.remove(ke)
-                                                break
+                                    etype = event.get('event_type')
+                                    team = event.get('team', 'unknown')
+                                    for ke in srt_pool:
+                                        if ke.get('event_type') == etype and ke.get('team') == team:
+                                            event['minute'] = ke.get('minute', 0)
+                                            event['second'] = ke.get('second', 0)
+                                            event['videoSecond'] = ke.get('videoSecond', 0)
+                                            event['metadata'] = event.get('metadata', {})
+                                            event['metadata']['timestampSource'] = 'srt_fallback'
+                                            event['metadata']['srt_file'] = target_srt.name
+                                            print(f"[Kakttus] ✓ SRT fallback timestamp atribuído ({etype}/{team}): {event['minute']}:{event['second']:02d}")
+                                            srt_pool.remove(ke)
+                                            break
                         else:
                             print(f"[Kakttus] ✓ Todos os eventos já possuem timestamps válidos")
                                 
