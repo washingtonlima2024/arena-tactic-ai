@@ -427,6 +427,22 @@ def find_all_candidates(
     """
     lines = [ln.strip() for ln in (transcript or "").splitlines() if ln.strip()]
     
+    # Se texto corrido (poucas linhas mas muito conteúdo), dividir em sentenças sintéticas
+    if len(lines) < 10 and len(transcript or "") > 500:
+        import re
+        # Dividir por sentenças (pontuação + espaço)
+        sentences = re.split(r'(?<=[.!?])\s+', transcript)
+        # Se ainda poucas sentenças, dividir por blocos de ~15 palavras
+        if len(sentences) < 10:
+            words = transcript.split()
+            chunk_size = 15
+            sentences = [
+                " ".join(words[i:i+chunk_size])
+                for i in range(0, len(words), chunk_size)
+            ]
+        lines = [s.strip() for s in sentences if s.strip()]
+        print(f"[EventDetector] Texto corrido detectado, dividido em {len(lines)} linhas sintéticas")
+    
     if not lines:
         return {}
 
