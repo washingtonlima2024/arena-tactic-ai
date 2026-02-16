@@ -1,92 +1,95 @@
 
 
-# Corrigir: Pipeline Async Usando Transcricao Parcial do Smart Import
+# Corrigir: Fallback por Keywords Nao Funciona com Texto do Whisper
 
-## Problema Raiz
+## Problema Real (diagnosticado no codigo)
 
-O pipeline gera apenas 6 eventos porque esta usando a **transcricao parcial do Smart Import** (primeiros 5 minutos do video, ~12k chars) em vez de rodar o Whisper completo no video inteiro (~47 minutos).
+O pipeline gera poucos eventos (5-6) porque existem **2 bugs** que neutralizam o fallback por keywords:
 
-### Por que a transcricao parcial passa na validacao?
+### Bug 1: `detect_events_by_keywords_from_text` ignora keywords sem timestamps inline
 
-O filtro de densidade (`chars_per_sec < 3`) nao detecta a parcialidade porque:
+Na funcao `detect_events_by_keywords_from_text` (linha 5448), a condicao `if closest_ts:` exige que o texto tenha timestamps no formato `HH:MM:SS` ou `MM:SS`. Mas a transcricao do Whisper eh texto puro sem timestamps inline. Resultado: `timestamp_map` fica vazio e **zero eventos** sao criados pelo fallback de texto.
 
 ```text
-Video: 2797 segundos (~47 min)
-Transcricao Smart Import: ~12.000 chars (primeiros 5 min)
-Calculo: 12000 / 2797 = 4.3 chars/s  -->  PASSA (> 3)
-
-Transcricao completa real teria: ~50.000-80.000 chars
-Ratio real: ~20 chars/s
+Whisper gera: "O jogador chutou e gol do Flamengo!"
+timestamp_map = {}  (vazio - sem HH:MM:SS no texto)
+if closest_ts:  -->  SEMPRE False  -->  nenhum evento criado
 ```
 
-O Smart Import gera texto denso (transcreve apenas 5 minutos, mas com alta qualidade), entao o ratio chars/s fica acima do threshold. O pipeline aceita, pula o Whisper, e a IA so tem narracaco dos primeiros 5 minutos para analisar.
+### Bug 2: Fallback do Kakttus prefere texto bruto quando nao tem match_id ou SRT
 
-### Segundo problema: `break` no fallback por keywords
+No bloco de fallback (linha 6219-6292), quando o SRT nao eh encontrado, cai na funcao `detect_events_by_keywords_from_text` que, como explicado no Bug 1, nao funciona com texto puro.
 
-No `detect_events_by_keywords_from_text` (linha 5499), ha um `break` que limita a deteccao a **uma unica ocorrencia por padrao de regex**. Se o texto menciona "gol" 3 vezes, so a primeira e capturada.
+Enquanto isso, o SRT sintetico gerado na Phase 3.5 do pipeline async **existe no disco** mas o fallback no `ai_services.py` pode nao encontra-lo por divergencia nos nomes de arquivo.
 
 ## Solucao
 
-### Arquivo 1: `video-processor/server.py`
+### Arquivo: `video-processor/ai_services.py`
 
-**Aumentar o threshold de densidade para 8 chars/s** (ou melhor: usar um threshold absoluto de chars minimos baseado na duracao do video).
+**Corrigir `detect_events_by_keywords_from_text` para funcionar SEM timestamps inline.**
 
-```text
-Logica atual (linha 8963):
-  if chars_per_sec < 3:  -->  descarta
-
-Logica corrigida:
-  if chars_per_sec < 8:  -->  descarta (transcricoes reais tem ~15-20 chars/s)
-
-  OU (mais robusto):
-  expected_min_chars = dur * 5  # minimo 5 chars/s para ~47 min
-  if text_len < expected_min_chars:  -->  descarta
-```
-
-Aplicar a mesma correcao no `_validate_storage_transcription` (linha 9007): mudar `< 3` para `< 8`.
-
-Isso garante que:
-- Transcricao completa (~50k chars, ~20 chars/s): ACEITA
-- Transcricao parcial Smart Import (~12k chars, ~4 chars/s): DESCARTADA --> Whisper roda
-
-### Arquivo 2: `video-processor/ai_services.py`
-
-**Remover o `break` na linha 5499** do `detect_events_by_keywords_from_text` para permitir multiplas deteccoes do mesmo padrao (ex: 3 gols diferentes no texto).
-
-Substituir por logica que acumula todas as ocorrencias, mantendo a deduplicacao posterior (linha 5504) para evitar eventos repetidos.
+Quando `timestamp_map` esta vazio, estimar o timestamp pela posicao proporcional da keyword no texto:
 
 ```text
-Antes (linha 5499):
-  break  # Uma deteccao por padrao
-
-Depois:
-  continue  # Permitir multiplas deteccoes do mesmo padrao
+posicao_keyword = keyword_pos / len(transcription)
+video_second_estimado = posicao_keyword * video_duration
+game_minute = game_start_minute + (video_second_estimado / 60)
 ```
+
+Mudancas especificas:
+
+1. **Linha ~5347**: Apos criar o `timestamp_map`, se estiver vazio, calcular `video_duration` a partir do parametro ou estimar 2700s (45 min)
+
+2. **Linha ~5448**: Mudar a logica do `if closest_ts:` para incluir fallback proporcional:
+
+```python
+if closest_ts:
+    # Usar timestamp mais proximo (logica atual)
+    minute = closest_ts['minute']
+    second = closest_ts['second']
+    video_second = closest_ts['videoSecond']
+else:
+    # FALLBACK: Estimar pela posicao no texto
+    text_len = len(transcription)
+    if text_len > 0:
+        position_ratio = keyword_pos / text_len
+        est_duration = video_duration or 2700  # 45 min default
+        video_second = int(position_ratio * est_duration)
+        game_second = max(0, video_second - video_game_start_second)
+        minute = game_start_minute + (game_second // 60)
+        second = game_second % 60
+    else:
+        continue  # Sem texto, pular
+```
+
+3. **Manter o resto da logica identica** (detect_goal_author, validate_card_event, etc.), apenas usando as variaveis `minute`, `second`, `video_second` calculadas acima em vez de `closest_ts['minute']` etc.
+
+### Resultado Esperado
+
+- Com texto de ~50k chars (Whisper completo de 47 min):
+  - Cada keyword encontrada recebe um timestamp estimado pela posicao no texto
+  - A estimativa eh proporcional: keyword no meio do texto -> ~22 min de jogo
+  - Nao eh preciso, mas garante que eventos sejam detectados com timestamps aproximados
+  - A deduplicacao por janela de 2 minutos evita duplicatas
+
+- O fallback passa a gerar 15-40 eventos em vez de 0
 
 ## Detalhes Tecnicos
 
-### server.py - Correcao do threshold
+### ai_services.py - Linhas 5430-5500
 
-**Linhas 8962-8968** (validacao do frontend):
-- Mudar `chars_per_sec < 3` para `chars_per_sec < 8` nas linhas 8964 e 8977
+Reestruturar o loop de deteccao para:
 
-**Linhas 9005-9010** (`_validate_storage_transcription`):
-- Mudar `chars_per_sec < 3` para `chars_per_sec < 8` na linha 9007
+1. Calcular `minute`, `second`, `video_second` ANTES do bloco de criacao do evento
+2. Usar `closest_ts` quando disponivel, senao usar estimativa proporcional
+3. Adicionar `timestampSource: 'proportional_estimate'` no metadata quando usar estimativa
+4. Adicionar log: `[Keywords-Text] Sem timestamps inline, usando estimativa proporcional`
 
-### ai_services.py - Remover break limitante
+### Parametro video_duration
 
-**Linha 5499**:
-- Substituir `break` por `continue` para detectar multiplas ocorrencias do mesmo padrao de keyword no texto
+Garantir que o pipeline async passe `video_duration` ao chamar o fallback. Verificar nas chamadas do bloco Kakttus (linhas 6263-6291) se `video_duration` esta sendo passado -- atualmente nao esta em todas as chamadas.
 
-## Impacto Esperado
+## Arquivo a Modificar
 
-- Pipeline async rodara o Whisper completo (47 min) em vez de usar os 5 min do Smart Import
-- A IA recebera ~50-80k chars de transcricao, cobrindo toda a partida
-- O fallback por keywords capturara multiplas instancias de cada tipo de evento
-- Resultado esperado: 15-40 eventos por tempo em vez de 3-6
-
-## Arquivos a Modificar
-
-1. `video-processor/server.py` - Aumentar threshold de densidade de 3 para 8 chars/s
-2. `video-processor/ai_services.py` - Remover break limitante no fallback por keywords
+1. **`video-processor/ai_services.py`** -- Adicionar estimativa proporcional de timestamps quando `timestamp_map` esta vazio no `detect_events_by_keywords_from_text`
 
