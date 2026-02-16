@@ -5496,7 +5496,7 @@ def detect_events_by_keywords_from_text(
                     
                     events.append(event)
                     print(f"[Keywords-Text] ✓ {event_type} em {closest_ts['minute']}:{closest_ts['second']:02d}")
-                    break  # Uma detecção por padrão
+                    continue  # Permitir múltiplas detecções do mesmo padrão
     
     # 4. Validar timestamps (remover zeros inválidos)
     events = validate_event_timestamps(events, video_duration)
