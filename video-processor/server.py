@@ -8961,9 +8961,9 @@ def _process_match_pipeline(job_id: str, data: dict):
                 first_dur = video_durations.get('first', 0)
                 if first_dur > 300:
                     chars_per_sec = len(first_half_transcription.strip()) / first_dur
-                    if chars_per_sec < 3:
+                    if chars_per_sec < 8:
                         print(f"[ASYNC-PIPELINE] Transcricao do frontend DESCARTADA (parcial): "
-                              f"{len(first_half_transcription.strip())} chars / {first_dur:.0f}s = {chars_per_sec:.1f} chars/s")
+                              f"{len(first_half_transcription.strip())} chars / {first_dur:.0f}s = {chars_per_sec:.1f} chars/s (< 8 = parcial)")
                         has_preloaded_first = False
                         first_half_transcription = ''
                     else:
@@ -8974,7 +8974,7 @@ def _process_match_pipeline(job_id: str, data: dict):
                 second_dur = video_durations.get('second', 0)
                 if second_dur > 300:
                     chars_per_sec_2 = len(second_half_transcription.strip()) / second_dur
-                    if chars_per_sec_2 < 3:
+                    if chars_per_sec_2 < 8:
                         print(f"[ASYNC-PIPELINE] Transcricao 2T do frontend DESCARTADA (parcial): "
                               f"{len(second_half_transcription.strip())} chars / {second_dur:.0f}s = {chars_per_sec_2:.1f} chars/s")
                         has_preloaded_second = False
@@ -9004,9 +9004,9 @@ def _process_match_pipeline(job_id: str, data: dict):
                     dur = video_durations.get(half_key, 0)
                     if dur > 300 and text_len > 0:
                         chars_per_sec = text_len / dur
-                        if chars_per_sec < 3:
+                        if chars_per_sec < 8:
                             print(f"[ASYNC-PIPELINE] Transcricao do storage DESCARTADA: "
-                                  f"{text_len} chars / {dur:.0f}s = {chars_per_sec:.1f} chars/s (< 3 = parcial)")
+                                  f"{text_len} chars / {dur:.0f}s = {chars_per_sec:.1f} chars/s (< 8 = parcial)")
                             return False
                         else:
                             print(f"[ASYNC-PIPELINE] Transcricao do storage ACEITA: "
