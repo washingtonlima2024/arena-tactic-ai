@@ -1,156 +1,75 @@
 
+# Corrigir: Fallback por Keywords no Pipeline Kakttus
 
-# Deteccao Completa de Fases da Partida via Palavras-Chave (Pre-Eventos)
+## Problema Identificado
 
-## Objetivo
+A analise do jogo gerou apenas **1 evento** porque o pipeline Kakttus (Ollama) nao possui fallback por keywords quando retorna poucos eventos.
 
-Expandir o sistema de deteccao de boundaries (`detect_match_periods_from_transcription`) para identificar TODAS as fases da partida -- incluindo acrescimos, prorrogacao 1T/2T e disputa de penaltis -- ANTES da criacao de eventos. Isso garante que cada evento receba o minuto de jogo correto, independente do tamanho ou formato do arquivo.
+O fluxo atual:
+1. `analyze_match_events()` detecta `use_ollama_flow = True` (Ollama e o provedor primario)
+2. Chama `analyze_with_kakttus()` que usa o `event_detector.py` (pipeline multi-eventos)
+3. Se o pipeline retorna poucos eventos (ex: 1), o sistema aceita e retorna esse unico evento
+4. **NAO existe fallback por keywords** neste fluxo -- diferente do fluxo Ollama legado (linha 5786) que tem `if len(events) < 3: usar fallback`
 
-## Situacao Atual
+## Causa Raiz
 
-O backend ja detecta 5 marcos:
-- Inicio do jogo (`_GAME_START_PATTERNS` - 14 padroes)
-- Fim do 1T (`_HALFTIME_END_PATTERNS` - 9 padroes)
-- Inicio do 2T (`_SECOND_HALF_START_PATTERNS` - 6 padroes)
-- Fim do jogo (`_GAME_END_PATTERNS` - 15 padroes)
-- Prorrogacao generico (`_EXTRA_TIME_PATTERNS` - 6 padroes)
+No fluxo Kakttus (linhas 6083-6322 de `ai_services.py`), apos receber os eventos do `analyze_with_kakttus()`:
+- Se `events` existe (mesmo que seja apenas 1), entra no bloco `if events:` (linha 6100)
+- Enriquece, deduplica e retorna na linha 6322
+- **Nunca verifica se o numero de eventos e suficiente**
+- **Nunca aciona o fallback por keywords do SRT/TXT**
 
-**Faltam:** acrescimos (1T e 2T), prorrogacao separada (1T vs 2T), e disputa de penaltis.
+O fallback por keywords (linhas 5785-5876) so existe no fluxo Ollama legado, que NAO e chamado quando o pipeline Kakttus funciona.
 
-## Alteracoes
+## Solucao
 
-### 1. `video-processor/ai_services.py` -- Novos grupos de padroes e logica expandida
+### Arquivo: `video-processor/ai_services.py`
 
-**Adicionar novos padroes de palavras-chave:**
-
-```text
-_ADDED_TIME_PATTERNS (acrescimos):
-  - "X minutos de acréscimo"
-  - "tempo adicional"
-  - "acréscimo de X minutos"
-  - "o árbitro deu X minutos"
-  - "teremos mais X minutos"
-  - "minutos a mais"
-  - "compensação"
-  - "stoppage time"
-  Regex para extrair valor: r'(\d+)\s*minutos?\s*(de\s+)?(acr[eé]scimo|adicional|compensa)'
-
-_PENALTY_SHOOTOUT_PATTERNS (penaltis):
-  - "disputa de pênaltis"
-  - "cobranças de pênaltis"
-  - "vamos para os pênaltis"
-  - "decisão nos pênaltis"
-  - "primeira cobrança"
-  - "bateu para o gol" (contexto penalti)
-  - "converteu" / "perdeu o pênalti"
-
-_EXTRA_TIME_1T_PATTERNS (prorrogacao 1T):
-  - "primeiro tempo da prorrogação"
-  - "primeiro tempo extra"
-  - "começa a prorrogação"
-
-_EXTRA_TIME_2T_PATTERNS (prorrogacao 2T):
-  - "segundo tempo da prorrogação"
-  - "segundo tempo extra"
-```
-
-**Expandir padroes existentes com as palavras-chave do usuario:**
+**Adicionar fallback por keywords apos o enriquecimento de timestamps no pipeline Kakttus** (entre as linhas 6210 e 6212):
 
 ```text
-_GAME_START_PATTERNS (adicionar):
-  - "autorizado o início"
-  - "iniciado o primeiro tempo"
-  - "toca na bola"
-  - "apita o árbitro" (contexto inicio, primeiros 25%)
-
-_HALFTIME_END_PATTERNS (adicionar):
-  - "equipes vão para o vestiário"
-  - "vão para o vestiário"
-  - "acabou a primeira etapa"
-  - "encerrada a primeira etapa"
-  - "fim da primeira etapa"
-
-_SECOND_HALF_START_PATTERNS (adicionar):
-  - "iniciado o segundo tempo"
-  - "autorizado o reinício"
-
-_GAME_END_PATTERNS (adicionar):
-  - "fim da partida"
-  - "encerrada a partida"
-  - "final da partida"
+Logica a adicionar:
+1. Apos enriquecer timestamps e antes de retornar final_events
+2. Se len(final_events) < 10, acionar fallback por keywords
+3. Buscar SRT do tempo correto (mesmo padrao ja usado no Ollama legado)
+4. Usar detect_events_by_keywords() para SRT ou detect_events_by_keywords_from_text() para texto
+5. Merge com deduplicacao (janela de 2 minutos por tipo de evento)
+6. Log detalhado dos eventos adicionados pelo fallback
 ```
 
-**Atualizar `detect_match_periods_from_transcription()`:**
-
-Adicionar novas secoes de busca para:
-
-1. **Acrescimos 1T**: buscar `_ADDED_TIME_PATTERNS` entre 35-55% do texto, extrair valor numerico (ex: "3 minutos de acrescimo" -> `added_time_1t_minutes: 3`)
-2. **Acrescimos 2T**: buscar entre 80-95% do texto
-3. **Prorrogacao 1T**: buscar `_EXTRA_TIME_1T_PATTERNS` apos o fim do 2T regular (>75%)
-4. **Prorrogacao 2T**: buscar `_EXTRA_TIME_2T_PATTERNS` apos prorrogacao 1T
-5. **Penaltis**: buscar `_PENALTY_SHOOTOUT_PATTERNS` nos ultimos 10% do texto
-
-Novos campos no resultado:
-
+Pseudo-codigo:
 ```python
-result['added_time_1t_minutes'] = None      # int: minutos de acrescimo do 1T
-result['added_time_2t_minutes'] = None      # int: minutos de acrescimo do 2T
-result['extra_time_1t_start_second'] = None # float: segundo do inicio da prorrogacao 1T
-result['extra_time_2t_start_second'] = None # float: segundo do inicio da prorrogacao 2T
-result['penalty_shootout_detected'] = False
-result['penalty_shootout_second'] = None    # float: segundo do inicio dos penaltis
+# FALLBACK: Se Kakttus retornou poucos eventos, usar keywords
+if len(final_events) < 10 and match_id:
+    print(f"[Kakttus] Poucos eventos ({len(final_events)}), acionando fallback keywords...")
+    
+    # Buscar SRT do tempo correto
+    target_srt = encontrar_srt_do_tempo(match_id, match_half)
+    
+    if target_srt:
+        keyword_events = detect_events_by_keywords(srt_path, home_team, away_team, match_half, game_start_minute)
+    else:
+        keyword_events = detect_events_by_keywords_from_text(transcription, home_team, away_team, ...)
+    
+    # Merge com deduplicacao
+    for ke in keyword_events:
+        if nao_duplicado(ke, final_events, janela=2min):
+            final_events.append(ke)
+    
+    print(f"[Kakttus] Total apos fallback: {len(final_events)} eventos")
 ```
 
-**Atualizar `calculate_game_minute()`:**
+### Detalhes Tecnicos
 
-Adicionar logica para prorrogacao e penaltis:
-- Se `video_second >= penalty_shootout_second` -> minuto = 120+ (penaltis)
-- Se `video_second >= extra_time_2t_start_second` -> minuto baseado no inicio da prorrogacao 2T (base 105)
-- Se `video_second >= extra_time_1t_start_second` -> minuto baseado no inicio da prorrogacao 1T (base 90)
-- Manter logica existente para 1T e 2T regulares
+1. **Inserir o fallback** entre as linhas 6210 e 6212 de `ai_services.py` (apos o bloco de enriquecimento de timestamps e antes do log "ANALISE COMPLETA")
 
-### 2. `video-processor/server.py` -- Persistir novos campos de boundaries
+2. **Reutilizar a mesma logica** do fallback Ollama legado (linhas 5785-5876), adaptando para o contexto do pipeline Kakttus:
+   - Mesma busca de SRT por prioridade de nome (`{match_half}_half.srt`, etc.)
+   - Mesma deduplicacao por janela de 2 minutos
+   - Passar `video_game_start_second` e `boundaries` para calculo correto dos timestamps
 
-No trecho que salva boundaries no `analysis_job.result` (linha ~3868), adicionar os novos campos:
+3. **Threshold**: usar `< 10` em vez de `< 3` para ser mais agressivo no fallback, garantindo que partidas com poucos eventos detectados pela IA sejam complementadas
 
-```python
-job_result['boundaries'] = {
-    # ... campos existentes ...
-    'added_time_1t_minutes': boundaries.get('added_time_1t_minutes'),
-    'added_time_2t_minutes': boundaries.get('added_time_2t_minutes'),
-    'extra_time_1t_start_second': boundaries.get('extra_time_1t_start_second'),
-    'extra_time_2t_start_second': boundaries.get('extra_time_2t_start_second'),
-    'penalty_shootout': boundaries.get('penalty_shootout_detected', False),
-    'penalty_shootout_second': boundaries.get('penalty_shootout_second'),
-}
-```
+## Arquivo a Modificar
 
-### 3. `src/lib/matchPhases.ts` -- Adicionar fase de Penaltis
-
-- Adicionar `'Penaltis'` ao tipo `PhaseLabel` e ao `PHASE_ORDER`
-- Atualizar `getEventPhase()`: eventos com `metadata.penalty_shootout === true` ou minuto > 130 -> 'Penaltis'
-- Adicionar `'Penaltis'` a um novo array `PENALTY_PHASES`
-
-### 4. `src/components/match-center/EventsFeed.tsx` e `ClipsGallery.tsx`
-
-- Renderizar fase "Penaltis" com estilo visual proprio (icone de bola, cor diferenciada)
-- Manter o padrao existente para as demais fases
-
-## Fluxo Completo (pos-implementacao)
-
-```text
-1. Upload de video/link + SRT/TXT
-2. detect_match_periods_from_transcription() analisa a transcricao
-3. Retorna boundaries completos (inicio, acrescimos, intervalo, 2T, prorrogacao, penaltis)
-4. Boundaries salvos no analysis_job
-5. calculate_game_minute() usa boundaries para atribuir minuto correto a cada evento
-6. Frontend agrupa eventos nas 8 fases possiveis
-```
-
-## Arquivos a Modificar
-
-1. **`video-processor/ai_services.py`** -- Novos padroes regex, novos campos no resultado, logica de busca expandida, `calculate_game_minute` atualizado
-2. **`video-processor/server.py`** -- Persistir novos campos de boundaries
-3. **`src/lib/matchPhases.ts`** -- Fase Penaltis no tipo e classificacao
-4. **`src/components/match-center/EventsFeed.tsx`** -- Visual de Penaltis
-5. **`src/components/match-center/ClipsGallery.tsx`** -- Visual de Penaltis
+- `video-processor/ai_services.py` -- Adicionar bloco de fallback por keywords no fluxo Kakttus pipeline (entre linhas 6210-6212)
