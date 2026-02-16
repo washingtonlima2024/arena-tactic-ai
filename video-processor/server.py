@@ -9286,6 +9286,70 @@ def _process_match_pipeline(job_id: str, data: dict):
             else:
                 print(f"[ASYNC-PIPELINE] ⚠️ AVISO: Nenhum áudio disponível após todas as tentativas")
 
+            # ========== PHASE 3.5: DETECT BOUNDARIES ==========
+            boundaries_1t = {}
+            boundaries_2t = {}
+            first_half_offset = 0
+            second_half_offset = 0
+
+            # Detectar boundaries do 1T
+            if first_half_text:
+                try:
+                    boundaries_1t = ai_services.detect_match_periods_from_transcription(first_half_text)
+                    if boundaries_1t.get('game_start_second') is not None:
+                        first_half_offset = int(boundaries_1t['game_start_second'])
+                        print(f"[ASYNC-PIPELINE] Boundaries 1T via texto: inicio={first_half_offset}s")
+                except Exception as bd_err:
+                    print(f"[ASYNC-PIPELINE] ⚠ Erro detectando boundaries 1T via texto: {bd_err}")
+
+            # Se nao detectou pelo texto, tentar pelo SRT
+            if not boundaries_1t.get('game_start_second'):
+                try:
+                    srt_1t = get_subfolder_path(match_id, 'srt') / 'first_half.srt'
+                    if srt_1t.exists():
+                        with open(srt_1t, 'r', encoding='utf-8') as f:
+                            srt_content_1t = f.read()
+                        boundaries_1t = ai_services.detect_match_periods_from_transcription(srt_content_1t)
+                        if boundaries_1t.get('game_start_second') is not None:
+                            first_half_offset = int(boundaries_1t['game_start_second'])
+                            print(f"[ASYNC-PIPELINE] Boundaries 1T via SRT: inicio={first_half_offset}s")
+                except Exception as bd_err:
+                    print(f"[ASYNC-PIPELINE] ⚠ Erro detectando boundaries 1T via SRT: {bd_err}")
+
+            # Detectar boundaries do 2T
+            if second_half_text:
+                try:
+                    boundaries_2t = ai_services.detect_match_periods_from_transcription(second_half_text)
+                    if boundaries_2t.get('second_half_start_second') is not None:
+                        second_half_offset = int(boundaries_2t['second_half_start_second'])
+                        print(f"[ASYNC-PIPELINE] Boundaries 2T: inicio={second_half_offset}s (second_half_start)")
+                    elif boundaries_2t.get('game_start_second') is not None:
+                        second_half_offset = int(boundaries_2t['game_start_second'])
+                        print(f"[ASYNC-PIPELINE] Boundaries 2T: inicio={second_half_offset}s (game_start)")
+                except Exception as bd_err:
+                    print(f"[ASYNC-PIPELINE] ⚠ Erro detectando boundaries 2T via texto: {bd_err}")
+
+            # Se nao detectou 2T pelo texto, tentar pelo SRT
+            if not boundaries_2t.get('second_half_start_second') and not boundaries_2t.get('game_start_second'):
+                try:
+                    srt_2t = get_subfolder_path(match_id, 'srt') / 'second_half.srt'
+                    if srt_2t.exists():
+                        with open(srt_2t, 'r', encoding='utf-8') as f:
+                            srt_content_2t = f.read()
+                        boundaries_2t = ai_services.detect_match_periods_from_transcription(srt_content_2t)
+                        if boundaries_2t.get('second_half_start_second') is not None:
+                            second_half_offset = int(boundaries_2t['second_half_start_second'])
+                        elif boundaries_2t.get('game_start_second') is not None:
+                            second_half_offset = int(boundaries_2t['game_start_second'])
+                        if second_half_offset:
+                            print(f"[ASYNC-PIPELINE] Boundaries 2T via SRT: inicio={second_half_offset}s")
+                except Exception as bd_err:
+                    print(f"[ASYNC-PIPELINE] ⚠ Erro detectando boundaries 2T via SRT: {bd_err}")
+
+            print(f"[ASYNC-PIPELINE] Boundaries finais: 1T offset={first_half_offset}s, 2T offset={second_half_offset}s")
+            print(f"[ASYNC-PIPELINE] Boundaries 1T: {boundaries_1t}")
+            print(f"[ASYNC-PIPELINE] Boundaries 2T: {boundaries_2t}")
+
             # ========== PHASE 4: AI ANALYSIS (10%) ==========
             _update_async_job(job_id, 'analyzing', 80, 'Analisando com IA...', 'analyzing')
             
@@ -9316,7 +9380,9 @@ def _process_match_pipeline(job_id: str, data: dict):
                         first_half_text, home_team, away_team, 0, game_end,
                         match_id=match_id,
                         use_dual_verification=True,
-                        settings=local_settings
+                        settings=local_settings,
+                        video_game_start_second=first_half_offset,
+                        boundaries=boundaries_1t
                     )
                     events = events or []
                 except Exception as ai_err:
@@ -9396,7 +9462,9 @@ def _process_match_pipeline(job_id: str, data: dict):
                         second_half_text, home_team, away_team, 45, 90,
                         match_id=match_id,
                         use_dual_verification=True,
-                        settings=local_settings
+                        settings=local_settings,
+                        video_game_start_second=second_half_offset,
+                        boundaries=boundaries_2t
                     )
                     events = events or []
                 except Exception as ai_err:
