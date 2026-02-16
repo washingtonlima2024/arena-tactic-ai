@@ -9012,7 +9012,11 @@ def _process_match_pipeline(job_id: str, data: dict):
                             print(f"[ASYNC-PIPELINE] Transcricao do storage ACEITA: "
                                   f"{text_len} chars / {dur:.0f}s = {chars_per_sec:.1f} chars/s")
                             return True
-                    return text_len > 100
+                    if text_len < 1000:
+                        print(f"[ASYNC-PIPELINE] Transcricao do storage DESCARTADA: "
+                              f"apenas {text_len} chars (minimo 1000 para evitar parciais do Smart Import)")
+                        return False
+                    return True
                 
                 if existing_txt_path_1.exists():
                     with open(existing_txt_path_1, 'r', encoding='utf-8') as f:
@@ -9196,6 +9200,10 @@ def _process_match_pipeline(job_id: str, data: dict):
                 return '-->' in content[:1000] and any(c.isdigit() for c in content[:50])
             
             # Save transcription files - BOTH SRT and TXT formats when applicable
+            # Flag: se a transcricao veio pre-loaded (Smart Import), salvar como _partial
+            # para nao ser reutilizada como transcricao completa em reprocessamentos
+            is_from_smart_import = has_preloaded_first or has_preloaded_second
+            
             if first_half_text:
                 # Se é formato SRT, salvar na pasta srt com extensão correta
                 if is_srt_format(first_half_text):
@@ -9204,8 +9212,13 @@ def _process_match_pipeline(job_id: str, data: dict):
                         f.write(first_half_text)
                     print(f"[ASYNC-PIPELINE] ✓ SRT 1º tempo salvo: {srt_path}")
                 
-                # Também salvar como TXT para análise
-                txt_path = get_subfolder_path(match_id, 'texts') / 'first_half_transcription.txt'
+                # Salvar como TXT para análise
+                # Se veio do Smart Import (parcial), salvar com sufixo _partial
+                if is_from_smart_import and len(first_half_text) < 30000:
+                    txt_path = get_subfolder_path(match_id, 'texts') / 'first_half_transcription_partial.txt'
+                    print(f"[ASYNC-PIPELINE] ⚠ Transcricao do Smart Import (parcial): salvando como _partial.txt ({len(first_half_text)} chars)")
+                else:
+                    txt_path = get_subfolder_path(match_id, 'texts') / 'first_half_transcription.txt'
                 with open(txt_path, 'w', encoding='utf-8') as f:
                     f.write(first_half_text)
                 print(f"[ASYNC-PIPELINE] ✓ Transcrição 1º tempo salva: {txt_path}")

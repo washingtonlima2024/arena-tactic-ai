@@ -6208,65 +6208,58 @@ def analyze_match_events(
                         print(f"[Kakttus] ⚠ Erro ao enriquecer timestamps: {enrich_err}")
                         import traceback
                         traceback.print_exc()
+            else:
+                final_events = []
+                print(f"[Kakttus] ⚠ Nenhum evento detectado pela IA, acionando fallback...")
+            
+            # ═══════════════════════════════════════════════════════════
+            # FALLBACK: Se Kakttus retornou poucos eventos, complementar com keywords
+            # (FORA do if events: para executar mesmo com 0 eventos)
+            # ═══════════════════════════════════════════════════════════
+            if len(final_events) < 10:
+                print(f"[Kakttus] ⚠️ Poucos eventos ({len(final_events)}), acionando fallback por keywords...")
+                keyword_events = []
                 
-                # ═══════════════════════════════════════════════════════════
-                # FALLBACK: Se Kakttus retornou poucos eventos, complementar com keywords
-                # ═══════════════════════════════════════════════════════════
-                if len(final_events) < 10:
-                    print(f"[Kakttus] ⚠️ Poucos eventos ({len(final_events)}), acionando fallback por keywords...")
-                    keyword_events = []
-                    
-                    if match_id:
-                        try:
-                            from storage import get_subfolder_path
-                            srt_folder = get_subfolder_path(match_id, 'srt')
-                            srt_files = list(srt_folder.glob('*.srt')) if srt_folder.exists() else []
-                            
-                            print(f"[Kakttus] 📂 SRTs disponíveis: {[f.name for f in srt_files]}")
-                            print(f"[Kakttus] 🎯 Buscando SRT para tempo: {match_half}")
-                            
-                            target_srt_fb = None
-                            if srt_files:
-                                srt_patterns = [
-                                    f'{match_half}_half.srt',
-                                    f'{match_half}_transcription.srt',
-                                    f'{match_half}.srt',
-                                ]
-                                for pattern in srt_patterns:
-                                    for srt_file in srt_files:
-                                        if pattern in srt_file.name.lower():
-                                            target_srt_fb = srt_file
-                                            break
-                                    if target_srt_fb:
+                if match_id:
+                    try:
+                        from storage import get_subfolder_path
+                        srt_folder = get_subfolder_path(match_id, 'srt')
+                        srt_files = list(srt_folder.glob('*.srt')) if srt_folder.exists() else []
+                        
+                        print(f"[Kakttus] 📂 SRTs disponíveis: {[f.name for f in srt_files]}")
+                        print(f"[Kakttus] 🎯 Buscando SRT para tempo: {match_half}")
+                        
+                        target_srt_fb = None
+                        if srt_files:
+                            srt_patterns = [
+                                f'{match_half}_half.srt',
+                                f'{match_half}_transcription.srt',
+                                f'{match_half}.srt',
+                            ]
+                            for pattern in srt_patterns:
+                                for srt_file in srt_files:
+                                    if pattern in srt_file.name.lower():
+                                        target_srt_fb = srt_file
                                         break
-                                
-                                if not target_srt_fb and len(srt_files) == 1:
-                                    target_srt_fb = srt_files[0]
-                                    print(f"[Kakttus] ⚠️ Usando único SRT disponível: {target_srt_fb.name}")
+                                if target_srt_fb:
+                                    break
                             
-                            if target_srt_fb:
-                                print(f"[Kakttus] ✓ Usando SRT do {match_half}: {target_srt_fb.name}")
-                                keyword_events = detect_events_by_keywords(
-                                    srt_path=str(target_srt_fb),
-                                    home_team=home_team,
-                                    away_team=away_team,
-                                    half=match_half,
-                                    segment_start_minute=game_start_minute
-                                )
-                                print(f"[Kakttus] Detecção por SRT keywords: {len(keyword_events)} eventos")
-                            else:
-                                print(f"[Kakttus] SRT não encontrado, usando texto bruto...")
-                                keyword_events = detect_events_by_keywords_from_text(
-                                    transcription=transcription,
-                                    home_team=home_team,
-                                    away_team=away_team,
-                                    game_start_minute=game_start_minute,
-                                    video_duration=None,
-                                    video_game_start_second=video_game_start_second,
-                                    boundaries=boundaries
-                                )
-                        except Exception as fb_err:
-                            print(f"[Kakttus] Erro no fallback SRT: {fb_err}, usando texto bruto...")
+                            if not target_srt_fb and len(srt_files) == 1:
+                                target_srt_fb = srt_files[0]
+                                print(f"[Kakttus] ⚠️ Usando único SRT disponível: {target_srt_fb.name}")
+                        
+                        if target_srt_fb:
+                            print(f"[Kakttus] ✓ Usando SRT do {match_half}: {target_srt_fb.name}")
+                            keyword_events = detect_events_by_keywords(
+                                srt_path=str(target_srt_fb),
+                                home_team=home_team,
+                                away_team=away_team,
+                                half=match_half,
+                                segment_start_minute=game_start_minute
+                            )
+                            print(f"[Kakttus] Detecção por SRT keywords: {len(keyword_events)} eventos")
+                        else:
+                            print(f"[Kakttus] SRT não encontrado, usando texto bruto...")
                             keyword_events = detect_events_by_keywords_from_text(
                                 transcription=transcription,
                                 home_team=home_team,
@@ -6276,7 +6269,8 @@ def analyze_match_events(
                                 video_game_start_second=video_game_start_second,
                                 boundaries=boundaries
                             )
-                    else:
+                    except Exception as fb_err:
+                        print(f"[Kakttus] Erro no fallback SRT: {fb_err}, usando texto bruto...")
                         keyword_events = detect_events_by_keywords_from_text(
                             transcription=transcription,
                             home_team=home_team,
@@ -6286,24 +6280,39 @@ def analyze_match_events(
                             video_game_start_second=video_game_start_second,
                             boundaries=boundaries
                         )
-                    
-                    # Merge com deduplicação (janela de 2 minutos por tipo)
-                    added_count = 0
-                    for ke in keyword_events:
-                        already_exists = any(
-                            abs(e.get('minute', 0) - ke.get('minute', 0)) < 2 and
-                            e.get('event_type') == ke.get('event_type')
-                            for e in final_events
-                        )
-                        if not already_exists:
-                            final_events.append(ke)
-                            added_count += 1
-                    
-                    print(f"[Kakttus] ✅ Fallback adicionou {added_count} eventos. Total: {len(final_events)}")
+                else:
+                    keyword_events = detect_events_by_keywords_from_text(
+                        transcription=transcription,
+                        home_team=home_team,
+                        away_team=away_team,
+                        game_start_minute=game_start_minute,
+                        video_duration=None,
+                        video_game_start_second=video_game_start_second,
+                        boundaries=boundaries
+                    )
                 
+                # Merge com deduplicação (janela de 2 minutos por tipo)
+                added_count = 0
+                for ke in keyword_events:
+                    already_exists = any(
+                        abs(e.get('minute', 0) - ke.get('minute', 0)) < 2 and
+                        e.get('event_type') == ke.get('event_type')
+                        for e in final_events
+                    )
+                    if not already_exists:
+                        final_events.append(ke)
+                        added_count += 1
+                
+                print(f"[Kakttus] ✅ Fallback adicionou {added_count} eventos. Total: {len(final_events)}")
+            
+            # ═══════════════════════════════════════════════════════════
+            # SAVE & RETURN (FORA do if events: para funcionar com fallback)
+            # ═══════════════════════════════════════════════════════════
+            if final_events:
                 goals_count = len([e for e in final_events if e.get('event_type') == 'goal'])
                 print(f"[AI] ✓ ANÁLISE COMPLETA (Pipeline Kakttus)")
-                print(f"[AI]   Detectados: {len(events)} eventos")
+                print(f"[AI]   Detectados: {len(events)} eventos pela IA + fallback")
+                print(f"[AI]   Total final: {len(final_events)} eventos")
                 print(f"[AI]   Gols: {goals_count}")
                 
                 # 2. Salvar análise do tempo (analysis_first_half.json ou analysis_second_half.json)
@@ -6365,7 +6374,8 @@ def analyze_match_events(
                         print(f"[AI] ✓ Validados salvos: json/{validated_filename}")
                         
                         # 2d. rejected_events_{half}.json - eventos descartados na dedup
-                        rejected_events = [e for e in enriched_events if e not in final_events]
+                        enriched_events_for_reject = enriched_events if events else []
+                        rejected_events = [e for e in enriched_events_for_reject if e not in final_events]
                         rejected_result = {
                             "match_id": match_id,
                             "rejected_at": datetime.utcnow().isoformat() + "Z",
