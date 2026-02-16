@@ -5440,6 +5440,19 @@ def detect_events_by_keywords_from_text(
             for match in re.finditer(pattern, transcription, re.IGNORECASE):
                 keyword_pos = match.start()
                 
+                # FILTRO DE NEGAÇÃO PARA GOLS: verificar contexto local
+                if event_type == 'goal':
+                    ctx_start = max(0, keyword_pos - 50)
+                    ctx_end = min(len(transcription), keyword_pos + 30)
+                    local_ctx = transcription[ctx_start:ctx_end].lower()
+                    
+                    negation_words = ['quase', 'por pouco', 'perdeu', 'na trave', 'travessao',
+                                      'travessão', 'pra fora', 'defendeu', 'espalmou', 'salvou',
+                                      'nao foi', 'não foi', 'anulado', 'impedido', 'passou perto',
+                                      'raspou', 'tirou', 'quase gol', 'perdeu o gol']
+                    if any(neg in local_ctx for neg in negation_words):
+                        continue  # Pular - não é gol real
+                
                 # Encontrar timestamp mais próximo (antes OU depois)
                 closest_ts = None
                 min_distance = float('inf')
@@ -6315,6 +6328,10 @@ def analyze_match_events(
                         video_game_start_second=video_game_start_second,
                         boundaries=boundaries
                     )
+                
+                # VALIDAÇÃO: Remover gols falsos dos keyword_events antes do merge
+                keyword_events = _validate_goals_with_context(keyword_events, transcription)
+                print(f"[Kakttus] 🛡️ Pós-validação de gols: {len([e for e in keyword_events if e.get('event_type') == 'goal'])} gols válidos")
                 
                 # Merge com deduplicação (janela de 2 minutos por tipo)
                 added_count = 0
