@@ -2509,7 +2509,8 @@ def detect_goals_by_sliding_window(
     half: str = 'first',
     window_size: int = 5,
     min_goal_mentions: int = 3,
-    min_block_gap: int = 5
+    min_block_gap: int = 5,
+    boundaries: dict = None
 ) -> List[Dict[str, Any]]:
     """
     Detecta gols REAIS analisando repetição em janela deslizante de 5 linhas.
@@ -2556,7 +2557,19 @@ def detect_goals_by_sliding_window(
     print(f"[SlidingWindow]   Espaçamento mínimo: {min_block_gap} blocos")
     print(f"[SlidingWindow]   Total de blocos: {len(srt_blocks)}")
     
+    # Extrair game_start_second dos boundaries para filtrar pré-jogo
+    game_start_second = 0
+    if boundaries and boundaries.get('game_start_second') is not None:
+        game_start_second = boundaries['game_start_second']
+        print(f"[SlidingWindow] Filtrando blocos antes de {game_start_second}s")
+
     for i in range(len(srt_blocks)):
+        # NOVO: Ignorar blocos antes do início do jogo
+        _, b_hours, b_minutes, b_seconds, _, _ = srt_blocks[i]
+        block_time = b_hours * 3600 + b_minutes * 60 + b_seconds
+        if block_time < game_start_second:
+            continue
+
         # Criar janela: 2 antes + atual + 2 depois (5 linhas total)
         start = max(0, i - 2)
         end = min(len(srt_blocks), i + 3)
@@ -2621,11 +2634,17 @@ def detect_goals_by_sliding_window(
         raw_total = hours * 3600 + minutes * 60 + seconds
         timestamp_seconds = max(0, raw_total - 3)
         
-        # Recalcular minuto/segundo ajustados
-        adjusted_total = max(0, raw_total - 3)
-        adj_minutes = (adjusted_total % 3600) // 60
-        adj_seconds = adjusted_total % 60
-        game_minute = segment_start_minute + adj_minutes + ((adjusted_total // 3600) * 60)
+        # Usar calculate_game_minute quando boundaries disponível
+        if boundaries:
+            adj_minutes, adj_seconds = calculate_game_minute(
+                timestamp_seconds, boundaries, segment_start_minute
+            )
+            game_minute = adj_minutes
+        else:
+            adjusted_total = max(0, raw_total - 3)
+            adj_minutes = (adjusted_total % 3600) // 60
+            adj_seconds = adjusted_total % 60
+            game_minute = segment_start_minute + adj_minutes + ((adjusted_total // 3600) * 60)
         
         # Extrair jogador (se possível) - procurar nomes próprios na janela
         player = extract_player_from_window(window_text)
@@ -2704,7 +2723,8 @@ def detect_events_by_keywords(
     home_team: str,
     away_team: str,
     half: str = 'first',
-    segment_start_minute: int = 0
+    segment_start_minute: int = 0,
+    boundaries: dict = None
 ) -> List[Dict[str, Any]]:
     """
     Detect events using keywords from SRT file.
@@ -2773,7 +2793,8 @@ def detect_events_by_keywords(
         half=half,
         window_size=5,
         min_goal_mentions=3,
-        min_block_gap=20
+        min_block_gap=20,
+        boundaries=boundaries
     )
     events.extend(goal_events)
     print(f"[KEYWORDS] 🎯 {len(goal_events)} gols detectados por sliding window")
@@ -2781,6 +2802,12 @@ def detect_events_by_keywords(
     # ═══════════════════════════════════════════════════════════════
     # OUTROS EVENTOS: Usar keywords tradicionais (cartões, faltas, etc.)
     # ═══════════════════════════════════════════════════════════════
+    # Extrair game_start_second dos boundaries para filtrar pré-jogo
+    kw_game_start_second = 0
+    if boundaries and boundaries.get('game_start_second') is not None:
+        kw_game_start_second = boundaries['game_start_second']
+        print(f"[KEYWORDS] Filtrando blocos antes de {kw_game_start_second}s")
+
     for block_index, block in enumerate(srt_blocks):
         _, hours, minutes, seconds, _, text = block
         text_upper = text.upper()
@@ -2788,8 +2815,17 @@ def detect_events_by_keywords(
         # Calculate timestamp in seconds (absolute video time)
         timestamp_seconds = hours * 3600 + minutes * 60 + seconds
         
-        # Calculate game minute (for display)
-        game_minute = segment_start_minute + minutes + (hours * 60)
+        # NOVO: Ignorar blocos antes do início do jogo
+        if timestamp_seconds < kw_game_start_second:
+            continue
+        
+        # Calculate game minute (for display) usando calculate_game_minute quando disponível
+        if boundaries:
+            game_minute, _ = calculate_game_minute(
+                timestamp_seconds, boundaries, segment_start_minute
+            )
+        else:
+            game_minute = segment_start_minute + minutes + (hours * 60)
         
         # ═══════════════════════════════════════════════════════════════
         # NOVO: Obter contexto da janela (2 blocos antes e depois)
@@ -5891,7 +5927,8 @@ Formato obrigatório:
                             home_team=home_team,
                             away_team=away_team,
                             half=match_half,
-                            segment_start_minute=game_start_minute
+                            segment_start_minute=game_start_minute,
+                            boundaries=boundaries
                         )
                         print(f"[Ollama] Detecção por SRT (sliding window): {len(keyword_events)} eventos")
                     else:
@@ -6241,10 +6278,10 @@ def analyze_match_events(
                                 target_srt = candidate
                                 break
                         
-                        # Contar eventos com timestamp zerado (TODOS os tipos, não só gols)
+                        # Contar gols com timestamp zerado (apenas gols, como nos scripts antigos)
                         events_needing_timestamps = [
                             e for e in final_events 
-                            if e.get('minute', 0) in (0, game_start_minute) and e.get('videoSecond', 0) == 0
+                            if e.get('event_type') == 'goal' and e.get('minute', 0) == 0 and e.get('videoSecond', 0) == 0
                         ]
                         
                         if events_needing_timestamps:
@@ -6283,7 +6320,7 @@ def analyze_match_events(
                             # 2. Se TXT não encontrou timestamps suficientes, tentar SRT como fallback
                             remaining_events = [
                                 e for e in final_events 
-                                if e.get('minute', 0) in (0, game_start_minute) and e.get('videoSecond', 0) == 0
+                                if e.get('event_type') == 'goal' and e.get('minute', 0) == 0 and e.get('videoSecond', 0) == 0
                             ]
                             
                             if remaining_events and target_srt:
@@ -6295,7 +6332,8 @@ def analyze_match_events(
                                     home_team=home_team,
                                     away_team=away_team,
                                     half=match_half,
-                                    segment_start_minute=game_start_minute
+                                    segment_start_minute=game_start_minute,
+                                    boundaries=boundaries
                                 )
                                 
                                 srt_pool = list(srt_keyword_events)
@@ -6370,7 +6408,8 @@ def analyze_match_events(
                                 home_team=home_team,
                                 away_team=away_team,
                                 half=match_half,
-                                segment_start_minute=game_start_minute
+                                segment_start_minute=game_start_minute,
+                                boundaries=boundaries
                             )
                             print(f"[Kakttus] Detecção por SRT keywords: {len(keyword_events)} eventos")
                         else:
