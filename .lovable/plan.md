@@ -1,104 +1,90 @@
 
+# Corrigir Deteccao de Gols: Eliminar Falsos Positivos e Nao Perder Gols Reais
 
-# Corrigir: EventDetector com 0 Candidatos - min_evidence_lines Muito Restritivo para Chunks Sinteticos
+## Diagnostico
 
-## Problema Diagnosticado
+O problema tem 3 causas raiz:
 
-A correcao anterior (dividir texto corrido em chunks de 15 palavras) gera as linhas sinteticas corretamente, mas o filtro `min_evidence_lines` continua bloqueando todos os candidatos.
+### 1. Keyword `go+l` nao filtra contexto negativo
 
-### Fluxo atual:
+O padrao regex `go+l` no fallback por keywords casa com QUALQUER mencao de "gol", incluindo:
+- "quase gol" (nao foi gol)
+- "perdeu o gol" (nao foi gol)
+- "gol anulado" (nao foi gol)
 
-1. Texto do Whisper (~50k chars) eh dividido em ~3000 chunks de 15 palavras
-2. Para cada chunk, o sistema busca keywords (ex: "gol")
-3. Quando encontra, pega uma janela de 8 chunks ao redor
-4. Conta quantos chunks na janela tem alguma keyword (`evidence_count`)
-5. Para gols: `min_evidence_lines=2` -- exige que PELO MENOS 2 chunks tenham keywords
-6. Com chunks de 15 palavras, a keyword "gol" fica em UM chunk, e os 7 chunks vizinhos raramente contem "rede", "comemora", etc.
-7. Resultado: `evidence_count=1 < 2` → candidato descartado → 0 candidatos total
+Resultado: gera falsos positivos que sao classificados como gol real.
 
-### Por que isso acontece?
+### 2. Validacao `_validate_goals_with_context` NAO eh aplicada no fallback
 
-Chunks de 15 palavras sao muito curtos. No texto original, duas linhas de narracaco poderiam ter "GOOOL" e "a bola entrou na rede" juntas. Mas quando dividimos artificialmente em blocos de 15 palavras, cada bloco tem pouco contexto, e a probabilidade de 2 blocos adjacentes conterem keywords diferentes cai drasticamente.
+A funcao que remove gols falsos (verificando "quase", "perdeu", "na trave", etc.) so eh chamada apos a analise do Ollama (linha 5803), mas NUNCA nos eventos do fallback por keywords (linhas 6319-6331). Os gols falsos do fallback entram direto no `final_events` sem validacao.
 
-## Solucao
+### 3. Deduplicacao por janela de 2 minutos pode remover gol real
 
-### Arquivo: `video-processor/event_detector.py`
+Com timestamps proporcionais (imprecisos), um gol falso pode ter timestamp proximo ao gol real do Felipe Coutinho. A deduplicacao em `already_exists` (linha 6322-6326) verifica `abs(minute) < 2 AND same type`, podendo manter o falso e descartar o real (ou vice-versa).
 
-Duas mudancas complementares:
+## Solucao (3 mudancas no mesmo arquivo)
 
-**1. Aumentar o tamanho dos chunks sinteticos de 15 para 40 palavras**
+### Arquivo: `video-processor/ai_services.py`
 
-Chunks maiores (40 palavras ~ 2-3 frases) mantem mais contexto junto, aumentando a chance de ter keywords primarias e secundarias no mesmo chunk ou em chunks adjacentes.
+**Mudanca 1: Adicionar filtro de negacao DENTRO de `detect_events_by_keywords_from_text` para gols**
 
-```text
-Antes: chunk_size = 15  (~60 chars, contexto minimo)
-Depois: chunk_size = 40  (~200 chars, contexto suficiente)
+No loop principal (linha 5440), quando `event_type == 'goal'`, verificar se o contexto proximo da keyword contem palavras de negacao ANTES de criar o evento. Isso previne a criacao de gols falsos na origem.
+
+```python
+# Dentro do loop, apos encontrar a keyword (linha 5441):
+if event_type == 'goal':
+    # Verificar contexto de negacao (50 chars antes, 30 depois)
+    ctx_start = max(0, keyword_pos - 50)
+    ctx_end = min(len(transcription), keyword_pos + 30)
+    local_ctx = transcription[ctx_start:ctx_end].lower()
+    
+    negation_words = ['quase', 'por pouco', 'perdeu', 'na trave', 'travessao',
+                      'pra fora', 'defendeu', 'espalmou', 'salvou', 'nao foi',
+                      'anulado', 'impedido', 'passou perto', 'raspou', 'tirou']
+    if any(neg in local_ctx for neg in negation_words):
+        continue  # Pular - nao eh gol real
 ```
 
-Isso gera ~750 chunks em vez de ~3000 para 50k chars -- ainda muito mais que o `window_size` de qualquer receita.
+**Mudanca 2: Aplicar `_validate_goals_with_context` nos eventos do fallback**
 
-**2. Reduzir `min_evidence_lines` para 1 quando usando linhas sinteticas**
+No bloco de fallback (linha 6244-6331), APOS gerar `keyword_events`, validar os gols antes do merge:
 
-Passar um flag para `find_event_candidates` indicando que as linhas sao sinteticas, e nesse caso usar `min_evidence_lines=1` (em vez do valor da receita). Com chunks de 40 palavras, um unico chunk contendo "gol" ou "golaço" ja eh evidencia suficiente para ser candidato.
+```python
+# Apos linha 6296 (e tambem apos linhas 6284, 6306, 6317):
+keyword_events = _validate_goals_with_context(keyword_events, transcription)
+```
 
-Implementacao: adicionar parametro `synthetic_lines=False` em `find_event_candidates`, e quando `True`, forcar `min_evidence = 1`.
+Isso garante que qualquer gol falso que passe pelo filtro inline seja removido pela validacao contextual mais robusta.
 
-### Resultado Esperado
+**Mudanca 3: Na deduplicacao do merge, priorizar eventos com maior confianca**
 
-- Texto de 50k chars → ~750 chunks de 40 palavras
-- Cada chunk tem contexto suficiente para conter keywords
-- `min_evidence_lines=1` permite que qualquer chunk com keyword seja candidato
-- EventDetector gera 15-40 candidatos (gols, cartoes, faltas, etc.)
-- Pipeline Kakttus recebe snippets focados em vez do texto inteiro
-- Mais eventos detectados com maior precisao
+Na logica de merge (linhas 6319-6331), quando um evento do keyword tiver o mesmo tipo e minuto proximo de um evento existente, manter o que tiver maior `confidence`. Atualmente, o primeiro encontrado vence (o do Ollama), mas se o Ollama nao detectou o gol do Felipe Coutinho, o keyword pode adiciona-lo sem conflito.
+
+A deduplicacao atual ja funciona bem para isso -- o problema real eh que gols falsos estao entrando. As mudancas 1 e 2 resolvem isso.
+
+## Resultado Esperado
+
+- Gols falsos ("quase gol", "perdeu o gol") sao bloqueados na origem (mudanca 1) e validados novamente (mudanca 2)
+- Gols reais (como o de Felipe Coutinho) continuam sendo detectados normalmente
+- O sistema nunca mais classifica como gol algo que nao foi gol
+- Se o gol do Felipe Coutinho aparece na transcricao com "gol" ou "marca" proximo, sera detectado com timestamp proporcional
 
 ## Detalhes Tecnicos
 
-### Mudanca 1: Chunk size (linha ~436-441)
+### Linha 5440-5475 (filtro inline de negacao para gols)
 
-```python
-# Antes:
-chunk_size = 15
+Adicionar verificacao de contexto local (50 chars antes, 30 depois) para cada match de keyword de gol. Se contem palavras de negacao, pular com `continue`.
 
-# Depois:
-chunk_size = 40
-```
+### Linhas 6284, 6296, 6306, 6317 (validacao pos-keyword)
 
-### Mudanca 2: Flag synthetic_lines em find_event_candidates (linha 321-332)
+Adicionar chamada `keyword_events = _validate_goals_with_context(keyword_events, transcription)` apos cada chamada de `detect_events_by_keywords_from_text` ou `detect_events_by_keywords` no bloco de fallback.
 
-```python
-# Antes:
-def find_event_candidates(transcript_lines, recipe, home_team, away_team):
-    if not transcript_lines or len(transcript_lines) < recipe.window_size:
-        return []
+### Impacto
 
-# Depois:
-def find_event_candidates(transcript_lines, recipe, home_team, away_team, synthetic_lines=False):
-    if not transcript_lines or len(transcript_lines) < recipe.window_size:
-        return []
-    # ... no filtro de evidencia (linha 371):
-    min_evidence = 1 if synthetic_lines else recipe.min_evidence_lines
-    if evidence_count < min_evidence:
-        continue
-```
+- Apenas gols sao afetados (outros eventos passam normalmente)
+- A validacao eh rapida (regex em string, sem chamada de IA)
+- Compativel com timestamps proporcionais e de SRT
 
-### Mudanca 3: Passar flag na chamada (linha 456)
+## Arquivo a Modificar
 
-```python
-# Antes:
-candidates = find_event_candidates(lines, recipe, home_team, away_team)
-
-# Depois:
-candidates = find_event_candidates(lines, recipe, home_team, away_team, synthetic_lines=is_synthetic)
-```
-
-Onde `is_synthetic` eh setado como `True` quando o texto foi dividido sinteticamente (bloco das linhas 431-444).
-
-## Arquivos a Modificar
-
-1. **`video-processor/event_detector.py`**:
-   - Aumentar `chunk_size` de 15 para 40
-   - Adicionar parametro `synthetic_lines` em `find_event_candidates`
-   - Usar `min_evidence=1` quando `synthetic_lines=True`
-   - Passar flag `is_synthetic` na chamada dentro de `find_all_candidates`
-
+1. **`video-processor/ai_services.py`** -- 3 pontos de mudanca conforme descrito acima
