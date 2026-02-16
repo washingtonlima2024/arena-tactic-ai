@@ -1,71 +1,156 @@
 
 
-# Corrigir Deteccao de Nomes de Times e Download de Escudos na Importacao
+# Deteccao Completa de Fases da Partida via Palavras-Chave (Pre-Eventos)
 
-## Problema
+## Objetivo
 
-Durante a importacao inteligente (Smart Import), o sistema falha em dois pontos:
+Expandir o sistema de deteccao de boundaries (`detect_match_periods_from_transcription`) para identificar TODAS as fases da partida -- incluindo acrescimos, prorrogacao 1T/2T e disputa de penaltis -- ANTES da criacao de eventos. Isso garante que cada evento receba o minuto de jogo correto, independente do tamanho ou formato do arquivo.
 
-1. **Nomes dos times nao detectados**: A IA (Ollama ou Gemini) nao conseguiu extrair os nomes dos times da transcricao parcial (5 minutos), provavelmente porque:
-   - A transcricao e muito curta e nao menciona nomes dos times nos primeiros 5 min
-   - O endpoint `/api/extract-match-info` retornou `null` para `home_team` e `away_team`
-   - Times genericos ("Time Casa" / "Time Visitante") foram criados
+## Situacao Atual
 
-2. **Escudos nao baixados**: A funcao `autoFetchTeamLogo` busca em `football-logos.cc`, mas nomes genericos ou incorretos nao produzem resultados. Alem disso, o logo e buscado em background e pode falhar silenciosamente.
+O backend ja detecta 5 marcos:
+- Inicio do jogo (`_GAME_START_PATTERNS` - 14 padroes)
+- Fim do 1T (`_HALFTIME_END_PATTERNS` - 9 padroes)
+- Inicio do 2T (`_SECOND_HALF_START_PATTERNS` - 6 padroes)
+- Fim do jogo (`_GAME_END_PATTERNS` - 15 padroes)
+- Prorrogacao generico (`_EXTRA_TIME_PATTERNS` - 6 padroes)
 
-## Solucao
+**Faltam:** acrescimos (1T e 2T), prorrogacao separada (1T vs 2T), e disputa de penaltis.
 
-### 1. Melhorar o prompt de extracao no backend
+## Alteracoes
 
-**Arquivo: `video-processor/server.py`** (endpoint `/api/extract-match-info`)
+### 1. `video-processor/ai_services.py` -- Novos grupos de padroes e logica expandida
 
-- Adicionar instrucoes mais especificas no prompt para que a IA extraia nomes de times mesmo de mencoes indiretas (narrador falando sobre jogadores, torcida, etc.)
-- Incluir exemplos no prompt para guiar a extracao
-- Aumentar o trecho da transcricao usado (de 8000 para 12000 chars)
+**Adicionar novos padroes de palavras-chave:**
 
-### 2. Adicionar fallback de deteccao por regex no backend
+```text
+_ADDED_TIME_PATTERNS (acrescimos):
+  - "X minutos de acréscimo"
+  - "tempo adicional"
+  - "acréscimo de X minutos"
+  - "o árbitro deu X minutos"
+  - "teremos mais X minutos"
+  - "minutos a mais"
+  - "compensação"
+  - "stoppage time"
+  Regex para extrair valor: r'(\d+)\s*minutos?\s*(de\s+)?(acr[eé]scimo|adicional|compensa)'
 
-**Arquivo: `video-processor/server.py`** (endpoint `/api/extract-match-info`)
+_PENALTY_SHOOTOUT_PATTERNS (penaltis):
+  - "disputa de pênaltis"
+  - "cobranças de pênaltis"
+  - "vamos para os pênaltis"
+  - "decisão nos pênaltis"
+  - "primeira cobrança"
+  - "bateu para o gol" (contexto penalti)
+  - "converteu" / "perdeu o pênalti"
 
-- Antes de chamar a IA, tentar detectar nomes de times via regex em padroes comuns:
-  - "Time A x Time B", "Time A versus Time B", "Time A contra Time B"
-  - "gol do [Time]", "posse do [Time]", "falta de [Time]"
-- Se o regex encontrar nomes, incluir como dica no prompt da IA para aumentar a confianca
+_EXTRA_TIME_1T_PATTERNS (prorrogacao 1T):
+  - "primeiro tempo da prorrogação"
+  - "primeiro tempo extra"
+  - "começa a prorrogação"
 
-### 3. Melhorar o Smart Import para usar mais contexto
+_EXTRA_TIME_2T_PATTERNS (prorrogacao 2T):
+  - "segundo tempo da prorrogação"
+  - "segundo tempo extra"
+```
 
-**Arquivo: `src/components/upload/SmartImportCard.tsx`**
+**Expandir padroes existentes com as palavras-chave do usuario:**
 
-- Quando a transcricao falha ou e muito curta, extrair nomes do **titulo/nome do arquivo** de forma mais robusta (ja existe `extractTeamsFromFilename`, mas os separadores podem ser melhorados)
-- Adicionar suporte a mais padroes de nome: "time1-time2", "time1 - time2", etc.
+```text
+_GAME_START_PATTERNS (adicionar):
+  - "autorizado o início"
+  - "iniciado o primeiro tempo"
+  - "toca na bola"
+  - "apita o árbitro" (contexto inicio, primeiros 25%)
 
-### 4. Garantir download de escudo apos criacao do time
+_HALFTIME_END_PATTERNS (adicionar):
+  - "equipes vão para o vestiário"
+  - "vão para o vestiário"
+  - "acabou a primeira etapa"
+  - "encerrada a primeira etapa"
+  - "fim da primeira etapa"
 
-**Arquivo: `src/pages/Upload.tsx`** (callback do SmartImport)
+_SECOND_HALF_START_PATTERNS (adicionar):
+  - "iniciado o segundo tempo"
+  - "autorizado o reinício"
 
-- Apos criar os times automaticamente, chamar `autoFetchTeamLogo` explicitamente em vez de depender apenas do hook `onSuccess` do `useCreateTeam`
-- Aguardar o resultado do logo antes de prosseguir, atualizando o time com o logo encontrado
-- Adicionar log mais detalhado para diagnosticar falhas
+_GAME_END_PATTERNS (adicionar):
+  - "fim da partida"
+  - "encerrada a partida"
+  - "final da partida"
+```
 
-### 5. Melhorar `extractTeamsFromFilename` com mais separadores
+**Atualizar `detect_match_periods_from_transcription()`:**
 
-**Arquivo: `src/components/upload/SmartImportCard.tsx`**
+Adicionar novas secoes de busca para:
 
-- Adicionar separadores: `" - "`, `"-"`, `"_x_"`, `"_vs_"`
-- Limpar prefixos de data/hora comuns: "2024-01-15_", "jogo_"
-- Tratar nomes com acentos corretamente
+1. **Acrescimos 1T**: buscar `_ADDED_TIME_PATTERNS` entre 35-55% do texto, extrair valor numerico (ex: "3 minutos de acrescimo" -> `added_time_1t_minutes: 3`)
+2. **Acrescimos 2T**: buscar entre 80-95% do texto
+3. **Prorrogacao 1T**: buscar `_EXTRA_TIME_1T_PATTERNS` apos o fim do 2T regular (>75%)
+4. **Prorrogacao 2T**: buscar `_EXTRA_TIME_2T_PATTERNS` apos prorrogacao 1T
+5. **Penaltis**: buscar `_PENALTY_SHOOTOUT_PATTERNS` nos ultimos 10% do texto
 
-### 6. Retry de logo com invalidacao de cache
+Novos campos no resultado:
 
-**Arquivo: `src/hooks/useTeams.ts`**
+```python
+result['added_time_1t_minutes'] = None      # int: minutos de acrescimo do 1T
+result['added_time_2t_minutes'] = None      # int: minutos de acrescimo do 2T
+result['extra_time_1t_start_second'] = None # float: segundo do inicio da prorrogacao 1T
+result['extra_time_2t_start_second'] = None # float: segundo do inicio da prorrogacao 2T
+result['penalty_shootout_detected'] = False
+result['penalty_shootout_second'] = None    # float: segundo do inicio dos penaltis
+```
 
-- No `onSuccess` do `useCreateTeam`, adicionar um retry com delay (5s) caso o primeiro autoFetchTeamLogo falhe
-- Invalidar o cache da query de teams apos logo ser atribuida
+**Atualizar `calculate_game_minute()`:**
+
+Adicionar logica para prorrogacao e penaltis:
+- Se `video_second >= penalty_shootout_second` -> minuto = 120+ (penaltis)
+- Se `video_second >= extra_time_2t_start_second` -> minuto baseado no inicio da prorrogacao 2T (base 105)
+- Se `video_second >= extra_time_1t_start_second` -> minuto baseado no inicio da prorrogacao 1T (base 90)
+- Manter logica existente para 1T e 2T regulares
+
+### 2. `video-processor/server.py` -- Persistir novos campos de boundaries
+
+No trecho que salva boundaries no `analysis_job.result` (linha ~3868), adicionar os novos campos:
+
+```python
+job_result['boundaries'] = {
+    # ... campos existentes ...
+    'added_time_1t_minutes': boundaries.get('added_time_1t_minutes'),
+    'added_time_2t_minutes': boundaries.get('added_time_2t_minutes'),
+    'extra_time_1t_start_second': boundaries.get('extra_time_1t_start_second'),
+    'extra_time_2t_start_second': boundaries.get('extra_time_2t_start_second'),
+    'penalty_shootout': boundaries.get('penalty_shootout_detected', False),
+    'penalty_shootout_second': boundaries.get('penalty_shootout_second'),
+}
+```
+
+### 3. `src/lib/matchPhases.ts` -- Adicionar fase de Penaltis
+
+- Adicionar `'Penaltis'` ao tipo `PhaseLabel` e ao `PHASE_ORDER`
+- Atualizar `getEventPhase()`: eventos com `metadata.penalty_shootout === true` ou minuto > 130 -> 'Penaltis'
+- Adicionar `'Penaltis'` a um novo array `PENALTY_PHASES`
+
+### 4. `src/components/match-center/EventsFeed.tsx` e `ClipsGallery.tsx`
+
+- Renderizar fase "Penaltis" com estilo visual proprio (icone de bola, cor diferenciada)
+- Manter o padrao existente para as demais fases
+
+## Fluxo Completo (pos-implementacao)
+
+```text
+1. Upload de video/link + SRT/TXT
+2. detect_match_periods_from_transcription() analisa a transcricao
+3. Retorna boundaries completos (inicio, acrescimos, intervalo, 2T, prorrogacao, penaltis)
+4. Boundaries salvos no analysis_job
+5. calculate_game_minute() usa boundaries para atribuir minuto correto a cada evento
+6. Frontend agrupa eventos nas 8 fases possiveis
+```
 
 ## Arquivos a Modificar
 
-1. **`video-processor/server.py`** - Melhorar prompt do `/api/extract-match-info`; adicionar deteccao regex pre-IA
-2. **`src/components/upload/SmartImportCard.tsx`** - Mais separadores no `extractTeamsFromFilename`
-3. **`src/pages/Upload.tsx`** - Chamar `autoFetchTeamLogo` explicitamente apos criar times no Smart Import
-4. **`src/hooks/useTeams.ts`** - Retry de logo fetch com delay
-
+1. **`video-processor/ai_services.py`** -- Novos padroes regex, novos campos no resultado, logica de busca expandida, `calculate_game_minute` atualizado
+2. **`video-processor/server.py`** -- Persistir novos campos de boundaries
+3. **`src/lib/matchPhases.ts`** -- Fase Penaltis no tipo e classificacao
+4. **`src/components/match-center/EventsFeed.tsx`** -- Visual de Penaltis
+5. **`src/components/match-center/ClipsGallery.tsx`** -- Visual de Penaltis
