@@ -108,6 +108,68 @@ export function EventsFeed({ events, thumbnails = [], selectedEventId, onSelectE
                   </div>
                   <div className="flex-1 h-0.5 bg-border" />
                 </div>
+              ) : group.phase === 'Pênaltis' ? (
+                <>
+                  <div className="flex items-center gap-2 py-2 my-1">
+                    <div className="flex-1 h-px bg-purple-500/30" />
+                    <div className="flex items-center gap-2 shrink-0">
+                      <Badge variant="outline" className="text-xs font-semibold text-purple-400 border-purple-500/30">
+                        ⚽ {group.phase}
+                      </Badge>
+                      <span className="text-xs font-mono font-bold text-primary">
+                        {homeShort} {group.homeGoals} × {group.awayGoals} {awayShort}
+                      </span>
+                    </div>
+                    <div className="flex-1 h-px bg-purple-500/30" />
+                  </div>
+                  <div className="space-y-2">
+                    {group.events.map((event: any) => {
+                      const aiComment = (event.metadata as any)?.ai_comment;
+                      return (
+                        <div
+                          key={event.id}
+                          className={cn(
+                            "p-3 rounded-lg border cursor-pointer transition-all hover:border-primary/40",
+                            selectedEventId === event.id ? "border-primary bg-primary/5" : "border-border"
+                          )}
+                          onClick={() => onSelectEvent(event)}
+                        >
+                          <div className="flex items-start gap-3">
+                            <div className={cn("w-10 h-10 rounded-lg flex items-center justify-center flex-shrink-0 overflow-hidden", EVENT_BG[event.event_type] || 'bg-muted')}>
+                              {(() => {
+                                const thumb = getThumbnail(event.id);
+                                return thumb ? (
+                                  <img src={thumb} alt="" className="w-full h-full object-cover" />
+                                ) : (
+                                  <span className="text-lg">{getEventIcon(event.event_type)}</span>
+                                );
+                              })()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className={cn("font-semibold text-sm", EVENT_TEXT[event.event_type] || 'text-foreground')}>
+                                  {getEventLabel(event.event_type)}
+                                </span>
+                                <Badge variant="secondary" className="text-[10px] h-5">{event.minute}'</Badge>
+                              </div>
+                              <p className="text-sm text-muted-foreground mt-1 line-clamp-2">
+                                {event.description || 'Lance da partida'}
+                              </p>
+                              {aiComment && (
+                                <div className="mt-2 p-2.5 rounded-md bg-gradient-to-r from-primary/5 to-transparent border-l-2 border-primary/50">
+                                  <div className="flex items-start gap-2">
+                                    <Sparkles className="h-3.5 w-3.5 text-primary mt-0.5 flex-shrink-0" />
+                                    <p className="text-sm leading-relaxed text-muted-foreground">{aiComment}</p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </>
               ) : (
                 <>
                   <div className="flex items-center gap-2 py-2 my-1">

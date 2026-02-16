@@ -3873,6 +3873,13 @@ def analyze_match():
                             'first_half_duration_min': boundaries.get('first_half_duration_min'),
                             'extra_time': boundaries.get('extra_time_detected', False),
                             'confidence': boundaries.get('confidence'),
+                            # Novos campos do plano
+                            'added_time_1t_minutes': boundaries.get('added_time_1t_minutes'),
+                            'added_time_2t_minutes': boundaries.get('added_time_2t_minutes'),
+                            'extra_time_1t_start_second': boundaries.get('extra_time_1t_start_second'),
+                            'extra_time_2t_start_second': boundaries.get('extra_time_2t_start_second'),
+                            'penalty_shootout': boundaries.get('penalty_shootout_detected', False),
+                            'penalty_shootout_second': boundaries.get('penalty_shootout_second'),
                         }
                         job.result = job_result
                         session_bd.commit()
