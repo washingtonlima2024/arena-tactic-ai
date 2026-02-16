@@ -1,114 +1,122 @@
 
 
-# Corrigir: Pipeline Async Nao Detecta Boundaries e Nao Passa Parametros ao Kakttus
+# Corrigir: Zero Eventos no Pipeline Kakttus
 
-## Problema
+## Problemas Identificados
 
-A analise gerou apenas 2 eventos (2 gols) porque o **pipeline async** (`_run_async_pipeline` no `server.py`) chama `analyze_match_events()` **sem detectar boundaries** e **sem passar `video_game_start_second` nem `boundaries`**.
+### Bug 1: Fallback por keywords nunca executa quando Kakttus retorna 0 eventos
 
-Comparacao entre os dois caminhos:
+No `ai_services.py`, a logica do fallback por keywords (linha 6215) esta **dentro** do bloco `if events:` (linha 6100). Quando `analyze_with_kakttus()` retorna uma lista vazia (`[]`), o Python avalia `if []:` como `False` e pula TODO o bloco -- incluindo o fallback e o `return`.
 
 ```text
-/api/analyze-match (manual):
-  1. Detecta boundaries via SRT/TXT          <-- EXISTE
-  2. Calcula video_game_start_second          <-- EXISTE
-  3. Passa ambos para analyze_match_events()  <-- EXISTE
-
-Pipeline async (Smart Import):
-  1. Detecta boundaries                       <-- NAO EXISTE
-  2. Calcula video_game_start_second          <-- NAO EXISTE
-  3. Passa ambos                              <-- NAO PASSA (linhas 9315-9320)
+Fluxo atual quando events = []:
+  1. events = kakttus_result.get('events', [])   # []
+  2. if events:                                   # False! Pula tudo
+  3.   enrichment...                              # PULADO
+  4.   fallback keywords...                       # PULADO
+  5.   return final_events                        # PULADO
+  6. except...                                    # Nao ha excecao
+  7. if can_use_gpt:                              # Provavelmente False
+  8. # Cai no fluxo legado ou retorna vazio
 ```
 
-Sem boundaries, o fallback por keywords (que foi adicionado na ultima sessao) nao consegue calcular timestamps corretos.
+### Bug 2: Transcricao parcial do Smart Import pode ser reutilizada
+
+O Smart Import salva a transcricao inicial (curta, ~12k chars) no storage. Quando o pipeline async roda, ele encontra essa transcricao no storage e, se passar na validacao de densidade (>= 3 chars/s), usa-a em vez de rodar o Whisper completo. Resultado: a IA recebe texto insuficiente.
 
 ## Solucao
 
-### Arquivo: `video-processor/server.py`
+### Arquivo 1: `video-processor/ai_services.py`
 
-**Adicionar deteccao de boundaries e calculo de offset no pipeline async** (antes da Phase 4, entre linhas ~9288 e 9289):
+**Mover o fallback por keywords para FORA do `if events:`**, garantindo que execute mesmo quando Kakttus retorna 0 eventos.
 
-1. **Detectar boundaries** usando a mesma logica do `/api/analyze-match`:
-   - Ler SRT ou TXT do storage
-   - Chamar `ai_services.detect_match_periods_from_transcription()`
-   - Salvar boundaries no analysis_job
+Estrutura corrigida:
 
-2. **Calcular `video_game_start_second`** a partir dos boundaries detectados
+```text
+events = kakttus_result.get('events', [])
 
-3. **Passar `video_game_start_second` e `boundaries`** na chamada `analyze_match_events()` (linhas 9315 e 9406):
+if events:
+    enriched_events = _enrich_events(events, ...)
+    final_events = deduplicate_goal_events(enriched_events)
+    # ... enriquecimento de timestamps ...
+else:
+    final_events = []
 
-```python
-# ANTES (linha 9315-9320):
-events = ai_services.analyze_match_events(
-    first_half_text, home_team, away_team, 0, game_end,
-    match_id=match_id,
-    use_dual_verification=True,
-    settings=local_settings
-)
+# FALLBACK (agora FORA do if events:)
+if len(final_events) < 10:
+    # ... deteccao por keywords (SRT ou texto bruto) ...
+    # ... merge com deduplicacao ...
 
-# DEPOIS:
-events = ai_services.analyze_match_events(
-    first_half_text, home_team, away_team, 0, game_end,
-    match_id=match_id,
-    use_dual_verification=True,
-    settings=local_settings,
-    video_game_start_second=first_half_offset,
-    boundaries=boundaries_1t
-)
+if final_events:
+    # salvar JSONs, consolidar
+    ...
+    return final_events
+
+# Se chegou aqui, tentar fluxo legado
 ```
 
-4. **Mesma correcao para o 2o tempo** (linha ~9406):
-   - Usar `second_half_start_second` dos boundaries como offset
-   - Passar boundaries do 2T
+Mudancas especificas:
+1. Adicionar `else: final_events = []` apos o bloco `if events:` (depois da linha ~6210)
+2. Mover o bloco de fallback (linhas 6212-6302) para fora do `if events:`, mantendo-o no mesmo nivel de indentacao
+3. Mover o bloco de salvamento e `return` (linhas 6304-6414) para fora tambem, protegendo com `if final_events:`
 
-### Detalhes da implementacao
+### Arquivo 2: `video-processor/server.py`
 
-**Bloco a inserir antes da Phase 4 (antes da linha 9289):**
+**Marcar transcricoes do Smart Import como parciais** para evitar reutilizacao indevida.
 
+No pipeline async, quando a transcricao vem do Smart Import (pre-loaded), adicionar um sufixo ou flag ao nome do arquivo para que a validacao do storage nao a confunda com uma transcricao completa:
+
+- Na secao onde salva `first_half_transcription.txt` (linha 9208), verificar se a transcricao foi gerada pelo Whisper Local ou se veio pre-loaded do Smart Import
+- Se veio pre-loaded E o Whisper ainda vai rodar, NAO sobrescrever os arquivos de storage com a transcricao parcial
+- Adicionar log explicando a decisao
+
+Alternativa mais simples: na validacao `_validate_storage_transcription`, aumentar o threshold minimo de caracteres de 100 para 1000 (para que transcricoes muito curtas do Smart Import sejam descartadas).
+
+## Detalhes Tecnicos
+
+### ai_services.py -- Reestruturacao do bloco Kakttus (linhas 6098-6414)
+
+**Antes:**
 ```python
-# ========== PHASE 3.5: DETECT BOUNDARIES ==========
-boundaries_1t = {}
-boundaries_2t = {}
-first_half_offset = 0
-second_half_offset = 0
+events = kakttus_result.get('events', [])
 
-# Detectar boundaries do 1T
-if first_half_text:
-    boundaries_1t = ai_services.detect_match_periods_from_transcription(first_half_text)
-    if boundaries_1t.get('game_start_second') is not None:
-        first_half_offset = int(boundaries_1t['game_start_second'])
-        print(f"[ASYNC-PIPELINE] Boundaries 1T: inicio={first_half_offset}s")
-
-# Se nao detectou pelo texto, tentar pelo SRT
-if not boundaries_1t.get('game_start_second'):
-    srt_1t = get_subfolder_path(match_id, 'srt') / 'first_half.srt'
-    if srt_1t.exists():
-        with open(srt_1t, 'r', encoding='utf-8') as f:
-            boundaries_1t = ai_services.detect_match_periods_from_transcription(f.read())
-        if boundaries_1t.get('game_start_second') is not None:
-            first_half_offset = int(boundaries_1t['game_start_second'])
-
-# Detectar boundaries do 2T
-if second_half_text:
-    boundaries_2t = ai_services.detect_match_periods_from_transcription(second_half_text)
-    if boundaries_2t.get('second_half_start_second') is not None:
-        second_half_offset = int(boundaries_2t['second_half_start_second'])
-    elif boundaries_2t.get('game_start_second') is not None:
-        second_half_offset = int(boundaries_2t['game_start_second'])
-
-# Persistir no analysis_job
-# (mesma logica do /api/analyze-match)
+if events:                          # <-- Se vazio, pula TUDO
+    enriched_events = ...
+    final_events = ...
+    # timestamp enrichment (100 linhas)
+    # fallback keywords (90 linhas)    # <-- NUNCA EXECUTA se events=[]
+    # save JSONs (100 linhas)
+    return final_events              # <-- NUNCA EXECUTA se events=[]
 ```
 
-**Modificar chamada do 1T (linha 9315):**
-- Adicionar `video_game_start_second=first_half_offset`
-- Adicionar `boundaries=boundaries_1t`
+**Depois:**
+```python
+events = kakttus_result.get('events', [])
 
-**Modificar chamada do 2T (linha ~9406):**
-- Adicionar `video_game_start_second=second_half_offset`
-- Adicionar `boundaries=boundaries_2t`
+if events:
+    enriched_events = ...
+    final_events = ...
+    # timestamp enrichment (100 linhas)
+else:
+    final_events = []
+    print("[Kakttus] ⚠ Nenhum evento detectado pela IA")
 
-## Arquivo a Modificar
+# FALLBACK (FORA do if events:)
+if len(final_events) < 10:
+    # keyword detection...
+    # merge...
 
-- `video-processor/server.py` -- Adicionar deteccao de boundaries no pipeline async e passar parametros para `analyze_match_events()`
+# SAVE (FORA do if events:)
+if final_events:
+    # save JSONs...
+    return final_events
+```
 
+### server.py -- Proteger contra transcricao parcial (linha ~9208)
+
+Adicionar verificacao: se `first_half_text` veio do request (Smart Import) e nao do Whisper, salvar com nome diferente (`first_half_transcription_partial.txt`) para que o pipeline nao o reutilize como transcricao completa na proxima execucao.
+
+## Arquivos a Modificar
+
+1. **`video-processor/ai_services.py`** -- Reestruturar bloco Kakttus para que fallback execute mesmo com 0 eventos
+2. **`video-processor/server.py`** -- Proteger contra reutilizacao de transcricao parcial do Smart Import
