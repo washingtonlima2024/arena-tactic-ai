@@ -323,6 +323,7 @@ def find_event_candidates(
     recipe: EventRecipe,
     home_team: str,
     away_team: str,
+    synthetic_lines: bool = False,
 ) -> List[Dict[str, Any]]:
     """
     Retorna lista de candidatos para um tipo de evento usando a receita.
@@ -368,7 +369,8 @@ def find_event_candidates(
             if any(p.search(ln) for p in all_patterns)
         )
 
-        if evidence_count < recipe.min_evidence_lines:
+        min_evidence = 1 if synthetic_lines else recipe.min_evidence_lines
+        if evidence_count < min_evidence:
             continue
 
         team_hint = detect_team(chunk, home_team, away_team) if recipe.team_extraction else None
@@ -426,6 +428,7 @@ def find_all_candidates(
         Dict mapeando event_type → lista de candidatos
     """
     lines = [ln.strip() for ln in (transcript or "").splitlines() if ln.strip()]
+    is_synthetic = False
     
     # Se texto corrido (poucas linhas mas muito conteúdo), dividir em sentenças sintéticas
     if len(lines) < 10 and len(transcript or "") > 500:
@@ -435,13 +438,14 @@ def find_all_candidates(
         # Se ainda poucas sentenças, dividir por blocos de ~15 palavras
         if len(sentences) < 10:
             words = transcript.split()
-            chunk_size = 15
+            chunk_size = 40
             sentences = [
                 " ".join(words[i:i+chunk_size])
                 for i in range(0, len(words), chunk_size)
             ]
         lines = [s.strip() for s in sentences if s.strip()]
-        print(f"[EventDetector] Texto corrido detectado, dividido em {len(lines)} linhas sintéticas")
+        is_synthetic = True
+        print(f"[EventDetector] Texto corrido detectado, dividido em {len(lines)} linhas sintéticas (chunk=40 palavras)")
     
     if not lines:
         return {}
@@ -453,7 +457,7 @@ def find_all_candidates(
         recipes_to_use = {k: v for k, v in RECIPES.items() if k in event_types}
 
     for event_type, recipe in recipes_to_use.items():
-        candidates = find_event_candidates(lines, recipe, home_team, away_team)
+        candidates = find_event_candidates(lines, recipe, home_team, away_team, synthetic_lines=is_synthetic)
         if candidates:
             candidates_by_type[event_type] = candidates
             print(f"[EventDetector] {event_type}: {len(candidates)} candidatos encontrados")
