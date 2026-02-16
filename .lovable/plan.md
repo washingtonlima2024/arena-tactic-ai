@@ -1,75 +1,114 @@
 
-# Corrigir: Fallback por Keywords no Pipeline Kakttus
 
-## Problema Identificado
+# Corrigir: Pipeline Async Nao Detecta Boundaries e Nao Passa Parametros ao Kakttus
 
-A analise do jogo gerou apenas **1 evento** porque o pipeline Kakttus (Ollama) nao possui fallback por keywords quando retorna poucos eventos.
+## Problema
 
-O fluxo atual:
-1. `analyze_match_events()` detecta `use_ollama_flow = True` (Ollama e o provedor primario)
-2. Chama `analyze_with_kakttus()` que usa o `event_detector.py` (pipeline multi-eventos)
-3. Se o pipeline retorna poucos eventos (ex: 1), o sistema aceita e retorna esse unico evento
-4. **NAO existe fallback por keywords** neste fluxo -- diferente do fluxo Ollama legado (linha 5786) que tem `if len(events) < 3: usar fallback`
+A analise gerou apenas 2 eventos (2 gols) porque o **pipeline async** (`_run_async_pipeline` no `server.py`) chama `analyze_match_events()` **sem detectar boundaries** e **sem passar `video_game_start_second` nem `boundaries`**.
 
-## Causa Raiz
+Comparacao entre os dois caminhos:
 
-No fluxo Kakttus (linhas 6083-6322 de `ai_services.py`), apos receber os eventos do `analyze_with_kakttus()`:
-- Se `events` existe (mesmo que seja apenas 1), entra no bloco `if events:` (linha 6100)
-- Enriquece, deduplica e retorna na linha 6322
-- **Nunca verifica se o numero de eventos e suficiente**
-- **Nunca aciona o fallback por keywords do SRT/TXT**
+```text
+/api/analyze-match (manual):
+  1. Detecta boundaries via SRT/TXT          <-- EXISTE
+  2. Calcula video_game_start_second          <-- EXISTE
+  3. Passa ambos para analyze_match_events()  <-- EXISTE
 
-O fallback por keywords (linhas 5785-5876) so existe no fluxo Ollama legado, que NAO e chamado quando o pipeline Kakttus funciona.
+Pipeline async (Smart Import):
+  1. Detecta boundaries                       <-- NAO EXISTE
+  2. Calcula video_game_start_second          <-- NAO EXISTE
+  3. Passa ambos                              <-- NAO PASSA (linhas 9315-9320)
+```
+
+Sem boundaries, o fallback por keywords (que foi adicionado na ultima sessao) nao consegue calcular timestamps corretos.
 
 ## Solucao
 
-### Arquivo: `video-processor/ai_services.py`
+### Arquivo: `video-processor/server.py`
 
-**Adicionar fallback por keywords apos o enriquecimento de timestamps no pipeline Kakttus** (entre as linhas 6210 e 6212):
+**Adicionar deteccao de boundaries e calculo de offset no pipeline async** (antes da Phase 4, entre linhas ~9288 e 9289):
 
-```text
-Logica a adicionar:
-1. Apos enriquecer timestamps e antes de retornar final_events
-2. Se len(final_events) < 10, acionar fallback por keywords
-3. Buscar SRT do tempo correto (mesmo padrao ja usado no Ollama legado)
-4. Usar detect_events_by_keywords() para SRT ou detect_events_by_keywords_from_text() para texto
-5. Merge com deduplicacao (janela de 2 minutos por tipo de evento)
-6. Log detalhado dos eventos adicionados pelo fallback
-```
+1. **Detectar boundaries** usando a mesma logica do `/api/analyze-match`:
+   - Ler SRT ou TXT do storage
+   - Chamar `ai_services.detect_match_periods_from_transcription()`
+   - Salvar boundaries no analysis_job
 
-Pseudo-codigo:
+2. **Calcular `video_game_start_second`** a partir dos boundaries detectados
+
+3. **Passar `video_game_start_second` e `boundaries`** na chamada `analyze_match_events()` (linhas 9315 e 9406):
+
 ```python
-# FALLBACK: Se Kakttus retornou poucos eventos, usar keywords
-if len(final_events) < 10 and match_id:
-    print(f"[Kakttus] Poucos eventos ({len(final_events)}), acionando fallback keywords...")
-    
-    # Buscar SRT do tempo correto
-    target_srt = encontrar_srt_do_tempo(match_id, match_half)
-    
-    if target_srt:
-        keyword_events = detect_events_by_keywords(srt_path, home_team, away_team, match_half, game_start_minute)
-    else:
-        keyword_events = detect_events_by_keywords_from_text(transcription, home_team, away_team, ...)
-    
-    # Merge com deduplicacao
-    for ke in keyword_events:
-        if nao_duplicado(ke, final_events, janela=2min):
-            final_events.append(ke)
-    
-    print(f"[Kakttus] Total apos fallback: {len(final_events)} eventos")
+# ANTES (linha 9315-9320):
+events = ai_services.analyze_match_events(
+    first_half_text, home_team, away_team, 0, game_end,
+    match_id=match_id,
+    use_dual_verification=True,
+    settings=local_settings
+)
+
+# DEPOIS:
+events = ai_services.analyze_match_events(
+    first_half_text, home_team, away_team, 0, game_end,
+    match_id=match_id,
+    use_dual_verification=True,
+    settings=local_settings,
+    video_game_start_second=first_half_offset,
+    boundaries=boundaries_1t
+)
 ```
 
-### Detalhes Tecnicos
+4. **Mesma correcao para o 2o tempo** (linha ~9406):
+   - Usar `second_half_start_second` dos boundaries como offset
+   - Passar boundaries do 2T
 
-1. **Inserir o fallback** entre as linhas 6210 e 6212 de `ai_services.py` (apos o bloco de enriquecimento de timestamps e antes do log "ANALISE COMPLETA")
+### Detalhes da implementacao
 
-2. **Reutilizar a mesma logica** do fallback Ollama legado (linhas 5785-5876), adaptando para o contexto do pipeline Kakttus:
-   - Mesma busca de SRT por prioridade de nome (`{match_half}_half.srt`, etc.)
-   - Mesma deduplicacao por janela de 2 minutos
-   - Passar `video_game_start_second` e `boundaries` para calculo correto dos timestamps
+**Bloco a inserir antes da Phase 4 (antes da linha 9289):**
 
-3. **Threshold**: usar `< 10` em vez de `< 3` para ser mais agressivo no fallback, garantindo que partidas com poucos eventos detectados pela IA sejam complementadas
+```python
+# ========== PHASE 3.5: DETECT BOUNDARIES ==========
+boundaries_1t = {}
+boundaries_2t = {}
+first_half_offset = 0
+second_half_offset = 0
+
+# Detectar boundaries do 1T
+if first_half_text:
+    boundaries_1t = ai_services.detect_match_periods_from_transcription(first_half_text)
+    if boundaries_1t.get('game_start_second') is not None:
+        first_half_offset = int(boundaries_1t['game_start_second'])
+        print(f"[ASYNC-PIPELINE] Boundaries 1T: inicio={first_half_offset}s")
+
+# Se nao detectou pelo texto, tentar pelo SRT
+if not boundaries_1t.get('game_start_second'):
+    srt_1t = get_subfolder_path(match_id, 'srt') / 'first_half.srt'
+    if srt_1t.exists():
+        with open(srt_1t, 'r', encoding='utf-8') as f:
+            boundaries_1t = ai_services.detect_match_periods_from_transcription(f.read())
+        if boundaries_1t.get('game_start_second') is not None:
+            first_half_offset = int(boundaries_1t['game_start_second'])
+
+# Detectar boundaries do 2T
+if second_half_text:
+    boundaries_2t = ai_services.detect_match_periods_from_transcription(second_half_text)
+    if boundaries_2t.get('second_half_start_second') is not None:
+        second_half_offset = int(boundaries_2t['second_half_start_second'])
+    elif boundaries_2t.get('game_start_second') is not None:
+        second_half_offset = int(boundaries_2t['game_start_second'])
+
+# Persistir no analysis_job
+# (mesma logica do /api/analyze-match)
+```
+
+**Modificar chamada do 1T (linha 9315):**
+- Adicionar `video_game_start_second=first_half_offset`
+- Adicionar `boundaries=boundaries_1t`
+
+**Modificar chamada do 2T (linha ~9406):**
+- Adicionar `video_game_start_second=second_half_offset`
+- Adicionar `boundaries=boundaries_2t`
 
 ## Arquivo a Modificar
 
-- `video-processor/ai_services.py` -- Adicionar bloco de fallback por keywords no fluxo Kakttus pipeline (entre linhas 6210-6212)
+- `video-processor/server.py` -- Adicionar deteccao de boundaries no pipeline async e passar parametros para `analyze_match_events()`
+
