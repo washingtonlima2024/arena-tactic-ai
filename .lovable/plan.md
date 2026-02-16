@@ -1,95 +1,84 @@
 
 
-# Corrigir: Fallback por Keywords Nao Funciona com Texto do Whisper
+# Corrigir: EventDetector Retorna 0 Candidatos com Texto do Whisper
 
-## Problema Real (diagnosticado no codigo)
+## Problema Raiz
 
-O pipeline gera poucos eventos (5-6) porque existem **2 bugs** que neutralizam o fallback por keywords:
+O EventDetector (`event_detector.py`) recebe a transcricao do Whisper como **um unico paragrafo** sem quebras de linha. Na linha 428:
 
-### Bug 1: `detect_events_by_keywords_from_text` ignora keywords sem timestamps inline
-
-Na funcao `detect_events_by_keywords_from_text` (linha 5448), a condicao `if closest_ts:` exige que o texto tenha timestamps no formato `HH:MM:SS` ou `MM:SS`. Mas a transcricao do Whisper eh texto puro sem timestamps inline. Resultado: `timestamp_map` fica vazio e **zero eventos** sao criados pelo fallback de texto.
-
-```text
-Whisper gera: "O jogador chutou e gol do Flamengo!"
-timestamp_map = {}  (vazio - sem HH:MM:SS no texto)
-if closest_ts:  -->  SEMPRE False  -->  nenhum evento criado
+```python
+lines = [ln.strip() for ln in (transcript or "").splitlines() if ln.strip()]
 ```
 
-### Bug 2: Fallback do Kakttus prefere texto bruto quando nao tem match_id ou SRT
+Isso gera `lines = ["todo o texto em uma unica linha"]` (1 elemento).
 
-No bloco de fallback (linha 6219-6292), quando o SRT nao eh encontrado, cai na funcao `detect_events_by_keywords_from_text` que, como explicado no Bug 1, nao funciona com texto puro.
+Na linha 331, cada receita verifica:
 
-Enquanto isso, o SRT sintetico gerado na Phase 3.5 do pipeline async **existe no disco** mas o fallback no `ai_services.py` pode nao encontra-lo por divergencia nos nomes de arquivo.
+```python
+if not transcript_lines or len(transcript_lines) < recipe.window_size:
+    return []  # window_size = 4-8, len = 1 → SEMPRE retorna vazio
+```
+
+Resultado: **todas as receitas retornam `[]`**, 0 candidatos, e o sistema cai no prompt completo (sem pre-filtro), que gera poucos eventos.
 
 ## Solucao
 
-### Arquivo: `video-processor/ai_services.py`
+### Arquivo: `video-processor/event_detector.py`
 
-**Corrigir `detect_events_by_keywords_from_text` para funcionar SEM timestamps inline.**
+**Corrigir `find_all_candidates` para dividir texto corrido em linhas sinteticas** quando o Whisper gera texto sem quebras de linha.
 
-Quando `timestamp_map` esta vazio, estimar o timestamp pela posicao proporcional da keyword no texto:
-
-```text
-posicao_keyword = keyword_pos / len(transcription)
-video_second_estimado = posicao_keyword * video_duration
-game_minute = game_start_minute + (video_second_estimado / 60)
-```
-
-Mudancas especificas:
-
-1. **Linha ~5347**: Apos criar o `timestamp_map`, se estiver vazio, calcular `video_duration` a partir do parametro ou estimar 2700s (45 min)
-
-2. **Linha ~5448**: Mudar a logica do `if closest_ts:` para incluir fallback proporcional:
+Na funcao `find_all_candidates` (linha 428), apos o `splitlines()`, se o resultado tiver poucas linhas mas muito texto, dividir em sentencas ou blocos de ~100 palavras:
 
 ```python
-if closest_ts:
-    # Usar timestamp mais proximo (logica atual)
-    minute = closest_ts['minute']
-    second = closest_ts['second']
-    video_second = closest_ts['videoSecond']
-else:
-    # FALLBACK: Estimar pela posicao no texto
-    text_len = len(transcription)
-    if text_len > 0:
-        position_ratio = keyword_pos / text_len
-        est_duration = video_duration or 2700  # 45 min default
-        video_second = int(position_ratio * est_duration)
-        game_second = max(0, video_second - video_game_start_second)
-        minute = game_start_minute + (game_second // 60)
-        second = game_second % 60
-    else:
-        continue  # Sem texto, pular
+lines = [ln.strip() for ln in (transcript or "").splitlines() if ln.strip()]
+
+# Se texto corrido (poucas linhas mas muito conteudo), dividir em sentencas
+if len(lines) < 10 and len(transcript or "") > 500:
+    import re
+    # Dividir por sentencas (pontuacao + espaco)
+    sentences = re.split(r'(?<=[.!?])\s+', transcript)
+    # Se ainda poucas sentencas, dividir por blocos de ~15 palavras
+    if len(sentences) < 10:
+        words = transcript.split()
+        chunk_size = 15
+        sentences = [
+            " ".join(words[i:i+chunk_size])
+            for i in range(0, len(words), chunk_size)
+        ]
+    lines = [s.strip() for s in sentences if s.strip()]
+    print(f"[EventDetector] Texto corrido detectado, dividido em {len(lines)} linhas sinteticas")
 ```
 
-3. **Manter o resto da logica identica** (detect_goal_author, validate_card_event, etc.), apenas usando as variaveis `minute`, `second`, `video_second` calculadas acima em vez de `closest_ts['minute']` etc.
+Isso garante que:
+- Texto do Whisper (~50k chars, sem newlines) → dividido em ~300+ sentencas/blocos
+- Cada receita encontra linhas suficientes para a janela deslizante
+- Os patterns de regex funcionam normalmente em cada bloco
 
 ### Resultado Esperado
 
-- Com texto de ~50k chars (Whisper completo de 47 min):
-  - Cada keyword encontrada recebe um timestamp estimado pela posicao no texto
-  - A estimativa eh proporcional: keyword no meio do texto -> ~22 min de jogo
-  - Nao eh preciso, mas garante que eventos sejam detectados com timestamps aproximados
-  - A deduplicacao por janela de 2 minutos evita duplicatas
-
-- O fallback passa a gerar 15-40 eventos em vez de 0
+- EventDetector passa a encontrar 15-40 candidatos em vez de 0
+- Pipeline multi-eventos envia candidatos reais ao Ollama/Kakttus
+- Ollama recebe trechos focados (snippets) em vez do texto completo
+- Mais eventos detectados com maior precisao
 
 ## Detalhes Tecnicos
 
-### ai_services.py - Linhas 5430-5500
+### event_detector.py - Linha 428
 
-Reestruturar o loop de deteccao para:
+Adicionar logica de segmentacao apos o `splitlines()`:
 
-1. Calcular `minute`, `second`, `video_second` ANTES do bloco de criacao do evento
-2. Usar `closest_ts` quando disponivel, senao usar estimativa proporcional
-3. Adicionar `timestampSource: 'proportional_estimate'` no metadata quando usar estimativa
-4. Adicionar log: `[Keywords-Text] Sem timestamps inline, usando estimativa proporcional`
+1. Verificar se `len(lines) < 10` e `len(transcript) > 500`
+2. Primeiro tentar dividir por sentencas (`re.split(r'(?<=[.!?])\s+', ...)`)
+3. Se ainda insuficiente, dividir por blocos de 15 palavras
+4. Log informativo para debug
 
-### Parametro video_duration
+### Impacto no resto do pipeline
 
-Garantir que o pipeline async passe `video_duration` ao chamar o fallback. Verificar nas chamadas do bloco Kakttus (linhas 6263-6291) se `video_duration` esta sendo passado -- atualmente nao esta em todas as chamadas.
+- `find_event_candidates` recebe linhas sinteticas e aplica a janela deslizante normalmente
+- Nenhuma mudanca necessaria em `ai_services.py` -- o fix e apenas no `event_detector.py`
+- O fallback por keywords (`detect_events_by_keywords_from_text`) nao e afetado pois opera no texto inteiro, nao em linhas
 
 ## Arquivo a Modificar
 
-1. **`video-processor/ai_services.py`** -- Adicionar estimativa proporcional de timestamps quando `timestamp_map` esta vazio no `detect_events_by_keywords_from_text`
+1. **`video-processor/event_detector.py`** -- Adicionar segmentacao de texto corrido em `find_all_candidates`
 
