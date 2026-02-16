@@ -1,90 +1,127 @@
 
-# Corrigir Deteccao de Gols: Eliminar Falsos Positivos e Nao Perder Gols Reais
+# Corrigir Pipeline de Analise: Timestamps, Nomes e Validacao
 
-## Diagnostico
+## Resumo dos Problemas
 
-O problema tem 3 causas raiz:
+A analise gerou eventos com timestamps zerados (minute=0 ou 45), nomes de jogadores inventados ("Nem Mar", "Tando", "Falta"), e gols potencialmente falsos. A causa raiz eh que o modelo Kakttus 7B recebe texto sem timestamps e alucina dados.
 
-### 1. Keyword `go+l` nao filtra contexto negativo
+## Solucao em 4 Partes
 
-O padrao regex `go+l` no fallback por keywords casa com QUALQUER mencao de "gol", incluindo:
-- "quase gol" (nao foi gol)
-- "perdeu o gol" (nao foi gol)
-- "gol anulado" (nao foi gol)
+### Parte 1: Usar SRT como fonte primaria para o Kakttus (em vez de texto corrido)
 
-Resultado: gera falsos positivos que sao classificados como gol real.
+**Arquivo**: `video-processor/ai_services.py` (funcao `analyze_with_kakttus`, linha 1249)
 
-### 2. Validacao `_validate_goals_with_context` NAO eh aplicada no fallback
+Atualmente a funcao recebe `transcript` e faz `strip_srt_to_text()` (linha 1265), removendo todos os timestamps. Mudar para:
 
-A funcao que remove gols falsos (verificando "quase", "perdeu", "na trave", etc.) so eh chamada apos a analise do Ollama (linha 5803), mas NUNCA nos eventos do fallback por keywords (linhas 6319-6331). Os gols falsos do fallback entram direto no `final_events` sem validacao.
+1. Se a transcricao contem formato SRT (tem `-->` e blocos numerados), **manter o formato SRT** para enviar ao Kakttus
+2. Apenas fazer strip para o `find_all_candidates` do event_detector (que trabalha com texto)
+3. O prompt do Kakttus (fallback legado, linha 1319) ja instrui a usar timestamps SRT — basta nao remove-los
 
-### 3. Deduplicacao por janela de 2 minutos pode remover gol real
+Isso permite que o modelo 7B extraia timestamps dos blocos SRT (ex: `00:24:52,253 --> 00:24:55,500`) em vez de inventar.
 
-Com timestamps proporcionais (imprecisos), um gol falso pode ter timestamp proximo ao gol real do Felipe Coutinho. A deduplicacao em `already_exists` (linha 6322-6326) verifica `abs(minute) < 2 AND same type`, podendo manter o falso e descartar o real (ou vice-versa).
+### Parte 2: Enriquecer timestamps de TODOS os eventos (nao so gols)
 
-## Solucao (3 mudancas no mesmo arquivo)
+**Arquivo**: `video-processor/ai_services.py` (linhas 6168-6242)
 
-### Arquivo: `video-processor/ai_services.py`
-
-**Mudanca 1: Adicionar filtro de negacao DENTRO de `detect_events_by_keywords_from_text` para gols**
-
-No loop principal (linha 5440), quando `event_type == 'goal'`, verificar se o contexto proximo da keyword contem palavras de negacao ANTES de criar o evento. Isso previne a criacao de gols falsos na origem.
-
+Atualmente o filtro `events_needing_timestamps` so busca gols:
 ```python
-# Dentro do loop, apos encontrar a keyword (linha 5441):
-if event_type == 'goal':
-    # Verificar contexto de negacao (50 chars antes, 30 depois)
-    ctx_start = max(0, keyword_pos - 50)
-    ctx_end = min(len(transcription), keyword_pos + 30)
-    local_ctx = transcription[ctx_start:ctx_end].lower()
-    
-    negation_words = ['quase', 'por pouco', 'perdeu', 'na trave', 'travessao',
-                      'pra fora', 'defendeu', 'espalmou', 'salvou', 'nao foi',
-                      'anulado', 'impedido', 'passou perto', 'raspou', 'tirou']
-    if any(neg in local_ctx for neg in negation_words):
-        continue  # Pular - nao eh gol real
+events_needing_timestamps = [
+    e for e in final_events 
+    if e.get('event_type') == 'goal' and e.get('minute', 0) == 0
+]
 ```
 
-**Mudanca 2: Aplicar `_validate_goals_with_context` nos eventos do fallback**
-
-No bloco de fallback (linha 6244-6331), APOS gerar `keyword_events`, validar os gols antes do merge:
-
+Mudar para buscar QUALQUER evento com minute=0 ou minute=game_start_minute sem videoSecond:
 ```python
-# Apos linha 6296 (e tambem apos linhas 6284, 6306, 6317):
-keyword_events = _validate_goals_with_context(keyword_events, transcription)
+events_needing_timestamps = [
+    e for e in final_events 
+    if e.get('minute', 0) in (0, game_start_minute) and e.get('videoSecond', 0) == 0
+]
 ```
 
-Isso garante que qualquer gol falso que passe pelo filtro inline seja removido pela validacao contextual mais robusta.
+E na associacao, fazer match por `event_type` (nao so gols) e por `team`:
+```python
+for event in events_needing_timestamps:
+    etype = event.get('event_type')
+    team = event.get('team', 'unknown')
+    for ke in keyword_events:
+        if ke.get('event_type') == etype and ke.get('team') == team:
+            # Atribuir timestamp
+            ...
+```
 
-**Mudanca 3: Na deduplicacao do merge, priorizar eventos com maior confianca**
+### Parte 3: Validar nomes de jogadores contra a transcricao
 
-Na logica de merge (linhas 6319-6331), quando um evento do keyword tiver o mesmo tipo e minuto proximo de um evento existente, manter o que tiver maior `confidence`. Atualmente, o primeiro encontrado vence (o do Ollama), mas se o Ollama nao detectou o gol do Felipe Coutinho, o keyword pode adiciona-lo sem conflito.
+**Arquivo**: `video-processor/ai_services.py` (funcao `_enrich_events`, linha 5925)
 
-A deduplicacao atual ja funciona bem para isso -- o problema real eh que gols falsos estao entrando. As mudancas 1 e 2 resolvem isso.
+Adicionar validacao de nomes apos o enriquecimento:
+1. Para cada evento com campo `player`, verificar se o nome (ou parte dele, minimo 4 chars) aparece na transcricao
+2. Se nao aparece, limpar o campo (setar como string vazia)
+3. Isso elimina alucinacoes como "Tando", "Dos", "Paulo Montenegro"
+
+```python
+# Dentro de _enrich_events, apos o loop principal:
+for event in enriched:
+    player = event.get('player', '')
+    if player and len(player) > 2:
+        # Verificar se nome aparece na transcricao (case-insensitive)
+        if player.lower() not in transcription_lower:
+            # Tentar partes do nome (sobrenome)
+            parts = player.split()
+            found = any(p.lower() in transcription_lower for p in parts if len(p) > 3)
+            if not found:
+                event['player'] = ''
+                event['metadata']['player_hallucinated'] = player
+```
+
+Nota: A funcao `_enrich_events` nao recebe a transcricao hoje — sera preciso passar como parametro.
+
+### Parte 4: Priorizar SRT no pipeline multi-eventos
+
+**Arquivo**: `video-processor/ai_services.py` (funcao `analyze_match_events`, linhas 6120-6250)
+
+Antes de chamar `analyze_with_kakttus`, verificar se existe SRT para o tempo. Se sim, usar o conteudo SRT como `transcription` em vez do texto do Whisper. Isso da ao modelo timestamps reais.
+
+```python
+# Antes de chamar analyze_with_kakttus (linha 6129):
+srt_transcript = None
+if match_id:
+    from storage import get_subfolder_path
+    srt_folder = get_subfolder_path(match_id, 'srt')
+    for pattern in [f'{match_half}_transcription.srt', f'{match_half}_half.srt']:
+        candidate = srt_folder / pattern
+        if candidate.exists():
+            srt_transcript = candidate.read_text(encoding='utf-8')
+            break
+
+kakttus_result = analyze_with_kakttus(
+    transcript=srt_transcript or transcription,
+    home_team=home_team,
+    away_team=away_team,
+    match_half=match_half
+)
+```
 
 ## Resultado Esperado
 
-- Gols falsos ("quase gol", "perdeu o gol") sao bloqueados na origem (mudanca 1) e validados novamente (mudanca 2)
-- Gols reais (como o de Felipe Coutinho) continuam sendo detectados normalmente
-- O sistema nunca mais classifica como gol algo que nao foi gol
-- Se o gol do Felipe Coutinho aparece na transcricao com "gol" ou "marca" proximo, sera detectado com timestamp proporcional
+- Kakttus recebe SRT com timestamps reais → extrai minutos corretos (24', 38', etc.)
+- Eventos sem timestamp sao enriquecidos via keywords (nao so gols)
+- Nomes inventados sao removidos automaticamente
+- Todos os eventos tem timestamps proporcionais no minimo (nunca 0 ou 45)
 
 ## Detalhes Tecnicos
 
-### Linha 5440-5475 (filtro inline de negacao para gols)
+### Arquivos a modificar
 
-Adicionar verificacao de contexto local (50 chars antes, 30 depois) para cada match de keyword de gol. Se contem palavras de negacao, pular com `continue`.
-
-### Linhas 6284, 6296, 6306, 6317 (validacao pos-keyword)
-
-Adicionar chamada `keyword_events = _validate_goals_with_context(keyword_events, transcription)` apos cada chamada de `detect_events_by_keywords_from_text` ou `detect_events_by_keywords` no bloco de fallback.
+1. **`video-processor/ai_services.py`**:
+   - `analyze_with_kakttus` (linha 1265): Nao fazer `strip_srt_to_text` quando recebe SRT — manter formato SRT para o prompt
+   - `analyze_match_events` (linha 6129): Carregar SRT do storage e passar ao Kakttus
+   - Bloco de enriquecimento (linhas 6168-6242): Expandir para todos os tipos de eventos
+   - `_enrich_events` (linha 5925): Adicionar parametro `transcription` e validar nomes de jogadores
 
 ### Impacto
 
-- Apenas gols sao afetados (outros eventos passam normalmente)
-- A validacao eh rapida (regex em string, sem chamada de IA)
-- Compativel com timestamps proporcionais e de SRT
-
-## Arquivo a Modificar
-
-1. **`video-processor/ai_services.py`** -- 3 pontos de mudanca conforme descrito acima
+- Nenhuma mudanca no frontend
+- Nenhuma mudanca no event_detector.py
+- Compativel com o pipeline existente (fallback por keywords continua funcionando)
+- Se nao houver SRT, o comportamento atual eh mantido (texto corrido + timestamps proporcionais)
