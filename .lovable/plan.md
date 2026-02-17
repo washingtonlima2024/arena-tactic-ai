@@ -1,139 +1,140 @@
 
 
-# Corrigir Deteccao de Eventos: Propagar Boundaries + Filtrar Pre-Jogo
+# Corrigir Deteccao Completa de Eventos (Alem de Gols)
 
-## Problema
+## Analise do Anexo
 
-Tres regressoes criticas em relacao aos scripts antigos:
+O arquivo `analise_eventos.txt` identificou 5 problemas criticos que explicam porque apenas gols sao detectados corretamente:
 
-1. **Falso positivo no minuto 0**: `detect_goals_by_sliding_window` e `detect_events_by_keywords` nao recebem `boundaries`, entao processam blocos SRT do pre-jogo como se fossem lance real.
-2. **Timestamp matching muito amplo** (linha 6245-6247): O filtro `e.get('minute', 0) in (0, game_start_minute) and e.get('videoSecond', 0) == 0` tenta reatribuir timestamps de TODOS os tipos de evento, nao apenas gols. Nos scripts antigos, so gols com `minute=0` eram corrigidos.
-3. **Calculo de game_minute errado**: Usa `segment_start_minute + minutes` sem descontar `game_start_second`, gerando offset em todos os eventos.
+1. **Cartoes desabilitados no EVENT_KEYWORDS** - `yellow_card` e `red_card` estao comentados (linhas 2242-2258)
+2. **Filtro anti-times-externos muito agressivo** - `is_other_game_commentary` descarta eventos legitimos quando o narrador menciona outro time como referencia (ex: "veio do Flamengo")
+3. **event_detector.py nao integrado** - O import falha silenciosamente e cai no fallback legado menos eficiente
+4. **Keywords de cartoes desabilitadas na extracao de contexto** - `red_card` e `yellow_card` tambem estao comentados no mapa de keywords da funcao `extract_event_context` (linhas 1622-1626)
+5. **Validacoes muito restritas** - `validate_card_event` e `validate_penalty_event` exigem contextos muito especificos
 
 ## Mudancas Tecnicas
 
 **Arquivo unico**: `video-processor/ai_services.py`
 
-### Mudanca 1: Adicionar `boundaries` a `detect_goals_by_sliding_window` (linha 2504)
+### Mudanca 1: Descomentar cartoes no EVENT_KEYWORDS (linhas 2242-2258)
 
-Adicionar parametro `boundaries: dict = None` na assinatura. No inicio da funcao, extrair `game_start_second`. Dentro do loop (linha 2559), filtrar blocos antes de `game_start_second`:
+Reativar `yellow_card` e `red_card` no dicionario `EVENT_KEYWORDS`:
 
 ```python
-def detect_goals_by_sliding_window(
-    srt_blocks, home_team, away_team,
-    segment_start_minute=0, half='first',
-    window_size=5, min_goal_mentions=3, min_block_gap=5,
-    boundaries: dict = None
-):
-    game_start_second = 0
-    if boundaries and boundaries.get('game_start_second') is not None:
-        game_start_second = boundaries['game_start_second']
-        print(f"[SlidingWindow] Filtrando blocos antes de {game_start_second}s")
-
-    # ... codigo existente ...
-
-    for i in range(len(srt_blocks)):
-        # NOVO: Ignorar blocos antes do inicio do jogo
-        _, hours, minutes, seconds, _, _ = srt_blocks[i]
-        block_time = hours * 3600 + minutes * 60 + seconds
-        if block_time < game_start_second:
-            continue
-
-        # ... resto do loop ...
+'yellow_card': [
+    r'CARTÃO AMARELO',
+    r'AMARELO PARA',
+    r'RECEBE O AMARELO',
+    r'LEVA AMARELO',
+    r'ESTÁ AMARELADO',
+],
+'red_card': [
+    r'CARTÃO VERMELHO',
+    r'VERMELHO PARA',
+    r'EXPULSO',
+    r'FOI EXPULSO',
+    r'RECEBE O VERMELHO',
+    r'LEVA VERMELHO',
+],
 ```
 
-No calculo final de timestamp (linhas 2619-2628), usar `calculate_game_minute` quando boundaries estiver disponivel:
+### Mudanca 2: Descomentar cartoes no mapa de contexto (linhas 1622-1626)
+
+Reativar keywords de cartoes na funcao `extract_event_context`:
 
 ```python
-_, hours, minutes, seconds, _, text = first_goal_block
-raw_total = hours * 3600 + minutes * 60 + seconds
-timestamp_seconds = max(0, raw_total - 3)
+event_keywords = {
+    'goal': ['gol', 'golaço', 'bola na rede', 'abre o placar', 'marca', 'gooool'],
+    'red_card': ['vermelho', 'expuls', 'cartão vermelho', 'direto pro chuveiro'],
+    'yellow_card': ['amarelo', 'cartão amarelo', 'amarelou', 'recebe amarelo'],
+    'penalty': ['pênalti', 'penalidade', 'marca pênalti', 'penalty'],
+    'save': ['defesa', 'salvou', 'espalmou', 'defendeu'],
+}
+```
 
-if boundaries:
-    adj_minutes, adj_seconds = calculate_game_minute(
-        timestamp_seconds, boundaries, segment_start_minute
-    )
-    game_minute = adj_minutes
+### Mudanca 3: Suavizar filtro `is_other_game_commentary` para eventos nao-gol
+
+O filtro atual descarta o evento inteiro se detectar qualquer time externo na janela de 5 blocos. Para eventos como cartoes e faltas, o time mencionado pode ser uma referencia biografica ("veio do Flamengo"). A correcao:
+
+- **Gols**: Manter filtro rigoroso (como esta)
+- **Outros eventos**: Aplicar filtro apenas se a frase explicitamente indicar "outro jogo" (`looks_like_other_game_commentary`), mas **nao** rejeitar por simples mencao de time externo
+
+Na funcao `detect_events_by_keywords` (linha 2850), mudar:
+
+```python
+# ANTES: Rejeita qualquer evento se detectar time externo
+if is_other_game_commentary(window_text, home_team, away_team):
+    continue
+
+# DEPOIS: Para nao-gol, usar apenas o filtro de frases explicitas
+if event_type == 'goal':
+    if is_other_game_commentary(window_text, home_team, away_team):
+        continue
 else:
-    adjusted_total = max(0, raw_total - 3)
-    adj_minutes = (adjusted_total % 3600) // 60
-    adj_seconds = adjusted_total % 60
-    game_minute = segment_start_minute + adj_minutes + ((adjusted_total // 3600) * 60)
+    if looks_like_other_game_commentary(window_text.lower()):
+        continue
 ```
 
-### Mudanca 2: Adicionar `boundaries` a `detect_events_by_keywords` (linha 2702)
+### Mudanca 4: Adicionar tipos de evento faltantes ao EVENT_KEYWORDS
 
-Adicionar parametro `boundaries: dict = None` na assinatura. Propagar para `detect_goals_by_sliding_window` (linha 2768):
+Adicionar `shot`, `offside`, `free_kick` e `substitution` que existem no `event_detector.py` mas faltam no `EVENT_KEYWORDS`:
 
 ```python
-goal_events = detect_goals_by_sliding_window(
-    ...,
-    boundaries=boundaries
-)
+'shot': [
+    r'CHUTOU',
+    r'FINALIZOU',
+    r'FINALIZAÇÃO',
+    r'NA TRAVE',
+    r'QUASE GOL',
+    r'POR POUCO',
+    r'PERDEU O GOL',
+],
+'offside': [
+    r'IMPEDIMENTO',
+    r'IMPEDIDO',
+    r'POSIÇÃO IRREGULAR',
+    r'BANDEIRA LEVANTADA',
+],
+'free_kick': [
+    r'COBROU A FALTA',
+    r'COBRANÇA DE FALTA',
+    r'BATE A FALTA',
+    r'COBRA A FALTA',
+],
+'substitution': [
+    r'SUBSTITUIÇÃO',
+    r'SAI .+ ENTRA',
+    r'ENTRA .+ SAI',
+],
 ```
 
-No loop de outros eventos (linha 2784), filtrar blocos pre-jogo e usar `calculate_game_minute`:
+Tambem remover o tipo `chance` do `EVENT_KEYWORDS` (ja e um tipo proibido conforme as regras do sistema) e mover seus patterns para `shot`:
 
 ```python
-for block_index, block in enumerate(srt_blocks):
-    _, hours, minutes, seconds, _, text = block
-    timestamp_seconds = hours * 3600 + minutes * 60 + seconds
-
-    # Ignorar blocos antes do inicio do jogo
-    if boundaries and boundaries.get('game_start_second'):
-        if timestamp_seconds < boundaries['game_start_second']:
-            continue
-
-    # Usar calculate_game_minute quando disponivel
-    if boundaries:
-        game_minute, _ = calculate_game_minute(
-            timestamp_seconds, boundaries, segment_start_minute
-        )
-    else:
-        game_minute = segment_start_minute + minutes + (hours * 60)
+# REMOVER 'chance' e incorporar patterns relevantes em 'shot'
 ```
 
-### Mudanca 3: Restringir timestamp matching para apenas gols (linhas 6244-6247)
+### Mudanca 5: Relaxar validacoes de cartoes e penaltis
 
-**Antes** (atual -- muito amplo):
-```python
-events_needing_timestamps = [
-    e for e in final_events 
-    if e.get('minute', 0) in (0, game_start_minute) and e.get('videoSecond', 0) == 0
-]
-```
+Na validacao de cartoes (`validate_card_event`), aceitar com confianca mais baixa ao inves de rejeitar:
 
-**Depois** (como nos scripts antigos -- apenas gols):
-```python
-events_needing_timestamps = [
-    e for e in final_events 
-    if e.get('event_type') == 'goal' and e.get('minute', 0) == 0 and e.get('videoSecond', 0) == 0
-]
-```
+- Reduzir exigencia de contexto: se a keyword primaria for encontrada, aceitar com `confidence=0.7` mesmo sem contexto de confirmacao
+- Manter rejeicao apenas para negacoes explicitas ("nao houve cartao", "recuou o cartao")
 
-Aplicar a mesma restricao na segunda checagem (linhas 6284-6287):
-```python
-remaining_events = [
-    e for e in final_events 
-    if e.get('event_type') == 'goal' and e.get('minute', 0) == 0 and e.get('videoSecond', 0) == 0
-]
-```
-
-### Mudanca 4: Propagar `boundaries` nos 3 chamadores
-
-- **Linha 5889** (Ollama fallback): adicionar `boundaries=boundaries`
-- **Linha 6293** (Kakttus SRT enrichment): adicionar `boundaries=boundaries`
-- **Linha 6368** (Kakttus fallback obrigatorio): adicionar `boundaries=boundaries`
+Na validacao de penaltis (`validate_penalty_event`):
+- Aceitar com `confidence=0.7` se keyword primaria presente, sem exigir confirmacao
 
 ## Resumo de Impacto
 
 | Problema | Causa | Correcao |
 |----------|-------|----------|
-| Gol falso no minuto 0 | Blocos pre-jogo processados | Filtro `block_time < game_start_second` |
-| Timestamps errados | Sem desconto do pre-jogo | Usar `calculate_game_minute()` |
-| Eventos errados reatribuidos | Filtro amplo em todos os tipos | Restringir a `event_type == 'goal'` |
+| Cartoes nao detectados | Keywords comentadas | Descomentar yellow_card e red_card |
+| Eventos descartados injustamente | Filtro anti-externo agressivo | Filtro brando para nao-gol |
+| Poucos tipos detectados | Faltam shot, offside, etc | Adicionar ao EVENT_KEYWORDS |
+| Contexto sem cartoes | Keywords de contexto comentadas | Descomentar no extract_event_context |
+| Validacao rejeitando demais | Exigencias muito estritas | Aceitar com confianca menor |
 
 - Nenhuma mudanca no frontend
-- Funciona com e sem boundaries (fallback mantido)
-- Mantem o offset -3s nos gols (mudanca anterior)
+- `event_detector.py` ja existe e sera usado quando o import funcionar; estas mudancas melhoram o fallback legado que roda quando ele nao esta disponivel
+- Compativel com as correcoes de boundaries/pre-jogo ja aplicadas
 
