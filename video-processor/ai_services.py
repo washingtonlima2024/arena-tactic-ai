@@ -1538,56 +1538,35 @@ def validate_card_event(
     """
     window_lower = window_text.lower()
     
-    # Filter 1: Not about another team/game
-    if is_other_game_commentary(window_text, home_team, away_team):
-        return {'is_valid': False, 'confidence': 0, 'reason': 'other_game'}
+    # Filter 1: Rejeitar apenas se frase explícita de outro jogo (brando)
+    if looks_like_other_game_commentary(window_lower):
+        return {'is_valid': False, 'confidence': 0, 'reason': 'other_game_phrase'}
     
-    # Filter 2: Should have player name nearby (PARA Fulano, de Fulano, etc.)
+    # Filter 2: Negações explícitas ("não houve cartão", "recuou o cartão")
+    negation_keywords = [
+        'não houve cartão', 'recuou o cartão', 'voltou atrás',
+        'cancelou o cartão', 'não deu cartão', 'sem cartão'
+    ]
+    if any(kw in window_lower for kw in negation_keywords):
+        return {'is_valid': False, 'confidence': 0.1, 'reason': 'negation_detected'}
+    
+    # Filter 3: Should have player name nearby (PARA Fulano, de Fulano, etc.)
     has_player = bool(re.search(
         r'(?:para|pra|de|do|em)\s+[A-ZÀ-Ú][a-záéíóúàèìòùâêîôûãõç]+',
         window_text,
         re.IGNORECASE
     ))
     
-    # Filter 3: For red card - VALIDAÇÃO REFORÇADA
+    # Filter 4: For red card - verificar menções hipotéticas
     if card_type == 'red_card':
-        # Palavras que indicam expulsão REAL
-        expulsion_keywords = [
-            'expuls', 'expulso', 'foi expulso',
-            'vermelho direto', 'cartão vermelho direto',
-            'deixa o campo', 'deixou o campo',
-            'vai pro chuveiro', 'direto pro chuveiro',
-            'fora de campo', 'fora da partida',
-            'ficou com um a menos', 'fica com um a menos',
-            'jogo com 10', 'com dez jogadores'
-        ]
-        
-        # Palavras que indicam menção HIPOTÉTICA (não expulsão real)
         hypothetical_keywords = [
             'poderia', 'deveria', 'mereceu', 'merecia',
-            'quase', 'por pouco', 'escapou',
-            'poderia ter sido', 'deveria ter sido',
-            'era para', 'era pra',
-            'pegou leve', 'só amarelo',
             'podia ser vermelho', 'poderia ser vermelho'
         ]
-        
-        # Verificar se há evidência de expulsão real
-        has_expulsion = any(kw in window_lower for kw in expulsion_keywords)
-        
-        # Verificar se é menção hipotética
         is_hypothetical = any(kw in window_lower for kw in hypothetical_keywords)
         
-        # Log para debug
-        print(f"[ValidateCard] Vermelho - expulsão:{has_expulsion}, hipotético:{is_hypothetical}")
-        print(f"[ValidateCard] Contexto (100 chars): {window_lower[:100]}...")
-        
-        # Rejeitar se não tem expulsão OU se é hipotético
-        if not has_expulsion:
-            return {'is_valid': False, 'confidence': 0.2, 'reason': 'no_expulsion_context'}
-        
         if is_hypothetical:
-            return {'is_valid': False, 'confidence': 0.3, 'reason': 'hypothetical_mention'}
+            return {'is_valid': True, 'confidence': 0.5, 'reason': 'hypothetical_but_accepted'}
     
     confidence = 0.9 if has_player else 0.7
     return {'is_valid': True, 'confidence': confidence, 'reason': 'validated'}
@@ -1619,13 +1598,16 @@ def _extract_context_around_timestamp(
         Contexto extraído centrado na keyword ou posição estimada
     """
     # Mapa de keywords por tipo de evento
-    # 🔧 red_card e yellow_card REMOVIDOS - menções de cartão serão ignoradas
     event_keywords = {
         'goal': ['gol', 'golaço', 'bola na rede', 'abre o placar', 'marca', 'gooool'],
-        # 'red_card': ['vermelho', 'expuls', 'cartão vermelho', 'direto pro chuveiro'],
-        # 'yellow_card': ['amarelo', 'cartão amarelo', 'amarelou', 'recebe amarelo'],
+        'red_card': ['vermelho', 'expuls', 'cartão vermelho', 'direto pro chuveiro'],
+        'yellow_card': ['amarelo', 'cartão amarelo', 'amarelou', 'recebe amarelo'],
         'penalty': ['pênalti', 'penalidade', 'marca pênalti', 'penalty'],
         'save': ['defesa', 'salvou', 'espalmou', 'defendeu'],
+        'shot': ['chutou', 'finalizou', 'finalização', 'na trave', 'quase gol'],
+        'offside': ['impedimento', 'impedido', 'posição irregular'],
+        'free_kick': ['cobrou a falta', 'cobrança de falta', 'bate a falta'],
+        'substitution': ['substituição'],
     }
     
     # 1. Tentar encontrar keyword do evento
@@ -1734,23 +1716,22 @@ def validate_penalty_event(
     """
     window_lower = window_text.lower()
     
-    # Filter 1: Not about another team/game
-    if is_other_game_commentary(window_text, home_team, away_team):
-        return {'is_valid': False, 'confidence': 0, 'reason': 'other_game'}
+    # Filter 1: Rejeitar apenas se frase explícita de outro jogo
+    if looks_like_other_game_commentary(window_lower):
+        return {'is_valid': False, 'confidence': 0, 'reason': 'other_game_phrase'}
     
-    # Filter 2: Should have emotion/intensity
-    intensity = intensity_score(window_text)
-    if intensity < 1:
-        return {'is_valid': False, 'confidence': 0.3, 'reason': 'low_intensity'}
+    # Filter 2: Negações explícitas
+    negation_keywords = ['não foi pênalti', 'sem pênalti', 'anulou o pênalti', 'cancelou']
+    if any(kw in window_lower for kw in negation_keywords):
+        return {'is_valid': False, 'confidence': 0.1, 'reason': 'negation_detected'}
     
     # Filter 3: Context about missing vs scoring
-    # "perdeu o pênalti" without positive context = uncertain
     if 'perdeu' in window_lower:
-        if 'mas' not in window_lower and 'porém' not in window_lower:
-            # Still valid but mark as missed penalty
-            return {'is_valid': True, 'confidence': 0.7, 'reason': 'penalty_missed'}
+        return {'is_valid': True, 'confidence': 0.7, 'reason': 'penalty_missed'}
     
-    confidence = min(0.95, 0.7 + intensity * 0.1)
+    # Aceitar com confiança base de 0.7 (sem exigir intensidade)
+    intensity = intensity_score(window_text)
+    confidence = min(0.95, 0.7 + intensity * 0.05)
     return {'is_valid': True, 'confidence': confidence, 'reason': 'validated'}
 
 
@@ -2239,57 +2220,49 @@ EVENT_KEYWORDS = {
         r'SEGUNDO GOL',    # Segundo gol
         r'TERCEIRO GOL',   # Terceiro gol
     ],
-    # 🔧 yellow_card DESABILITADO - menções de cartão amarelo serão ignoradas
-    # 'yellow_card': [
-    #     r'CARTÃO AMARELO',
-    #     r'AMARELO PARA',
-    #     r'RECEBE O AMARELO',
-    #     r'LEVA AMARELO',
-    #     r'ESTÁ AMARELADO',
-    # ],
-    # 🔧 red_card DESABILITADO - menções de cartão vermelho serão ignoradas
-    # 'red_card': [
-    #     r'CARTÃO VERMELHO',
-    #     r'VERMELHO PARA',
-    #     r'EXPULSO',
-    #     r'FOI EXPULSO',
-    #     r'RECEBE O VERMELHO',
-    #     r'LEVA VERMELHO',
-    # ],
-    'foul': [
-        r'FALTA DE',
-        r'FALTA PARA',
-        r'COMETEU FALTA',
-        r'FALTA PERIGOSA',
-        r'FALTA DURA',
+    'yellow_card': [
+        r'CARTÃO AMARELO',
+        r'AMARELO PARA',
+        r'RECEBE O AMARELO',
+        r'LEVA AMARELO',
+        r'ESTÁ AMARELADO',
     ],
-    'corner': [
-        r'ESCANTEIO',
-        r'CÓRNER',
-        r'BATE O ESCANTEIO',
-        r'COBRANÇA DE ESCANTEIO',
+    'red_card': [
+        r'CARTÃO VERMELHO',
+        r'VERMELHO PARA',
+        r'EXPULSO',
+        r'FOI EXPULSO',
+        r'RECEBE O VERMELHO',
+        r'LEVA VERMELHO',
     ],
-    'penalty': [
-        r'PÊNALTI',
-        r'PENALIDADE MÁXIMA',
-        r'MARCA O PÊNALTI',
-        r'VAI COBRAR O PÊNALTI',
-    ],
-    'save': [
-        r'GRANDE DEFESA',
-        r'DEFESAÇA',
-        r'SALVOU O GOL',
-        r'ESPETACULAR DEFESA',
-        r'MILAGRE DO GOLEIRO',
-    ],
-    'chance': [
+    'shot': [
+        r'CHUTOU',
+        r'FINALIZOU',
+        r'FINALIZAÇÃO',
+        r'NA TRAVE',
         r'QUASE GOL',
         r'POR POUCO',
+        r'PERDEU O GOL',
         r'RASPOU',
-        r'NA TRAVE',
         r'PASSOU PERTO',
         r'QUE CHANCE',
-        r'PERDEU O GOL',
+    ],
+    'offside': [
+        r'IMPEDIMENTO',
+        r'IMPEDIDO',
+        r'POSIÇÃO IRREGULAR',
+        r'BANDEIRA LEVANTADA',
+    ],
+    'free_kick': [
+        r'COBROU A FALTA',
+        r'COBRANÇA DE FALTA',
+        r'BATE A FALTA',
+        r'COBRA A FALTA',
+    ],
+    'substitution': [
+        r'SUBSTITUIÇÃO',
+        r'SAI .+ ENTRA',
+        r'ENTRA .+ SAI',
     ]
 }
 
@@ -2845,11 +2818,16 @@ def detect_events_by_keywords(
                 if re.search(keyword, text_upper, re.IGNORECASE):
                     
                     # ═══════════════════════════════════════════════════════════════
-                    # NOVO: Filtro Anti-Times-Externos (aplica a TODOS os eventos)
+                    # NOVO: Filtro Anti-Times-Externos (rigoroso para gols, brando para outros)
                     # ═══════════════════════════════════════════════════════════════
-                    if is_other_game_commentary(window_text, home_team, away_team):
-                        print(f"[KEYWORDS] ⚠ {event_type.upper()} ignorado (outro time/jogo mencionado)")
-                        continue
+                    if event_type == 'goal':
+                        if is_other_game_commentary(window_text, home_team, away_team):
+                            print(f"[KEYWORDS] ⚠ GOAL ignorado (outro time/jogo mencionado)")
+                            continue
+                    else:
+                        if looks_like_other_game_commentary(window_text.lower()):
+                            print(f"[KEYWORDS] ⚠ {event_type.upper()} ignorado (frase de outro jogo)")
+                            continue
                     
                     # ═══════════════════════════════════════════════════════════════
                     # NOVO: Validações específicas por tipo de evento
