@@ -2765,7 +2765,7 @@ def detect_events_by_keywords(
         segment_start_minute=segment_start_minute,
         half=half,
         window_size=5,
-        min_goal_mentions=3,
+        min_goal_mentions=2,
         min_block_gap=20,
         boundaries=boundaries
     )
@@ -2808,11 +2808,17 @@ def detect_events_by_keywords(
         window_blocks = srt_blocks[window_start:window_end]
         window_text = ' '.join([b[5] for b in window_blocks])
         
-        # Search for keywords (SKIP GOALS - already handled by sliding window)
+        # Search for keywords (goals only if not already detected by sliding window)
         for event_type, keywords in EVENT_KEYWORDS.items():
-            # PULAR GOLS - já foram detectados por sliding window
+            # Para gols: só detectar por keyword se sliding window não encontrou nenhum neste bloco
             if event_type == 'goal':
-                continue
+                # Verificar se já existe um gol detectado próximo (±30s)
+                already_detected = any(
+                    abs((hours * 3600 + minutes * 60 + seconds) - g.get('videoSecond', 0)) < 30
+                    for g in goal_events
+                )
+                if already_detected:
+                    continue
             
             for keyword in keywords:
                 if re.search(keyword, text_upper, re.IGNORECASE):
@@ -2832,8 +2838,17 @@ def detect_events_by_keywords(
                     # ═══════════════════════════════════════════════════════════════
                     # NOVO: Validações específicas por tipo de evento
                     # ═══════════════════════════════════════════════════════════════
-                    confidence = 1.0
+                    confidence = 0.8
                     confirmation_reason = 'keyword_match'
+                    
+                    # Validação de gols por keyword (fallback do sliding window)
+                    if event_type == 'goal':
+                        goal_check = confirm_goal_event(text, window_text)
+                        if not goal_check.get('is_goal', False):
+                            print(f"[KEYWORDS] ⚠ GOAL ignorado por confirm_goal_event ({goal_check.get('reason', 'unknown')})")
+                            continue
+                        confidence = goal_check.get('confidence', 0.7)
+                        confirmation_reason = f"keyword_fallback:{goal_check.get('reason', 'confirmed')}"
                     
                     # Validação de cartões
                     if event_type in ['yellow_card', 'red_card']:
