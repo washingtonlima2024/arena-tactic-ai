@@ -1,44 +1,42 @@
 
-# Mostrar Times Cadastrados no Dropdown do Evento
+
+# Corrigir Vinculacao de Times na Partida
 
 ## Problema
 
-A partida atual nao tem times vinculados (`home_team` e `away_team` sao null no banco). Por isso, o dropdown de time no dialogo de edicao de evento mostra apenas "Time Casa" e "Time Visitante" genericos -- os times cadastrados (Sport, Novorizontino) nunca aparecem.
+O `MatchEditDialog` (dialog de edicao de partida) usa `supabase.from('matches').update(...)` para salvar alteracoes, mas os dados da partida estao no **servidor local** (SQLite). Isso significa que quando voce tenta trocar os times de "Time Casa"/"Time Visitante" para Sport/Novorizontino, a alteracao nunca chega ao servidor local.
+
+Outros componentes (Live, Matches, Events) ja usam `apiClient.updateMatch()` corretamente. Apenas o `MatchEditDialog` usa Supabase diretamente.
 
 ## Solucao
 
-Buscar a lista de times cadastrados (`useTeams`) dentro do `EventEditDialog` e mostra-los como opcoes no dropdown, alem das opcoes de casa/visitante quando disponíveis.
+Alterar o `MatchEditDialog` para usar `apiClient.updateMatch()` em vez de `supabase.from('matches').update(...)`.
 
-### Arquivo: `src/components/events/EventEditDialog.tsx`
+### Arquivo: `src/components/matches/MatchEditDialog.tsx`
 
-**Mudanca 1 - Importar e usar useTeams:**
-- Importar `useTeams` de `@/hooks/useTeams`
-- Chamar `const { data: registeredTeams = [] } = useTeams()` dentro do componente
+**Mudanca na funcao `handleSave`** (linhas 135-199):
 
-**Mudanca 2 - Refazer o dropdown de times:**
-- Se `homeTeam`/`awayTeam` estiverem definidos (nomes reais, nao placeholders), mostrar como opcoes principais com label "(Casa)" / "(Visitante)"
-- Abaixo, mostrar todos os times cadastrados que nao sejam o home/away ja listados
-- Se nenhum time real estiver vinculado, mostrar diretamente todos os times cadastrados
-- Manter fallback "Time Casa" / "Time Visitante" como ultima opcao caso nao haja times cadastrados
+- Substituir `supabase.from('matches').update({...}).eq('id', match.id)` por `apiClient.updateMatch(match.id, {...})`
+- Remover a atualizacao de eventos via Supabase (pois o servidor local gerencia isso)
+- Manter o restante da logica (invalidar queries, fechar dialog)
 
-O resultado: ao abrir o dropdown, o usuario vera "Sport", "Novorizontino" e qualquer outro time cadastrado, podendo selecionar corretamente.
+**Mudanca na funcao `handleSyncFromEvents`**: Manter como esta (ja usa `syncMatchScoreFromEvents` que usa apiClient).
+
+**Mudanca na funcao `handleToggleScoreLock`**: Substituir chamada Supabase por apiClient.
+
+**Mudanca no `eventStats` query**: Substituir `supabase.from('match_events')` por `apiClient.getMatchEvents()`.
+
+**Mudanca no `matchLockStatus` query**: Substituir `supabase.from('matches')` por `apiClient.getMatch()`.
 
 ## Detalhes Tecnicos
 
 ```text
-Dropdown (antes):
-  - Time Casa
-  - Time Visitante
+Antes:
+  MatchEditDialog -> supabase.update() -> Supabase (nao tem o match) -> NADA ACONTECE
 
-Dropdown (depois, com times cadastrados):
-  - Sport (se vinculado como Casa)
-  - Novorizontino (se vinculado como Visitante)
-  -- separador --
-  - Sport        (da lista de teams cadastrados)
-  - Novorizontino
-  -- fallback --
-  - Time Casa    (se nenhum time cadastrado)
-  - Time Visitante
+Depois:
+  MatchEditDialog -> apiClient.updateMatch() -> Servidor Local (SQLite) -> TIME ATUALIZADO
 ```
 
-Impacto: apenas no componente `EventEditDialog.tsx`. Sem mudancas no backend.
+Isso vai permitir que ao editar a partida e selecionar Sport como "Time Casa" e Novorizontino como "Time Visitante", os times sejam efetivamente vinculados. E consequentemente, o dropdown de times no evento tambem mostrara os nomes corretos.
+
