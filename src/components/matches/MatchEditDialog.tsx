@@ -18,7 +18,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Loader2, Save, Target, Trophy, AlertTriangle, Users, Lock, Unlock } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
@@ -26,7 +26,7 @@ import { useTeams } from '@/hooks/useTeams';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Switch } from '@/components/ui/switch';
-import { syncMatchScoreFromEvents, setMatchScoreLock } from '@/lib/scoreSync';
+import { syncMatchScoreFromEvents } from '@/lib/scoreSync';
 
 interface MatchEditDialogProps {
   isOpen: boolean;
@@ -66,24 +66,21 @@ export function MatchEditDialog({
     queryFn: async () => {
       if (!match?.id) return null;
       
-      const { data: events } = await supabase
-        .from('match_events')
-        .select('event_type, metadata')
-        .eq('match_id', match.id);
+      const events = await apiClient.getMatchEvents(match.id);
       
       if (!events) return null;
       
-      const goals = events.filter(e => e.event_type === 'goal').length;
-      const shots = events.filter(e => 
+      const goals = events.filter((e: any) => e.event_type === 'goal').length;
+      const shots = events.filter((e: any) => 
         e.event_type === 'shot' || 
         e.event_type === 'shot_on_target'
       ).length;
-      const fouls = events.filter(e => 
+      const fouls = events.filter((e: any) => 
         e.event_type === 'foul'
       ).length;
-      const yellowCards = events.filter(e => e.event_type === 'yellow_card').length;
-      const redCards = events.filter(e => e.event_type === 'red_card').length;
-      const corners = events.filter(e => 
+      const yellowCards = events.filter((e: any) => e.event_type === 'yellow_card').length;
+      const redCards = events.filter((e: any) => e.event_type === 'red_card').length;
+      const corners = events.filter((e: any) => 
         e.event_type === 'corner'
       ).length;
       
@@ -105,12 +102,12 @@ export function MatchEditDialog({
     queryKey: ['match-lock-status', match?.id],
     queryFn: async () => {
       if (!match?.id) return { score_locked: false };
-      const { data } = await supabase
-        .from('matches')
-        .select('score_locked')
-        .eq('id', match.id)
-        .single();
-      return data || { score_locked: false };
+      try {
+        const data = await apiClient.getMatch(match.id);
+        return { score_locked: data?.score_locked || false };
+      } catch {
+        return { score_locked: false };
+      }
     },
     enabled: !!match?.id && isOpen
   });
@@ -137,51 +134,16 @@ export function MatchEditDialog({
     
     setIsSaving(true);
     try {
-      // Update match with score_locked = true (admin is manually editing)
-      const { error } = await supabase
-        .from('matches')
-        .update({
-          home_score: parseInt(homeScore) || 0,
-          away_score: parseInt(awayScore) || 0,
-          home_team_id: homeTeamId || null,
-          away_team_id: awayTeamId || null,
-          score_locked: true, // Lock score when manually edited
-        })
-        .eq('id', match.id);
+      // Update match via apiClient (servidor local)
+      await apiClient.updateMatch(match.id, {
+        home_score: parseInt(homeScore) || 0,
+        away_score: parseInt(awayScore) || 0,
+        home_team_id: homeTeamId || null,
+        away_team_id: awayTeamId || null,
+        score_locked: true, // Lock score when manually edited
+      });
 
-      if (error) throw error;
       setScoreLocked(true);
-
-      // Get new team names
-      const newHomeTeam = teams.find(t => t.id === homeTeamId);
-      const newAwayTeam = teams.find(t => t.id === awayTeamId);
-
-      // Update teamName in all events for this match
-      if (newHomeTeam || newAwayTeam) {
-        const { data: events } = await supabase
-          .from('match_events')
-          .select('id, metadata')
-          .eq('match_id', match.id);
-
-        if (events && events.length > 0) {
-          for (const event of events) {
-            const metadata = event.metadata as Record<string, any> | null;
-            if (metadata) {
-              const updatedMetadata = { ...metadata };
-              if (metadata.team === 'home' && newHomeTeam) {
-                updatedMetadata.teamName = newHomeTeam.name;
-              } else if (metadata.team === 'away' && newAwayTeam) {
-                updatedMetadata.teamName = newAwayTeam.name;
-              }
-              
-              await supabase
-                .from('match_events')
-                .update({ metadata: updatedMetadata })
-                .eq('id', event.id);
-            }
-          }
-        }
-      }
 
       toast.success('Partida atualizada com sucesso!');
       queryClient.invalidateQueries({ queryKey: ['completed-matches'] });
@@ -231,13 +193,12 @@ export function MatchEditDialog({
     if (!match?.id) return;
     
     const newLockState = !scoreLocked;
-    const success = await setMatchScoreLock(match.id, newLockState);
-    
-    if (success) {
+    try {
+      await apiClient.updateMatch(match.id, { score_locked: newLockState });
       setScoreLocked(newLockState);
       queryClient.invalidateQueries({ queryKey: ['match-lock-status', match.id] });
       toast.success(newLockState ? 'Placar travado' : 'Placar destravado');
-    } else {
+    } catch {
       toast.error('Erro ao alterar trava do placar');
     }
   };
