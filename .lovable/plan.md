@@ -1,51 +1,46 @@
 
-
-# Remover Dependencia do Google e Tratar Erro 429
+# Corrigir Deteccao de Times - Priorizar Nome do Arquivo
 
 ## Problema
 
-O modo "Analise Visual" (vision) envia frames do video para a API do Google Gemini no backend Python. Quando ha muitas requisicoes, o Google retorna erro 429 (rate limit), e o frontend nao trata isso de forma amigavel.
+O arquivo de video se chama `BrasilxArgentina_1_50MB.mp4`, mas o sistema registrou "Paraguai" como adversario. Isso acontece porque:
+
+1. A IA do backend (Ollama) analisa a **transcricao do audio** e identificou incorretamente "Paraguai"
+2. O nome do arquivo contem a informacao correta ("Argentina"), mas so e usado como **fallback** quando a transcricao falha completamente
+3. Nao existe validacao cruzada entre o que a IA extraiu e o que o nome do arquivo diz
 
 ## Solucao
 
-### 1. Detectar e tratar erro 429 no frontend com retry automatico
+Usar o nome do arquivo como **fonte prioritaria** para nomes de times, e so usar a IA para complementar dados que o filename nao fornece (competicao, data, estadio).
 
-**Arquivo: `src/hooks/useMatchAnalysis.ts`**
+### Arquivo: `src/components/upload/SmartImportCard.tsx`
 
-- No `analyzeWithTranscription`, ao capturar erros, verificar se a mensagem contem "429" ou "rate limit"
-- Implementar 1 retry automatico com delay de 5 segundos antes de falhar
-- Atualizar a mensagem de progresso para informar o usuario: "Rate limit atingido. Aguardando 5s..."
-- Se retry tambem falhar, retornar erro claro sugerindo usar modo Texto
+**Mudanca 1 - Extrair times do filename SEMPRE (nao so no fallback):**
+- Mover a chamada `extractTeamsFromFilename` para **antes** da extracao por IA
+- Passar os nomes extraidos do filename junto com os dados da IA no resultado final
 
-### 2. Tratar erro 429 no handleReprocess
+**Mudanca 2 - Priorizar filename sobre IA nos nomes dos times:**
+- Quando o filename contem nomes de times validos (>= 2 caracteres cada), usar esses nomes como `_homeTeamName` e `_awayTeamName`
+- Usar os nomes da IA apenas quando o filename nao fornece nomes
 
-**Arquivo: `src/pages/Matches.tsx`**
+A logica ficara assim:
 
-- No bloco catch da analise (linhas 517-524), detectar "429" na mensagem de erro
-- Exibir toast especifico: "Limite de requisicoes do Google atingido. Tente novamente em 1-2 minutos ou use o modo Texto."
+```text
+1. Extrair times do filename (BrasilxArgentina -> home=Brasil, away=Argentina)
+2. Transcrever audio e extrair metadados via IA
+3. Montar resultado final:
+   - Times: usar filename se disponivel, senao usar IA
+   - Competicao, data, estadio: usar IA (filename nao tem essa info)
+```
 
-### 3. Adicionar aviso no dialog de reprocessamento
+### Arquivo: `src/pages/Upload.tsx`
 
-**Arquivo: `src/components/matches/ReprocessOptionsDialog.tsx`**
+Nenhuma mudanca necessaria - o `findTeamId` e auto-create ja funcionam corretamente com os nomes recebidos. O problema e apenas que recebem "Paraguai" em vez de "Argentina".
 
-- Abaixo da opcao "Analise Visual (kakttus Pro)" (linha 236-239), adicionar uma nota de aviso:
-  "Videos longos podem exceder o limite de requisicoes do Google. Se ocorrer erro 429, use o modo Texto."
-- Alterar o default de `analysisMode` de `'vision'` para `'text'` (linha 73), ja que o modo texto usa Ollama local e nao depende do Google
-
-### 4. Forcar modo texto como padrao
-
-**Arquivo: `src/components/matches/ReprocessOptionsDialog.tsx`**
-
-- Mudar o valor inicial de `analysisMode` de `'vision'` para `'text'` na linha 73
-- Mover o badge "Recomendado" da opcao Vision para a opcao Texto
-
-## Resumo das mudancas
+## Resumo
 
 | Arquivo | Mudanca |
 |---|---|
-| `src/hooks/useMatchAnalysis.ts` | Retry automatico com delay de 5s para erro 429 |
-| `src/pages/Matches.tsx` | Toast especifico para rate limit no catch da analise |
-| `src/components/matches/ReprocessOptionsDialog.tsx` | Default para modo texto + aviso sobre rate limit no modo vision |
+| `src/components/upload/SmartImportCard.tsx` | Extrair times do filename sempre e priorizar sobre resultado da IA |
 
-Todas as mudancas sao no frontend. O backend Python continua funcionando normalmente - apenas o modo padrao sera texto (Ollama local) em vez de vision (Google).
-
+Mudanca simples e localizada. O filename e uma fonte mais confiavel que a IA para nomes de times porque o usuario geralmente nomeia o arquivo com os times corretos.
