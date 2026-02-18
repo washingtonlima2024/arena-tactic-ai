@@ -273,18 +273,63 @@ def normalize(s: str) -> str:
     return (s or "").strip().lower()
 
 
+def _build_team_variants(team_name: str) -> List[str]:
+    """Build list of name variants for a team, including aliases."""
+    variants = []
+    name_lower = normalize(team_name)
+    if not name_lower:
+        return variants
+    variants.append(name_lower)
+    # Add individual words with len > 3
+    for word in name_lower.split():
+        if len(word) > 3 and word not in variants:
+            variants.append(word)
+    # Import aliases from ai_services
+    try:
+        from ai_services import TEAM_ALIASES
+        for key, aliases in TEAM_ALIASES.items():
+            if key in name_lower or name_lower in key or any(name_lower in a.lower() for a in aliases):
+                if key not in variants:
+                    variants.append(key)
+                for alias in aliases:
+                    al = alias.lower()
+                    if al not in variants:
+                        variants.append(al)
+    except ImportError:
+        pass
+    return variants
+
+
+def _match_team_in_text(text: str, variants: List[str]) -> bool:
+    """Check if any team variant matches in text using word boundaries."""
+    for v in variants:
+        # Use word boundary for short names (<=5 chars) to avoid false positives
+        if len(v) <= 5:
+            if re.search(r'\b' + re.escape(v) + r'\b', text):
+                return True
+        else:
+            if v in text:
+                return True
+    return False
+
+
 def detect_team(chunk: List[str], home: str, away: str) -> str:
     """
     Detecta qual time é mencionado no chunk.
     Retorna 'home', 'away' ou 'unknown'.
+    Usa aliases do TEAM_ALIASES e word boundaries para nomes curtos.
     """
     joined = normalize(" ".join(chunk))
-    home_ok = normalize(home) in joined if home else False
-    away_ok = normalize(away) in joined if away else False
+    home_variants = _build_team_variants(home)
+    away_variants = _build_team_variants(away)
+    home_ok = _match_team_in_text(joined, home_variants) if home else False
+    away_ok = _match_team_in_text(joined, away_variants) if away else False
     if home_ok and not away_ok:
         return "home"
     if away_ok and not home_ok:
         return "away"
+    if home_ok and away_ok:
+        return "both"
     return "unknown"
 
 
