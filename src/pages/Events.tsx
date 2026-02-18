@@ -111,7 +111,7 @@ const EventRow = ({
 
   return (
     <div 
-      className={`flex items-center gap-2 sm:gap-3 rounded-lg border p-2 sm:p-3 transition-colors group cursor-pointer overflow-hidden ${
+      className={`flex items-center gap-2 sm:gap-3 rounded-lg border p-2 sm:p-3 transition-colors group cursor-pointer overflow-hidden min-w-0 w-full ${
         event.approval_status === 'pending' || !event.approval_status
           ? 'border-yellow-500/30 bg-yellow-500/5 hover:bg-yellow-500/10'
           : event.approval_status === 'approved'
@@ -1004,7 +1004,7 @@ export default function Events() {
 
   return (
     <AppLayout key={currentMatchId}>
-      <div className="space-y-6">
+      <div className="space-y-6 max-w-full overflow-hidden">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex items-center gap-2 sm:gap-3 flex-wrap">
