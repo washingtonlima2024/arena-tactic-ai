@@ -329,8 +329,10 @@ def find_event_candidates(
     Retorna lista de candidatos para um tipo de evento usando a receita.
     Cada candidato tem: start_line, end_line, evidence_count, team_hint, player_hint, snippet.
     """
-    if not transcript_lines or len(transcript_lines) < recipe.window_size:
+    if not transcript_lines:
         return []
+    # Dynamic window size: adapt to short transcriptions instead of rejecting them
+    effective_window = min(recipe.window_size, len(transcript_lines))
 
     # Compilar todos os patterns
     all_primary = [re.compile(p, re.IGNORECASE) for p in recipe.primary_patterns]
@@ -357,8 +359,8 @@ def find_event_candidates(
         if hits == 0:
             continue
 
-        # Extrair janela deslizante centrada na linha
-        half_w = recipe.window_size // 2
+        # Extrair janela deslizante centrada na linha (using effective_window)
+        half_w = effective_window // 2
         start = max(0, i - half_w)
         end = min(len(transcript_lines), i + half_w + 1)
         chunk = transcript_lines[start:end]
@@ -431,21 +433,22 @@ def find_all_candidates(
     is_synthetic = False
     
     # Se texto corrido (poucas linhas mas muito conteúdo), dividir em sentenças sintéticas
-    if len(lines) < 10 and len(transcript or "") > 500:
+    if len(lines) < 10 and len(transcript or "") > 100:
         import re
         # Dividir por sentenças (pontuação + espaço)
         sentences = re.split(r'(?<=[.!?])\s+', transcript)
-        # Se ainda poucas sentenças, dividir por blocos de ~15 palavras
+        # Se ainda poucas sentenças, dividir por blocos adaptativos
         if len(sentences) < 10:
             words = transcript.split()
-            chunk_size = 40
+            # Adaptive chunk size: smaller for short texts to generate more lines
+            chunk_size = 15 if len(transcript or "") < 500 else 40
             sentences = [
                 " ".join(words[i:i+chunk_size])
                 for i in range(0, len(words), chunk_size)
             ]
         lines = [s.strip() for s in sentences if s.strip()]
         is_synthetic = True
-        print(f"[EventDetector] Texto corrido detectado, dividido em {len(lines)} linhas sintéticas (chunk=40 palavras)")
+        print(f"[EventDetector] Texto corrido detectado ({len(transcript)} chars), dividido em {len(lines)} linhas sintéticas (chunk={'15' if len(transcript or '') < 500 else '40'} palavras)")
     
     if not lines:
         return {}
