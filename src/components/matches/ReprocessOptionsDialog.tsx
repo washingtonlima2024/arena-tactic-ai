@@ -70,7 +70,7 @@ export function ReprocessOptionsDialog({
   const [manualText, setManualText] = useState({ first: '', second: '', full: '' });
   const [selectedTab, setSelectedTab] = useState('existing');
   const [activeHalf, setActiveHalf] = useState<'first' | 'second' | 'full'>('full');
-  const [analysisMode, setAnalysisMode] = useState<'vision' | 'text'>('vision');
+  const [analysisMode, setAnalysisMode] = useState<'vision' | 'text'>('text');
 
   // CRITICAL: Reset ALL state when dialog opens or match changes to prevent data contamination
   useEffect(() => {
@@ -87,7 +87,7 @@ export function ReprocessOptionsDialog({
       setActiveHalf('full');
       setExistingTranscriptions(null);
       setIsLoading(true);
-      setAnalysisMode('vision'); // Default to vision mode
+      setAnalysisMode('text'); // Default to text mode (Ollama local, sem Google)
       
       // Then load existing transcriptions for the NEW match
       if (match?.id) {
@@ -232,23 +232,26 @@ export function ReprocessOptionsDialog({
                       <Eye className="h-4 w-4 text-primary" />
                       Análise Visual (kakttus Pro)
                     </Label>
-                    <p className="text-xs text-muted-foreground mt-1">
+                     <p className="text-xs text-muted-foreground mt-1">
                       Detecta eventos diretamente nos frames do vídeo. Timestamps precisos sem depender da narração.
                     </p>
+                    <p className="text-xs text-yellow-600 dark:text-yellow-400 mt-1">
+                      ⚠️ Pode exceder o limite de requisições do Google em vídeos longos (erro 429).
+                    </p>
                   </div>
-                  <Badge variant="default" className="bg-primary/20 text-primary text-xs">Recomendado</Badge>
                 </div>
-                <div className="flex items-start space-x-3 p-3 rounded-lg border border-border bg-background hover:border-primary/40 transition-colors">
+                <div className="flex items-start space-x-3 p-3 rounded-lg border border-primary/20 bg-background hover:border-primary/40 transition-colors">
                   <RadioGroupItem value="text" id="text" className="mt-0.5" />
                   <div className="flex-1">
                     <Label htmlFor="text" className="font-medium flex items-center gap-2 cursor-pointer">
                       <Type className="h-4 w-4" />
-                      Análise de Transcrição
+                      Análise de Transcrição (Ollama Local)
                     </Label>
                     <p className="text-xs text-muted-foreground mt-1">
-                      Detecta eventos a partir do texto transcrito da narração. Mais rápido, mas depende da qualidade da transcrição.
+                      Detecta eventos a partir do texto transcrito. Usa modelo local, sem depender do Google.
                     </p>
                   </div>
+                  <Badge variant="default" className="bg-primary/20 text-primary text-xs">Recomendado</Badge>
                 </div>
               </RadioGroup>
             </div>
