@@ -153,12 +153,16 @@ export function EventEditDialog({
 
         toast.success('Evento criado! Clip será gerado automaticamente.');
         
-        // Sync score after creating event
-        const syncResult = await syncMatchScoreFromEvents(targetMatchId);
-        if (syncResult?.updated) {
-          queryClient.invalidateQueries({ queryKey: ['match-details', targetMatchId] });
-          queryClient.invalidateQueries({ queryKey: ['completed-matches'] });
-          queryClient.invalidateQueries({ queryKey: ['matches'] });
+        // Sync score after creating event (non-blocking)
+        try {
+          const syncResult = await syncMatchScoreFromEvents(targetMatchId);
+          if (syncResult?.updated) {
+            queryClient.invalidateQueries({ queryKey: ['match-details', targetMatchId] });
+            queryClient.invalidateQueries({ queryKey: ['completed-matches'] });
+            queryClient.invalidateQueries({ queryKey: ['matches'] });
+          }
+        } catch (syncError) {
+          console.warn('Score sync failed (non-blocking):', syncError);
         }
       } else {
         // Update existing event - MERGE metadata to preserve important fields
@@ -189,21 +193,25 @@ export function EventEditDialog({
         console.log('[EventEdit] Updated with isOwnGoal:', isOwnGoal, 'metadata:', updatedMetadata);
 
         toast.success('Evento atualizado! Clip será regenerado automaticamente.');
-        
-        // Sync score after updating event
-        const targetMatchId = matchId || event?.match_id;
-        if (targetMatchId) {
-          const syncResult = await syncMatchScoreFromEvents(targetMatchId);
-          if (syncResult?.updated) {
-            queryClient.invalidateQueries({ queryKey: ['match-details', targetMatchId] });
-            queryClient.invalidateQueries({ queryKey: ['completed-matches'] });
-            queryClient.invalidateQueries({ queryKey: ['matches'] });
-          }
-        }
       }
       
       onSave();
       onClose();
+
+      // Sync score AFTER closing dialog (non-blocking)
+      const targetMatchId2 = matchId || event?.match_id;
+      if (targetMatchId2) {
+        try {
+          const syncResult = await syncMatchScoreFromEvents(targetMatchId2);
+          if (syncResult?.updated) {
+            queryClient.invalidateQueries({ queryKey: ['match-details', targetMatchId2] });
+            queryClient.invalidateQueries({ queryKey: ['completed-matches'] });
+            queryClient.invalidateQueries({ queryKey: ['matches'] });
+          }
+        } catch (syncError) {
+          console.warn('Score sync failed (non-blocking):', syncError);
+        }
+      }
     } catch (error) {
       console.error('Error saving event:', error);
       toast.error('Erro ao salvar evento');
