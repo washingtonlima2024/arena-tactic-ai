@@ -1781,18 +1781,28 @@ def update_team(team_id: str):
 
 @app.route('/api/teams/<team_id>', methods=['DELETE'])
 def delete_team(team_id: str):
-    """Remove um time."""
+    """Remove um time, desassociando-o de partidas primeiro."""
     session = get_session()
     try:
         team = session.query(Team).filter_by(id=team_id).first()
         if not team:
             return jsonify({'error': 'Time não encontrado'}), 404
         
+        # Desassociar o time de partidas (nullificar referências)
+        from models import Match
+        session.query(Match).filter(Match.home_team_id == team_id).update(
+            {Match.home_team_id: None}, synchronize_session='fetch'
+        )
+        session.query(Match).filter(Match.away_team_id == team_id).update(
+            {Match.away_team_id: None}, synchronize_session='fetch'
+        )
+        
         session.delete(team)
         session.commit()
         return jsonify({'success': True})
     except Exception as e:
         session.rollback()
+        logger.error(f"Erro ao deletar time {team_id}: {e}")
         return jsonify({'error': str(e)}), 400
     finally:
         session.close()
