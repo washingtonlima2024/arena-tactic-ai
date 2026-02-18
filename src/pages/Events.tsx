@@ -50,6 +50,7 @@ import {
 } from 'lucide-react';
 import { useMatchEvents } from '@/hooks/useMatchDetails';
 import { useMatchSelection } from '@/hooks/useMatchSelection';
+import { useAutoTeamLogos } from '@/hooks/useAutoTeamLogos';
 import { getEventLabel } from '@/lib/eventLabels';
 import { Link, useNavigate } from 'react-router-dom';
 import { EventEditDialog } from '@/components/events/EventEditDialog';
@@ -267,6 +268,9 @@ export default function Events() {
   const [isAnalyzingTranscription, setIsAnalyzingTranscription] = useState(false);
   
   const { data: events = [], isLoading: eventsLoading, refetch: refetchEvents } = useMatchEvents(currentMatchId);
+
+  // Auto-fetch missing team logos
+  useAutoTeamLogos([selectedMatch?.home_team, selectedMatch?.away_team]);
 
   // Polling para atualizar eventos durante live (modo local)
   useEffect(() => {
