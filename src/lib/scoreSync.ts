@@ -28,14 +28,37 @@ export async function syncMatchScoreFromEvents(
 ): Promise<ScoreSyncResult | null> {
   try {
     // 1. Check if score is locked
-    const { data: match, error: matchError } = await supabase
+    let match: any = null;
+    
+    // Try Supabase first
+    const { data: supaMatch, error: matchError } = await supabase
       .from('matches')
       .select('score_locked, home_score, away_score, home_team_id, away_team_id')
       .eq('id', matchId)
-      .single();
+      .maybeSingle();
 
-    if (matchError || !match) {
-      console.error('Error fetching match for score sync:', matchError);
+    if (supaMatch) {
+      match = supaMatch;
+    } else {
+      // Fallback to local server
+      try {
+        const localMatch = await apiClient.getMatch(matchId);
+        if (localMatch) {
+          match = {
+            score_locked: localMatch.score_locked || false,
+            home_score: localMatch.home_score || 0,
+            away_score: localMatch.away_score || 0,
+            home_team_id: localMatch.home_team_id,
+            away_team_id: localMatch.away_team_id,
+          };
+        }
+      } catch (e) {
+        console.error('Error fetching match from local server:', e);
+      }
+    }
+
+    if (!match) {
+      console.error('Match not found for score sync:', matchId);
       return null;
     }
 
@@ -81,8 +104,16 @@ export async function syncMatchScoreFromEvents(
         .from('teams')
         .select('name')
         .eq('id', match.home_team_id)
-        .single();
+        .maybeSingle();
       homeTeamName = homeTeam?.name || '';
+      
+      if (!homeTeamName) {
+        try {
+          const teams = await apiClient.getTeams();
+          const found = teams?.find((t: any) => t.id === match.home_team_id);
+          homeTeamName = found?.name || '';
+        } catch {}
+      }
     }
     
     if (match.away_team_id) {
@@ -90,8 +121,16 @@ export async function syncMatchScoreFromEvents(
         .from('teams')
         .select('name')
         .eq('id', match.away_team_id)
-        .single();
+        .maybeSingle();
       awayTeamName = awayTeam?.name || '';
+      
+      if (!awayTeamName) {
+        try {
+          const teams = await apiClient.getTeams();
+          const found = teams?.find((t: any) => t.id === match.away_team_id);
+          awayTeamName = found?.name || '';
+        } catch {}
+      }
     }
 
     // 4. Calculate score from events
