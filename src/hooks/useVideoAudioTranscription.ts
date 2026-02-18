@@ -11,7 +11,7 @@ interface UseVideoAudioTranscriptionOptions {
 }
 
 export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOptions = {}) => {
-  const { onTranscript, onPartialTranscript, chunkDurationMs = 10000, language = "pt" } = options;
+  const { onTranscript, onPartialTranscript, chunkDurationMs = 15000, language = "pt" } = options;
 
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -63,8 +63,11 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
         ? "audio/webm"
         : "audio/ogg";
       
-      // Create a new MediaRecorder for each segment to get complete files with headers
-      const mediaRecorder = new MediaRecorder(streamRef.current, { mimeType });
+      // Create a new MediaRecorder with high bitrate for better quality
+      const mediaRecorder = new MediaRecorder(streamRef.current, { 
+        mimeType,
+        audioBitsPerSecond: 128000, // 128kbps for better transcription quality
+      });
 
       const chunks: Blob[] = [];
 
@@ -90,7 +93,7 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
       mediaRecorder.start();
 
       // Record for the chunk duration (minus some buffer time)
-      const recordDuration = Math.min(chunkDurationMs - 500, 9500);
+      const recordDuration = Math.min(chunkDurationMs - 500, 14500);
       
       await new Promise(resolve => setTimeout(resolve, recordDuration));
 
@@ -219,6 +222,12 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
       if (data?.success && data?.text?.trim()) {
         const transcriptText = data.text.trim();
         
+        // Filter out very short texts (likely noise or hallucination)
+        if (transcriptText.length < 10) {
+          console.log("Filtered short text:", transcriptText);
+          return;
+        }
+
         // Filter out Whisper hallucinations
         const hallucinations = [
           "Legendas by",
@@ -235,6 +244,19 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
           "www.",
           ".com",
           ".br",
+          "Obrigado a todos",
+          "Tchau tchau",
+          "Até a próxima",
+          "Amém",
+          "Amem",
+          "Música de fundo",
+          "Aplausos",
+          "(música)",
+          "(musica)",
+          "Subtítulos",
+          "Subtitles",
+          "Subscribe",
+          "Thank you for watching",
         ];
         
         const isHallucination = hallucinations.some(h => 
@@ -301,14 +323,29 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
       analyser.fftSize = 256;
       analyserRef.current = analyser;
 
+      // Create highpass filter to remove low-frequency noise (rumble, hum)
+      const highpassFilter = audioContext.createBiquadFilter();
+      highpassFilter.type = "highpass";
+      highpassFilter.frequency.value = 300; // Cut below 300Hz
+      highpassFilter.Q.value = 0.7;
+
+      // Create dynamics compressor to normalize volume levels
+      const compressor = audioContext.createDynamicsCompressor();
+      compressor.threshold.value = -30;
+      compressor.knee.value = 20;
+      compressor.ratio.value = 4;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.25;
+
       // Create a destination to capture the audio
       const destination = audioContext.createMediaStreamDestination();
       
-      // Connect source -> analyser -> destination (for recording)
-      // Also connect source -> output (so user can hear)
-      source.connect(analyser);
+      // Audio chain: source -> highpass -> compressor -> analyser -> destinations
+      source.connect(highpassFilter);
+      highpassFilter.connect(compressor);
+      compressor.connect(analyser);
       analyser.connect(destination);
-      source.connect(audioContext.destination);
+      source.connect(audioContext.destination); // User still hears original audio
 
       streamRef.current = destination.stream;
 
