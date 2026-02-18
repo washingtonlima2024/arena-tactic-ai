@@ -20,7 +20,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Loader2, Save, Trash2, CheckCircle, XCircle, Clock, Play, Plus } from 'lucide-react';
+import { Separator } from '@/components/ui/separator';
 import { apiClient } from '@/lib/apiClient';
+import { useTeams } from '@/hooks/useTeams';
 import { toast } from 'sonner';
 import { useAuth } from '@/hooks/useAuth';
 import { useQueryClient } from '@tanstack/react-query';
@@ -83,6 +85,7 @@ export function EventEditDialog({
 }: EventEditDialogProps) {
   const { isAdmin, user } = useAuth();
   const queryClient = useQueryClient();
+  const { data: registeredTeams = [] } = useTeams();
   const [eventType, setEventType] = useState('goal');
   const [minute, setMinute] = useState('');
   const [second, setSecond] = useState('');
@@ -419,12 +422,31 @@ export function EventEditDialog({
                 <SelectValue placeholder="Selecione o time" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={homeTeam || 'home'}>
-                  {homeTeam && homeTeam !== 'Time Casa' ? `${homeTeam} (Casa)` : 'Time Casa'}
-                </SelectItem>
-                <SelectItem value={awayTeam || 'away'}>
-                  {awayTeam && awayTeam !== 'Time Visitante' ? `${awayTeam} (Visitante)` : 'Time Visitante'}
-                </SelectItem>
+                {/* Match-linked teams */}
+                {homeTeam && homeTeam !== 'Time Casa' && (
+                  <SelectItem value={homeTeam}>{homeTeam} (Casa)</SelectItem>
+                )}
+                {awayTeam && awayTeam !== 'Time Visitante' && (
+                  <SelectItem value={awayTeam}>{awayTeam} (Visitante)</SelectItem>
+                )}
+                {/* Separator if we have both linked teams and registered teams */}
+                {(homeTeam && homeTeam !== 'Time Casa' || awayTeam && awayTeam !== 'Time Visitante') && registeredTeams.length > 0 && (
+                  <Separator className="my-1" />
+                )}
+                {/* All registered teams (excluding already-listed home/away) */}
+                {registeredTeams
+                  .filter(t => t.name !== homeTeam && t.name !== awayTeam)
+                  .map(t => (
+                    <SelectItem key={t.id} value={t.name}>{t.name}</SelectItem>
+                  ))
+                }
+                {/* Fallback if no real teams */}
+                {registeredTeams.length === 0 && !homeTeam && !awayTeam && (
+                  <>
+                    <SelectItem value="Time Casa">Time Casa</SelectItem>
+                    <SelectItem value="Time Visitante">Time Visitante</SelectItem>
+                  </>
+                )}
               </SelectContent>
             </Select>
           </div>
