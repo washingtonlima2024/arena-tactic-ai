@@ -1306,7 +1306,12 @@ def analyze_with_kakttus(
             else:
                 print(f"[Kakttus] ⚠ Pipeline multi-eventos retornou vazio, usando fallback legado...")
         else:
-            print(f"[Kakttus] ⚠ Nenhum candidato local encontrado, usando prompt completo...")
+            # Fallback: check if short transcript contains goal keywords
+            goal_keywords = re.search(r'\bg+o+l+\b|\bgolaço\b|\bmarcou\b|\bbalançou\s+a\s+rede\b', transcript_clean, re.IGNORECASE)
+            if goal_keywords and len(transcript_clean) < 1000:
+                print(f"[Kakttus] ⚠ Nenhum candidato local, MAS keywords de gol detectadas em texto curto ({len(transcript_clean)} chars) — forçando pipeline legado...")
+            else:
+                print(f"[Kakttus] ⚠ Nenhum candidato local encontrado, usando prompt completo...")
 
     except ImportError:
         print(f"[Kakttus] ℹ event_detector.py não disponível, usando pipeline legado")
