@@ -46,6 +46,7 @@ import {
 } from "lucide-react";
 import { useMatchEvents, useMatchDetails, useMatchAnalysis } from "@/hooks/useMatchDetails";
 import { useMatchSelection } from "@/hooks/useMatchSelection";
+import { useAutoTeamLogos } from "@/hooks/useAutoTeamLogos";
 import { supabase } from "@/integrations/supabase/client";
 import { apiClient } from "@/lib/apiClient";
 import { useDynamicMatchStats } from "@/hooks/useDynamicMatchStats";
@@ -890,6 +891,9 @@ export default function MatchDashboard() {
   const { data: matchDetails } = useMatchDetails(currentMatchId);
   const { data: events = [], isLoading: loadingEvents } = useMatchEvents(currentMatchId);
   const { data: analysis } = useMatchAnalysis(currentMatchId);
+
+  // Auto-fetch missing team logos
+  useAutoTeamLogos([matchDetails?.home_team, matchDetails?.away_team]);
 
   // Get video URL for evidence
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
