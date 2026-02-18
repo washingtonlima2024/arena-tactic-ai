@@ -2127,9 +2127,19 @@ def update_event(event_id: str):
         
         for key in ['event_type', 'description', 'minute', 'second', 'match_half',
                     'player_id', 'video_id', 'position_x', 'position_y', 'is_highlight',
-                    'clip_url', 'approval_status', 'metadata']:
+                    'clip_url', 'approval_status', 'approved_by', 'approved_at', 'clip_pending']:
             if key in data:
                 setattr(event, key, data[key])
+        
+        # Handle metadata -> event_metadata mapping
+        if 'metadata' in data:
+            # Merge with existing metadata to preserve AI-generated fields
+            existing = event.event_metadata or {}
+            if isinstance(existing, dict) and isinstance(data['metadata'], dict):
+                existing.update(data['metadata'])
+                event.event_metadata = existing
+            else:
+                event.event_metadata = data['metadata']
         
         session.commit()
         return jsonify(event.to_dict())
