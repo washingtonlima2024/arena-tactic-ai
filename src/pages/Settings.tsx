@@ -13,6 +13,7 @@ import { TeamCard } from "@/components/teams/TeamCard";
 import { BulkImportTeamsDialog } from "@/components/teams/BulkImportTeamsDialog";
 import { useTeams, useCreateTeam, useUpdateTeam, useDeleteTeam, type Team } from "@/hooks/useTeams";
 import { useApiSettings, useUpsertApiSetting } from "@/hooks/useApiSettings";
+import { useAutoTeamLogos } from "@/hooks/useAutoTeamLogos";
 import { AIProviderPriority } from "@/components/settings/AIProviderPriority";
 import { apiClient } from "@/lib/apiClient";
 import { toast } from "sonner";
@@ -121,6 +122,7 @@ export default function Settings() {
 
   // Teams
   const { data: teams, isLoading: teamsLoading } = useTeams();
+  useAutoTeamLogos(teams || []);
   const createTeam = useCreateTeam();
   const updateTeam = useUpdateTeam();
   const deleteTeam = useDeleteTeam();
