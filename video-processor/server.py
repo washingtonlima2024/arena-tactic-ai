@@ -2144,12 +2144,12 @@ def update_event(event_id: str):
         # Handle metadata -> event_metadata mapping
         if 'metadata' in data:
             # Merge with existing metadata to preserve AI-generated fields
-            existing = event.event_metadata or {}
+            existing = dict(event.event_metadata or {})  # Copia para novo dict
             if isinstance(existing, dict) and isinstance(data['metadata'], dict):
                 existing.update(data['metadata'])
-                event.event_metadata = existing
             else:
-                event.event_metadata = data['metadata']
+                existing = data['metadata']
+            event.event_metadata = existing  # Atribui novo objeto -> SQLAlchemy detecta
         
         session.commit()
         return jsonify(event.to_dict())
