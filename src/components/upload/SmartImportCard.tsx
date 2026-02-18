@@ -156,6 +156,13 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
       // Determine primary video for AI transcription
       const videoFile = primaryVideo.file || undefined;
       const videoUrl = (primaryVideo.url || '').trim() || undefined;
+
+      // Extract teams from filename EARLY (priority source)
+      const firstFileName = videoFile?.name || '';
+      const filenameTeams = extractTeamsFromFilename(firstFileName);
+      if (filenameTeams.home || filenameTeams.away) {
+        console.log('[SmartImport] Times extraídos do filename:', filenameTeams);
+      }
       
       let transcriptionText = '';
       let transcriptionFailed = false;
@@ -279,6 +286,13 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
       setPhase('done');
       setProgress({ message: 'Metadados extraídos com sucesso!', percent: 100 });
       
+      // Prioritize filename teams over AI-extracted teams
+      const finalHome = (filenameTeams.home && filenameTeams.home.length >= 2) ? filenameTeams.home : extractResult.home_team;
+      const finalAway = (filenameTeams.away && filenameTeams.away.length >= 2) ? filenameTeams.away : extractResult.away_team;
+      if (filenameTeams.home && extractResult.home_team && filenameTeams.home !== extractResult.home_team) {
+        console.log(`[SmartImport] Filename prioritizado: "${filenameTeams.home}" sobre IA "${extractResult.home_team}"`);
+      }
+
       const matchData: MatchSetupData & { _homeTeamName?: string; _awayTeamName?: string } = {
         homeTeamId: '',
         awayTeamId: '',
@@ -286,8 +300,8 @@ export function SmartImportCard({ onMatchInfoExtracted, onCancel }: SmartImportC
         matchDate: extractResult.match_date || new Date().toISOString().split('T')[0],
         matchTime: '',
         venue: extractResult.venue || '',
-        _homeTeamName: extractResult.home_team || undefined,
-        _awayTeamName: extractResult.away_team || undefined,
+        _homeTeamName: finalHome || undefined,
+        _awayTeamName: finalAway || undefined,
       };
 
       onMatchInfoExtracted(
