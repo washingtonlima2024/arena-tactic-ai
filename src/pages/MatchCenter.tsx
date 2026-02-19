@@ -38,25 +38,25 @@ export default function MatchCenter() {
   const awayTeamName = awayTeam?.name || 'Time Visitante';
   const homeTeamShort = homeTeam?.short_name || homeTeamName.slice(0, 3).toUpperCase();
   const awayTeamShort = awayTeam?.short_name || awayTeamName.slice(0, 3).toUpperCase();
-  const rawHomeColor = homeTeam?.primary_color || '#ffffff';
-  const rawAwayColor = awayTeam?.primary_color || '#ffffff';
+  const rawHomeColor = homeTeam?.primary_color || '#10b981';
+  const rawAwayColor = awayTeam?.primary_color || '#f59e0b';
 
-  // Garante legibilidade do placar em fundo escuro
-  const ensureScoreReadable = (color: string): string => {
-    if (!color || color === '#10b981' || color === '#3b82f6') return '#ffffff';
+  // Garante legibilidade: evita branco e cores muito claras em fundo escuro
+  const ensureChartVisible = (color: string, fallback: string): string => {
+    if (!color) return fallback;
     const hex = color.replace('#', '');
-    if (hex.length !== 6) return '#ffffff';
+    if (hex.length !== 6) return fallback;
     const r = parseInt(hex.slice(0, 2), 16) / 255;
     const g = parseInt(hex.slice(2, 4), 16) / 255;
     const b = parseInt(hex.slice(4, 6), 16) / 255;
     const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    return luminance < 0.25 ? '#ffffff' : color;
+    // Too bright (white/near-white) → use fallback
+    return luminance > 0.7 ? fallback : color;
   };
 
-  const homeTeamColor = ensureScoreReadable(rawHomeColor);
-  const awayTeamColor = ensureScoreReadable(rawAwayColor) === homeTeamColor && homeTeamColor !== '#ffffff'
-    ? '#f59e0b'
-    : ensureScoreReadable(rawAwayColor);
+  const homeTeamColor = ensureChartVisible(rawHomeColor, '#10b981');
+  const rawAwayResolved = ensureChartVisible(rawAwayColor, '#f59e0b');
+  const awayTeamColor = rawAwayResolved === homeTeamColor ? '#f59e0b' : rawAwayResolved;
 
   // Dynamic stats
   const dynamicStats = useDynamicMatchStats(events, homeTeamName, awayTeamName);
