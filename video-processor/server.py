@@ -9423,8 +9423,14 @@ def _process_match_pipeline(job_id: str, data: dict):
             
             total_events = 0
             
-            # Analyze first half
-            if first_half_text:
+            # 🆕 Determinar quais tempos foram EFETIVAMENTE enviados nesta importação
+            # Se o texto veio apenas do fallback do storage, NÃO re-analisar (preservar eventos existentes)
+            should_analyze_first = 'first' in video_paths
+            should_analyze_second = 'second' in video_paths
+            print(f"[ASYNC-PIPELINE] 🎯 Flags de análise: 1T={should_analyze_first}, 2T={should_analyze_second} (video_paths keys: {list(video_paths.keys())})")
+            
+            # Analyze first half - SOMENTE se o usuário enviou vídeo do 1T
+            if first_half_text and should_analyze_first:
                 print(f"[ASYNC-PIPELINE] Analyzing first half...")
                 
                 # 🆕 Limpar eventos anteriores do primeiro tempo para evitar duplicatas
@@ -9507,8 +9513,8 @@ def _process_match_pipeline(job_id: str, data: dict):
                     finally:
                         session.close()
             
-            # Analyze second half
-            if second_half_text:
+            # Analyze second half - SOMENTE se o usuário enviou vídeo do 2T
+            if second_half_text and should_analyze_second:
                 print(f"[ASYNC-PIPELINE] Analyzing second half...")
                 
                 # 🆕 Limpar eventos anteriores do segundo tempo para evitar duplicatas
