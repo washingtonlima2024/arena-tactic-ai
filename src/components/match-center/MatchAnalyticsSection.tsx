@@ -171,13 +171,18 @@ export function MatchAnalyticsSection({
           <ResponsiveContainer width="100%" height={250}>
             <PieChart>
               <Pie data={possessionData} cx="50%" cy="50%" innerRadius={60} outerRadius={90} dataKey="value"
-                label={({ name, value }) => `${value}%`}>
+                label={({ name, value }) => `${value}%`}
+                labelLine={{ stroke: 'hsl(var(--muted-foreground))' }}>
                 {possessionData.map((entry, i) => (
-                  <Cell key={i} fill={entry.color} />
+                  <Cell key={i} fill={entry.color} opacity={0.9} />
                 ))}
               </Pie>
-              <Legend />
-              <Tooltip />
+              <Legend formatter={(value) => <span style={{ color: 'hsl(var(--foreground))' }}>{value}</span>} />
+              <Tooltip
+                contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8 }}
+                labelStyle={{ color: 'hsl(var(--foreground))' }}
+                formatter={(value) => [`${value}%`, '']}
+              />
             </PieChart>
           </ResponsiveContainer>
         </Card>
