@@ -2086,8 +2086,21 @@ export default function VideoUpload() {
           });
           console.log('[Boundaries] Resultado:', detectedBoundaries);
         } catch (boundaryError) {
-          console.warn('[Boundaries] Falha na pré-detecção (continuando sem boundaries):', boundaryError);
-          // Continuar sem boundaries - o backend fará a detecção internamente como antes
+          console.warn('[Boundaries] Falha na pré-detecção, usando boundaries estimados:', boundaryError);
+          
+          // FALLBACK: Criar boundaries estimados baseados na duração do vídeo
+          const fullSegment = currentSegments.find(s => s.videoType === 'full' || s.videoType === 'first_half');
+          const estimatedDuration = fullSegment?.durationSeconds || 5400; // fallback: 90 min em segundos
+          detectedBoundaries = {
+            game_start_second: 0,
+            half_time_second: Math.floor(estimatedDuration / 2),
+            game_end_second: estimatedDuration,
+          };
+          console.log('[Boundaries] Boundaries estimados:', detectedBoundaries);
+          toast({
+            title: "ℹ️ Limites temporais estimados",
+            description: "A detecção automática falhou. Usando estimativa baseada na duração do vídeo. A precisão dos minutos pode ser menor.",
+          });
         }
         
         // DIVIDIR TRANSCRIÇÃO NO HALF_TIME
@@ -2255,6 +2268,7 @@ export default function VideoUpload() {
               awayTeam: awayTeamName,
               gameStartMinute: 45,
               gameEndMinute: 90,
+              halfType: 'second',
             });
             
             totalEventsDetected += result.eventsDetected || 0;
