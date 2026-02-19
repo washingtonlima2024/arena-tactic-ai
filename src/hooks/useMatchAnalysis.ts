@@ -252,56 +252,6 @@ export function useMatchAnalysis() {
     } catch (error) {
       console.error('Analysis error:', error);
       const errorMessage = error instanceof Error ? error.message : 'Erro desconhecido';
-      const isRateLimit = errorMessage.includes('429') || errorMessage.toLowerCase().includes('rate limit');
-      
-      if (isRateLimit && !skipValidation) {
-        // Retry automático com delay de 5s para erro 429
-        console.log('[Analysis] Rate limit detectado, aguardando 5s para retry...');
-        setProgress({ stage: 'analyzing', progress: 45, message: '⚠️ Rate limit atingido. Aguardando 5s para nova tentativa...' });
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        
-        try {
-          setProgress({ stage: 'analyzing', progress: 50, message: 'Tentando novamente...' });
-          const retryData = await apiClient.analyzeMatch({
-            matchId,
-            transcription: transcription || '',
-            homeTeam,
-            awayTeam,
-            gameStartMinute,
-            gameEndMinute,
-            halfType: halfType || (gameStartMinute >= 45 ? 'second' : 'first'),
-            autoClip: true,
-            includeSubtitles: true,
-            skipValidation: true,
-            analysisMode
-          });
-          
-          if (retryData?.success) {
-            const usedFallback = !retryData?.supabaseSync && retryData?.success;
-            setProgress({ 
-              stage: 'complete', progress: 100, 
-              message: `✓ ${retryData.eventsDetected} eventos detectados! Placar: ${retryData.homeScore} x ${retryData.awayScore}`,
-              usedFallback
-            });
-            toast.success(`Análise completa (retry)! ${retryData.eventsDetected} eventos detectados.`);
-            return {
-              success: true,
-              eventsDetected: retryData.eventsDetected,
-              homeScore: retryData.homeScore,
-              awayScore: retryData.awayScore,
-              usedFallback
-            };
-          }
-        } catch (retryError) {
-          console.error('Retry also failed:', retryError);
-        }
-        
-        // Retry falhou - sugerir modo texto
-        setProgress({ stage: 'error', progress: 0, message: 'Rate limit do Google persistente. Use o modo Texto (Ollama local).' });
-        toast.error('Limite de requisições do Google atingido. Use o modo Texto para análise sem dependência do Google.');
-        return null;
-      }
-      
       setProgress({ stage: 'error', progress: 0, message: errorMessage });
       toast.error('Erro na análise: ' + errorMessage);
       return null;

@@ -516,15 +516,9 @@ export default function Matches() {
           });
         } catch (analysisError: any) {
           console.error(`[Reprocess] ✗ Erro na análise do ${halfLabel}:`, analysisError);
-          const errMsg = analysisError.message || 'Erro desconhecido';
-          const isRateLimit = errMsg.includes('429') || errMsg.toLowerCase().includes('rate limit');
           toast({
-            title: isRateLimit 
-              ? `Rate limit do Google atingido` 
-              : `Erro na análise do ${halfLabel}`,
-            description: isRateLimit 
-              ? 'Aguarde 1-2 minutos ou use o modo Texto (Ollama local) que não depende do Google.'
-              : errMsg,
+            title: `Erro na análise do ${halfLabel}`,
+            description: analysisError.message || 'Erro desconhecido',
             variant: "destructive"
           });
         }

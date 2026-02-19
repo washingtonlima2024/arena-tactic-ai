@@ -1,46 +1,39 @@
 
-# Corrigir Deteccao de Times - Priorizar Nome do Arquivo
+# Centralizar Eventos na Pagina Events
 
 ## Problema
 
-O arquivo de video se chama `BrasilxArgentina_1_50MB.mp4`, mas o sistema registrou "Paraguai" como adversario. Isso acontece porque:
+Os cards de eventos (EventRow) estao ficando desalinhados e saindo da area visivel. O layout atual usa `overflow-hidden` no container pai mas nao garante que o conteudo respeite os limites da tela, especialmente em telas menores.
 
-1. A IA do backend (Ollama) analisa a **transcricao do audio** e identificou incorretamente "Paraguai"
-2. O nome do arquivo contem a informacao correta ("Argentina"), mas so e usado como **fallback** quando a transcricao falha completamente
-3. Nao existe validacao cruzada entre o que a IA extraiu e o que o nome do arquivo diz
+## Causa
+
+1. O EventRow (linha 114) usa `flex items-center gap-2 sm:gap-3` mas nao tem `min-w-0` no container flex, o que permite que itens internos expandam alem do container
+2. O container principal `div.space-y-6` (linha 1007) nao tem restricao de largura maxima (`max-w-full`)
+3. O Scoreboard Card (linha 1038) usa `absolute inset-0` para o gradiente de fundo, que pode causar overflow
 
 ## Solucao
 
-Usar o nome do arquivo como **fonte prioritaria** para nomes de times, e so usar a IA para complementar dados que o filename nao fornece (competicao, data, estadio).
+### Arquivo: `src/pages/Events.tsx`
 
-### Arquivo: `src/components/upload/SmartImportCard.tsx`
+**Mudanca 1 - Adicionar `max-w-full` e `overflow-hidden` no container principal:**
+- Linha 1007: Alterar `<div className="space-y-6">` para `<div className="space-y-6 max-w-full overflow-hidden">`
 
-**Mudanca 1 - Extrair times do filename SEMPRE (nao so no fallback):**
-- Mover a chamada `extractTeamsFromFilename` para **antes** da extracao por IA
-- Passar os nomes extraidos do filename junto com os dados da IA no resultado final
+**Mudanca 2 - Adicionar `min-w-0` no EventRow para evitar overflow de flex items:**
+- Linha 114: Alterar o className do container do EventRow para incluir `min-w-0 w-full`
+- Garantir que o container flex nao expanda alem do pai
 
-**Mudanca 2 - Priorizar filename sobre IA nos nomes dos times:**
-- Quando o filename contem nomes de times validos (>= 2 caracteres cada), usar esses nomes como `_homeTeamName` e `_awayTeamName`
-- Usar os nomes da IA apenas quando o filename nao fornece nomes
+**Mudanca 3 - Limitar largura dos textos truncados:**
+- Verificar que `truncate` e `min-w-0` estao aplicados nos textos de descricao (linha 161-169)
 
-A logica ficara assim:
+### Arquivo: `src/components/layout/AppLayout.tsx`
 
-```text
-1. Extrair times do filename (BrasilxArgentina -> home=Brasil, away=Argentina)
-2. Transcrever audio e extrair metadados via IA
-3. Montar resultado final:
-   - Times: usar filename se disponivel, senao usar IA
-   - Competicao, data, estadio: usar IA (filename nao tem essa info)
-```
+Nenhuma mudanca necessaria - o AppLayout ja tem `overflow-x-hidden` e `max-w-[100vw]`.
 
-### Arquivo: `src/pages/Upload.tsx`
+## Detalhes Tecnicos
 
-Nenhuma mudanca necessaria - o `findTeamId` e auto-create ja funcionam corretamente com os nomes recebidos. O problema e apenas que recebem "Paraguai" em vez de "Argentina".
+| Arquivo | Linha | Mudanca |
+|---|---|---|
+| `src/pages/Events.tsx` | 1007 | Adicionar `max-w-full overflow-hidden` no container |
+| `src/pages/Events.tsx` | 114 | Adicionar `min-w-0 w-full` no EventRow |
 
-## Resumo
-
-| Arquivo | Mudanca |
-|---|---|
-| `src/components/upload/SmartImportCard.tsx` | Extrair times do filename sempre e priorizar sobre resultado da IA |
-
-Mudanca simples e localizada. O filename e uma fonte mais confiavel que a IA para nomes de times porque o usuario geralmente nomeia o arquivo com os times corretos.
+Essas mudancas garantem que os flex items respeitem o container pai e nao extrapolem a area visivel, mantendo os eventos centralizados e dentro da tela.
