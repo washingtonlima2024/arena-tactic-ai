@@ -77,6 +77,13 @@ export function useStartAnalysis() {
     gameStartMinute?: number;
     gameEndMinute?: number;
     halfType?: 'first' | 'second';
+    boundaries?: {
+      game_start_second: number;
+      half_time_second: number;
+      game_end_second: number;
+      first_half_duration?: number;
+      second_half_start?: number;
+    };
     matchData?: {
       home_team?: { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string; secondary_color?: string };
       away_team?: { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string; secondary_color?: string };
@@ -111,6 +118,7 @@ export function useStartAnalysis() {
         halfType: halfType,
         autoClip: true,
         includeSubtitles: true,
+        boundaries: params.boundaries,
         matchData: params.matchData
       });
 
