@@ -13942,9 +13942,10 @@ Retorne SOMENTE um JSON válido com esta estrutura exata (sem texto adicional):
   "confidence": 0.8
 }}
 
-Regras:
-- home_team: o time que joga em casa (geralmente mencionado primeiro pelo narrador)
-- away_team: o time visitante
+Regras OBRIGATÓRIAS de ordem dos times:
+- home_team: SEMPRE o PRIMEIRO time mencionado na transcrição. NÃO tente adivinhar com base em estádio, torcida ou contexto. A ORDEM DE APARIÇÃO no texto é a única regra.
+- away_team: SEMPRE o SEGUNDO time mencionado na transcrição.
+- EXEMPLO: se o narrador diz "Brasil e Paraguai se enfrentam", home_team="Brasil" e away_team="Paraguai". NUNCA inverta.
 - Identifique times mesmo a partir de menções INDIRETAS: nomes de jogadores conhecidos, cores de uniforme, torcida, apelidos ("Timão", "Mengão", "Tricolor", "Alviverde", etc.)
 - Se o narrador mencionar "gol do [Time]", "posse do [Time]", "falta de [Time]", extraia o nome do time
 - competition: liga, campeonato ou torneio (ex: Brasileirão, Libertadores, Copa do Brasil)
@@ -14015,10 +14016,35 @@ EXEMPLOS de extração:
         parsed = json_module.loads(clean_text)
 
         # Validar e normalizar
+        ai_home = parsed.get('home_team')
+        ai_away = parsed.get('away_team')
+
+        # ── Pós-processamento: garantir que a ordem dos times respeita a primeira menção no texto ──
+        if ai_home and ai_away:
+            # Mudança 2: Se regex detectou times, usar a ordem do regex como autoridade
+            regex_home = regex_hints.get('home')
+            regex_away = regex_hints.get('away')
+            if regex_home and regex_away:
+                ai_names = {ai_home.lower().strip(), ai_away.lower().strip()}
+                regex_names = {regex_home.lower().strip(), regex_away.lower().strip()}
+                if ai_names == regex_names:
+                    # Mesmos times, mas pode estar invertido - usar ordem do regex
+                    if ai_home.lower().strip() != regex_home.lower().strip():
+                        print(f"[ExtractMatchInfo] ⚠ IA inverteu ordem dos times! Corrigindo: {ai_home}↔{ai_away} → regex: {regex_home} vs {regex_away}")
+                        ai_home, ai_away = regex_home, regex_away
+
+            # Mudança 3: Fallback - verificar qual aparece primeiro no texto bruto
+            text_lower = transcription.lower()
+            pos_home = text_lower.find(ai_home.lower().strip())
+            pos_away = text_lower.find(ai_away.lower().strip())
+            if pos_home >= 0 and pos_away >= 0 and pos_away < pos_home:
+                print(f"[ExtractMatchInfo] ⚠ away_team '{ai_away}' aparece antes de home_team '{ai_home}' no texto. Invertendo.")
+                ai_home, ai_away = ai_away, ai_home
+
         result = {
             'success': True,
-            'home_team': parsed.get('home_team'),
-            'away_team': parsed.get('away_team'),
+            'home_team': ai_home,
+            'away_team': ai_away,
             'competition': parsed.get('competition'),
             'venue': parsed.get('venue'),
             'match_date': parsed.get('match_date'),
