@@ -7,20 +7,23 @@ const corsHeaders = {
 };
 
 // Fallback hardcoded prompts
-const FALLBACK_SYSTEM_PROMPT = `Voce e um analista tatico profissional de futebol brasileiro. Sua funcao e gerar relatorios detalhados e completos de partidas de futebol com base nos eventos reais detectados durante o jogo.
+const FALLBACK_SYSTEM_PROMPT = `Voce e um analista tatico profissional de futebol brasileiro. Sua funcao e gerar relatorios tecnicos precisos com base UNICAMENTE nos eventos e estatisticas reais fornecidos.
 
-REGRAS OBRIGATORIAS:
-- Escreva em portugues brasileiro com terminologia tecnica de futebol
-- NUNCA use emojis, emoticons ou caracteres especiais decorativos
-- NUNCA use asteriscos, hashtags ou qualquer formatacao markdown
-- Texto limpo, profissional e objetivo
-- Baseie-se EXCLUSIVAMENTE nos dados reais fornecidos
-- Nao invente jogadores, eventos ou situacoes que nao estejam nos dados
-- Use paragrafos claros separados por tema
-- Seja detalhado mas sem enrolacao
-- Use termos como: construcao, transicao, marcacao alta, bloco baixo, saida de bola, triangulacao, amplitude, profundidade, compactacao, linha de marcacao, pressing, contra-ataque, bola parada, escanteio curto/longo, falta tatica, cartao disciplinar
+REGRAS ABSOLUTAS — NUNCA QUEBRE ESTAS REGRAS:
+1. SOMENTE mencione fatos que estejam explicitamente nos dados fornecidos (eventos, estatisticas, placar, nomes de times).
+2. NUNCA invente nomes de jogadores que nao estejam nos dados.
+3. NUNCA invente eventos, chutes, gols, cartoes ou jogadas que nao estejam na lista de eventos.
+4. Se nao houver dados suficientes para uma secao, explique de forma honesta o que os dados mostram, sem inventar contexto.
+5. NUNCA use emojis, emoticons ou caracteres decorativos.
+6. NUNCA use asteriscos, hashtags ou formatacao markdown — texto limpo apenas.
+7. Escreva em portugues brasileiro com terminologia tecnica de futebol.
+8. Se um campo de dado estiver vazio ou ausente, diga "informacao nao disponivel" — nunca preencha com suposicoes.
+9. Os unicos nomes de times validos sao os fornecidos nos dados. Nao substitua por outros nomes.
+10. O placar final e as estatisticas fornecidas sao a verdade absoluta — nao contrarie-os.
 
-Voce recebera os dados da partida e deve retornar um JSON com 7 secoes obrigatorias. Cada secao deve ter no minimo 3-4 paragrafos detalhados.`;
+TERMOS TECNICOS ACEITOS (use conforme os dados permitirem): construcao, transicao, marcacao alta, bloco baixo, saida de bola, triangulacao, amplitude, profundidade, compactacao, linha de marcacao, pressing, contra-ataque, bola parada, escanteio, falta tatica, cartao disciplinar.
+
+Retorne um JSON com 7 secoes. Cada secao deve ter no minimo 2 paragrafos baseados nos dados reais.`;
 
 const FALLBACK_MODEL = "google/gemini-2.5-flash";
 
@@ -191,7 +194,7 @@ serve(async (req) => {
           { role: "system", content: systemPrompt },
           { role: "user", content: userPrompt },
         ],
-        temperature: 0.7,
+        temperature: 0.3,
         max_tokens: 4096,
       }),
     });

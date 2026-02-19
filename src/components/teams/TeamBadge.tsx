@@ -31,9 +31,9 @@ export function TeamBadge({ team, size = 'md', className, showGlow = false }: Te
   const primaryColor = team.primary_color || team.primaryColor || '#10b981';
 
   const containerStyle: React.CSSProperties = {
-    backgroundColor: '#ffffff',
-    border: `1.5px solid ${primaryColor}40`,
-    boxShadow: showGlow ? `0 0 16px ${primaryColor}40` : `0 0 0 1px ${primaryColor}20`,
+    backgroundColor: '#000000',
+    border: `1.5px solid ${primaryColor}50`,
+    boxShadow: showGlow ? `0 0 16px ${primaryColor}50` : undefined,
   };
 
   return (
@@ -50,7 +50,7 @@ export function TeamBadge({ team, size = 'md', className, showGlow = false }: Te
           src={logoUrl}
           alt={team.name}
           onError={() => setImgError(true)}
-          className="w-full h-full object-contain p-[10%]"
+          className="w-full h-full object-contain p-[8%]"
         />
       ) : (
         <span style={{ color: primaryColor }} className="leading-none select-none">
