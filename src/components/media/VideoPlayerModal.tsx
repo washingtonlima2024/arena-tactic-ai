@@ -2,12 +2,13 @@ import { useRef, useEffect, useState, useCallback } from 'react';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { X, Clock, Maximize2, Volume2, VolumeX, SkipBack, SkipForward, RotateCcw, Smartphone, Monitor, Square, Tablet } from 'lucide-react';
+import { X, Clock, Maximize2, Volume2, VolumeX, SkipBack, SkipForward, RotateCcw, Smartphone, Monitor, Square, Tablet, Loader2, MessageSquare } from 'lucide-react';
 import { ClipVignette } from './ClipVignette';
 import { DeviceMockup } from './DeviceMockup';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { normalizeStorageUrl } from '@/lib/apiClient';
 import { cn } from '@/lib/utils';
+import { supabase } from '@/integrations/supabase/client';
 
 type DeviceFormat = '9:16' | '16:9' | '1:1' | '4:5';
 
@@ -42,6 +43,8 @@ interface VideoPlayerModalProps {
   awayScore: number;
   showVignette: boolean;
   onVignetteComplete: () => void;
+  aiComment?: string | null;
+  onCommentGenerated?: (eventId: string, comment: string) => void;
 }
 
 const formatIcons: Record<DeviceFormat, React.ReactNode> = {
@@ -53,9 +56,9 @@ const formatIcons: Record<DeviceFormat, React.ReactNode> = {
 
 const formatLabels: Record<DeviceFormat, string> = {
   '9:16': 'Story',
-  '16:9': 'Landscape',
+  '16:9': 'Paisagem',
   '1:1': 'Quadrado',
-  '4:5': 'Portrait',
+  '4:5': 'Retrato',
 };
 
 export function VideoPlayerModal({
@@ -70,13 +73,18 @@ export function VideoPlayerModal({
   homeScore,
   awayScore,
   showVignette,
-  onVignetteComplete
+  onVignetteComplete,
+  aiComment: initialAiComment,
+  onCommentGenerated,
 }: VideoPlayerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTimestamp, setCurrentTimestamp] = useState(0);
   const [iframeKey, setIframeKey] = useState(0);
   const [deviceFormat, setDeviceFormat] = useState<DeviceFormat>('16:9');
+  const [aiComment, setAiComment] = useState<string | null>(initialAiComment ?? null);
+  const [isGeneratingComment, setIsGeneratingComment] = useState(false);
+  const commentGeneratedRef = useRef<string | null>(null);
 
   // Normalize URLs for tunnel compatibility
   const normalizedClipUrl = normalizeStorageUrl(clip?.clipUrl);
@@ -145,6 +153,57 @@ export function VideoPlayerModal({
       setIframeKey(prev => prev + 1);
     }
   }, [isOpen, clip?.id, calculateInitialTimestamp]);
+
+  // Sync aiComment when prop changes (new event opened)
+  useEffect(() => {
+    setAiComment(initialAiComment ?? null);
+    commentGeneratedRef.current = null;
+  }, [clip?.id, initialAiComment]);
+
+  // Auto-generate AI comment when modal opens and no comment exists
+  useEffect(() => {
+    if (!isOpen || !clip || aiComment || isGeneratingComment) return;
+    if (commentGeneratedRef.current === clip.id) return;
+    commentGeneratedRef.current = clip.id;
+
+    const generate = async () => {
+      setIsGeneratingComment(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('generate-event-comments', {
+          body: {
+            events: [{
+              id: clip.id,
+              event_type: clip.type,
+              minute: clip.minute,
+              description: clip.description,
+              metadata: {},
+            }],
+            home_team: homeTeam,
+            away_team: awayTeam,
+          },
+        });
+        if (!error && data?.generated > 0) {
+          // Fetch updated comment from DB
+          const { data: updated } = await supabase
+            .from('match_events')
+            .select('metadata')
+            .eq('id', clip.id)
+            .single();
+          const comment = (updated?.metadata as any)?.ai_comment as string | undefined;
+          if (comment) {
+            setAiComment(comment);
+            onCommentGenerated?.(clip.id, comment);
+          }
+        }
+      } catch (e) {
+        console.warn('[VideoPlayerModal] AI comment generation failed:', e);
+      } finally {
+        setIsGeneratingComment(false);
+      }
+    };
+
+    generate();
+  }, [isOpen, clip?.id]);
 
   if (!clip) return null;
   if (!hasDirectClip && !hasValidMatchVideo) return null;
@@ -400,6 +459,21 @@ export function VideoPlayerModal({
                   </>
                 )}
               </div>
+            </div>
+
+            {/* AI Tactical Comment */}
+            <div className="border-t border-border/50 pt-3">
+              {isGeneratingComment ? (
+                <div className="flex items-center gap-2 text-muted-foreground text-sm">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  <span>Gerando análise tática...</span>
+                </div>
+              ) : aiComment ? (
+                <div className="flex items-start gap-2">
+                  <MessageSquare className="h-3.5 w-3.5 mt-0.5 text-primary shrink-0" />
+                  <p className="text-sm text-muted-foreground leading-relaxed">{aiComment}</p>
+                </div>
+              ) : null}
             </div>
           </div>
         </div>
