@@ -32,17 +32,21 @@ export function TeamBadge({ team, size = 'md', className, showGlow = false }: Te
   
   if (logoUrl && !imgError) {
     return (
-      <img 
-        src={logoUrl} 
-        alt={team.name} 
-        onError={() => setImgError(true)}
+      <div
         className={cn(
-          sizeClasses[size], 
-          'rounded-full object-contain',
+          sizeClasses[size],
+          'rounded-full flex items-center justify-center bg-black',
           className
         )}
         style={showGlow ? { boxShadow: `0 0 20px ${primaryColor}40` } : undefined}
-      />
+      >
+        <img 
+          src={logoUrl} 
+          alt={team.name} 
+          onError={() => setImgError(true)}
+          className="h-[80%] w-[80%] object-contain"
+        />
+      </div>
     );
   }
   
@@ -54,12 +58,12 @@ export function TeamBadge({ team, size = 'md', className, showGlow = false }: Te
         className
       )}
       style={{ 
-        backgroundColor: primaryColor + '30', 
-        color: primaryColor,
+        backgroundColor: primaryColor, 
+        color: '#ffffff',
         boxShadow: showGlow ? `0 0 20px ${primaryColor}40` : undefined
       }}
     >
-      {shortName.slice(0, 2).toUpperCase()}
+      {shortName.slice(0, 3).toUpperCase()}
     </div>
   );
 }
