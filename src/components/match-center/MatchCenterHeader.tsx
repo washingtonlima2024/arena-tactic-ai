@@ -32,7 +32,7 @@ export function MatchCenterHeader({
       <div
         className={cn(
           "w-20 h-20 md:w-24 md:h-24 rounded-full flex items-center justify-center text-3xl font-black border-2 overflow-hidden",
-          "transition-all duration-500 bg-white"
+          "transition-all duration-500 bg-black"
         )}
         style={{
           borderColor: `${color}30`,
