@@ -1,72 +1,102 @@
 
 
-# Corrigir Exibicao de Times nos Cards de Partidas
+# Corrigir Falsos Gols no 2o Tempo e Desbloquear Pipeline de Importacao
 
-## Problema Raiz
+## Problema
 
-O hook `useMatches` (src/hooks/useMatches.ts) tem dois caminhos:
-1. **Servidor local**: Funciona, retorna `home_team`/`away_team` corretamente via `to_dict(include_teams=True)`
-2. **Fallback Supabase** (linhas 38-48): Usa referencia de foreign key `teams!matches_home_team_id_fkey` que **NAO EXISTE** na tabela `matches`
+Ao importar o segundo tempo de Brasil vs Argentina, dois problemas ocorrem:
 
-Quando o fallback e acionado (ou em momentos de instabilidade do tunel), a query falha e os matches retornam sem dados dos times. Resultado: cards mostram "Casa" e "Time Casa" sem escudo.
+1. **Pipeline bloqueado**: O frontend (Upload.tsx linha 1724-1734) aborta silenciosamente se nao existe um arquivo SRT pre-carregado para o 2o tempo, impedindo que o servidor faca a transcricao automatica via Whisper.
+
+2. **Gols falsos no 2o tempo**: A narracao do 2o tempo naturalmente faz referencias a gols do 1o tempo ("Coutinho abriu o placar", "com o gol do Neymar o Brasil ja vencia"). A IA interpreta essas mencoes como gols novos, gerando eventos duplicados. Resultado: Brasil 7x2 em vez de 3x0.
+
+## Evidencia no Banco
+
+Match `9d0f3f27`: 2 gols do 1o tempo (Coutinho min 35, Neymar min 45) + 2 gols duplicados no 2o tempo (Coutinho e Neymar ambos min 45 com match_half=second) = placar inflado.
+
+Match `677801c3`: So tem 2 eventos (ambos second half), mas as descricoes sao identicas aos gols do 1o tempo.
 
 ## Solucao
 
-### Mudanca 1 - Adicionar Foreign Keys na tabela `matches`
+### Mudanca 1 - Remover bloqueio de SRT no pipeline async (Upload.tsx)
 
-Criar migracao SQL para adicionar as constraints que faltam:
+**Arquivo**: `src/pages/Upload.tsx` (linhas 1724-1734)
+
+Remover o `return` que aborta o pipeline. O servidor Python transcreve automaticamente via Whisper quando nao recebe SRT.
 
 ```text
-ALTER TABLE public.matches 
-  ADD CONSTRAINT matches_home_team_id_fkey 
-  FOREIGN KEY (home_team_id) REFERENCES public.teams(id);
+// ANTES: aborta completamente
+if (secondHalfSegments.length > 0 && !secondHalfTranscription) {
+  setProcessingStage('idle');
+  return;  // BLOQUEIA
+}
 
-ALTER TABLE public.matches 
-  ADD CONSTRAINT matches_away_team_id_fkey 
-  FOREIGN KEY (away_team_id) REFERENCES public.teams(id);
+// DEPOIS: apenas log informativo
+if (secondHalfSegments.length > 0 && !secondHalfTranscription) {
+  console.log('[ASYNC] 2o tempo sem SRT pre-carregado, servidor transcreverá via Whisper');
+}
 ```
 
-Isso permite que o join do Supabase funcione corretamente no fallback.
+### Mudanca 2 - Pipeline sequencial tenta Whisper em vez de pular (Upload.tsx)
 
-### Mudanca 2 - Query alternativa sem dependencia de FK
+**Arquivo**: `src/pages/Upload.tsx` (linhas 2248-2261)
 
-Caso as FKs nao possam ser adicionadas (dados orfaos), alterar a query do Supabase em `useMatches.ts` para usar a sintaxe de join explicito sem referencia de FK:
+Em vez de mostrar toast e ignorar o 2o tempo, tentar transcrever automaticamente antes de analisar.
+
+### Mudanca 3 - Deduplicar gols entre tempos no backend (ai_services.py)
+
+**Arquivo**: `video-processor/ai_services.py` (funcao `_enrich_events`)
+
+Adicionar deduplicacao cross-half: antes de salvar eventos do 2o tempo, consultar eventos existentes do 1o tempo no banco. Se um gol do 2o tempo tiver descricao muito similar (>80% de similaridade) a um gol ja existente do 1o tempo, descartar como falso positivo.
 
 ```text
-// ANTES (falha sem FK):
-home_team:teams!matches_home_team_id_fkey(...)
-
-// DEPOIS (funciona sem FK):
-home_team:teams!home_team_id(...)
-away_team:teams!away_team_id(...)
+# Na funcao _enrich_events ou no endpoint de analise:
+if half == 'second' and match_id:
+    # Buscar gols existentes do 1o tempo
+    existing_goals = get_first_half_goals(match_id)
+    
+    # Filtrar gols do 2o tempo que sao duplicatas de descricoes do 1T
+    new_events = []
+    for event in events:
+        if event['event_type'] == 'goal':
+            is_duplicate = any(
+                similarity(event['description'], eg['description']) > 0.7
+                for eg in existing_goals
+            )
+            if is_duplicate:
+                print(f"[Enrich] Gol falso removido (duplicata do 1T): {event['description']}")
+                continue
+        new_events.append(event)
 ```
 
-A sintaxe `teams!home_team_id` diz ao PostgREST para usar a coluna `home_team_id` como chave de join, sem precisar de uma FK formal.
+### Mudanca 4 - Melhorar prompt do 2o tempo com contexto do 1T (ai_services.py)
 
-### Mudanca 3 - Tratamento de erro robusto
+**Arquivo**: `video-processor/ai_services.py` (funcao `analyze_match_events`)
 
-No `useMatches`, caso o join com times falhe, fazer uma segunda query mais simples (sem join) para pelo menos mostrar os matches:
+Quando analisar o 2o tempo, incluir no prompt um resumo dos gols ja detectados no 1o tempo, instruindo a IA a **nao** re-detectar esses gols:
 
 ```text
-// Se a query com join falhar, buscar sem join
-const { data, error } = await supabase
-  .from('matches')
-  .select('*')
-  .order('created_at', { ascending: false });
+# Adicionar ao prompt de analise do 2T:
+"IMPORTANTE: Os seguintes gols ja foram detectados no 1o tempo e NAO devem ser 
+contados novamente, mesmo que o narrador os mencione como referencia:
+- Min 24': Gol de Coutinho (Brasil)
+- Min 45': Gol de Neymar (Brasil)
+Detecte APENAS gols NOVOS que acontecem durante o 2o tempo."
 ```
 
 ## Arquivos Afetados
 
 | Arquivo | Mudanca |
 |---|---|
-| Migracao SQL | Adicionar FKs matches -> teams |
-| src/hooks/useMatches.ts | Corrigir sintaxe do join e adicionar fallback sem join |
+| src/pages/Upload.tsx | Remover bloqueio de SRT (linhas 1724-1734) e ajustar pipeline sequencial (linhas 2248-2261) |
+| video-processor/ai_services.py | Deduplicacao cross-half + prompt com contexto do 1T |
 
-## Resultado
+## Resultado Esperado
 
 | Cenario | Antes | Depois |
 |---|---|---|
-| Servidor local online | Times aparecem (funciona) | Sem mudanca |
-| Servidor offline, fallback Supabase | Query com FK falha, times nao aparecem | Join funciona, times aparecem |
-| Times genericos ("Time Casa") | Sem logo, mostra fallback | Sem mudanca (dados corretos, so nao tem logo) |
+| Importar 2o tempo sem SRT | Aborta silenciosamente | Servidor transcreve via Whisper |
+| Gols mencionados do 1T na narracao do 2T | Re-detectados como gols novos (falsos) | Filtrados por deduplicacao e prompt contextual |
+| Placar Brasil vs Argentina | 7x2 (inflado) | 3x0 (correto: Coutinho, Neymar 1T + Paulinho 2T) |
+| Pipeline sequencial sem SRT | Pula analise do 2T | Tenta Whisper automaticamente |
 
