@@ -156,8 +156,8 @@ export function MatchAnalyticsSection({
                 contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: 8 }}
                 labelStyle={{ color: 'hsl(var(--foreground))' }}
               />
-              <Bar dataKey="home" name={homeTeamName} fill={homeTeamColor} radius={[4, 4, 0, 0]} />
-              <Bar dataKey="away" name={awayTeamName} fill={awayTeamColor} radius={[4, 4, 0, 0]} />
+              <Bar dataKey="home" name={homeTeamName} fill={homeTeamColor === awayTeamColor ? '#10b981' : homeTeamColor} radius={[4, 4, 0, 0]} />
+              <Bar dataKey="away" name={awayTeamName} fill={awayTeamColor === homeTeamColor ? '#f59e0b' : awayTeamColor} radius={[4, 4, 0, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </Card>
