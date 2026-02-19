@@ -1268,6 +1268,9 @@ def upload_to_match(match_id: str, subfolder: str):
                     except Exception as e:
                         print(f"[upload] Aviso ao detectar duração: {e}")
                     
+                    start_minute_val = 0 if video_type in ['first_half', 'full'] else 45
+                    duration_minutes = round(duration_seconds / 60) if duration_seconds else None
+                    end_minute_val = (start_minute_val + duration_minutes) if duration_minutes else (45 if video_type != 'second_half' else 90)
                     video = Video(
                         match_id=match_id,
                         file_url=result['url'],
@@ -1275,8 +1278,8 @@ def upload_to_match(match_id: str, subfolder: str):
                         video_type=video_type,
                         duration_seconds=duration_seconds,
                         status='ready',
-                        start_minute=0 if video_type in ['first_half', 'full'] else 45,
-                        end_minute=45 if video_type == 'first_half' else 90
+                        start_minute=start_minute_val,
+                        end_minute=end_minute_val
                     )
                     session.add(video)
                     session.commit()
@@ -1360,6 +1363,9 @@ def _sync_videos_for_match(match_id: str) -> dict:
                     
                     # Criar registro
                     file_url = f"http://localhost:5000/api/storage/{match_id}/videos/{filename}"
+                    start_minute_val = 0 if video_type in ['first_half', 'full'] else 45
+                    duration_minutes = round(duration_seconds / 60) if duration_seconds else None
+                    end_minute_val = (start_minute_val + duration_minutes) if duration_minutes else (45 if video_type != 'second_half' else 90)
                     video = Video(
                         match_id=match_id,
                         file_url=file_url,
@@ -1367,8 +1373,8 @@ def _sync_videos_for_match(match_id: str) -> dict:
                         video_type=video_type,
                         duration_seconds=duration_seconds,
                         status='ready',
-                        start_minute=0 if video_type in ['first_half', 'full'] else 45,
-                        end_minute=45 if video_type == 'first_half' else 90
+                        start_minute=start_minute_val,
+                        end_minute=end_minute_val
                     )
                     session.add(video)
                     synced.append(video.to_dict())
@@ -1435,6 +1441,9 @@ def sync_videos_from_storage(match_id: str):
                     
                     # Criar registro
                     file_url = f"http://localhost:5000/api/storage/{match_id}/videos/{filename}"
+                    start_minute_val = 0 if video_type in ['first_half', 'full'] else 45
+                    duration_minutes = round(duration_seconds / 60) if duration_seconds else None
+                    end_minute_val = (start_minute_val + duration_minutes) if duration_minutes else (45 if video_type != 'second_half' else 90)
                     video = Video(
                         match_id=match_id,
                         file_url=file_url,
@@ -1442,8 +1451,8 @@ def sync_videos_from_storage(match_id: str):
                         video_type=video_type,
                         duration_seconds=duration_seconds,
                         status='ready',
-                        start_minute=0 if video_type in ['first_half', 'full'] else 45,
-                        end_minute=45 if video_type == 'first_half' else 90
+                        start_minute=start_minute_val,
+                        end_minute=end_minute_val
                     )
                     session.add(video)
                     synced.append(video.to_dict())

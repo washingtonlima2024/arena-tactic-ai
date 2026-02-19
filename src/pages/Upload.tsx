@@ -481,10 +481,14 @@ export default function VideoUpload() {
       
       // Start duration detection in parallel (don't wait)
       detectVideoDuration(file).then(duration => {
-        setSegments(prev => 
-          prev.map(s => 
-            s.id === segmentId ? { ...s, durationSeconds: duration || null } : s
-          )
+        if (!duration) return;
+        setSegments(prev =>
+          prev.map(s => {
+            if (s.id !== segmentId) return s;
+            const durationMinutes = Math.round(duration / 60);
+            const newEndMinute = (s.startMinute ?? 0) + durationMinutes;
+            return { ...s, durationSeconds: duration, endMinute: newEndMinute };
+          })
         );
       });
 
