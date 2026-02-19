@@ -943,29 +943,6 @@ export default function Media() {
               </Card>
             )}
 
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/20">
-                      <Scissors className="h-5 w-5 text-primary" />
-                    </div>
-                    <div className="flex-1">
-                      <p className="font-medium">
-                        {clips.some(c => c.clipUrl) 
-                          ? `${clips.filter(c => c.clipUrl).length} clips extraídos` 
-                          : 'Extrair Clips Individuais'
-                        }
-                      </p>
-                      <p className="text-sm text-muted-foreground">
-                        {clips.some(c => c.clipUrl) 
-                          ? 'Clique para reproduzir os clips extraídos diretamente. Clips com ✓ são vídeos independentes.'
-                          : 'Clique em "Extrair Clips" para gerar vídeos individuais de cada evento (~8 segundos cada). Isso permite reprodução e download separados.'
-                        }
-                      </p>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
-
             {/* Half filter tabs for clips */}
 
             {clips.length === 0 ? (
