@@ -1687,7 +1687,10 @@ export default function VideoUpload() {
         }
         
         // 🆕 Verificar transcrições existentes no storage (reutilizar se já processadas)
-        if (!firstHalfTranscription) {
+        // PROTEÇÃO: Só buscar transcrição existente se há vídeo correspondente
+        const hasFirstHalfVideo = firstHalfSegments.length > 0;
+        const hasSecondHalfVideo = secondHalfSegments.length > 0;
+        if (!firstHalfTranscription && hasFirstHalfVideo) {
           try {
             const existingFirst = await apiClient.getExistingTranscription(matchId, 'first');
             if (existingFirst) {
@@ -1702,7 +1705,7 @@ export default function VideoUpload() {
             console.log('[Async] Sem transcrição existente no storage para 1º tempo');
           }
         }
-        if (!secondHalfTranscription) {
+        if (!secondHalfTranscription && hasSecondHalfVideo) {
           try {
             const existingSecond = await apiClient.getExistingTranscription(matchId, 'second');
             if (existingSecond) {
@@ -1750,8 +1753,8 @@ export default function VideoUpload() {
             awayTeam: awayTeamName,
             autoClip: true,
             autoAnalysis: true,
-            firstHalfTranscription: firstHalfTranscription || undefined,
-            secondHalfTranscription: secondHalfTranscription || undefined,
+            firstHalfTranscription: hasFirstHalfVideo ? (firstHalfTranscription || undefined) : undefined,
+            secondHalfTranscription: hasSecondHalfVideo ? (secondHalfTranscription || undefined) : undefined,
           });
           
           toast({
@@ -1869,7 +1872,8 @@ export default function VideoUpload() {
       }
       
       // 🆕 Verificar transcrições existentes no storage (reutilizar se já processadas)
-      if (!firstHalfTranscription) {
+      // PROTEÇÃO: Só buscar transcrição existente se há vídeo correspondente
+      if (!firstHalfTranscription && firstHalfSegments.length > 0) {
         try {
           const existingFirst = await apiClient.getExistingTranscription(matchId, 'first');
           if (existingFirst) {
@@ -1884,7 +1888,7 @@ export default function VideoUpload() {
           console.log('[Sequential] Sem transcrição existente no storage para 1º tempo');
         }
       }
-      if (!secondHalfTranscription) {
+      if (!secondHalfTranscription && secondHalfSegments.length > 0) {
         try {
           const existingSecond = await apiClient.getExistingTranscription(matchId, 'second');
           if (existingSecond) {
@@ -2198,6 +2202,8 @@ export default function VideoUpload() {
         setProcessingMessage('Analisando 1º tempo...');
         
         // Analyze first half if has transcription
+        console.log('[PROTEÇÃO] 1T: transcrição=' + !!firstHalfTranscription + ', segmentos=' + firstHalfSegments.length + ' → ' + (firstHalfTranscription && firstHalfSegments.length > 0 ? 'ANALISAR' : 'PULAR'));
+        console.log('[PROTEÇÃO] 2T: transcrição=' + !!secondHalfTranscription + ', segmentos=' + secondHalfSegments.length + ' → ' + (secondHalfTranscription && secondHalfSegments.length > 0 ? 'ANALISAR' : 'PULAR'));
         if (firstHalfTranscription && firstHalfSegments.length > 0) {
           const segment = firstHalfSegments[0];
           const isClip = segment.videoType === 'clip';
