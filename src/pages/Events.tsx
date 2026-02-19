@@ -138,11 +138,21 @@ const EventRow = ({
         </div>
       ) : null}
 
-      {/* Team logo */}
-      {teamLogo ? (
+      {/* Team badge */}
+      {teamName ? (
         <Avatar className="h-6 w-6 sm:h-7 sm:w-7 shrink-0">
-          <AvatarImage src={teamLogo} alt={teamName} className="object-contain" />
-          <AvatarFallback className="text-[10px] sm:text-xs">{teamName?.slice(0, 2)}</AvatarFallback>
+          {teamLogo ? (
+            <AvatarImage src={teamLogo} alt={teamName} className="object-contain" />
+          ) : null}
+          <AvatarFallback 
+            className="text-[10px] sm:text-xs font-bold"
+            style={{ 
+              backgroundColor: (eventTeam?.primary_color || '#10b981') + '30',
+              color: eventTeam?.primary_color || '#10b981'
+            }}
+          >
+            {teamName.slice(0, 2).toUpperCase()}
+          </AvatarFallback>
         </Avatar>
       ) : (
         getApprovalIcon(event.approval_status)
