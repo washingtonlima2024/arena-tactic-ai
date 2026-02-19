@@ -31,13 +31,12 @@ export function MatchCenterHeader({
     <div className="flex flex-col items-center gap-3">
       <div
         className={cn(
-          "w-20 h-20 md:w-24 md:h-24 rounded-full flex items-center justify-center text-3xl font-black border-[3px] overflow-hidden",
-          "shadow-[0_0_20px_rgba(0,0,0,0.3)] transition-all duration-500"
+          "w-20 h-20 md:w-24 md:h-24 rounded-full flex items-center justify-center text-3xl font-black border-2 overflow-hidden",
+          "transition-all duration-500 bg-white"
         )}
         style={{
-          borderColor: color,
-          backgroundColor: `${color}15`,
-          boxShadow: `0 0 25px ${color}40, inset 0 0 15px ${color}10`,
+          borderColor: `${color}30`,
+          boxShadow: `0 0 20px ${color}25`,
         }}
       >
         {logo ? (
