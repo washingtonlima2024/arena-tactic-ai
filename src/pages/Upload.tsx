@@ -1721,16 +1721,9 @@ export default function VideoUpload() {
           }
         }
         
-        // 🆕 Validar que segundo tempo tem transcrição se tem vídeo
+        // 🆕 2º tempo sem SRT: servidor transcreve via Whisper automaticamente
         if (secondHalfSegments.length > 0 && !secondHalfTranscription) {
-          console.error('[ASYNC] ⚠️ Vídeo do 2º tempo SEM transcrição! Abortando pipeline async.');
-          toast({
-            title: "⚠️ Transcrição do 2º tempo não encontrada",
-            description: "Arraste o arquivo SRT do 2º tempo antes de iniciar a análise.",
-            variant: "destructive"
-          });
-          setProcessingStage('idle');
-          return;
+          console.log('[ASYNC] 2º tempo sem SRT pré-carregado — servidor fará transcrição via Whisper');
         }
         
         // Build video inputs for async processing
@@ -2244,20 +2237,31 @@ export default function VideoUpload() {
           }
         }
         // Analyze second half if has transcription
-        // 🆕 DIAGNÓSTICO: Verificar se 2º tempo tem vídeo mas não tem transcrição
+        // 🆕 2º tempo sem SRT: tentar transcrição automática em vez de pular
         if (secondHalfSegments.length > 0 && !secondHalfTranscription) {
-          console.warn('⚠️ [DIAGNÓSTICO] Vídeo do 2º tempo existe mas SEM transcrição!');
-          console.warn('⚠️ [DIAGNÓSTICO] Segmentos 2º tempo:', secondHalfSegments.map(s => ({
-            name: s.name,
-            videoType: s.videoType,
-            half: s.half,
-            hasTranscription: !!s.transcription
-          })));
-          toast({
-            title: "⚠️ 2º Tempo sem transcrição",
-            description: "Arraste o arquivo SRT do 2º tempo para continuar. A análise do 2º tempo foi ignorada.",
-            variant: "destructive",
-          });
+          console.log('[SEQ] 2º tempo sem SRT — tentando transcrição automática...');
+          const secondVideoUrl = secondHalfSegments[0]?.url;
+          if (secondVideoUrl) {
+            try {
+              setProcessingMessage('Transcrevendo 2º tempo via Whisper...');
+              const whisperResult = await apiClient.transcribeLargeVideo({
+                videoUrl: secondVideoUrl,
+                matchId,
+                halfType: 'second',
+              });
+              if (whisperResult?.text && whisperResult.text.length > 50) {
+                secondHalfTranscription = whisperResult.text;
+                console.log('[SEQ] ✓ Transcrição automática do 2º tempo:', whisperResult.text.length, 'chars');
+              }
+            } catch (whisperErr: any) {
+              console.warn('[SEQ] Whisper falhou para 2º tempo:', whisperErr?.message);
+              toast({
+                title: "⚠️ 2º Tempo sem transcrição",
+                description: "Não foi possível transcrever automaticamente. Importe um SRT ou tente novamente.",
+                variant: "destructive",
+              });
+            }
+          }
         }
         
         if (secondHalfTranscription) {

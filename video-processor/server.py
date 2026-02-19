@@ -9541,6 +9541,16 @@ def _process_match_pipeline(job_id: str, data: dict):
                         boundaries=boundaries_2t
                     )
                     events = events or []
+                    
+                    # 🆕 Deduplicação cross-half: filtrar gols do 2T que são referências ao 1T
+                    if events:
+                        try:
+                            first_half_goals = ai_services.get_first_half_goals(match_id)
+                            if first_half_goals:
+                                events = ai_services.filter_duplicate_cross_half_goals(events, first_half_goals)
+                        except Exception as dedup_err:
+                            print(f"[ASYNC-PIPELINE] ⚠ Deduplicação cross-half falhou: {dedup_err}")
+                    
                 except Exception as ai_err:
                     print(f"[ASYNC-PIPELINE] ⚠ Análise 2º tempo falhou: {ai_err}")
                     events = []

@@ -5999,11 +5999,138 @@ Formato obrigatório:
         return []
 
 
+def get_first_half_goals(match_id: str) -> List[Dict[str, Any]]:
+    """
+    Busca gols do 1º tempo no banco para deduplicação cross-half.
+    Retorna lista de dicts com description, minute, player.
+    """
+    try:
+        from database import get_session
+        from models import MatchEvent
+        session = get_session()
+        try:
+            goals = session.query(MatchEvent).filter_by(
+                match_id=match_id,
+                event_type='goal',
+                match_half='first_half'
+            ).all()
+            result = []
+            for g in goals:
+                result.append({
+                    'description': g.description or '',
+                    'minute': g.minute or 0,
+                    'player': (g.event_metadata or {}).get('player', '') if g.event_metadata else '',
+                })
+            print(f"[CrossHalf] Gols do 1T encontrados: {len(result)}")
+            for r in result:
+                print(f"  - Min {r['minute']}': {r['description'][:80]}")
+            return result
+        finally:
+            session.close()
+    except Exception as e:
+        print(f"[CrossHalf] Erro ao buscar gols do 1T: {e}")
+        return []
+
+
+def _text_similarity(a: str, b: str) -> float:
+    """Similaridade simples baseada em palavras em comum (Jaccard)."""
+    if not a or not b:
+        return 0.0
+    words_a = set(a.lower().split())
+    words_b = set(b.lower().split())
+    if not words_a or not words_b:
+        return 0.0
+    intersection = words_a & words_b
+    union = words_a | words_b
+    return len(intersection) / len(union) if union else 0.0
+
+
+def filter_duplicate_cross_half_goals(
+    events: List[Dict[str, Any]],
+    first_half_goals: List[Dict[str, Any]],
+    similarity_threshold: float = 0.5
+) -> List[Dict[str, Any]]:
+    """
+    Filtra gols do 2º tempo que são referências a gols do 1º tempo.
+    
+    Detecta duplicatas por:
+    1. Similaridade textual da descrição (>threshold)
+    2. Mesmo jogador mencionado
+    """
+    if not first_half_goals:
+        return events
+    
+    filtered = []
+    removed_count = 0
+    
+    for event in events:
+        if event.get('event_type') != 'goal':
+            filtered.append(event)
+            continue
+        
+        desc = (event.get('description') or '').lower()
+        player = (event.get('player') or '').lower()
+        
+        is_duplicate = False
+        for fg in first_half_goals:
+            fg_desc = (fg.get('description') or '').lower()
+            fg_player = (fg.get('player') or '').lower()
+            
+            # Check 1: Text similarity
+            sim = _text_similarity(desc, fg_desc)
+            if sim > similarity_threshold:
+                print(f"[CrossHalf] ⚠ Gol falso removido (similaridade {sim:.2f}): {desc[:80]}")
+                is_duplicate = True
+                break
+            
+            # Check 2: Same player name in both descriptions
+            if fg_player and len(fg_player) > 3 and fg_player in desc:
+                # Verificar se não é um gol NOVO do mesmo jogador
+                # (gol novo teria minuto > 45 e descrição diferente)
+                if sim > 0.3:  # Mesmo jogador + alguma similaridade = duplicata
+                    print(f"[CrossHalf] ⚠ Gol falso removido (mesmo jogador '{fg_player}', sim={sim:.2f}): {desc[:80]}")
+                    is_duplicate = True
+                    break
+        
+        if is_duplicate:
+            removed_count += 1
+        else:
+            filtered.append(event)
+    
+    if removed_count > 0:
+        print(f"[CrossHalf] ✓ {removed_count} gol(s) falso(s) do 2T removido(s) (referências ao 1T)")
+    
+    return filtered
+
+
+def build_first_half_context(first_half_goals: List[Dict[str, Any]]) -> str:
+    """
+    Constrói texto de contexto dos gols do 1T para incluir no prompt do 2T.
+    """
+    if not first_half_goals:
+        return ""
+    
+    lines = [
+        "\nIMPORTANTE: Os seguintes gols já foram detectados no 1º tempo e NÃO devem ser contados novamente,",
+        "mesmo que o narrador os mencione como referência ao placar anterior:",
+    ]
+    for g in first_half_goals:
+        player = g.get('player', 'Jogador desconhecido')
+        minute = g.get('minute', '?')
+        desc = g.get('description', '')[:60]
+        lines.append(f"  - Min {minute}': {player} ({desc})")
+    lines.append("Detecte APENAS gols NOVOS que acontecem durante o 2º tempo.\n")
+    
+    return "\n".join(lines)
+
+
 def _enrich_events(
     events: List[Dict[str, Any]],
     game_start_minute: int,
     game_end_minute: int,
-    transcription: str = ""
+    transcription: str = "",
+    match_id: str = None,
+    match_half: str = None
 ) -> List[Dict[str, Any]]:
     """
     Enrich events with required fields for database insertion.
@@ -6105,6 +6232,15 @@ def _enrich_events(
                         hallucinated_count += 1
         if hallucinated_count:
             print(f"[Enrich] 🛡️ {hallucinated_count} nomes de jogadores removidos (alucinação)")
+    
+    # ═══════════════════════════════════════════════════════════════
+    # DEDUPLICAÇÃO CROSS-HALF: Filtrar gols do 2T que são referências ao 1T
+    # ═══════════════════════════════════════════════════════════════
+    is_second_half = match_half == 'second' or game_start_minute >= 45
+    if is_second_half and match_id:
+        first_half_goals = get_first_half_goals(match_id)
+        if first_half_goals:
+            enriched = filter_duplicate_cross_half_goals(enriched, first_half_goals)
     
     return enriched
 
@@ -6261,8 +6397,17 @@ def analyze_match_events(
                     print(f"[AI] ⚠ Erro ao buscar SRT: {srt_err}")
             
             # 1. Análise com Kakttus (retorna events + summary + tactical)
+            # Se 2T, adicionar contexto dos gols do 1T no transcript para evitar falsos positivos
+            analysis_input = kakttus_input
+            if match_half == 'second' and match_id:
+                first_half_goals = get_first_half_goals(match_id)
+                context_prefix = build_first_half_context(first_half_goals)
+                if context_prefix:
+                    analysis_input = context_prefix + "\n" + kakttus_input
+                    print(f"[AI] 📋 Contexto do 1T adicionado ao prompt do 2T ({len(first_half_goals)} gols)")
+            
             kakttus_result = analyze_with_kakttus(
-                transcript=kakttus_input,
+                transcript=analysis_input,
                 home_team=home_team,
                 away_team=away_team,
                 match_half=match_half
@@ -6272,7 +6417,7 @@ def analyze_match_events(
             
             if events:
                 # Enrich and deduplicate
-                enriched_events = _enrich_events(events, game_start_minute, game_end_minute, transcription=transcription)
+                enriched_events = _enrich_events(events, game_start_minute, game_end_minute, transcription=transcription, match_id=match_id, match_half=match_half)
                 final_events = deduplicate_goal_events(enriched_events)
                 
                 # ═══════════════════════════════════════════════════════════
