@@ -255,11 +255,29 @@ export default function Analysis() {
   // Team colors/names
   const homeTeamName = selectedMatch?.home_team?.name || 'Time Casa';
   const awayTeamName = selectedMatch?.away_team?.name || 'Time Visitante';
-  const rawHomeColor = selectedMatch?.home_team?.primary_color || '#10b981';
-  const rawAwayColor = selectedMatch?.away_team?.primary_color || '#3b82f6';
-  const homeTeamColor = rawHomeColor;
+  const rawHomeColor = selectedMatch?.home_team?.primary_color || '#ffffff';
+  const rawAwayColor = selectedMatch?.away_team?.primary_color || '#ffffff';
+
+  // Helper: garante que a cor do placar seja legível num fundo escuro
+  // Se não há cor cadastrada (fallback padrão) ou a cor é muito escura, usa branco
+  const ensureScoreReadable = (color: string): string => {
+    // Se é a cor padrão emerald (#10b981) sem personalização real, usa branco
+    if (!color || color === '#10b981' || color === '#3b82f6') return '#ffffff';
+    // Verifica luminosidade aproximada para garantir legibilidade
+    const hex = color.replace('#', '');
+    const r = parseInt(hex.slice(0, 2), 16) / 255;
+    const g = parseInt(hex.slice(2, 4), 16) / 255;
+    const b = parseInt(hex.slice(4, 6), 16) / 255;
+    const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    // Se luminosidade < 0.25 (muito escura), usa branco
+    return luminance < 0.25 ? '#ffffff' : color;
+  };
+
+  const homeTeamColor = ensureScoreReadable(rawHomeColor);
   // Garante contraste: se cores idênticas, força cor diferente para visitante
-  const awayTeamColor = rawAwayColor === rawHomeColor ? '#f59e0b' : rawAwayColor;
+  const awayTeamColor = ensureScoreReadable(rawAwayColor) === homeTeamColor && homeTeamColor !== '#ffffff'
+    ? '#f59e0b'
+    : ensureScoreReadable(rawAwayColor);
 
   if (matchesLoading) {
     return (
