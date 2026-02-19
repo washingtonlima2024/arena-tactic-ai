@@ -1,52 +1,72 @@
 
-# Corrigir Exibição de Nomes e Escudos dos Times nos Eventos
 
-## Problema Identificado
+# Corrigir Exibicao de Times nos Cards de Partidas
 
-No componente `EventRow` (src/pages/Events.tsx, linhas 141-149), os nomes e escudos dos times so aparecem quando `teamLogo` nao e null. Quando o time nao tem logo (como "Time Casa" e "Time Visitante" nesta partida), o codigo cai no `else` e mostra apenas o icone de aprovacao -- sem nenhuma indicacao do time.
+## Problema Raiz
 
-```text
-Logica atual:
-  teamLogo existe? → Mostra Avatar com logo + fallback de iniciais
-  teamLogo null?   → Mostra icone de aprovacao (sem nome do time)
-```
+O hook `useMatches` (src/hooks/useMatches.ts) tem dois caminhos:
+1. **Servidor local**: Funciona, retorna `home_team`/`away_team` corretamente via `to_dict(include_teams=True)`
+2. **Fallback Supabase** (linhas 38-48): Usa referencia de foreign key `teams!matches_home_team_id_fkey` que **NAO EXISTE** na tabela `matches`
 
-O `teamName` e calculado na linha 110 mas nunca e exibido fora do bloco condicional do logo.
+Quando o fallback e acionado (ou em momentos de instabilidade do tunel), a query falha e os matches retornam sem dados dos times. Resultado: cards mostram "Casa" e "Time Casa" sem escudo.
 
 ## Solucao
 
-Modificar o `EventRow` em `src/pages/Events.tsx` para **sempre mostrar o badge do time** (nome + escudo/iniciais), independente de ter logo ou nao.
+### Mudanca 1 - Adicionar Foreign Keys na tabela `matches`
 
-### Mudanca no EventRow (linhas 141-149)
-
-Substituir a logica condicional por um bloco que sempre mostra o time:
+Criar migracao SQL para adicionar as constraints que faltam:
 
 ```text
-ANTES:
-  Se tem logo → Avatar com imagem
-  Senao → Icone de aprovacao
+ALTER TABLE public.matches 
+  ADD CONSTRAINT matches_home_team_id_fkey 
+  FOREIGN KEY (home_team_id) REFERENCES public.teams(id);
 
-DEPOIS:
-  Se tem logo → Avatar com imagem + nome do time
-  Se nao tem logo mas tem teamName → Circulo com iniciais + nome do time
-  Senao → Icone de aprovacao (fallback)
+ALTER TABLE public.matches 
+  ADD CONSTRAINT matches_away_team_id_fkey 
+  FOREIGN KEY (away_team_id) REFERENCES public.teams(id);
 ```
 
-O novo codigo tera:
-1. Um Avatar que mostra a imagem do logo quando disponivel, ou as iniciais do time como fallback
-2. O nome curto do time (short_name ou primeiras 3 letras) sempre visivel ao lado
-3. O icone de aprovacao so aparece quando nao ha informacao de time
+Isso permite que o join do Supabase funcione corretamente no fallback.
 
-### Arquivo Afetado
+### Mudanca 2 - Query alternativa sem dependencia de FK
+
+Caso as FKs nao possam ser adicionadas (dados orfaos), alterar a query do Supabase em `useMatches.ts` para usar a sintaxe de join explicito sem referencia de FK:
+
+```text
+// ANTES (falha sem FK):
+home_team:teams!matches_home_team_id_fkey(...)
+
+// DEPOIS (funciona sem FK):
+home_team:teams!home_team_id(...)
+away_team:teams!away_team_id(...)
+```
+
+A sintaxe `teams!home_team_id` diz ao PostgREST para usar a coluna `home_team_id` como chave de join, sem precisar de uma FK formal.
+
+### Mudanca 3 - Tratamento de erro robusto
+
+No `useMatches`, caso o join com times falhe, fazer uma segunda query mais simples (sem join) para pelo menos mostrar os matches:
+
+```text
+// Se a query com join falhar, buscar sem join
+const { data, error } = await supabase
+  .from('matches')
+  .select('*')
+  .order('created_at', { ascending: false });
+```
+
+## Arquivos Afetados
 
 | Arquivo | Mudanca |
 |---|---|
-| src/pages/Events.tsx | Modificar linhas 141-149 do EventRow para sempre exibir nome/badge do time quando disponivel |
+| Migracao SQL | Adicionar FKs matches -> teams |
+| src/hooks/useMatches.ts | Corrigir sintaxe do join e adicionar fallback sem join |
 
-## Resultado Esperado
+## Resultado
 
 | Cenario | Antes | Depois |
 |---|---|---|
-| Time com logo | Mostra avatar com logo | Mostra avatar com logo + nome |
-| Time sem logo (ex: "Time Casa") | Mostra apenas icone de aprovacao | Mostra circulo com iniciais + nome "TC" |
-| Evento sem time identificado | Mostra icone de aprovacao | Sem mudanca |
+| Servidor local online | Times aparecem (funciona) | Sem mudanca |
+| Servidor offline, fallback Supabase | Query com FK falha, times nao aparecem | Join funciona, times aparecem |
+| Times genericos ("Time Casa") | Sem logo, mostra fallback | Sem mudanca (dados corretos, so nao tem logo) |
+
