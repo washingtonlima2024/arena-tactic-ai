@@ -48,7 +48,7 @@ export function MatchCenterHeader({
             onError={(e) => { (e.target as HTMLImageElement).style.display = 'none'; }}
           />
         ) : (
-          <span style={{ color }}>{name.charAt(0)}</span>
+          <span style={{ color }}>{(short || name.slice(0, 3)).toUpperCase()}</span>
         )}
       </div>
       <span className="font-bold text-sm md:text-base tracking-wide text-foreground uppercase">

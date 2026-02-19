@@ -59,7 +59,7 @@ export function TeamBadge({ team, size = 'md', className, showGlow = false }: Te
         boxShadow: showGlow ? `0 0 20px ${primaryColor}40` : undefined
       }}
     >
-      {shortName.slice(0, 2).toUpperCase()}
+      {shortName.slice(0, 3).toUpperCase()}
     </div>
   );
 }

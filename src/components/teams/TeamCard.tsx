@@ -32,7 +32,7 @@ export function TeamCard({ team, onEdit, onDelete }: TeamCardProps) {
                 className="h-12 w-12 object-contain"
               />
             ) : (
-              team.short_name?.slice(0, 2) || team.name.slice(0, 2)
+              (team.short_name || team.name.slice(0, 3)).toUpperCase()
             )}
           </div>
 
