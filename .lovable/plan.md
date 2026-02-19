@@ -1,86 +1,66 @@
 
 
-# Corrigir Tempo dos Eventos na Importacao Inicial
+# Corrigir Ordem dos Times: Primeiro Mencionado = Time da Casa
 
 ## Problema
 
-Na importacao inicial de um video de **jogo completo** (CASO 2 no Upload.tsx), o sistema envia a **mesma transcricao inteira** para ambas as analises (1T e 2T). O backend precisa detectar os "boundaries" (limites de cada tempo) para saber qual trecho da transcricao corresponde a cada metade.
+Quando a IA extrai os metadados da partida (endpoint `/api/extract-match-info`), ela tenta adivinhar qual time joga em "casa" e qual e "visitante". Isso causa inversoes frequentes (ex: "Brasil x Paraguai" vira "Paraguai x Brasil") porque a IA nao prioriza a ordem de aparicao no texto da narracao.
 
-O problema e que na primeira analise (1T), os boundaries sao detectados e salvos. Mas na segunda analise (2T), o backend recebe a transcricao completa novamente e tenta re-detectar boundaries, o que pode resultar em offsets incorretos porque o contexto de "game_start_second" nao foi calibrado.
+A regra correta e simples: **o primeiro time mencionado pelo narrador e sempre o time da casa**.
 
-Na **re-analise**, os boundaries ja estao persistidos no `analysis_job.result.boundaries`, entao o calculo de `calculate_game_minute` e preciso.
+## Causa Raiz
+
+1. O prompt da IA no backend (`server.py` linha 13946) diz "geralmente mencionado primeiro" mas nao e uma instrucao forte
+2. A IA pode inverter a ordem tentando adivinhar quem joga em casa com base em contexto (ex: torcida, estadio)
+3. A funcao `_extract_teams_by_regex` ja respeita a ordem correta (primeiro encontrado = home), mas a IA pode sobrescrever isso
 
 ## Solucao
 
-Adicionar uma etapa de **pre-deteccao de boundaries** antes da analise, e passar os boundaries detectados como parametro para ambas as chamadas de analise. Isso garante que ambas usem os mesmos limites temporais calibrados.
+### Arquivo: `video-processor/server.py`
 
-### Arquivo: `src/pages/Upload.tsx`
+**Mudanca 1 - Reforcar no prompt que ordem de aparicao = home/away (linha ~13929-13962):**
+- Alterar a regra no prompt para ser explicita: "O PRIMEIRO time mencionado na transcricao e SEMPRE o time da casa (home_team). O SEGUNDO time e SEMPRE o visitante (away_team). NAO tente adivinhar com base em estadio ou torcida."
+- Remover a linguagem ambigua "geralmente mencionado primeiro"
 
-**Mudanca 1 - Detectar boundaries antes da analise (CASO 2):**
-- Antes de iniciar a analise do 1T (linha ~2068), chamar o endpoint `apiClient.detectBoundaries()` passando a transcricao completa
-- Armazenar o resultado (game_start_second, half_time_second, etc.)
+**Mudanca 2 - Usar regex como autoridade final para a ordem dos times (apos linha ~13980):**
+- Apos receber a resposta da IA, verificar se os dois times retornados pela IA correspondem aos detectados por regex
+- Se o regex detectou times e a IA inverteu a ordem, **corrigir para a ordem do regex** (que respeita a ordem de aparicao no texto)
+- Isso garante que mesmo se a IA errar, a ordem do texto prevalece
 
-**Mudanca 2 - Passar boundaries para ambas as chamadas de startAnalysis:**
-- Adicionar campo `boundaries` nos parametros da chamada `startAnalysis` para 1T e 2T
-- O backend usara esses boundaries pre-calculados em vez de re-detectar
-
-**Mudanca 3 - Dividir a transcricao antes de enviar ao 2T:**
-- Usar o `half_time_second` detectado para cortar a transcricao pela metade
-- Enviar apenas a segunda metade da transcricao para a analise do 2T
-- Isso evita que o backend precise filtrar e reduz confusao na deteccao de eventos
-
-### Arquivo: `src/hooks/useAnalysisJob.ts`
-
-**Mudanca 4 - Suportar parametro `boundaries` no startAnalysis:**
-- Adicionar campo opcional `boundaries` nos params
-- Passa-lo para `apiClient.analyzeMatch()`
-
-### Arquivo: `src/lib/apiClient.ts`
-
-**Mudanca 5 - Adicionar metodo `detectBoundaries`:**
-- Novo metodo que chama `POST /api/matches/{id}/detect-boundaries` no servidor Python
-- Recebe transcricao, retorna boundaries (game_start_second, half_time_second, game_end_second)
-- Adicionar campo `boundaries` no payload de `analyzeMatch`
+**Mudanca 3 - Adicionar fallback de primeira mencao no texto bruto:**
+- Se a IA retornar home_team e away_team, verificar qual aparece primeiro no texto original
+- Se away_team aparece antes de home_team no texto, inverter os dois
 
 ## Detalhes Tecnicos
 
-### Fluxo Atual (com bug):
+### Fluxo corrigido:
 
 ```text
-Transcricao Completa
-    |
-    +--> Analise 1T (0-45) --> Backend detecta boundaries pela 1a vez --> OK
-    |
-    +--> Analise 2T (45-90) --> Backend re-detecta boundaries --> ERRADO (offsets diferentes)
-```
-
-### Fluxo Corrigido:
-
-```text
-Transcricao Completa
-    |
-    v
-Detectar Boundaries (1 chamada) --> Salva game_start, half_time, game_end
-    |
-    +--> Corta transcricao no half_time
-    |
-    +--> Analise 1T (0-45) + boundaries --> Backend usa boundaries fornecidos --> OK
-    |
-    +--> Analise 2T (45-90) + transcricao 2a metade + boundaries --> OK
+Transcricao: "Brasil e Paraguai se enfrentam..."
+                |
+                v
+    Regex: home="Brasil", away="Paraguai" (ordem do texto)
+                |
+                v
+    IA analisa com prompt reforçado
+                |
+                v
+    IA retorna: home_team="Paraguai", away_team="Brasil" (ERRO da IA)
+                |
+                v
+    Pos-processamento: Verifica ordem no texto original
+    "Brasil" aparece na posicao 0, "Paraguai" na posicao 11
+    Brasil vem PRIMEIRO -> home_team="Brasil", away_team="Paraguai" (CORRIGIDO)
 ```
 
 ### Arquivos afetados:
 
-| Arquivo | Tipo de Mudanca |
+| Arquivo | Mudanca |
 |---|---|
-| `src/pages/Upload.tsx` | Adicionar pre-deteccao de boundaries no CASO 2 |
-| `src/hooks/useAnalysisJob.ts` | Suportar campo `boundaries` no startAnalysis |
-| `src/lib/apiClient.ts` | Novo metodo detectBoundaries + campo boundaries em analyzeMatch |
+| `video-processor/server.py` | Reforcar prompt + pos-processamento de ordem |
 
 ### Impacto:
 
-- CASO 1 (video curto): Sem mudanca (nao precisa de boundaries)
-- CASO 2 (jogo completo dividido): Corrigido - boundaries pre-detectados
-- CASO 3 (tempos separados): Sem mudanca (cada video tem sua propria transcricao)
-- Re-analise: Sem mudanca (ja funciona corretamente)
-
+- Smart Import: times sempre na ordem correta da narracao
+- Importacao manual: sem mudanca (usuario escolhe os times)
+- Re-analise: sem mudanca (times ja definidos)
