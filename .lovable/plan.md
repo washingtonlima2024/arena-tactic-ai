@@ -1,63 +1,99 @@
 
-
-# Corrigir Tempo dos Eventos na Analise Inicial
+# Corrigir Sobreposicao do 2o Tempo sobre o 1o Tempo
 
 ## Problema
 
-Na re-analise, os tempos dos eventos ficam corretos, mas na importacao inicial nao. A causa raiz esta em duas diferencas entre os fluxos:
+O segundo tempo esta sobrepondo o primeiro na timeline. Os eventos do 2T aparecem com minutos 0-45 em vez de 45-90, causando sobreposicao total com o 1T.
 
-1. **Re-analise usa o SRT original salvo** (com timestamps precisos como `00:05:04,000 --> 00:05:07,000`), que o backend consegue interpretar diretamente para calcular `calculate_game_minute`.
+## Causa Raiz
 
-2. **Analise inicial (CASO 2 - jogo completo)** tenta pre-detectar boundaries via endpoint `detectBoundaries`, mas se esse endpoint nao existe no backend Python, o catch silencia o erro e a analise segue sem boundaries. Sem boundaries calibrados, o backend re-detecta internamente e pode calcular offsets incorretos.
+No pipeline async (`server.py` linhas 9529-9536), a analise do 2T chama:
 
-3. **Analise inicial (CASO 3 - tempos separados, 2T)** na linha 2251 do Upload.tsx, a chamada `startAnalysis` nao passa `halfType`, forçando o default via `gameStartMinute >= 45`.
+```text
+analyze_match_events(second_half_text, home_team, away_team, 45, 90,
+    video_game_start_second=second_half_offset,
+    boundaries=boundaries_2t)
+```
+
+O problema: quando o 2T vem de um video separado, o SRT desse video tem timestamps comecando de 0 (inicio do arquivo). A funcao `calculate_game_minute` recebe `boundaries_2t` que tem `game_start_second` proximo de 0 e **nao tem** `second_half_start_second` (porque e um video so do 2T). Resultado: mapeia timestamp 0 para minuto 0 em vez de minuto 45.
+
+Na re-analise isso funciona porque o endpoint `/api/analyze-match` tem a correcao na linha 4116:
+
+```text
+if half_type == 'second' and raw_minute < 45:
+    raw_minute = raw_minute + 45
+```
+
+Mas no pipeline async (linha 9551), a correcao equivalente existe:
+
+```text
+if raw_minute < 45:
+    raw_minute += 45
+```
+
+Porem, o problema real e mais sutil: os `boundaries_2t` para video separado do 2T sao tratados como se fossem um jogo completo comecando do zero, entao `calculate_game_minute` retorna minutos no range 0-45 corretamente para a duracao do video, mas sem o offset de +45.
 
 ## Solucao
 
-### Arquivo: `src/pages/Upload.tsx`
+### Arquivo: `video-processor/server.py`
 
-**Mudanca 1 - CASO 3: Adicionar `halfType: 'second'` explicitamente (linha ~2251):**
-- Na chamada de `startAnalysis` para o segundo tempo separado (CASO 3), adicionar `halfType: 'second'` explicitamente em vez de depender do default
+**Mudanca 1 - Forcar `game_start_minute=45` nos boundaries do 2T (async pipeline):**
 
-**Mudanca 2 - CASO 2: Melhorar fallback quando `detectBoundaries` falha:**
-- Quando o endpoint de boundaries falha, criar boundaries estimados baseados na duracao do video (ex: `game_start_second: 0`, `half_time_second: duracao/2`, `game_end_second: duracao`)
-- Isso garante que mesmo sem o endpoint, o backend recebe alguma referencia temporal
+Antes de passar `boundaries_2t` para `analyze_match_events`, injetar o campo `game_start_minute_offset` ou ajustar a chamada para que o retorno ja venha com minutos corretos. A forma mais segura e garantir que o `game_start_minute=45` seja respeitado dentro do `analyze_match_events` quando o `match_half == 'second'`.
 
-**Mudanca 3 - CASO 2: Log de diagnostico quando boundaries falham:**
-- Adicionar toast informativo quando boundaries nao sao detectados para o usuario saber que a precisao pode ser menor
+**Mudanca 2 - Corrigir `calculate_game_minute` para aceitar offset base:**
 
-### Arquivo: `src/hooks/useAnalysisJob.ts`
+Atualmente, `calculate_game_minute` recebe `game_start_minute` mas so o usa no fallback (1T). Para o 2T de video separado, precisa somar o `game_start_minute` ao resultado quando `second_half_start_second` nao existe nos boundaries.
 
-**Mudanca 4 - Passar `boundaries` tambem na re-analise (consistencia):**
-- Nenhuma mudanca necessaria - a re-analise ja funciona porque usa SRT com timestamps
+Concretamente, no `ai_services.py` funcao `calculate_game_minute` (linha 760-762):
 
-### Resultado Esperado
+```text
+# Evento no 1T (ou sem detecção de halves)
+elapsed = max(0, video_second - game_start)
+return game_start_minute + int(elapsed // 60), int(elapsed % 60)
+```
 
-Apos as mudancas:
-- CASO 2 (jogo completo): Se `detectBoundaries` falhar, usara boundaries estimados em vez de nenhum
-- CASO 3 (tempos separados): 2T passara `halfType: 'second'` explicitamente
-- Re-analise: Sem mudanca (ja funciona)
+Este trecho ja usa `game_start_minute` como offset. O problema e que quando o async pipeline chama `analyze_match_events(... game_start_minute=45 ...)`, esse valor **e** passado adiante, mas as funcoes internas de detecao por keyword (`detect_events_by_keywords`) e o pipeline Kakttus podem retornar minutos sem esse offset.
 
-## Detalhes Tecnicos
+**Mudanca 3 - Garantir offset no pipeline async (correcao principal):**
 
-### Diferencas entre os fluxos:
+No pipeline async (`server.py` linhas 9549-9552), a correcao `if raw_minute < 45: raw_minute += 45` so funciona se o evento retornado pelo `analyze_match_events` tem `minute < 45`. Mas se o `analyze_match_events` ja somou o offset internamente (via `game_start_minute=45`), entao a correcao no pipeline duplica o offset (45 vira 90).
 
-| Aspecto | Analise Inicial | Re-analise |
-|---|---|---|
-| Transcricao | Whisper recente (pode ser texto puro) | SRT salvo no storage (com timestamps) |
-| Boundaries | Tenta detectar via endpoint (pode falhar) | Nao envia (backend usa timestamps do SRT) |
-| halfType | CASO 3/2T: nao passa explicitamente | Sempre passa `halfType: half` |
+A solucao e **padronizar**: `analyze_match_events` deve SEMPRE retornar minutos no range solicitado (`game_start_minute` a `game_end_minute`). E o pipeline async NAO deve re-aplicar o offset.
 
-### Arquivos afetados:
+### Mudancas concretas:
 
 | Arquivo | Mudanca |
 |---|---|
-| `src/pages/Upload.tsx` | Adicionar halfType explicito no CASO 3 + fallback de boundaries no CASO 2 |
+| `video-processor/ai_services.py` | Na funcao `_enrich_events`, garantir que o `game_start_minute` seja somado quando os eventos detectados tem minuto < game_start_minute |
+| `video-processor/server.py` | No async pipeline (linhas 9549-9552), remover a correcao manual `if raw_minute < 45: raw_minute += 45` pois `analyze_match_events` ja deve retornar minutos corretos com game_start_minute=45. Substituir por validacao: se o minuto ja esta no range 45-90, nao alterar |
+
+### Fluxo corrigido:
+
+```text
+Video 2T separado (timestamps SRT: 0:00 a 50:00)
+    |
+    v
+analyze_match_events(text, ..., game_start_minute=45, game_end_minute=90)
+    |
+    v
+calculate_game_minute(video_second=300, boundaries_2t, game_start_minute=45)
+    -> elapsed = 300 - 0 = 300s = 5min
+    -> return 45 + 5 = minuto 50  (CORRETO)
+    |
+    v
+Pipeline async recebe: minute=50 (ja no range correto)
+    -> NAO aplica +45 (ja esta >= 45)
+    -> Salva minute=50, match_half='second_half'
+```
+
+### Regra do documento O_TEMPO_DO_JOGO.TXT respeitada:
+
+O conceito de `tempo_absoluto` do documento e implementado pelo campo `minute` que e global e crescente. O 1T ocupa minutos 0-45+, o 2T ocupa 45-90+. Nunca ha sobreposicao porque o 2T sempre inicia apos o termino do 1T na timeline unica.
 
 ### Impacto:
 
-- CASO 1 (video curto): Sem mudanca
-- CASO 2 (jogo completo): Boundaries estimados como fallback
-- CASO 3 (tempos separados): halfType explicito no 2T
-- Re-analise: Sem mudanca
-
+- Analise inicial: eventos do 2T terao minutos 45+ (sem sobreposicao)
+- Re-analise: sem mudanca (ja funciona)
+- Clips: `videoSecond` continua relativo ao video individual (para seek correto)
+- Timeline UI: agrupamento por fases (`matchPhases.ts`) funcionara corretamente
