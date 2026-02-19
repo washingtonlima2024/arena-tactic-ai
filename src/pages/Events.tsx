@@ -1922,6 +1922,11 @@ export default function Events() {
           awayScore={selectedMatch?.away_score ?? 0}
           showVignette={showVignette}
           onVignetteComplete={() => setShowVignette(false)}
+          aiComment={(playingEvent?.metadata as any)?.ai_comment ?? null}
+          onCommentGenerated={(eventId, comment) => {
+            // Update local event metadata so comment persists in this session
+            // (no need to refetch all events)
+          }}
         />
 
         {/* Re-analyze Half Dialog */}
