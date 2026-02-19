@@ -329,8 +329,8 @@ export function MatchCard({ match }: MatchCardProps) {
                     Ver Ao Vivo
                   </Link>
                 </Button>
-                <Button variant="arena-outline" size="sm" className="flex-1" asChild>
-                  <Link to={`/analysis?match=${match.id}`}>
+              <Button variant="arena-outline" size="sm" className="flex-1" asChild>
+                  <Link to={`/match-center?match=${match.id}`}>
                     <BarChart3 className="mr-1 h-4 w-4" />
                     Análise Parcial
                   </Link>
@@ -339,8 +339,8 @@ export function MatchCard({ match }: MatchCardProps) {
             )}
             {(match.status === 'completed' || match.status === 'analyzed') && (
               <>
-                <Button variant="arena-outline" size="sm" className="flex-1" asChild>
-                  <Link to={`/analysis?match=${match.id}`}>
+              <Button variant="arena-outline" size="sm" className="flex-1" asChild>
+                  <Link to={`/match-center?match=${match.id}`}>
                     <BarChart3 className="mr-1 h-4 w-4" />
                     Análise
                   </Link>

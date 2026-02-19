@@ -38,8 +38,10 @@ export default function MatchCenter() {
   const awayTeamName = awayTeam?.name || 'Time Visitante';
   const homeTeamShort = homeTeam?.short_name || homeTeamName.slice(0, 3).toUpperCase();
   const awayTeamShort = awayTeam?.short_name || awayTeamName.slice(0, 3).toUpperCase();
-  const homeTeamColor = homeTeam?.primary_color || '#10b981';
-  const awayTeamColor = awayTeam?.primary_color || '#3b82f6';
+  const rawHomeColor = homeTeam?.primary_color || '#10b981';
+  const rawAwayColor = awayTeam?.primary_color || '#3b82f6';
+  const homeTeamColor = rawHomeColor;
+  const awayTeamColor = rawAwayColor === rawHomeColor ? '#f59e0b' : rawAwayColor;
 
   // Dynamic stats
   const dynamicStats = useDynamicMatchStats(events, homeTeamName, awayTeamName);
