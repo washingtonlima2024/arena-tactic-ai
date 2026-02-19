@@ -9107,6 +9107,10 @@ def _process_match_pipeline(job_id: str, data: dict):
                 first_half_text = ''
                 second_half_text = ''
             
+            # Inicializar variáveis de SRT real do Whisper (serão preenchidas se Whisper rodar)
+            first_half_srt_real = ''
+            second_half_srt_real = ''
+            
             if has_preloaded_first or has_preloaded_second:
                 # Use pre-loaded transcriptions - SKIP WHISPER
                 print(f"[ASYNC-PIPELINE] 📝 Using pre-loaded transcriptions (skipping Whisper)")
@@ -9207,6 +9211,18 @@ def _process_match_pipeline(job_id: str, data: dict):
                 # Combine transcriptions from Whisper
                 first_half_text = '\n\n'.join([r['text'] for r in sorted(transcription_results['first'], key=lambda x: x['part'])])
                 second_half_text = '\n\n'.join([r['text'] for r in sorted(transcription_results['second'], key=lambda x: x['part'])])
+                
+                # 🆕 CORREÇÃO: Combinar SRT real do Whisper (com timestamps precisos)
+                # O Whisper retorna srtContent com timestamps reais de áudio, mas antes
+                # só usávamos r['text'] (plain text) e gerávamos SRT sintético com timestamps
+                # proporcionais. Isso causava boundaries incorretos na análise inicial.
+                first_half_srt_real = '\n\n'.join([r.get('srtContent', '') for r in sorted(transcription_results['first'], key=lambda x: x['part']) if r.get('srtContent', '').strip()])
+                second_half_srt_real = '\n\n'.join([r.get('srtContent', '') for r in sorted(transcription_results['second'], key=lambda x: x['part']) if r.get('srtContent', '').strip()])
+                
+                if first_half_srt_real:
+                    print(f"[ASYNC-PIPELINE] ✓ SRT real do Whisper disponível para 1T: {len(first_half_srt_real)} chars")
+                if second_half_srt_real:
+                    print(f"[ASYNC-PIPELINE] ✓ SRT real do Whisper disponível para 2T: {len(second_half_srt_real)} chars")
             
             if not first_half_text and not second_half_text:
                 raise Exception("Nenhuma transcrição foi gerada ou fornecida")
@@ -9224,16 +9240,34 @@ def _process_match_pipeline(job_id: str, data: dict):
             # para nao ser reutilizada como transcricao completa em reprocessamentos
             is_from_smart_import = has_preloaded_first or has_preloaded_second
             
+            # 🆕 PRIORIDADE: Salvar SRT REAL do Whisper (com timestamps de áudio)
+            # Isso garante que boundary detection use timestamps precisos,
+            # igualando o comportamento da re-análise
+            whisper_srt_saved = {'first': False, 'second': False}
+            
+            if first_half_srt_real and '-->' in first_half_srt_real:
+                srt_path = get_subfolder_path(match_id, 'srt') / 'first_half.srt'
+                with open(srt_path, 'w', encoding='utf-8') as f:
+                    f.write(first_half_srt_real)
+                whisper_srt_saved['first'] = True
+                print(f"[ASYNC-PIPELINE] ✓ SRT REAL do Whisper salvo (1T): {srt_path} ({len(first_half_srt_real)} chars)")
+            
+            if second_half_srt_real and '-->' in second_half_srt_real:
+                srt_path = get_subfolder_path(match_id, 'srt') / 'second_half.srt'
+                with open(srt_path, 'w', encoding='utf-8') as f:
+                    f.write(second_half_srt_real)
+                whisper_srt_saved['second'] = True
+                print(f"[ASYNC-PIPELINE] ✓ SRT REAL do Whisper salvo (2T): {srt_path} ({len(second_half_srt_real)} chars)")
+            
             if first_half_text:
-                # Se é formato SRT, salvar na pasta srt com extensão correta
-                if is_srt_format(first_half_text):
+                # Se é formato SRT e não salvamos SRT real do Whisper, salvar o texto como SRT
+                if is_srt_format(first_half_text) and not whisper_srt_saved['first']:
                     srt_path = get_subfolder_path(match_id, 'srt') / 'first_half.srt'
                     with open(srt_path, 'w', encoding='utf-8') as f:
                         f.write(first_half_text)
-                    print(f"[ASYNC-PIPELINE] ✓ SRT 1º tempo salvo: {srt_path}")
+                    print(f"[ASYNC-PIPELINE] ✓ SRT 1º tempo salvo (do texto): {srt_path}")
                 
                 # Salvar como TXT para análise
-                # Se veio do Smart Import (parcial), salvar com sufixo _partial
                 if is_from_smart_import and len(first_half_text) < 30000:
                     txt_path = get_subfolder_path(match_id, 'texts') / 'first_half_transcription_partial.txt'
                     print(f"[ASYNC-PIPELINE] ⚠ Transcricao do Smart Import (parcial): salvando como _partial.txt ({len(first_half_text)} chars)")
@@ -9243,7 +9277,7 @@ def _process_match_pipeline(job_id: str, data: dict):
                     f.write(first_half_text)
                 print(f"[ASYNC-PIPELINE] ✓ Transcrição 1º tempo salva: {txt_path}")
                 
-                # Diagnostico: chars por segundo — detecta transcricoes parciais
+                # Diagnostico: chars por segundo
                 first_dur = video_durations.get('first', 0)
                 if first_dur > 0:
                     chars_per_sec = len(first_half_text) / first_dur
@@ -9254,12 +9288,12 @@ def _process_match_pipeline(job_id: str, data: dict):
                               f"Esperado ~{int(first_dur * 8)} chars, recebido {len(first_half_text)}")
             
             if second_half_text:
-                # Se é formato SRT, salvar na pasta srt com extensão correta
-                if is_srt_format(second_half_text):
+                # Se é formato SRT e não salvamos SRT real do Whisper, salvar
+                if is_srt_format(second_half_text) and not whisper_srt_saved['second']:
                     srt_path = get_subfolder_path(match_id, 'srt') / 'second_half.srt'
                     with open(srt_path, 'w', encoding='utf-8') as f:
                         f.write(second_half_text)
-                    print(f"[ASYNC-PIPELINE] ✓ SRT 2º tempo salvo: {srt_path}")
+                    print(f"[ASYNC-PIPELINE] ✓ SRT 2º tempo salvo (do texto): {srt_path}")
                 
                 # Também salvar como TXT para análise
                 txt_path = get_subfolder_path(match_id, 'texts') / 'second_half_transcription.txt'
@@ -9269,8 +9303,9 @@ def _process_match_pipeline(job_id: str, data: dict):
             
             # ========== PHASE 3.5: SYNTHETIC SRT GENERATION ==========
             # Generate SRT files when transcription is plain text (not SRT format)
+            # 🆕 CORREÇÃO: NÃO sobrescrever SRT real do Whisper com SRT sintético
             for half_label, text_content in [('first', first_half_text), ('second', second_half_text)]:
-                if text_content and not is_srt_format(text_content):
+                if text_content and not is_srt_format(text_content) and not whisper_srt_saved.get(half_label, False):
                     half_duration = video_durations.get(half_label, 2700)
                     if half_duration <= 0:
                         half_duration = 2700  # Default 45 min
