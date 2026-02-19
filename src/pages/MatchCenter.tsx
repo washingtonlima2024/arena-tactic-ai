@@ -41,7 +41,7 @@ export default function MatchCenter() {
   const rawHomeColor = homeTeam?.primary_color || '#10b981';
   const rawAwayColor = awayTeam?.primary_color || '#f59e0b';
 
-  // Garante legibilidade: evita branco e cores muito claras em fundo escuro
+  // Garante legibilidade: evita branco, preto e cores muito claras/escuras em fundo escuro
   const ensureChartVisible = (color: string, fallback: string): string => {
     if (!color) return fallback;
     const hex = color.replace('#', '');
@@ -50,8 +50,9 @@ export default function MatchCenter() {
     const g = parseInt(hex.slice(2, 4), 16) / 255;
     const b = parseInt(hex.slice(4, 6), 16) / 255;
     const luminance = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    // Too bright (white/near-white) → use fallback
-    return luminance > 0.7 ? fallback : color;
+    // Too bright (white/near-white) OR too dark (black/near-black) → use fallback
+    if (luminance > 0.7 || luminance < 0.08) return fallback;
+    return color;
   };
 
   const homeTeamColor = ensureChartVisible(rawHomeColor, '#10b981');
