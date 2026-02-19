@@ -2066,18 +2066,78 @@ export default function VideoUpload() {
         // Dividir em 2 análises melhora significativamente a detecção de gols
         console.log('Iniciando análise da PARTIDA COMPLETA em 2 fases...');
         
+        // PRÉ-DETECÇÃO DE BOUNDARIES
+        // Detectar limites temporais (início, intervalo, fim) ANTES da análise
+        // para garantir que ambos os tempos usem os mesmos offsets calibrados
+        let detectedBoundaries: {
+          game_start_second: number;
+          half_time_second: number;
+          game_end_second: number;
+          first_half_duration?: number;
+          second_half_start?: number;
+        } | undefined;
+        
+        try {
+          setProcessingMessage('Detectando limites temporais da partida...');
+          console.log('[Boundaries] Detectando boundaries antes da análise...');
+          detectedBoundaries = await apiClient.detectBoundaries({
+            matchId,
+            transcription: firstHalfTranscription,
+          });
+          console.log('[Boundaries] Resultado:', detectedBoundaries);
+        } catch (boundaryError) {
+          console.warn('[Boundaries] Falha na pré-detecção (continuando sem boundaries):', boundaryError);
+          // Continuar sem boundaries - o backend fará a detecção internamente como antes
+        }
+        
+        // DIVIDIR TRANSCRIÇÃO NO HALF_TIME
+        // Se temos boundaries, enviar apenas a parte relevante para cada tempo
+        let firstHalfText = firstHalfTranscription;
+        let secondHalfText = firstHalfTranscription; // fallback: transcrição completa
+        
+        if (detectedBoundaries?.half_time_second) {
+          const halfTimeSecond = detectedBoundaries.half_time_second;
+          console.log(`[Boundaries] Dividindo transcrição no segundo ${halfTimeSecond}`);
+          
+          // Tentar dividir por timestamps no formato [HH:MM:SS] ou similar
+          const lines = firstHalfTranscription.split('\n');
+          let splitIndex = lines.length;
+          
+          for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            // Procurar timestamps no formato comum de SRT/transcrição
+            const timeMatch = line.match(/(\d{1,2}):(\d{2}):(\d{2})/);
+            if (timeMatch) {
+              const lineSecond = parseInt(timeMatch[1]) * 3600 + parseInt(timeMatch[2]) * 60 + parseInt(timeMatch[3]);
+              if (lineSecond >= halfTimeSecond) {
+                splitIndex = i;
+                break;
+              }
+            }
+          }
+          
+          if (splitIndex < lines.length) {
+            firstHalfText = lines.slice(0, splitIndex).join('\n');
+            secondHalfText = lines.slice(splitIndex).join('\n');
+            console.log(`[Boundaries] Transcrição dividida: 1T=${firstHalfText.length} chars, 2T=${secondHalfText.length} chars`);
+          } else {
+            console.log('[Boundaries] Não foi possível dividir por timestamp, enviando completa para ambos');
+          }
+        }
+        
         // FASE 1: Primeiro Tempo (0-45 min)
         setProcessingMessage('Detectando eventos do 1º tempo (0-45 min)...');
         
         try {
           const result1 = await startAnalysis({
             matchId,
-            transcription: firstHalfTranscription,
+            transcription: firstHalfText,
             homeTeam: homeTeamName,
             awayTeam: awayTeamName,
             gameStartMinute: 0,
             gameEndMinute: 45,
             halfType: 'first',
+            boundaries: detectedBoundaries,
           });
           
           totalEventsDetected += result1.eventsDetected || 0;
@@ -2099,12 +2159,13 @@ export default function VideoUpload() {
         try {
           const result2 = await startAnalysis({
             matchId,
-            transcription: firstHalfTranscription,
+            transcription: secondHalfText,
             homeTeam: homeTeamName,
             awayTeam: awayTeamName,
             gameStartMinute: 45,
             gameEndMinute: 90,
             halfType: 'second',
+            boundaries: detectedBoundaries,
           });
           
           totalEventsDetected += result2.eventsDetected || 0;

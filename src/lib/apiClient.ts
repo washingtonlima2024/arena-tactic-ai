@@ -690,6 +690,24 @@ export const apiClient = {
   upsertSetting: (setting: { setting_key: string; setting_value: string }) => 
     apiRequest<any>('/api/settings', { method: 'POST', body: JSON.stringify(setting) }),
 
+  // ============== Boundary Detection ==============
+  detectBoundaries: async (data: {
+    matchId: string;
+    transcription: string;
+  }): Promise<{
+    game_start_second: number;
+    half_time_second: number;
+    game_end_second: number;
+    first_half_duration: number;
+    second_half_start: number;
+  }> => {
+    await ensureServerAvailable();
+    return apiRequest<any>(`/api/matches/${data.matchId}/detect-boundaries`, {
+      method: 'POST',
+      body: JSON.stringify({ transcription: data.transcription }),
+    });
+  },
+
   // ============== AI Services ==============
   analyzeMatch: async (data: { 
     matchId: string; 
@@ -702,7 +720,14 @@ export const apiClient = {
     autoClip?: boolean;
     includeSubtitles?: boolean;
     skipValidation?: boolean;
-    analysisMode?: 'text' | 'vision' | 'hybrid';  // NOVO: modo de análise
+    analysisMode?: 'text' | 'vision' | 'hybrid';
+    boundaries?: {
+      game_start_second: number;
+      half_time_second: number;
+      game_end_second: number;
+      first_half_duration?: number;
+      second_half_start?: number;
+    };
     // Match data for sync when using Edge Function fallback
     matchData?: {
       home_team?: { id: string; name: string; short_name?: string; logo_url?: string; primary_color?: string; secondary_color?: string };
@@ -715,7 +740,7 @@ export const apiClient = {
       status?: string;
     };
   }) => {
-    const body = {
+    const body: Record<string, any> = {
       matchId: data.matchId,
       transcription: data.transcription,
       homeTeam: data.homeTeam,
@@ -726,8 +751,13 @@ export const apiClient = {
       autoClip: data.autoClip ?? true,
       includeSubtitles: data.includeSubtitles ?? true,
       skipValidation: data.skipValidation ?? false,
-      analysisMode: data.analysisMode ?? 'text',  // NOVO
+      analysisMode: data.analysisMode ?? 'text',
     };
+
+    // Pass pre-detected boundaries if available
+    if (data.boundaries) {
+      body.boundaries = data.boundaries;
+    }
 
     // MODO 100% LOCAL - Sem fallback para nuvem
     const localServerAvailable = await isLocalServerAvailable();
