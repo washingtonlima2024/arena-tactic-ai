@@ -94,6 +94,8 @@ export default function Media() {
     eventRange?: [number, number];
   }>({ detected: false });
   const [isRecalculating, setIsRecalculating] = useState(false);
+  const [isGeneratingCovers, setIsGeneratingCovers] = useState(false);
+  const [coverProgress, setCoverProgress] = useState({ done: 0, total: 0 });
 
   const queryClient = useQueryClient();
   
@@ -192,6 +194,51 @@ export default function Media() {
   const hasRecordingInProgress = isMatchStillRecording && matchVideos?.some(v => v.status === 'recording' && (!v.file_url || v.file_url.length === 0));
 
   // Generate clips from events - Use eventMs from metadata as primary timestamp source
+
+  // Bulk generate covers for all clips without thumbnails
+  const handleGenerateAllCovers = async () => {
+    if (!matchVideo?.file_url || !matchId) return;
+    const videoUrl = normalizeStorageUrl(matchVideo.file_url);
+    if (!videoUrl) return;
+
+    const clipsWithoutCover = clips.filter(c => !thumbnails[c.id]);
+    if (clipsWithoutCover.length === 0) {
+      toast({ title: 'Todas as capas já existem!', description: 'Todos os clips já possuem capa.' });
+      return;
+    }
+
+    setIsGeneratingCovers(true);
+    setCoverProgress({ done: 0, total: clipsWithoutCover.length });
+    let done = 0;
+
+    for (const clip of clipsWithoutCover) {
+      // Use clip_url first (faster, no CORS issues), then match video
+      const sourceUrl = clip.clipUrl || videoUrl;
+      const timestamp = clip.clipUrl
+        ? 3 // ~middle of a ~6-30s clip
+        : Math.max(0, (clip.videoSecond ?? clip.totalSeconds ?? (clip.minute * 60)) - 2);
+
+      try {
+        await extractFrameFromVideo({
+          eventId: clip.id,
+          eventType: clip.type,
+          videoUrl: sourceUrl,
+          timestamp,
+          matchId,
+        });
+      } catch (e) {
+        console.warn(`[Covers] Failed for clip ${clip.id}:`, e);
+      }
+
+      done++;
+      setCoverProgress({ done, total: clipsWithoutCover.length });
+      // Small delay to avoid overwhelming the browser
+      await new Promise(r => setTimeout(r, 300));
+    }
+
+    setIsGeneratingCovers(false);
+    toast({ title: `${done} capas geradas!`, description: 'Capas extraídas do vídeo com sucesso.' });
+  };
   const clips = events?.map((event) => {
     const metadata = (event as any).metadata as { eventMs?: number; videoSecond?: number; source?: string; customTrim?: { startOffset: number; endOffset: number } } | null;
     const eventMs = metadata?.eventMs; // Primary: milliseconds from AI analysis
@@ -855,7 +902,47 @@ export default function Media() {
             {/* Info card about clips */}
             {matchVideo && clips.length > 0 && (
               <Card variant="glass" className="border-primary/30 bg-primary/5">
-                <CardContent className="py-4">
+                <CardContent className="p-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-foreground">
+                        {clips.some(c => c.clipUrl) ? `${clips.filter(c => c.clipUrl).length} clips extraídos` : 'Clips de Eventos'}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {clips.filter(c => !thumbnails[c.id]).length > 0
+                          ? `${clips.filter(c => !thumbnails[c.id]).length} clips sem capa — clique para gerar automaticamente.`
+                          : 'Todos os clips possuem capa.'}
+                      </p>
+                    </div>
+                    <div className="shrink-0">
+                      {isGeneratingCovers ? (
+                        <div className="flex flex-col gap-1.5 min-w-[180px]">
+                          <div className="flex items-center gap-2 text-sm text-primary">
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            <span>Gerando capas... {coverProgress.done}/{coverProgress.total}</span>
+                          </div>
+                          <Progress value={coverProgress.total > 0 ? (coverProgress.done / coverProgress.total) * 100 : 0} className="h-1.5" />
+                        </div>
+                      ) : (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="gap-1.5 border-primary/40 text-primary hover:bg-primary/10"
+                          onClick={handleGenerateAllCovers}
+                          disabled={clips.filter(c => !thumbnails[c.id]).length === 0}
+                        >
+                          <Film className="h-3.5 w-3.5" />
+                          {clips.filter(c => !thumbnails[c.id]).length === 0
+                            ? 'Capas OK ✓'
+                            : `Gerar ${clips.filter(c => !thumbnails[c.id]).length} capas`}
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
                   <div className="flex items-center gap-4">
                     <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/20">
                       <Scissors className="h-5 w-5 text-primary" />
