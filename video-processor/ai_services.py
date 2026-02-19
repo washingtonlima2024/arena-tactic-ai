@@ -6053,7 +6053,14 @@ def _enrich_events(
             event_type = 'unknown'
         
         event['event_type'] = event_type
-        event['minute'] = max(game_start_minute, min(game_end_minute, event.get('minute', game_start_minute)))
+        # ═══ CORREÇÃO DE OFFSET DO 2º TEMPO ═══
+        # Se game_start_minute=45 (2T) e a IA retornou minuto no range 0-45 (relativo ao SRT),
+        # precisamos somar o offset para mapear ao tempo absoluto do jogo (45-90).
+        raw_minute = event.get('minute', game_start_minute)
+        if raw_minute < game_start_minute and game_start_minute > 0:
+            raw_minute = raw_minute + game_start_minute
+            print(f"[Enrich] 🔄 Offset 2T aplicado: {event.get('minute', 0)}' → {raw_minute}' (game_start_minute={game_start_minute})")
+        event['minute'] = max(game_start_minute, min(game_end_minute, raw_minute))
         event['second'] = event.get('second', 0)
         event['team'] = event.get('team', 'home')
         event['description'] = (event.get('description') or '')[:200]

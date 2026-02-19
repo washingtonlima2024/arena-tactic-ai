@@ -9547,8 +9547,12 @@ def _process_match_pipeline(job_id: str, data: dict):
                         segment_end = 90
                         
                         for event_data in events:
+                            # analyze_match_events já retorna minutos no range correto (45-90)
+                            # via _enrich_events com game_start_minute=45
+                            # NÃO re-aplicar offset manualmente para evitar duplicação (45→90)
                             raw_minute = event_data.get('minute', 45)
                             if raw_minute < 45:
+                                print(f"[ASYNC-PIPELINE] ⚠ Evento 2T com minuto {raw_minute} < 45, corrigindo para {raw_minute + 45}")
                                 raw_minute += 45
                             evt_second = event_data.get('second') or 0
                             
