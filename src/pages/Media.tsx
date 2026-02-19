@@ -212,11 +212,22 @@ export default function Media() {
     let done = 0;
 
     for (const clip of clipsWithoutCover) {
-      // Use clip_url first (faster, no CORS issues), then match video
-      const sourceUrl = clip.clipUrl || videoUrl;
-      const timestamp = clip.clipUrl
-        ? 3 // ~middle of a ~6-30s clip
-        : Math.max(0, (clip.videoSecond ?? clip.totalSeconds ?? (clip.minute * 60)) - 2);
+      // Use clip_url first (faster, no CORS issues), then the event's specific video
+      const eventVideoUrl = clip.eventVideo?.file_url 
+        ? normalizeStorageUrl(clip.eventVideo.file_url) || videoUrl
+        : videoUrl;
+      const sourceUrl = clip.clipUrl || eventVideoUrl;
+
+      let timestamp: number;
+      if (clip.clipUrl) {
+        // For extracted clips, seek to ~3s (middle of short clip)
+        timestamp = 3;
+      } else {
+        // For full/half videos, subtract video start_minute to get relative position
+        const videoStartSec = (clip.eventVideo?.start_minute ?? 0) * 60;
+        const absoluteSec = clip.totalSeconds ?? (clip.minute * 60 + (clip.second ?? 0));
+        timestamp = Math.max(0, absoluteSec - videoStartSec - 2);
+      }
 
       try {
         await extractFrameFromVideo({
