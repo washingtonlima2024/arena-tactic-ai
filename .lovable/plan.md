@@ -1,102 +1,99 @@
 
+# Problema: 2º Tempo Sempre Mostra 45 Minutos de Duração
 
-# Corrigir Falsos Gols no 2o Tempo e Desbloquear Pipeline de Importacao
+## Causa Raiz
 
-## Problema
+O problema ocorre em **duas camadas independentes**, ambas usando valores hardcoded de 45 minutos ao invés da duração real do vídeo.
 
-Ao importar o segundo tempo de Brasil vs Argentina, dois problemas ocorrem:
+### Camada 1 — Backend Python (server.py)
 
-1. **Pipeline bloqueado**: O frontend (Upload.tsx linha 1724-1734) aborta silenciosamente se nao existe um arquivo SRT pre-carregado para o 2o tempo, impedindo que o servidor faca a transcricao automatica via Whisper.
-
-2. **Gols falsos no 2o tempo**: A narracao do 2o tempo naturalmente faz referencias a gols do 1o tempo ("Coutinho abriu o placar", "com o gol do Neymar o Brasil ja vencia"). A IA interpreta essas mencoes como gols novos, gerando eventos duplicados. Resultado: Brasil 7x2 em vez de 3x0.
-
-## Evidencia no Banco
-
-Match `9d0f3f27`: 2 gols do 1o tempo (Coutinho min 35, Neymar min 45) + 2 gols duplicados no 2o tempo (Coutinho e Neymar ambos min 45 com match_half=second) = placar inflado.
-
-Match `677801c3`: So tem 2 eventos (ambos second half), mas as descricoes sao identicas aos gols do 1o tempo.
-
-## Solucao
-
-### Mudanca 1 - Remover bloqueio de SRT no pipeline async (Upload.tsx)
-
-**Arquivo**: `src/pages/Upload.tsx` (linhas 1724-1734)
-
-Remover o `return` que aborta o pipeline. O servidor Python transcreve automaticamente via Whisper quando nao recebe SRT.
+Em 3 pontos diferentes do `server.py` (linhas 1278-1279, 1370-1371 e 1445-1446), o registro de vídeo é criado com `end_minute` **fixo em 45 para primeiro tempo e 90 para segundo tempo**, sem levar em conta a duração real detectada pelo `ffprobe`:
 
 ```text
-// ANTES: aborta completamente
-if (secondHalfSegments.length > 0 && !secondHalfTranscription) {
-  setProcessingStage('idle');
-  return;  // BLOQUEIA
-}
-
-// DEPOIS: apenas log informativo
-if (secondHalfSegments.length > 0 && !secondHalfTranscription) {
-  console.log('[ASYNC] 2o tempo sem SRT pre-carregado, servidor transcreverá via Whisper');
-}
+# PROBLEMA: end_minute hardcoded — ignora duração real do vídeo
+start_minute=0 if video_type in ['first_half', 'full'] else 45,
+end_minute=45 if video_type == 'first_half' else 90  ← sempre 45 ou 90
 ```
 
-### Mudanca 2 - Pipeline sequencial tenta Whisper em vez de pular (Upload.tsx)
+O `duration_seconds` é detectado corretamente via ffprobe logo acima, mas não é usado para calcular o `end_minute` correto.
 
-**Arquivo**: `src/pages/Upload.tsx` (linhas 2248-2261)
+### Camada 2 — Frontend (Upload.tsx)
 
-Em vez de mostrar toast e ignorar o 2o tempo, tentar transcrever automaticamente antes de analisar.
-
-### Mudanca 3 - Deduplicar gols entre tempos no backend (ai_services.py)
-
-**Arquivo**: `video-processor/ai_services.py` (funcao `_enrich_events`)
-
-Adicionar deduplicacao cross-half: antes de salvar eventos do 2o tempo, consultar eventos existentes do 1o tempo no banco. Se um gol do 2o tempo tiver descricao muito similar (>80% de similaridade) a um gol ja existente do 1o tempo, descartar como falso positivo.
+Quando o usuário faz upload de um arquivo pelo frontend, o `endMinute` do segmento é fixado em 45 ou 90 no momento da criação do segmento (linhas 947-950). O código detecta a duração real via `detectVideoDuration()` de forma assíncrona (linha 483), mas **nunca atualiza `endMinute`** com base na duração detectada — só atualiza `durationSeconds`.
 
 ```text
-# Na funcao _enrich_events ou no endpoint de analise:
-if half == 'second' and match_id:
-    # Buscar gols existentes do 1o tempo
-    existing_goals = get_first_half_goals(match_id)
-    
-    # Filtrar gols do 2o tempo que sao duplicatas de descricoes do 1T
-    new_events = []
-    for event in events:
-        if event['event_type'] == 'goal':
-            is_duplicate = any(
-                similarity(event['description'], eg['description']) > 0.7
-                for eg in existing_goals
-            )
-            if is_duplicate:
-                print(f"[Enrich] Gol falso removido (duplicata do 1T): {event['description']}")
-                continue
-        new_events.append(event)
+// O durationSeconds é atualizado...
+s.id === segmentId ? { ...s, durationSeconds: duration || null } : s
+// ...mas endMinute permanece em 45 ou 90 fixos
 ```
 
-### Mudanca 4 - Melhorar prompt do 2o tempo com contexto do 1T (ai_services.py)
+### Impacto
 
-**Arquivo**: `video-processor/ai_services.py` (funcao `analyze_match_events`)
+- Badge de duração mostra "45min" mesmo para vídeos de 48 ou 50 minutos
+- O `end_minute` salvo no banco é sempre 45 ou 90, não reflete acréscimos
+- A análise de IA usa `gameEndMinute` baseado nesse valor, potencialmente truncando eventos dos acréscimos
 
-Quando analisar o 2o tempo, incluir no prompt um resumo dos gols ja detectados no 1o tempo, instruindo a IA a **nao** re-detectar esses gols:
+## Solução
+
+### Mudança 1 — Backend: Calcular end_minute pela duração real (server.py)
+
+Em todos os 3 pontos onde o Video é criado, substituir o `end_minute` hardcoded por um cálculo baseado na duração real do vídeo detectada pelo ffprobe:
 
 ```text
-# Adicionar ao prompt de analise do 2T:
-"IMPORTANTE: Os seguintes gols ja foram detectados no 1o tempo e NAO devem ser 
-contados novamente, mesmo que o narrador os mencione como referencia:
-- Min 24': Gol de Coutinho (Brasil)
-- Min 45': Gol de Neymar (Brasil)
-Detecte APENAS gols NOVOS que acontecem durante o 2o tempo."
+# ANTES:
+start_minute=0 if video_type in ['first_half', 'full'] else 45,
+end_minute=45 if video_type == 'first_half' else 90
+
+# DEPOIS:
+start_minute_val = 0 if video_type in ['first_half', 'full'] else 45
+duration_minutes = round(duration_seconds / 60) if duration_seconds else None
+end_minute_val = (start_minute_val + duration_minutes) if duration_minutes else (45 if video_type != 'second_half' else 90)
+start_minute=start_minute_val,
+end_minute=end_minute_val
+```
+
+Por exemplo: um segundo tempo de 47 minutos (com acréscimos) terá `start_minute=45, end_minute=92`.
+
+### Mudança 2 — Frontend: Atualizar endMinute após detectar duração (Upload.tsx)
+
+No callback da detecção de duração (linha 483), além de atualizar `durationSeconds`, também recalcular e atualizar `endMinute`:
+
+```text
+// ANTES:
+detectVideoDuration(file).then(duration => {
+  setSegments(prev => 
+    prev.map(s => 
+      s.id === segmentId ? { ...s, durationSeconds: duration || null } : s
+    )
+  );
+});
+
+// DEPOIS:
+detectVideoDuration(file).then(duration => {
+  if (!duration) return;
+  setSegments(prev => 
+    prev.map(s => {
+      if (s.id !== segmentId) return s;
+      const durationMinutes = Math.round(duration / 60);
+      const newEndMinute = (s.startMinute ?? 0) + durationMinutes;
+      return { ...s, durationSeconds: duration, endMinute: newEndMinute };
+    })
+  );
+});
 ```
 
 ## Arquivos Afetados
 
-| Arquivo | Mudanca |
-|---|---|
-| src/pages/Upload.tsx | Remover bloqueio de SRT (linhas 1724-1734) e ajustar pipeline sequencial (linhas 2248-2261) |
-| video-processor/ai_services.py | Deduplicacao cross-half + prompt com contexto do 1T |
-
-## Resultado Esperado
-
-| Cenario | Antes | Depois |
+| Arquivo | Linhas | Mudança |
 |---|---|---|
-| Importar 2o tempo sem SRT | Aborta silenciosamente | Servidor transcreve via Whisper |
-| Gols mencionados do 1T na narracao do 2T | Re-detectados como gols novos (falsos) | Filtrados por deduplicacao e prompt contextual |
-| Placar Brasil vs Argentina | 7x2 (inflado) | 3x0 (correto: Coutinho, Neymar 1T + Paulinho 2T) |
-| Pipeline sequencial sem SRT | Pula analise do 2T | Tenta Whisper automaticamente |
+| `video-processor/server.py` | 1278-1279, 1370-1371, 1445-1446 | Calcular end_minute pela duração real do vídeo |
+| `src/pages/Upload.tsx` | ~483-488 | Atualizar endMinute ao detectar duração do arquivo |
 
+## Resultado
+
+| Cenário | Antes | Depois |
+|---|---|---|
+| 2º tempo com 47 min (acréscimos) | end_minute=90, badge "45min" | end_minute=92, badge "47min" |
+| 1º tempo com 48 min | end_minute=45, badge "48min" mas salva errado | end_minute=48, correto |
+| Badge de duração na UI | Sempre 45min para 2T | Duração real detectada |
+| Análise de IA | Trunca acréscimos | Inclui eventos dos acréscimos corretamente |
