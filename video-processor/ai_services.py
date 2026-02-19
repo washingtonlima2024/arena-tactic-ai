@@ -2995,7 +2995,7 @@ except Exception as e:
 
 # Enable by default if library is installed, or via env var
 LOCAL_WHISPER_ENABLED = _FASTER_WHISPER_AVAILABLE or os.environ.get('LOCAL_WHISPER_ENABLED', 'false').lower() == 'true'
-LOCAL_WHISPER_MODEL = os.environ.get('LOCAL_WHISPER_MODEL', 'base')
+LOCAL_WHISPER_MODEL = os.environ.get('LOCAL_WHISPER_MODEL', 'medium')
 
 LOVABLE_API_URL = 'https://ai.gateway.lovable.dev/v1/chat/completions'
 OPENAI_API_URL = 'https://api.openai.com/v1'
@@ -3948,8 +3948,16 @@ def _transcribe_single_file(audio_path: str, match_id: str = None) -> Dict[str, 
         audio_path, 
         language="pt",
         beam_size=5,
-        vad_filter=True,  # Voice Activity Detection for better accuracy
-        vad_parameters=dict(min_silence_duration_ms=500)
+        best_of=5,
+        patience=1.5,
+        word_timestamps=True,
+        condition_on_previous_text=True,
+        vad_filter=True,
+        vad_parameters=dict(
+            min_silence_duration_ms=300,
+            speech_pad_ms=200,
+            threshold=0.4
+        )
     )
     
     print(f"[LocalWhisper] Idioma detectado: {info.language} (probabilidade: {info.language_probability:.2%})")
@@ -4053,8 +4061,16 @@ def _transcribe_chunked(
                     chunk_path,
                     language="pt",
                     beam_size=5,
+                    best_of=5,
+                    patience=1.5,
+                    word_timestamps=True,
+                    condition_on_previous_text=True,
                     vad_filter=True,
-                    vad_parameters=dict(min_silence_duration_ms=500)
+                    vad_parameters=dict(
+                        min_silence_duration_ms=300,
+                        speech_pad_ms=200,
+                        threshold=0.4
+                    )
                 )
                 
                 chunk_text = []
@@ -7886,6 +7902,16 @@ def _transcribe_gemini_chunks(audio_path: str, tmpdir: str, match_id: str = None
             continue
         
         # Transcribe chunk with Gemini - WITH RETRY AND BACKOFF
+        # Get real chunk duration for accurate offset
+        real_chunk_duration = chunk_duration
+        try:
+            probe_cmd2 = ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+                         '-of', 'default=noprint_wrappers=1:nokey=1', chunk_path]
+            probe_r2 = subprocess.run(probe_cmd2, capture_output=True, text=True, timeout=15)
+            real_chunk_duration = float(probe_r2.stdout.strip())
+        except:
+            pass
+        
         chunk_transcribed = False
         for retry_attempt in range(CHUNK_MAX_RETRIES):
             try:
@@ -7895,7 +7921,7 @@ def _transcribe_gemini_chunks(audio_path: str, tmpdir: str, match_id: str = None
                     import time
                     time.sleep(delay)
                 
-                chunk_result = _transcribe_with_gemini(chunk_path, match_id)
+                chunk_result = _transcribe_with_gemini(chunk_path, match_id, real_chunk_duration)
                 
                 if chunk_result.get('success') and chunk_result.get('text'):
                     chunk_text = chunk_result['text']
@@ -7903,24 +7929,57 @@ def _transcribe_gemini_chunks(audio_path: str, tmpdir: str, match_id: str = None
                     successful_chunks += 1
                     chunk_transcribed = True
                     
-                    # Add SRT entries with adjusted timestamps - split by words, not paragraphs
-                    all_words = chunk_text.split()
-                    segment_size = 10  # Words per subtitle line
-                    segments_in_chunk = max(1, len(all_words) // segment_size)
-                    time_per_segment = chunk_duration / segments_in_chunk
+                    # If Gemini returned real timestamps, offset them; otherwise use synthetic
+                    chunk_srt = chunk_result.get('srtContent', '')
+                    has_real_ts = chunk_result.get('hasRealTimestamps', False)
                     
-                    for j in range(0, len(all_words), segment_size):
-                        word_chunk = all_words[j:j + segment_size]
-                        if not word_chunk:
-                            continue
+                    if has_real_ts and chunk_srt:
+                        # Offset all timestamps in the SRT by time_offset
+                        srt_timestamp_re = re.compile(r'(\d{2}):(\d{2}):(\d{2})[,.](\d{3})')
                         
-                        segment_text = ' '.join(word_chunk)
-                        seg_start = time_offset + ((j // segment_size) * time_per_segment)
-                        seg_end = seg_start + time_per_segment
-                        all_srt.append(f"{srt_index}\n{_format_srt_time(seg_start)} --> {_format_srt_time(seg_end)}\n{segment_text}\n")
-                        srt_index += 1
+                        for srt_block in chunk_srt.strip().split('\n\n'):
+                            block_lines = srt_block.strip().split('\n')
+                            if len(block_lines) < 3:
+                                continue
+                            
+                            ts_line = block_lines[1] if '-->' in block_lines[1] else (block_lines[0] if '-->' in block_lines[0] else None)
+                            if not ts_line:
+                                continue
+                            
+                            # Find text lines
+                            ts_idx = block_lines.index(ts_line) if ts_line in block_lines else 1
+                            text_part = ' '.join(block_lines[ts_idx + 1:]).strip()
+                            if not text_part:
+                                continue
+                            
+                            # Parse and offset timestamps
+                            matches = srt_timestamp_re.findall(ts_line)
+                            if len(matches) >= 2:
+                                def ts_to_sec(m):
+                                    return int(m[0]) * 3600 + int(m[1]) * 60 + int(m[2]) + int(m[3]) / 1000
+                                
+                                seg_start = time_offset + ts_to_sec(matches[0])
+                                seg_end = time_offset + ts_to_sec(matches[1])
+                                all_srt.append(f"{srt_index}\n{_format_srt_time(seg_start)} --> {_format_srt_time(seg_end)}\n{text_part}\n")
+                                srt_index += 1
+                    else:
+                        # Fallback: synthetic timestamps
+                        all_words = chunk_text.split()
+                        segment_size = 10
+                        segments_in_chunk = max(1, len(all_words) // segment_size)
+                        time_per_segment = real_chunk_duration / segments_in_chunk
+                        
+                        for j in range(0, len(all_words), segment_size):
+                            word_chunk = all_words[j:j + segment_size]
+                            if not word_chunk:
+                                continue
+                            segment_text = ' '.join(word_chunk)
+                            seg_start = time_offset + ((j // segment_size) * time_per_segment)
+                            seg_end = seg_start + time_per_segment
+                            all_srt.append(f"{srt_index}\n{_format_srt_time(seg_start)} --> {_format_srt_time(seg_end)}\n{segment_text}\n")
+                            srt_index += 1
                     
-                    print(f"[GeminiChunks] ✓ Chunk {i+1} transcrito: {len(chunk_text)} chars" + (f" (tentativa {retry_attempt + 1})" if retry_attempt > 0 else ""))
+                    print(f"[GeminiChunks] ✓ Chunk {i+1} transcrito: {len(chunk_text)} chars, timestamps={'REAIS' if has_real_ts else 'sintéticos'}" + (f" (tentativa {retry_attempt + 1})" if retry_attempt > 0 else ""))
                     break  # Sucesso, sair do loop de retry
                 else:
                     error_msg = chunk_result.get('error', 'unknown')
@@ -7994,13 +8053,13 @@ def _transcribe_with_gemini(audio_path: str, match_id: str = None, audio_duratio
     """
     Transcribe audio using Google Gemini via Lovable AI Gateway.
     
-    Works for files up to ~20MB. Converts audio to base64 and sends
-    to the Gemini model for transcription.
+    Requests SRT-formatted output with timestamps directly from Gemini
+    for much better temporal accuracy than synthetic SRT generation.
     
     Args:
         audio_path: Path to the audio file
         match_id: Optional match ID for reference
-        audio_duration: Real audio duration in seconds (from ffprobe) for accurate SRT timing
+        audio_duration: Real audio duration in seconds (from ffprobe) for fallback SRT timing
     """
     import base64
     
@@ -8030,6 +8089,32 @@ def _transcribe_with_gemini(audio_path: str, match_id: str = None, audio_duratio
         }
         mime_type = mime_types.get(ext, 'audio/mpeg')
         
+        # Prompt requesting SRT format with timestamps
+        srt_prompt = '''Transcreva este áudio em português brasileiro no formato SRT (SubRip Subtitle).
+
+REGRAS OBRIGATÓRIAS:
+1. Retorne SOMENTE o conteúdo SRT, sem explicações ou comentários
+2. Use timestamps precisos baseados no áudio real
+3. Cada bloco deve ter entre 5 e 15 palavras
+4. Formato exato de cada bloco:
+   NÚMERO
+   HH:MM:SS,mmm --> HH:MM:SS,mmm
+   Texto da fala
+
+5. NÃO traduza - mantenha exatamente o que foi falado
+6. NÃO adicione descrições de sons ou ruídos
+7. Se houver silêncio, NÃO crie blocos vazios
+8. Os timestamps devem refletir QUANDO cada frase é realmente falada no áudio
+
+Exemplo de formato esperado:
+1
+00:00:02,500 --> 00:00:05,800
+E a bola rolando para o primeiro tempo
+
+2
+00:00:06,200 --> 00:00:09,100
+Sport com a posse de bola no campo de defesa'''
+        
         # Use Lovable AI Gateway if available
         if LOVABLE_API_KEY:
             response = requests.post(
@@ -8052,9 +8137,7 @@ def _transcribe_with_gemini(audio_path: str, match_id: str = None, audio_duratio
                             },
                             {
                                 'type': 'text',
-                                'text': '''Transcreva este áudio em português brasileiro. 
-Retorne APENAS a transcrição completa do texto falado, sem comentários ou explicações adicionais.
-Se houver múltiplos falantes, separe as falas com quebras de linha.'''
+                                'text': srt_prompt
                             }
                         ]
                     }]
@@ -8076,9 +8159,7 @@ Se houver múltiplos falantes, separe as falas com quebras de linha.'''
                                 }
                             },
                             {
-                                'text': '''Transcreva este áudio em português brasileiro.
-Retorne APENAS a transcrição completa do texto falado, sem comentários ou explicações adicionais.
-Se houver múltiplos falantes, separe as falas com quebras de linha.'''
+                                'text': srt_prompt
                             }
                         ]
                     }]
@@ -8093,56 +8174,87 @@ Se houver múltiplos falantes, separe as falas com quebras de linha.'''
         
         # Extract text based on API used
         if LOVABLE_API_KEY:
-            text = data.get('choices', [{}])[0].get('message', {}).get('content', '')
+            raw_output = data.get('choices', [{}])[0].get('message', {}).get('content', '')
         else:
-            text = data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
+            raw_output = data.get('candidates', [{}])[0].get('content', {}).get('parts', [{}])[0].get('text', '')
         
-        if not text:
+        if not raw_output:
             return {"error": "Gemini não retornou transcrição", "success": False}
         
-        # Generate segmented SRT with real audio duration for accurate timing
-        # Split text into smaller segments (~8-12 words each) for better readability
-        srt_lines = []
-        all_words = text.split()
-        segment_size = 10  # Words per subtitle line (similar to ElevenLabs)
-        total_words = len(all_words)
+        # Clean markdown code blocks if present
+        cleaned_output = raw_output.strip()
+        if cleaned_output.startswith('```'):
+            # Remove ```srt or ``` wrapper
+            lines = cleaned_output.split('\n')
+            if lines[0].startswith('```'):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == '```':
+                lines = lines[:-1]
+            cleaned_output = '\n'.join(lines).strip()
         
-        # Use real audio duration if provided, otherwise estimate
-        if audio_duration and audio_duration > 0:
-            actual_duration = audio_duration
-            print(f"[GeminiSRT] Usando duração real: {actual_duration:.2f}s")
+        # Check if Gemini returned valid SRT format
+        srt_timestamp_pattern = re.compile(r'\d{2}:\d{2}:\d{2}[,.]\d{3}\s*-->\s*\d{2}:\d{2}:\d{2}[,.]\d{3}')
+        has_srt_format = bool(srt_timestamp_pattern.search(cleaned_output))
+        
+        if has_srt_format:
+            # Gemini returned proper SRT - use it directly
+            srt_content = cleaned_output
+            
+            # Extract plain text from SRT
+            text_lines = []
+            block_number_re = re.compile(r'^\d+$')
+            for line in srt_content.split('\n'):
+                line = line.strip()
+                if not line:
+                    continue
+                if block_number_re.match(line):
+                    continue
+                if srt_timestamp_pattern.search(line):
+                    continue
+                text_lines.append(line)
+            
+            text = ' '.join(text_lines)
+            print(f"[GeminiSRT] ✓ SRT com timestamps reais do Gemini: {len(text)} chars, {srt_content.count('-->')} blocos")
         else:
-            # Fallback: estimate based on speaking rate (150 words per minute)
-            actual_duration = max(60, (total_words / 150) * 60)
-            print(f"[GeminiSRT] ⚠ Usando duração estimada: {actual_duration:.2f}s (sem ffprobe)")
-        
-        segment_count = max(1, total_words // segment_size)
-        time_per_segment = actual_duration / segment_count
-        print(f"[GeminiSRT] {total_words} palavras / {segment_count} segmentos = {time_per_segment:.2f}s por segmento")
-        
-        srt_index = 1
-        for i in range(0, total_words, segment_size):
-            chunk_words = all_words[i:i + segment_size]
-            if not chunk_words:
-                continue
+            # Gemini returned plain text - generate synthetic SRT as fallback
+            text = cleaned_output
+            print(f"[GeminiSRT] ⚠ Gemini retornou texto puro, gerando SRT sintético...")
             
-            chunk_text = ' '.join(chunk_words)
-            start_sec = (i // segment_size) * time_per_segment
-            end_sec = start_sec + time_per_segment
+            srt_lines = []
+            all_words = text.split()
+            segment_size = 10
+            total_words = len(all_words)
             
-            start = _format_srt_time(start_sec)
-            end = _format_srt_time(end_sec)
-            srt_lines.append(f"{srt_index}\n{start} --> {end}\n{chunk_text}\n")
-            srt_index += 1
-        
-        srt_content = '\n'.join(srt_lines)
+            if audio_duration and audio_duration > 0:
+                actual_duration = audio_duration
+            else:
+                actual_duration = max(60, (total_words / 150) * 60)
+            
+            segment_count = max(1, total_words // segment_size)
+            time_per_segment = actual_duration / segment_count
+            
+            srt_index = 1
+            for i in range(0, total_words, segment_size):
+                chunk_words = all_words[i:i + segment_size]
+                if not chunk_words:
+                    continue
+                chunk_text = ' '.join(chunk_words)
+                start_sec = (i // segment_size) * time_per_segment
+                end_sec = start_sec + time_per_segment
+                start = _format_srt_time(start_sec)
+                end = _format_srt_time(end_sec)
+                srt_lines.append(f"{srt_index}\n{start} --> {end}\n{chunk_text}\n")
+                srt_index += 1
+            
+            srt_content = '\n'.join(srt_lines)
         
         return {
             "success": True,
             "text": text,
             "srtContent": srt_content,
             "matchId": match_id,
-            "provider": "gemini"
+            "provider": "gemini",
+            "hasRealTimestamps": has_srt_format
         }
         
     except Exception as e:
