@@ -4,7 +4,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { TeamBadge } from '@/components/teams/TeamBadge';
-import { Star, Pencil, Play, Volume2, VolumeX, Loader2 } from 'lucide-react';
+import { Star, Pencil, Play, Volume2, VolumeX, Loader2, Clock } from 'lucide-react';
 import { useAuth } from '@/hooks/useAuth';
 import { getEventTeam, getEventTimeMs, formatEventTime } from '@/lib/eventHelpers';
 import { apiClient } from '@/lib/apiClient';
@@ -149,6 +149,13 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
     return 'Acréscimos 2T';
   };
 
+  // Helper to check if phase transition crosses halftime
+  const isHalftimeTransition = (prevPhase: string, nextPhase: string) => {
+    const firstHalfPhases = ['1º Tempo', 'Acréscimos 1T'];
+    const secondHalfPhases = ['2º Tempo', 'Acréscimos 2T'];
+    return firstHalfPhases.includes(prevPhase) && secondHalfPhases.includes(nextPhase);
+  };
+
   let lastPhase = '';
 
   return (
@@ -159,10 +166,23 @@ export function EventTimeline({ events, className, onEditEvent, onPlayVideo, has
         const timeDisplay = formatEventTimeDisplay(event);
         const phase = getPhaseLabel(event);
         const showSeparator = phase !== lastPhase;
+        const showHalftime = showSeparator && isHalftimeTransition(lastPhase, phase);
         lastPhase = phase;
 
         return (
           <div key={event.id}>
+            {/* Halftime divider */}
+            {showHalftime && (
+              <div className="flex items-center gap-3 py-4 my-3">
+                <div className="flex-1 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+                <div className="flex items-center gap-2 px-4 py-1.5 rounded-full border border-border bg-muted/50">
+                  <Clock className="h-3.5 w-3.5 text-muted-foreground" />
+                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Intervalo</span>
+                </div>
+                <div className="flex-1 h-px bg-gradient-to-r from-transparent via-border to-transparent" />
+              </div>
+            )}
+
             {/* Phase separator */}
             {showSeparator && (
               <div className="flex items-center gap-2 py-2 mb-2">
