@@ -359,11 +359,12 @@ export function ExportPreviewDialog({
 
     const clipsWithUrls = selectedClips.filter(c => c.clipUrl);
 
-    // Single clip without vignette → fast direct download
+    // Single clip without vignette → fast direct download (normalize URL to avoid mixed-content block)
     if (selectedClips.length === 1 && !includeVignettes && selectedClips[0].clipUrl) {
       const clip = selectedClips[0];
       const filename = `${clip.minute}min-${clip.type.replace(/_/g, '-')}.mp4`;
-      await downloadSingleClip(clip.clipUrl, filename);
+      const normalizedUrl = normalizeStorageUrl(clip.clipUrl) || clip.clipUrl;
+      await downloadSingleClip(normalizedUrl, filename);
       return;
     }
 
@@ -1159,14 +1160,54 @@ export function ExportPreviewDialog({
           )}
         </div>
 
-        {/* Compilation Progress */}
-        <CompilationProgress 
-          progress={compilationProgress}
-          onCancel={() => {
-            cancelCompilation();
-            resetCompilation();
-          }}
-        />
+        {/* Compilation Progress Overlay - shown inside dialog when compiling */}
+        {isCompiling && (
+          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm">
+            <div className="bg-card border border-border rounded-2xl p-8 max-w-sm w-full mx-4 shadow-2xl text-center space-y-5">
+              <div className="flex flex-col items-center gap-3">
+                {compilationProgress.stage === 'generating-vignettes' && (
+                  <Film className="h-10 w-10 text-primary animate-pulse" />
+                )}
+                {compilationProgress.stage === 'downloading' && (
+                  <Download className="h-10 w-10 text-blue-500 animate-bounce" />
+                )}
+                {compilationProgress.stage === 'processing' && (
+                  <Loader2 className="h-10 w-10 text-primary animate-spin" />
+                )}
+                {compilationProgress.stage === 'concatenating' && (
+                  <FileVideo className="h-10 w-10 text-primary animate-pulse" />
+                )}
+                {!['generating-vignettes','downloading','processing','concatenating'].includes(compilationProgress.stage) && (
+                  <Loader2 className="h-10 w-10 text-primary animate-spin" />
+                )}
+                <div>
+                  <p className="text-2xl font-bold text-foreground">{compilationProgress.progress.toFixed(0)}%</p>
+                  <p className="text-sm font-medium text-foreground mt-1">{compilationProgress.message}</p>
+                  {compilationProgress.currentStep && compilationProgress.totalSteps && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Etapa {compilationProgress.currentStep} de {compilationProgress.totalSteps}
+                    </p>
+                  )}
+                </div>
+              </div>
+              <div className="w-full bg-muted rounded-full h-3 overflow-hidden">
+                <div
+                  className="h-full bg-primary rounded-full transition-all duration-300"
+                  style={{ width: `${compilationProgress.progress}%` }}
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">Não feche esta janela enquanto o vídeo está sendo gerado</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => { cancelCompilation(); resetCompilation(); }}
+                className="w-full"
+              >
+                Cancelar
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* Social Share Panel */}
         <SocialSharePanel

@@ -455,6 +455,17 @@ export function useVideoCompilation() {
               const video = await loadVideoElement(blobUrl);
               video.muted = true;
               await video.play();
+
+              // Wait for first frame to be decoded before starting canvas capture
+              await new Promise<void>(resolve => {
+                if (video.readyState >= 3) { resolve(); return; }
+                const onPlaying = () => { resolve(); };
+                video.addEventListener('playing', onPlaying, { once: true });
+                video.addEventListener('timeupdate', onPlaying, { once: true });
+                setTimeout(resolve, 2000); // fallback
+              });
+
+              console.log(`[Compilation] Rendering clip ${i + 1}, readyState=${video.readyState}, currentTime=${video.currentTime}`);
               await renderVideoOnCanvas(ctx, video, width, height, cancelRef);
               video.pause();
               video.src = '';
@@ -521,6 +532,11 @@ export function useVideoCompilation() {
       const blob = await new Promise<Blob>((resolve, reject) => {
         mediaRecorder.onstop = () => {
           const finalBlob = new Blob(chunks, { type: mimeType });
+          console.log(`[Compilation] Final blob: ${(finalBlob.size / 1024).toFixed(1)} KB, chunks: ${chunks.length}`);
+          if (finalBlob.size < 10_000) {
+            reject(new Error(`Vídeo gerado vazio (${finalBlob.size} bytes). O canvas não capturou frames — verifique se o servidor está acessível via HTTPS.`));
+            return;
+          }
           resolve(finalBlob);
         };
         mediaRecorder.onerror = (e) => reject(new Error(`MediaRecorder error: ${e}`));
