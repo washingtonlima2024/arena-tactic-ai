@@ -478,14 +478,14 @@ export function ExportPreviewDialog({
   if (step === 'config') {
     return (
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-0">
           <VisuallyHidden>
             <DialogTitle>Exportar Preview</DialogTitle>
           </VisuallyHidden>
           
-          <div className="space-y-6">
-            {/* Header */}
-            <div className="flex items-center justify-between">
+          <div className="flex flex-col flex-1 min-h-0">
+            {/* Header - sticky */}
+            <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b shrink-0">
               <div>
                 <h2 className="text-xl font-bold">Exportar para Redes Sociais</h2>
                 <p className="text-sm text-muted-foreground">
@@ -497,6 +497,8 @@ export function ExportPreviewDialog({
               </Button>
             </div>
 
+            {/* Scrollable content */}
+            <div className="flex-1 overflow-y-auto px-6 py-4">
             <div className="grid gap-6 lg:grid-cols-2">
               {/* Left: Format & Device Selection */}
               <div className="space-y-6">
@@ -673,9 +675,10 @@ export function ExportPreviewDialog({
                 </ScrollArea>
               </div>
             </div>
+            </div>{/* end scrollable content */}
 
-            {/* Footer */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-4 border-t">
+            {/* Footer - sticky at bottom */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-6 py-4 border-t shrink-0">
               <div className="text-sm text-muted-foreground">
                 {selectedClipIds.size > 0 
                   ? `${selectedClipIds.size} clips selecionados • Formato ${selectedFormat.ratio} • ${selectedDevice.name}`
