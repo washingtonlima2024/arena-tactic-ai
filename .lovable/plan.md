@@ -1,103 +1,115 @@
 
-## Problema Identificado
+## Diagnóstico Completo
 
-O código atual usa `clip.description` (nome do evento como "Gol - 45min") como texto de legenda na exportação. O que o usuário quer são os **Closed Captions reais** — frases sincronizadas com o áudio vindas do arquivo SRT do jogo, exatamente como funciona no ClipPreviewModal.
+Três problemas independentes causam as falhas reportadas: "sumiu tudo, sem áudio, sem legenda, sem vinheta."
 
-## Solução
+### Problema 1 — Áudio ausente (causa-raiz que destrói tudo)
 
-### 1. Adicionar `subtitleLines` no tipo `CompilationClip`
+**Arquivo:** `src/hooks/useVideoCompilation.ts`, linha 305
 
-O tipo `CompilationClip` precisa de um campo para carregar as linhas do SRT já filtradas e ajustadas para o tempo relativo do clip:
+```
+video.muted = true;  ← ESTA LINHA
+```
+
+O elemento de vídeo é carregado com `muted = true`. Mesmo com `video.volume = 1` sendo definido depois (linha 598), a propriedade `muted` tem precedência absoluta no navegador — nenhum áudio passa. 
+
+O `AudioContext.createMediaElementSource(video)` conecta a fonte, mas como o elemento está mudo, o `audioDestination` recebe silêncio. Em vários navegadores (Chrome especialmente), um `MediaRecorder` com uma faixa de áudio completamente silenciosa pode entrar em estado inválido, fazendo a gravação resultar em um arquivo corrompido ou vazio — o que explica por que **vinhetas, legendas e áudio desaparecem ao mesmo tempo**.
+
+**Correção:** Remover `video.muted = true`. O vídeo roda em um elemento fora do DOM (background), então não incomoda o usuário com som — mas o áudio precisa estar desbloqueado para o AudioContext capturá-lo.
+
+### Problema 2 — Offset do SRT incorreto (legendas no lugar errado)
+
+**Arquivo:** `src/components/media/ExportPreviewDialog.tsx`, linha 408
 
 ```typescript
-export interface SubtitleLine {
-  start: number; // seconds relative to clip start
-  end: number;
-  text: string;
-}
+const eventSec = c.totalSeconds ?? (c.minute * 60 + (c.second ?? 0));
+const clipStartInVideo = Math.max(0, eventSec - bufferBefore);
+```
 
-export interface CompilationClip {
+O campo `totalSeconds` no clip pode ser `eventMs / 1000` (tempo do jogo), não o segundo no arquivo de vídeo original. O SRT do jogo usa timestamps do arquivo de vídeo original.
+
+Em `Media.tsx` (linha 309), o campo correto já existe no objeto clip:
+```typescript
+videoSecond: videoSecond ?? totalSeconds,  // metadata.videoSecond do AI
+```
+
+Mas ele não é usado no cálculo do offset do SRT — o código usa apenas `totalSeconds`. A correção é usar `c.videoSecond` quando disponível, pois esse campo referencia o segundo correto no arquivo de vídeo onde o evento ocorre.
+
+### Problema 3 — Campo `videoSecond` não propagado para ExportPreviewDialog
+
+**Arquivo:** `src/pages/Media.tsx`, linha 1420
+
+O mapeamento `clips={clips.map(c => ({...c, thumbnail: getThumbnail(c.id)?.imageUrl}))}` inclui todos os campos via `...c`, então `videoSecond` já está sendo passado. O problema é que a interface `Clip` dentro do `ExportPreviewDialog.tsx` (linha 85) não declara `videoSecond`:
+
+```typescript
+interface Clip {
   id: string;
-  clipUrl: string;
-  eventType: string;
+  title: string;
+  type: string;
   minute: number;
+  second?: number;
   description?: string;
-  thumbnailUrl?: string;
-  subtitleLines?: SubtitleLine[]; // ← NOVO: linhas do SRT para o intervalo do clip
+  thumbnail?: string;
+  clipUrl?: string | null;
+  totalSeconds?: number;
+  // videoSecond não está aqui!
 }
 ```
 
-### 2. Mudar `renderVideoOnCanvas` para CC sincronizado
-
-Em vez de passar `subtitle?: string` (texto estático), passar `subtitleLines?: SubtitleLine[]` e calcular qual linha exibir com base no `video.currentTime`:
-
-```typescript
-// ANTES: texto estático
-if (subtitle) drawSubtitle(ctx, subtitle, width, height);
-
-// DEPOIS: CC sincronizado com o tempo do vídeo
-const currentSub = subtitleLines?.find(
-  s => video.currentTime >= s.start && video.currentTime <= s.end
-);
-if (currentSub) drawSubtitle(ctx, currentSub.text, width, height);
-```
-
-### 3. `ExportPreviewDialog`: buscar e passar o SRT para cada clip
-
-No `handleDownload`, antes de chamar `downloadCompilation`, buscar o arquivo SRT do match e pre-processar as linhas para cada clip:
-
-```typescript
-// Buscar SRT do jogo (mesma lógica do ClipPreviewModal)
-const filesData = await apiClient.listMatchFiles(matchId);
-const srtFiles = filesData?.folders?.srt || [];
-// Carregar e parsear o SRT
-const srtContent = await fetch(srtUrl).then(r => r.text());
-const allLines = parseSRT(srtContent);
-
-// Para cada clip, filtrar e ajustar os timestamps relativos
-const clipSubtitles = allLines
-  .filter(line => line.end >= clipStartInVideo && line.start <= clipEnd)
-  .map(line => ({
-    start: Math.max(0, line.start - clipStartInVideo),
-    end: Math.max(0, line.end - clipStartInVideo),
-    text: line.text,
-  }));
-```
-
-### 4. Remover o título/descrição do evento como legenda
-
-Retirar completamente o uso de `clip.description` na linha de renderização de vídeo — esse campo não deve mais aparecer no vídeo exportado.
+Sem `videoSecond` na interface, o TypeScript não permite usá-lo no `handleDownload`.
 
 ## Arquivos a Modificar
 
-| Arquivo | Mudança |
-|---|---|
-| `src/hooks/useVideoCompilation.ts` | Adicionar interface `SubtitleLine`; adicionar campo `subtitleLines` em `CompilationClip`; mudar `renderVideoOnCanvas` para receber `subtitleLines` e exibir CC sincronizado pelo `video.currentTime` |
-| `src/components/media/ExportPreviewDialog.tsx` | No `handleDownload`, buscar SRT do match via `apiClient.listMatchFiles`; parsear com `parseSRT`; filtrar e ajustar linhas para o intervalo de cada clip; passar `subtitleLines` em cada clip para `downloadCompilation`; também passar `matchId` como prop |
+### 1. `src/hooks/useVideoCompilation.ts`
 
-## Fluxo Correto
+**Linha 305:** Remover `video.muted = true`
 
-```text
-ExportPreviewDialog.handleDownload()
-  ↓
-  apiClient.listMatchFiles(matchId) → busca arquivos SRT
-  ↓
-  fetch(srtUrl) → texto bruto do SRT
-  ↓
-  parseSRT(content) → array de { start, end, text }
-  ↓
-  Para cada clip: filtrar linhas que cobrem o intervalo do clip
-                  ajustar timestamps para tempo relativo (0 = início do clip)
-  ↓
-  downloadCompilation({ clips: [..., subtitleLines: [...]] })
-  ↓
-  renderVideoOnCanvas() → a cada frame, lookup por video.currentTime
-                         → drawSubtitle(linha atual do CC)
+```typescript
+// ANTES
+video.muted = true;
+video.playsInline = true;
+
+// DEPOIS
+// video.muted removido — necessário para AudioContext capturar áudio
+video.playsInline = true;
 ```
+
+Esta é a correção mais crítica — resolve áudio, vinhetas e legendas de uma vez.
+
+### 2. `src/components/media/ExportPreviewDialog.tsx`
+
+**Interface `Clip` (linha 85):** Adicionar campo `videoSecond`
+
+```typescript
+interface Clip {
+  // ... campos existentes ...
+  totalSeconds?: number;
+  videoSecond?: number;  // ← NOVO: segundo no arquivo de vídeo original
+}
+```
+
+**Função `handleDownload` (linha 408):** Usar `videoSecond` para o cálculo do offset do SRT
+
+```typescript
+// ANTES
+const eventSec = c.totalSeconds ?? (c.minute * 60 + (c.second ?? 0));
+
+// DEPOIS
+// Usar videoSecond (tempo no arquivo de vídeo) para o offset do SRT
+// Fallback para totalSeconds se videoSecond não disponível
+const eventSec = c.videoSecond ?? c.totalSeconds ?? (c.minute * 60 + (c.second ?? 0));
+```
+
+## Resumo das Mudanças
+
+| Arquivo | Linha | Mudança | Impacto |
+|---|---|---|---|
+| `useVideoCompilation.ts` | 305 | Remover `video.muted = true` | Resolve áudio + vinhetas + pipeline completa |
+| `ExportPreviewDialog.tsx` | ~88 | Adicionar `videoSecond?: number` na interface `Clip` | Permite usar o campo correto |
+| `ExportPreviewDialog.tsx` | ~408 | Usar `c.videoSecond ?? c.totalSeconds` no cálculo do offset | Sincroniza CC com o timestamp correto do vídeo |
 
 ## Observações
 
-- Se não houver SRT disponível para o match, `subtitleLines` fica vazio e nenhuma legenda é renderizada (sem erro)
-- O `matchId` já está disponível via URL (`/media?match=...`) mas precisa ser passado como prop para o `ExportPreviewDialog`
-- A lógica de busca do SRT (escolha entre first_half, second_half, full) segue o mesmo padrão já implementado no `ClipPreviewModal`
-- A opção "Incluir legendas" no painel de configuração continua funcionando — quando desmarcada, `subtitleLines` não é passado
+- O `videoSecond` já é passado para o `ExportPreviewDialog` via `...c` no spread do `Media.tsx` — só precisa ser declarado na interface TypeScript para ser acessível
+- Sem SRT disponível, `subtitleLines` fica vazio e nenhuma legenda é renderizada — sem erro
+- A remoção do `muted` não afeta o usuário pois o elemento de vídeo está em background (fora do DOM visível)
