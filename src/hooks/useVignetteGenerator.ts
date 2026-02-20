@@ -179,8 +179,15 @@ export function useVignetteGenerator() {
       color: 'rgba(255, 255, 255, 0.6)'
     });
 
-    return new Promise((resolve) => {
-      canvas.toBlob((blob) => resolve(blob!), 'image/png', 1.0);
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (!blob || blob.size < 100) {
+          reject(new Error(`Vinheta de abertura gerada vazia (${blob?.size ?? 0} bytes)`));
+        } else {
+          console.log(`[Vignette] Opening blob: ${blob.size} bytes`);
+          resolve(blob);
+        }
+      }, 'image/png', 1.0);
     });
   }, [getCanvas]);
 
@@ -294,8 +301,15 @@ export function useVignetteGenerator() {
     ctx.lineTo(config.width - 30 * scale - cornerSize, config.height - 30 * scale);
     ctx.stroke();
 
-    return new Promise((resolve) => {
-      canvas.toBlob((blob) => resolve(blob!), 'image/png', 1.0);
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (!blob || blob.size < 100) {
+          reject(new Error(`Vinheta de clip gerada vazia (${blob?.size ?? 0} bytes)`));
+        } else {
+          console.log(`[Vignette] Clip blob: ${blob.size} bytes`);
+          resolve(blob);
+        }
+      }, 'image/png', 1.0);
     });
   }, [getCanvas]);
 
@@ -336,8 +350,14 @@ export function useVignetteGenerator() {
       color: 'rgba(255, 255, 255, 0.7)'
     });
 
-    return new Promise((resolve) => {
-      canvas.toBlob((blob) => resolve(blob!), 'image/png', 1.0);
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (!blob || blob.size < 100) {
+          reject(new Error(`Vinheta de transição gerada vazia (${blob?.size ?? 0} bytes)`));
+        } else {
+          resolve(blob);
+        }
+      }, 'image/png', 1.0);
     });
   }, [getCanvas]);
 
@@ -385,8 +405,14 @@ export function useVignetteGenerator() {
       color: 'rgba(255, 255, 255, 0.5)'
     });
 
-    return new Promise((resolve) => {
-      canvas.toBlob((blob) => resolve(blob!), 'image/png', 1.0);
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (!blob || blob.size < 100) {
+          reject(new Error(`Vinheta de encerramento gerada vazia (${blob?.size ?? 0} bytes)`));
+        } else {
+          resolve(blob);
+        }
+      }, 'image/png', 1.0);
     });
   }, [getCanvas]);
 

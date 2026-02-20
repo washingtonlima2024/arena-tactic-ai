@@ -142,9 +142,17 @@ async function loadImageBitmap(url: string): Promise<ImageBitmap | null> {
   }
 }
 
-// Load blob as ImageBitmap
+// Load blob as ImageBitmap — validates blob is non-empty
 async function blobToImageBitmap(blob: Blob): Promise<ImageBitmap> {
-  return createImageBitmap(blob);
+  if (!blob || blob.size < 100) {
+    throw new Error(`Blob da vinheta inválido: tamanho ${blob?.size ?? 0} bytes`);
+  }
+  const bitmap = await createImageBitmap(blob);
+  if (bitmap.width === 0 || bitmap.height === 0) {
+    throw new Error('ImageBitmap da vinheta tem dimensões zero');
+  }
+  console.log(`[Vignette] Bitmap criado: ${bitmap.width}x${bitmap.height}`);
+  return bitmap;
 }
 
 // Fetch video as Blob URL to avoid canvas CORS taint
@@ -391,6 +399,14 @@ export function useVideoCompilation() {
 
       mediaRecorder.start(100); // collect chunks every 100ms
 
+      // Wait for MediaRecorder to start capturing before drawing vignettes
+      await new Promise(r => setTimeout(r, 100));
+
+      // Draw initial black frame to ensure stream has content
+      ctx.fillStyle = '#000000';
+      ctx.fillRect(0, 0, width, height);
+      await new Promise(r => setTimeout(r, 50));
+
       const totalClips = config.clips.length;
 
       // --- Render sequence ---
@@ -530,15 +546,16 @@ export function useVideoCompilation() {
 
   // Download compiled playlist or single clip with vignette
   const downloadCompilation = useCallback(async (config: CompilationConfig): Promise<void> => {
-    // Single clip without vignette → direct download (fastest)
-    if (config.clips.length === 1 && !config.includeVignettes && config.clips[0].clipUrl) {
+    // ONLY skip pipeline if: single clip, no vignettes, has direct URL
+    if (config.clips.length === 1 && !config.includeVignettes && config.clips[0]?.clipUrl) {
       const clip = config.clips[0];
       const filename = `${clip.minute}min-${clip.eventType.replace(/_/g, '-')}.mp4`;
       await downloadSingleClip(clip.clipUrl, filename);
       return;
     }
 
-    // Otherwise: use MediaRecorder pipeline (with or without vignettes, single or playlist)
+    // All other cases (vignettes enabled, or multi-clip) → MediaRecorder pipeline
+    console.log('[Compilation] Starting pipeline. includeVignettes:', config.includeVignettes, 'clips:', config.clips.length);
     const blob = await compilePlaylist(config);
     if (!blob) return;
 
