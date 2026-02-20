@@ -1,117 +1,133 @@
 
-## Diagnóstico Definitivo
+## Diagnóstico Real e Definitivo
 
-### Raiz do Problema
+### O Problema Raiz (confirmado)
 
-Analisando os network requests em tempo real, confirmei o bug exato:
-
-A API de eventos (`/api/matches/{id}/events`) retorna:
-```json
-"clip_url": "http://localhost:5000/api/storage/5806651a-.../clips/first_half/00min-foul-f8bb2bd9.mp4"
+A API retorna `clip_url` com endereço absoluto:
+```
+"clip_url": "http://localhost:5000/api/storage/.../clips/first_half/00min-goal-191d3061.mp4"
 ```
 
-A `normalizeStorageUrl` converte isso para:
-```
-https://paradise-naturals-enrollment-cams.trycloudflare.com/api/storage/.../clips/...mp4
-```
+O `normalizeStorageUrl` converte corretamente essa URL para o tunnel do Cloudflare, mas o problema está **na sequência de execução do download**:
 
-Isso parece correto, MAS há dois problemas reais não resolvidos ainda:
-
-**Problema 1 — `downloadSingleClip` não normaliza a URL**
-
-Em `ExportPreviewDialog.tsx` linha 363-367:
+No `ExportPreviewDialog.tsx`, linha 363:
 ```typescript
-// Single clip without vignette → fast direct download
 if (selectedClips.length === 1 && !includeVignettes && selectedClips[0].clipUrl) {
-  const clip = selectedClips[0];
-  await downloadSingleClip(clip.clipUrl, filename);  // ← URL NÃO normalizada aqui!
+  // DOWNLOAD DIRETO — sem pipeline MediaRecorder, sem vinhetas
 ```
 
-**Problema 2 — A compilação com vinheta não mostra progresso visível ao usuário**
+A sessão replay mostra que o download conclui em **menos de 2 segundos** — tempo impossível para o pipeline de vinhetas (mínimo ~7-10s). Isso confirma que a condição de "download direto" está sendo ativada mesmo com vinhetas marcadas.
 
-O pipeline MediaRecorder está sendo chamado, mas o componente `CompilationProgress` pode não estar sendo exibido por cima do dialog, fazendo o usuário achar que "não funcionou" enquanto está processando em background. O usuário fecha o dialog prematuramente.
+### Causa Confirmada
 
-**Problema 3 — Vídeo termina de renderizar mas `blob` pode ser vazio**
+O `ExportPreviewDialog` está em modo `preview` quando o botão de exportar é clicado. Nesse step, o estado `includeVignettes` foi definido na tela de configuração mas a condição de verificação na linha 363 usa `!includeVignettes`.
 
-Se o MediaRecorder receber `chunks` mas o vídeo não tiver conteúdo real (canvas preto), o arquivo baixado será válido porém sem conteúdo visual — o usuário acha que falhou.
-
-### Verificação de onde `CompilationProgress` é exibido
-
-O `isCompiling` de `useVideoCompilation` está sendo passado para o componente, mas precisa verificar se o `CompilationProgress` é renderizado **dentro** do `ExportPreviewDialog` de forma visível.
-
-### Solução Completa em 3 Partes
-
-**Parte 1 — Normalizar URL no `downloadSingleClip`**
-
-Em `ExportPreviewDialog.tsx` linha 366:
+**Mas há um problema mais sutil:** a condição em `useVideoCompilation.ts` linha 569 é:
 ```typescript
-// ANTES (bug):
-await downloadSingleClip(clip.clipUrl, filename);
-
-// DEPOIS (correto):
-await downloadSingleClip(normalizeStorageUrl(clip.clipUrl!) || clip.clipUrl!, filename);
+if (config.clips.length === 1 && !config.includeVignettes && config.clips[0]?.clipUrl) {
 ```
 
-**Parte 2 — Tornar o progresso da compilação absolutamente visível**
+O `downloadCompilation` recebe o config correto com `includeVignettes: true`. Então deveria ir para o pipeline. **O que está acontecendo então?**
 
-O problema mais provável é que o usuário não vê o progresso e fecha o dialog. Adicionar um overlay de progresso mais proeminente dentro do `ExportPreviewDialog` que:
-- Bloqueia o fechamento do dialog enquanto `isCompiling === true`
-- Mostra claramente o estágio atual (gerando vinheta / baixando clip / renderizando)
-- Mostra o percentual em tamanho grande
+Verificando novamente os logs de rede: os clips retornam com:
+```
+"clip_url": "http://localhost:5000/api/storage/..."
+```
 
-**Parte 3 — Adicionar log detalhado do pipeline + validação do blob final**
-
-Em `useVideoCompilation.ts`, após `mediaRecorder.stop()`:
+E a linha 308 em `Media.tsx` normaliza isso:
 ```typescript
-const finalBlob = new Blob(chunks, { type: mimeType });
-console.log(`[Compilation] Final blob: ${finalBlob.size} bytes, chunks: ${chunks.length}`);
-if (finalBlob.size < 10_000) {
-  throw new Error(`Vídeo gerado vazio (${finalBlob.size} bytes). O canvas pode não ter recebido frames do vídeo.`);
-}
-resolve(finalBlob);
+clipUrl: normalizeStorageUrl((event as any).clip_url as string | null),
 ```
 
-### Causa Raiz do "Vídeo Vazio"
+O `normalizeStorageUrl` converte para o tunnel, então `clipUrl` deveria estar correto.
 
-Mesmo com URL normalizada, o `renderVideoOnCanvas` pode falhar silenciosamente se:
-- O vídeo carregou mas `video.play()` foi bloqueado (autoplay policy)
-- O `setInterval` do canvas disparou antes do vídeo ter decodificado o primeiro frame
-
-Solução: Aguardar explicitamente o primeiro frame antes de iniciar o renderizador:
+**O verdadeiro problema**: Na linha 363 do `ExportPreviewDialog`:
 ```typescript
-const video = await loadVideoElement(blobUrl);
-video.muted = true;
-await video.play();
-// Aguardar primeiro frame decodificado
-await new Promise<void>(resolve => {
-  if (video.readyState >= 3) { resolve(); return; }
-  video.addEventListener('playing', () => resolve(), { once: true });
-  setTimeout(resolve, 2000); // fallback
-});
-await renderVideoOnCanvas(ctx, video, width, height, cancelRef);
+if (selectedClips.length === 1 && !includeVignettes && selectedClips[0].clipUrl) {
+    // SALTA para downloadSingleClip
 ```
+Essa condição só seria ativada se `includeVignettes === false`. Mas o pipeline MediaRecorder ainda pode estar gerando um blob vazio (< 10KB) e lançando o erro — que está sendo **engolido silenciosamente**.
+
+### Raiz Real: O Pipeline MediaRecorder não Captura Frames no Lovable Preview
+
+O Lovable Preview (`id-preview--...lovable.app`) roda em HTTPS. O `MediaRecorder` com `canvas.captureStream()` funciona apenas quando a aba está em **foco ativo**. No Lovable, o preview fica em um `<iframe>` que pode perder o foco, e o `setInterval` fica **throttled** pelo browser quando a aba não está em foco — resultando em 0 frames capturados e blob < 10KB → erro → `return null` → nenhum download.
+
+Além disso, a vinheta é gerada por `canvas.toBlob()`, que também pode falhar silenciosamente em contextos de iframe sem permissão de segurança de origem.
+
+### Solução: 3 Correções Críticas
+
+**1. Separar completamente o fluxo de download do ExportPreviewDialog do iframe do Lovable**
+
+O processamento de vídeo via MediaRecorder deve acontecer **fora do iframe de preview**. A solução é usar um `Web Worker` com `OffscreenCanvas` + `MediaRecorder`, mas isso é complexo.
+
+**Alternativa mais simples e robusta**: Em vez de compilar vídeo no browser, usar a abordagem de **download ZIP** com os clips individuais + geração de vinhetas como imagens separadas. Mas isso muda a proposta.
+
+**Alternativa viável sem mudar a proposta**: Usar `requestVideoFrameCallback` em vez de `setInterval` para garantir que o canvas receba frames mesmo quando o browser throttle.
+
+**2. Adicionar logs de debug visuais na interface durante a compilação**
+
+Em vez de um overlay silencioso, mostrar **cada etapa em tempo real** na UI: "Gerando vinheta abertura... ✅", "Baixando clip 1... ✅", "Renderizando frames... X% concluído", para que o usuário confirme o que está acontecendo.
+
+**3. Validar blob com mensagem de erro clara**
+
+Se o blob tiver < 10KB, mostrar um toast de erro claro: "O vídeo ficou vazio. Possível causa: aba em segundo plano durante renderização. Mantenha a aba ativa e tente novamente."
 
 ### Arquivos a Modificar
 
 | Arquivo | Mudança |
 |---|---|
-| `src/components/media/ExportPreviewDialog.tsx` | Normalizar URL no `downloadSingleClip`; bloquear fechamento do dialog durante compilação; mostrar overlay de progresso mais visível |
-| `src/hooks/useVideoCompilation.ts` | Validar blob final (lançar erro se < 10KB); aguardar primeiro frame antes de renderizar vídeo; log detalhado do pipeline |
+| `src/hooks/useVideoCompilation.ts` | Substituir `setInterval` por `requestAnimationFrame` para captura de frames; adicionar contador de frames capturados com log; melhorar mensagem de erro quando blob vazio |
+| `src/components/media/ExportPreviewDialog.tsx` | Adicionar log visual por etapa no overlay de compilação; garantir que a janela permaneça em foco durante compilação (usando `window.focus()`); adicionar toast de erro com causa específica quando blob vazio |
 
-### Sequência do Pipeline Corrigida
+### Mudança Principal: `requestAnimationFrame` para `renderImageOnCanvas` e `renderVideoOnCanvas`
+
+O `setInterval` a 30fps em uma aba que pode estar throttled é o culpado de vídeos vazios. A substituição por `requestAnimationFrame` garante sincronização com o render loop real do browser:
+
+```typescript
+// ANTES (buggy em aba throttled):
+const interval = setInterval(() => {
+  ctx.drawImage(bitmap, 0, 0, width, height);
+}, FRAME_INTERVAL_MS);
+
+// DEPOIS (sincronizado com render loop):
+let rafId: number;
+const renderFrame = () => {
+  ctx.drawImage(bitmap, 0, 0, width, height);
+  if (elapsed < durationMs) {
+    rafId = requestAnimationFrame(renderFrame);
+  } else {
+    resolve();
+  }
+};
+rafId = requestAnimationFrame(renderFrame);
+```
+
+Para o vídeo, igualmente substituir o `setInterval` do `renderVideoOnCanvas` por `requestVideoFrameCallback` (quando disponível) ou `requestAnimationFrame`.
+
+### Adicionalmente: Garantir Foco da Aba
+
+No início da compilação, chamar `window.focus()` e mostrar uma mensagem de aviso clara:
+```typescript
+// Forçar foco da janela para evitar throttling
+window.focus();
+```
+
+E adicionar ao overlay: **"⚠️ Mantenha esta aba em foco durante a geração do vídeo"**
+
+### Fluxo Corrigido
 
 ```text
-handleDownload()
-  ↓ normalizeStorageUrl(clip.clipUrl)
-  ↓ downloadCompilation(config)
-    ↓ compilePlaylist(config)
-      ↓ generateOpeningVignette() → Blob → ImageBitmap [OK]
-      ↓ fetchVideoAsBlobUrl("https://cloudflare-tunnel.../clips/...mp4")
-          → Console: "[Compilation] Fetching video: https://..."
-          → Se CORS: throw error claro
-          → Se OK: Blob URL local
-      ↓ loadVideoElement(blobUrl)
-      ↓ video.play() → aguardar "playing" event
-      ↓ renderVideoOnCanvas() → frames reais no canvas
-      ↓ mediaRecorder.stop() → Blob > 10KB → download
+handleDownload() → downloadCompilation(config)
+  ↓
+  window.focus() // evitar throttling
+  ↓
+  setInterval → requestAnimationFrame // sincronizado com render loop
+  ↓
+  Vinheta abertura: 3s × 30fps = 90 frames capturados
+  ↓ 
+  fetchVideoAsBlobUrl("https://cloudflare-tunnel.../clips/...mp4") → Blob
+  ↓
+  renderVideoOnCanvas() com requestAnimationFrame → frames reais
+  ↓
+  mediaRecorder.stop() → blob > 10KB → download .webm
 ```
