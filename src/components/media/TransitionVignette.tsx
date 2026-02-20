@@ -21,6 +21,19 @@ export function TransitionVignette({
   const [phase, setPhase] = useState<'enter' | 'hold' | 'exit'>('enter');
   const { playSwoosh, initAudio } = useVignetteAudio();
   const soundPlayedRef = useRef(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(300);
+
+  // ResizeObserver: scale to container, not viewport
+  useEffect(() => {
+    const ro = new ResizeObserver(entries => {
+      setContainerWidth(entries[0].contentRect.width);
+    });
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
+  const scale = Math.max(0.35, Math.min(1.4, containerWidth / 400));
 
   useEffect(() => {
     const playSound = async () => {
@@ -43,8 +56,22 @@ export function TransitionVignette({
     };
   }, [duration, onComplete, playSwoosh, initAudio]);
 
+  // Scaled sizes
+  const iconSize = `${Math.round(24 * scale)}px`;
+  const labelFontSize = `${Math.round(14 * scale)}px`;
+  const minuteFontSize = `${Math.round(40 * scale)}px`;
+  const titleFontSize = `${Math.round(13 * scale)}px`;
+  const subFontSize = `${Math.round(10 * scale)}px`;
+  const dividerH = `${Math.round(40 * scale)}px`;
+  const contentGap = `${Math.round(12 * scale)}px`;
+  const innerGap = `${Math.round(8 * scale)}px`;
+  const cornerSize = `${Math.round(48 * scale)}px`;
+  const cornerOffset = `${Math.round(8 * scale)}px`;
+  const pulseOuter = `${Math.round(96 * scale)}px`;
+  const pulseInner = `${Math.round(48 * scale)}px`;
+
   return (
-    <div className="relative w-full h-full bg-background overflow-hidden flex items-center justify-center">
+    <div ref={containerRef} className="relative w-full h-full bg-background overflow-hidden flex items-center justify-center">
       {/* Animated background lines */}
       <div className="absolute inset-0 overflow-hidden">
         {Array.from({ length: 8 }).map((_, i) => (
@@ -55,7 +82,7 @@ export function TransitionVignette({
               top: `${12 + i * 12}%`,
               left: 0,
               right: 0,
-              animation: `lineSlide ${0.4 + i * 0.05}s ease-out ${i * 0.05}s forwards`,
+              animation: `tvLineSlide ${0.4 + i * 0.05}s ease-out ${i * 0.05}s forwards`,
               opacity: 0,
               transform: 'translateX(-100%)'
             }}
@@ -63,81 +90,74 @@ export function TransitionVignette({
         ))}
       </div>
 
-      {/* Center pulse - responsive */}
-      <div className={`absolute inset-0 flex items-center justify-center transition-all duration-300 ${
-        phase === 'hold' ? 'opacity-100' : 'opacity-0'
-      }`}>
+      {/* Center pulse */}
+      <div className={`absolute inset-0 flex items-center justify-center transition-all duration-300 ${phase === 'hold' ? 'opacity-100' : 'opacity-0'}`}>
         <div 
-          className="absolute w-32 h-32 sm:w-48 sm:h-48 md:w-64 md:h-64 rounded-full bg-primary/20"
-          style={{
-            animation: phase === 'hold' ? 'pulseBig 0.6s ease-out' : undefined
-          }}
+          className="absolute rounded-full bg-primary/20"
+          style={{ width: pulseOuter, height: pulseOuter, animation: phase === 'hold' ? 'tvPulseBig 0.6s ease-out' : undefined }}
         />
         <div 
-          className="absolute w-16 h-16 sm:w-24 sm:h-24 md:w-32 md:h-32 rounded-full bg-primary/40"
-          style={{
-            animation: phase === 'hold' ? 'pulseBig 0.4s ease-out' : undefined
-          }}
+          className="absolute rounded-full bg-primary/40"
+          style={{ width: pulseInner, height: pulseInner, animation: phase === 'hold' ? 'tvPulseBig 0.4s ease-out' : undefined }}
         />
       </div>
 
-      {/* Content - responsive */}
-      <div className={`relative z-10 flex flex-col items-center gap-2 sm:gap-3 md:gap-4 px-3 transition-all duration-300 ${
+      {/* Content */}
+      <div className={`relative z-10 flex flex-col items-center px-3 transition-all duration-300 ${
         phase === 'enter' ? 'opacity-0 scale-90' :
         phase === 'hold' ? 'opacity-100 scale-100' :
         'opacity-0 scale-110'
-      }`}>
-        <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3 text-primary">
-          <Zap className="h-4 w-4 sm:h-6 sm:w-6 md:h-8 md:w-8 fill-primary" />
-          <span className="text-sm sm:text-lg md:text-2xl font-bold uppercase tracking-widest">Próximo</span>
-          <ArrowRight className="h-4 w-4 sm:h-6 sm:w-6 md:h-8 md:w-8" />
+      }`} style={{ gap: contentGap }}>
+        <div className="flex items-center text-primary" style={{ gap: innerGap }}>
+          <Zap style={{ width: iconSize, height: iconSize }} className="fill-primary" />
+          <span className="font-bold uppercase tracking-widest" style={{ fontSize: labelFontSize }}>Próximo</span>
+          <ArrowRight style={{ width: iconSize, height: iconSize }} />
         </div>
 
-        <div className="flex items-center gap-2 sm:gap-3 md:gap-4">
-          <span className="text-2xl sm:text-4xl md:text-5xl font-black text-primary drop-shadow-[0_0_20px_hsl(var(--primary)/0.6)]">
+        <div className="flex items-center" style={{ gap: innerGap }}>
+          <span 
+            className="font-black text-primary drop-shadow-[0_0_20px_hsl(var(--primary)/0.6)]"
+            style={{ fontSize: minuteFontSize }}
+          >
             {nextClipMinute}'
           </span>
-          <div className="h-6 sm:h-10 md:h-12 w-px bg-primary/50" />
-          <div className="text-left max-w-[150px] sm:max-w-[200px] md:max-w-none">
-            <p className="text-xs sm:text-sm md:text-lg font-medium text-foreground truncate">{nextClipTitle}</p>
-            <p className="text-[10px] sm:text-xs md:text-sm text-muted-foreground uppercase tracking-wide">
+          <div className="bg-primary/50 w-px" style={{ height: dividerH }} />
+          <div className="text-left" style={{ maxWidth: `${Math.round(160 * scale)}px` }}>
+            <p className="font-medium text-foreground truncate" style={{ fontSize: titleFontSize }}>{nextClipTitle}</p>
+            <p className="text-muted-foreground uppercase tracking-wide" style={{ fontSize: subFontSize }}>
               {getEventLabelUpper(nextClipType)}
             </p>
           </div>
         </div>
       </div>
 
-      {/* Corner flashes - responsive */}
-      <div className={`absolute top-0 left-0 w-16 h-16 sm:w-24 sm:h-24 md:w-32 md:h-32 transition-opacity duration-200 ${
-        phase === 'hold' ? 'opacity-100' : 'opacity-0'
-      }`}>
-        <div className="absolute top-2 left-2 sm:top-3 sm:left-3 md:top-4 md:left-4 w-8 sm:w-12 md:w-16 h-px bg-primary" style={{ animation: 'expandX 0.3s ease-out' }} />
-        <div className="absolute top-2 left-2 sm:top-3 sm:left-3 md:top-4 md:left-4 h-8 sm:h-12 md:h-16 w-px bg-primary" style={{ animation: 'expandY 0.3s ease-out' }} />
+      {/* Corner flashes */}
+      <div className={`absolute top-0 left-0 transition-opacity duration-200 ${phase === 'hold' ? 'opacity-100' : 'opacity-0'}`} style={{ width: cornerSize, height: cornerSize }}>
+        <div className="absolute bg-primary" style={{ top: cornerOffset, left: cornerOffset, width: `${Math.round(48 * scale)}px`, height: '1px', animation: 'tvExpandX 0.3s ease-out' }} />
+        <div className="absolute bg-primary" style={{ top: cornerOffset, left: cornerOffset, width: '1px', height: `${Math.round(48 * scale)}px`, animation: 'tvExpandY 0.3s ease-out' }} />
       </div>
-      <div className={`absolute bottom-0 right-0 w-16 h-16 sm:w-24 sm:h-24 md:w-32 md:h-32 transition-opacity duration-200 ${
-        phase === 'hold' ? 'opacity-100' : 'opacity-0'
-      }`}>
-        <div className="absolute bottom-2 right-2 sm:bottom-3 sm:right-3 md:bottom-4 md:right-4 w-8 sm:w-12 md:w-16 h-px bg-primary" style={{ animation: 'expandX 0.3s ease-out' }} />
-        <div className="absolute bottom-2 right-2 sm:bottom-3 sm:right-3 md:bottom-4 md:right-4 h-8 sm:h-12 md:h-16 w-px bg-primary" style={{ animation: 'expandY 0.3s ease-out' }} />
+      <div className={`absolute bottom-0 right-0 transition-opacity duration-200 ${phase === 'hold' ? 'opacity-100' : 'opacity-0'}`} style={{ width: cornerSize, height: cornerSize }}>
+        <div className="absolute bg-primary" style={{ bottom: cornerOffset, right: cornerOffset, width: `${Math.round(48 * scale)}px`, height: '1px', animation: 'tvExpandX 0.3s ease-out' }} />
+        <div className="absolute bg-primary" style={{ bottom: cornerOffset, right: cornerOffset, width: '1px', height: `${Math.round(48 * scale)}px`, animation: 'tvExpandY 0.3s ease-out' }} />
       </div>
 
       <style>{`
-        @keyframes lineSlide {
+        @keyframes tvLineSlide {
           0% { transform: translateX(-100%); opacity: 0; }
           50% { opacity: 1; }
           100% { transform: translateX(100%); opacity: 0; }
         }
-        @keyframes pulseBig {
+        @keyframes tvPulseBig {
           0% { transform: scale(0); opacity: 1; }
           100% { transform: scale(3); opacity: 0; }
         }
-        @keyframes expandX {
+        @keyframes tvExpandX {
           0% { width: 0; }
-          100% { width: 4rem; }
+          100% { width: ${Math.round(48 * scale)}px; }
         }
-        @keyframes expandY {
+        @keyframes tvExpandY {
           0% { height: 0; }
-          100% { height: 4rem; }
+          100% { height: ${Math.round(48 * scale)}px; }
         }
       `}</style>
     </div>
