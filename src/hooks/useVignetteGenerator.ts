@@ -199,20 +199,29 @@ export function useVignetteGenerator() {
     const canvas = getCanvas(config.width, config.height);
     const ctx = canvas.getContext('2d')!;
 
-    // If thumbnail, draw it first
+    // If thumbnail, draw it first using cover (crop to fill, no deform)
     if (data.thumbnailUrl) {
       try {
         const img = new Image();
         img.crossOrigin = 'anonymous';
         await new Promise<void>((resolve, reject) => {
           img.onload = () => {
-            // Draw with Ken Burns style zoom
-            const scale = 1.2;
-            const drawWidth = config.width * scale;
-            const drawHeight = config.height * scale;
-            const offsetX = (config.width - drawWidth) / 2;
-            const offsetY = (config.height - drawHeight) / 2;
-            ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+            // Cover: crop to fill canvas without stretching
+            const srcRatio = img.naturalWidth / img.naturalHeight;
+            const dstRatio = config.width / config.height;
+            let drawW: number, drawH: number, offsetX: number, offsetY: number;
+            if (srcRatio > dstRatio) {
+              drawH = config.height;
+              drawW = img.naturalWidth * (config.height / img.naturalHeight);
+              offsetX = (config.width - drawW) / 2;
+              offsetY = 0;
+            } else {
+              drawW = config.width;
+              drawH = img.naturalHeight * (config.width / img.naturalWidth);
+              offsetX = 0;
+              offsetY = (config.height - drawH) / 2;
+            }
+            ctx.drawImage(img, offsetX, offsetY, drawW, drawH);
             resolve();
           };
           img.onerror = reject;
