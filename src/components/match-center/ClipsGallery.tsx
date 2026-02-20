@@ -128,11 +128,11 @@ export function ClipsGallery({ events, thumbnails, homeTeam, awayTeam }: ClipsGa
                             {aiComment && (
                               <div className="flex items-start gap-1.5">
                                 <Sparkles className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
-                                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">{aiComment}</p>
+                                <p className="text-xs text-foreground/70 leading-relaxed line-clamp-2">{aiComment}</p>
                               </div>
                             )}
                             {!aiComment && event.description && (
-                              <p className="text-xs text-muted-foreground line-clamp-2">{event.description}</p>
+                              <p className="text-xs text-foreground/60 line-clamp-2">{event.description}</p>
                             )}
                           </div>
                         </div>
@@ -195,11 +195,11 @@ export function ClipsGallery({ events, thumbnails, homeTeam, awayTeam }: ClipsGa
                             {aiComment && (
                               <div className="flex items-start gap-1.5">
                                 <Sparkles className="h-3 w-3 text-primary mt-0.5 flex-shrink-0" />
-                                <p className="text-xs text-muted-foreground leading-relaxed line-clamp-2">{aiComment}</p>
+                                <p className="text-xs text-foreground/70 leading-relaxed line-clamp-2">{aiComment}</p>
                               </div>
                             )}
                             {!aiComment && event.description && (
-                              <p className="text-xs text-muted-foreground line-clamp-2">{event.description}</p>
+                              <p className="text-xs text-foreground/60 line-clamp-2">{event.description}</p>
                             )}
                           </div>
                         </div>
@@ -218,10 +218,13 @@ export function ClipsGallery({ events, thumbnails, homeTeam, awayTeam }: ClipsGa
         onOpenChange={(open) => { if (!open) setSelectedEvent(null); }}
         clipUrl={selectedEvent?.clip_url}
         eventType={selectedEvent?.event_type || ''}
+        eventId={selectedEvent?.id}
         minute={selectedEvent?.minute}
         aiComment={(selectedEvent?.metadata as any)?.ai_comment}
         description={selectedEvent?.description}
         thumbnailUrl={selectedEvent ? getThumbnail(selectedEvent.id) : null}
+        homeTeam={homeTeam?.name}
+        awayTeam={awayTeam?.name}
       />
     </>
   );

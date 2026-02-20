@@ -2,34 +2,81 @@ import { useState, useRef, useEffect } from 'react';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Play, Pause, Volume2, VolumeX, Maximize2, X, Sparkles } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, Maximize2, X, Sparkles, Loader2 } from 'lucide-react';
 import { normalizeStorageUrl } from '@/lib/apiClient';
 import { getApiBase } from '@/lib/apiMode';
 import { getEventLabel, getEventIcon } from '@/lib/eventLabels';
+import { supabase } from '@/integrations/supabase/client';
 
 interface ClipPlayerModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   clipUrl?: string | null;
   eventType: string;
+  eventId?: string | null;
   minute?: number | null;
   aiComment?: string | null;
   description?: string | null;
   thumbnailUrl?: string | null;
+  homeTeam?: string;
+  awayTeam?: string;
 }
 
 export function ClipPlayerModal({
-  open, onOpenChange, clipUrl, eventType, minute, aiComment, description, thumbnailUrl
+  open, onOpenChange, clipUrl, eventType, eventId, minute, aiComment: initialAiComment, description, thumbnailUrl, homeTeam = '', awayTeam = ''
 }: ClipPlayerModalProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [aiComment, setAiComment] = useState<string | null>(initialAiComment ?? null);
+  const [isGeneratingComment, setIsGeneratingComment] = useState(false);
+  const generatedRef = useRef<string | null>(null);
 
   const resolvedUrl = clipUrl
     ? normalizeStorageUrl(clipUrl.startsWith('http') ? clipUrl : `${getApiBase()}${clipUrl}`)
     : null;
+
+  // Sync comment when prop changes
+  useEffect(() => {
+    setAiComment(initialAiComment ?? null);
+    generatedRef.current = null;
+  }, [eventId, initialAiComment]);
+
+  // Auto-generate comment when opening without one
+  useEffect(() => {
+    if (!open || !eventId || aiComment || isGeneratingComment) return;
+    if (generatedRef.current === eventId) return;
+    generatedRef.current = eventId;
+
+    const generate = async () => {
+      setIsGeneratingComment(true);
+      try {
+        const { data, error } = await supabase.functions.invoke('generate-event-comments', {
+          body: {
+            events: [{ id: eventId, event_type: eventType, minute, description, metadata: {} }],
+            home_team: homeTeam,
+            away_team: awayTeam,
+          },
+        });
+        if (!error && data?.generated > 0) {
+          const { data: updated } = await supabase
+            .from('match_events')
+            .select('metadata')
+            .eq('id', eventId)
+            .single();
+          const comment = (updated?.metadata as any)?.ai_comment as string | undefined;
+          if (comment) setAiComment(comment);
+        }
+      } catch (e) {
+        console.warn('[ClipPlayerModal] comment generation failed:', e);
+      } finally {
+        setIsGeneratingComment(false);
+      }
+    };
+    generate();
+  }, [open, eventId]);
 
   useEffect(() => {
     if (!open) {
@@ -165,14 +212,20 @@ export function ClipPlayerModal({
               <Badge variant="secondary" className="text-sm">{minute}'</Badge>
             )}
           </div>
-          {aiComment && (
-            <div className="flex items-start gap-2 mt-2">
-              <Sparkles className="h-4 w-4 text-primary mt-1 flex-shrink-0" />
-              <p className="text-base text-muted-foreground leading-relaxed">{aiComment}</p>
+          {isGeneratingComment && (
+            <div className="flex items-center gap-2 text-muted-foreground text-sm">
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              <span>Gerando análise tática...</span>
             </div>
           )}
-          {!aiComment && description && (
-            <p className="text-sm text-muted-foreground">{description}</p>
+          {!isGeneratingComment && aiComment && (
+            <div className="flex items-start gap-2 mt-2">
+              <Sparkles className="h-4 w-4 text-primary mt-1 flex-shrink-0" />
+              <p className="text-base text-white leading-relaxed">{aiComment.slice(0, 350)}</p>
+            </div>
+          )}
+          {!isGeneratingComment && !aiComment && description && (
+            <p className="text-sm text-white/70">{description}</p>
           )}
         </div>
       </DialogContent>
