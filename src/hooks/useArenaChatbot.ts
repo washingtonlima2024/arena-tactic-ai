@@ -1,6 +1,5 @@
 import { useState, useRef, useCallback, useMemo } from 'react';
 import { apiClient } from '@/lib/apiClient';
-import { supabase } from '@/integrations/supabase/client';
 import { toast } from 'sonner';
 
 interface Message {
@@ -59,44 +58,6 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
     return ctx;
   }, [matchContext]);
 
-  // Fallback to Lovable Cloud edge function
-  const sendViaCloud = useCallback(async (
-    message: string,
-    conversationHistory: { role: string; content: string }[]
-  ): Promise<string | null> => {
-    console.log('[ArenaChatbot] Using Lovable Cloud fallback...');
-    
-    try {
-      const { data, error } = await supabase.functions.invoke('arena-chatbot', {
-        body: {
-          message,
-          matchContext: matchContext ? {
-            homeTeam: matchContext.homeTeam,
-            awayTeam: matchContext.awayTeam,
-            homeScore: matchContext.homeScore,
-            awayScore: matchContext.awayScore,
-            competition: matchContext.match?.competition,
-            status: matchContext.match?.status,
-          } : undefined,
-          conversationHistory,
-        },
-      });
-
-      if (error) {
-        console.error('[ArenaChatbot] Cloud error:', error);
-        throw new Error(error.message || 'Erro no serviço de IA');
-      }
-
-      if (data?.error) {
-        throw new Error(data.error);
-      }
-
-      return data?.text || null;
-    } catch (error) {
-      console.error('[ArenaChatbot] Cloud fallback failed:', error);
-      throw error;
-    }
-  }, [matchContext]);
 
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return;
@@ -141,10 +102,8 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
         });
         responseText = data.text;
       } catch (localError) {
-        console.warn('[ArenaChatbot] Local server failed, trying cloud fallback:', localError);
-        
-        // Fallback to Lovable Cloud
-        responseText = await sendViaCloud(enrichedText, conversationHistory);
+        console.error('[ArenaChatbot] Local server failed:', localError);
+        throw new Error('Servidor local indisponível. Verifique se o servidor Python está em execução.');
       }
 
       if (responseText) {
@@ -190,7 +149,7 @@ export function useArenaChatbot(matchContext?: MatchContext | null) {
     } finally {
       setIsLoading(false);
     }
-  }, [messages, isLoading, contextString, matchContext, sendViaCloud]);
+  }, [messages, isLoading, contextString, matchContext]);
 
   // Strip emojis from text for cleaner TTS and display
   const stripEmojis = useCallback((text: string): string => {

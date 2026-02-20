@@ -1,5 +1,4 @@
 import { useState, useRef, useCallback, useEffect } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import { apiClient } from "@/lib/apiClient";
 import { generateUUID } from "@/lib/utils";
 
@@ -143,75 +142,18 @@ export const useVideoAudioTranscription = (options: UseVideoAudioTranscriptionOp
       }
       const base64Audio = btoa(binary);
 
-      console.log("Sending audio chunk to Whisper:", audioBlob.size, "bytes, language:", language);
+      console.log("Sending audio chunk to transcription:", audioBlob.size, "bytes, language:", language);
 
-      // Call transcribe-audio edge function (uses Google Gemini directly)
+      // Call local backend for transcription
       let data: { success: boolean; text?: string; error?: string } | null = null;
-      let retryCount = 0;
-      const maxRetries = 2;
       
-      while (retryCount <= maxRetries) {
-        try {
-          const response = await supabase.functions.invoke("transcribe-audio", {
-            body: { audio: base64Audio, language },
-          });
-          
-          if (response.error) {
-            console.error("Transcription function error:", response.error);
-            retryCount++;
-            if (retryCount <= maxRetries) {
-              console.log(`Retrying transcription (${retryCount}/${maxRetries})...`);
-              await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-              continue;
-            }
-            // Fall through to backend fallback
-            break;
-          }
-          
-          data = response.data;
-          
-          // Handle rate limiting
-          if (data && !data.success && data.error?.includes('Rate limit')) {
-            console.warn("Rate limited, waiting before retry...");
-            retryCount++;
-            if (retryCount <= maxRetries) {
-              await new Promise(resolve => setTimeout(resolve, 3000 * retryCount));
-              continue;
-            }
-            // Fall through to backend fallback
-            break;
-          }
-          
-          // Success, exit retry loop
-          if (data?.success && data?.text) {
-            break;
-          }
-          
-          break;
-        } catch (err) {
-          console.error("Transcription request error:", err);
-          retryCount++;
-          if (retryCount <= maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, 1000 * retryCount));
-            continue;
-          }
-          // Fall through to backend fallback
-          break;
+      try {
+        const backendResult = await apiClient.transcribeAudio({ audio: base64Audio, language });
+        if (backendResult?.text) {
+          data = { success: true, text: backendResult.text };
         }
-      }
-
-      // Fallback to backend Python server if edge function failed
-      if (!data?.success || !data?.text) {
-        console.log("[VideoAudioTranscription] Edge function failed, trying backend fallback...");
-        try {
-          const backendResult = await apiClient.transcribeAudio({ audio: base64Audio, language });
-          if (backendResult?.text) {
-            data = { success: true, text: backendResult.text };
-            console.log("[VideoAudioTranscription] Backend fallback succeeded");
-          }
-        } catch (backendErr) {
-          console.warn("[VideoAudioTranscription] Backend fallback also failed:", backendErr);
-        }
+      } catch (backendErr) {
+        console.warn("[VideoAudioTranscription] Transcription failed:", backendErr);
       }
 
       if (!data) {

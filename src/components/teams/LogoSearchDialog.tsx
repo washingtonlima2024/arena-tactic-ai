@@ -5,7 +5,7 @@ import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Loader2, Search, Globe } from 'lucide-react';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { downloadLogoToLocal } from '@/lib/autoTeamLogo';
 
@@ -58,11 +58,7 @@ export function LogoSearchDialog({ open, onOpenChange, onSelect }: LogoSearchDia
     setIsLoadingCountries(true);
     setError(null);
     try {
-      const { data, error: fnError } = await supabase.functions.invoke('fetch-football-logos', {
-        body: { mode: 'countries' },
-      });
-
-      if (fnError) throw fnError;
+      const data = await apiClient.get('/api/football-logos/countries');
       if (data?.success && data.countries) {
         setCountries(data.countries);
       } else {
@@ -80,11 +76,9 @@ export function LogoSearchDialog({ open, onOpenChange, onSelect }: LogoSearchDia
     setIsLoadingLogos(true);
     setError(null);
     try {
-      const { data, error: fnError } = await supabase.functions.invoke('fetch-football-logos', {
-        body: { mode: 'search', country: selectedCountry, query: searchQuery || undefined },
-      });
-
-      if (fnError) throw fnError;
+      const params = new URLSearchParams({ country: selectedCountry });
+      if (searchQuery) params.set('query', searchQuery);
+      const data = await apiClient.get(`/api/football-logos/search?${params}`);
       if (data?.success && data.logos) {
         setLogos(data.logos);
       } else {

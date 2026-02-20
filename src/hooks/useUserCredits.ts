@@ -1,5 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 import { useAuth } from './useAuth';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -21,24 +21,19 @@ export function useUserCredits() {
         return { balance: 0, monthlyQuota: 0 };
       }
 
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('credits_balance, credits_monthly_quota')
-        .eq('user_id', user.id)
-        .single();
-
-      if (error) {
+      try {
+        const data = await apiClient.get(`/api/users/${user.id}/credits`);
+        return {
+          balance: data?.credits_balance || 0,
+          monthlyQuota: data?.credits_monthly_quota || 0,
+        };
+      } catch (error) {
         console.error('Erro ao buscar créditos:', error);
         return { balance: 0, monthlyQuota: 0 };
       }
-
-      return {
-        balance: data?.credits_balance || 0,
-        monthlyQuota: data?.credits_monthly_quota || 0,
-      };
     },
     enabled: !!user?.id,
-    staleTime: 30000, // Cache por 30 segundos
+    staleTime: 30000,
   });
 
   const consumeCredits = useMutation({
@@ -51,16 +46,8 @@ export function useUserCredits() {
         throw new Error('Créditos insuficientes');
       }
 
-      const newBalance = currentBalance - amount;
-
-      const { error } = await supabase
-        .from('profiles')
-        .update({ credits_balance: newBalance })
-        .eq('user_id', user.id);
-
-      if (error) throw error;
-
-      return newBalance;
+      await apiClient.post(`/api/users/${user.id}/credits/consume`, { amount });
+      return currentBalance - amount;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user-credits', user?.id] });
@@ -81,18 +68,8 @@ export function useUserCredits() {
   const addCredits = useMutation({
     mutationFn: async (amount: number) => {
       if (!user?.id) throw new Error('Usuário não autenticado');
-
-      const currentBalance = credits?.balance || 0;
-      const newBalance = currentBalance + amount;
-
-      const { error } = await supabase
-        .from('profiles')
-        .update({ credits_balance: newBalance })
-        .eq('user_id', user.id);
-
-      if (error) throw error;
-
-      return newBalance;
+      await apiClient.post(`/api/users/${user.id}/credits/add`, { amount });
+      return (credits?.balance || 0) + amount;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['user-credits', user?.id] });
