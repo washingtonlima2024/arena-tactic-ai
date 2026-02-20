@@ -1,112 +1,117 @@
 
-## Diagnóstico Real e Definitivo
+## Diagnóstico Definitivo
 
-### O que foi visto no session replay
-O toast "Download concluído!" aparece em menos de 1 segundo. Isso é o comportamento exato do `downloadSingleClip` (download direto do arquivo). Significa que o fluxo NÃO está passando pelo pipeline de Canvas + MediaRecorder.
+### Raiz do Problema
 
-### Por que isso acontece
+Analisando os network requests em tempo real, confirmei o bug exato:
 
-Ao analisar `ExportPreviewDialog.tsx` linha 362:
+A API de eventos (`/api/matches/{id}/events`) retorna:
+```json
+"clip_url": "http://localhost:5000/api/storage/5806651a-.../clips/first_half/00min-foul-f8bb2bd9.mp4"
+```
+
+A `normalizeStorageUrl` converte isso para:
+```
+https://paradise-naturals-enrollment-cams.trycloudflare.com/api/storage/.../clips/...mp4
+```
+
+Isso parece correto, MAS há dois problemas reais não resolvidos ainda:
+
+**Problema 1 — `downloadSingleClip` não normaliza a URL**
+
+Em `ExportPreviewDialog.tsx` linha 363-367:
 ```typescript
 // Single clip without vignette → fast direct download
 if (selectedClips.length === 1 && !includeVignettes && selectedClips[0].clipUrl) {
+  const clip = selectedClips[0];
+  await downloadSingleClip(clip.clipUrl, filename);  // ← URL NÃO normalizada aqui!
 ```
 
-E `useVideoCompilation.ts` linha 550:
+**Problema 2 — A compilação com vinheta não mostra progresso visível ao usuário**
+
+O pipeline MediaRecorder está sendo chamado, mas o componente `CompilationProgress` pode não estar sendo exibido por cima do dialog, fazendo o usuário achar que "não funcionou" enquanto está processando em background. O usuário fecha o dialog prematuramente.
+
+**Problema 3 — Vídeo termina de renderizar mas `blob` pode ser vazio**
+
+Se o MediaRecorder receber `chunks` mas o vídeo não tiver conteúdo real (canvas preto), o arquivo baixado será válido porém sem conteúdo visual — o usuário acha que falhou.
+
+### Verificação de onde `CompilationProgress` é exibido
+
+O `isCompiling` de `useVideoCompilation` está sendo passado para o componente, mas precisa verificar se o `CompilationProgress` é renderizado **dentro** do `ExportPreviewDialog` de forma visível.
+
+### Solução Completa em 3 Partes
+
+**Parte 1 — Normalizar URL no `downloadSingleClip`**
+
+Em `ExportPreviewDialog.tsx` linha 366:
 ```typescript
-if (config.clips.length === 1 && !config.includeVignettes && config.clips[0]?.clipUrl) {
+// ANTES (bug):
+await downloadSingleClip(clip.clipUrl, filename);
+
+// DEPOIS (correto):
+await downloadSingleClip(normalizeStorageUrl(clip.clipUrl!) || clip.clipUrl!, filename);
 ```
 
-Ambas as condições estão corretas no papel. Mas o session replay mostra que o download termina em ~1 segundo — o que é impossível para o pipeline MediaRecorder (que leva pelo menos 3s de vinheta de abertura + 30s de clip + etc).
+**Parte 2 — Tornar o progresso da compilação absolutamente visível**
 
-**A conclusão é que o pipeline MediaRecorder está rodando mas o vídeo está vazio ou corrompido**, pois:
+O problema mais provável é que o usuário não vê o progresso e fecha o dialog. Adicionar um overlay de progresso mais proeminente dentro do `ExportPreviewDialog` que:
+- Bloqueia o fechamento do dialog enquanto `isCompiling === true`
+- Mostra claramente o estágio atual (gerando vinheta / baixando clip / renderizando)
+- Mostra o percentual em tamanho grande
 
-1. As URLs dos clips são `http://localhost:5000/api/storage/...` (HTTP)
-2. O app roda em `https://519b0589...lovableproject.com` (HTTPS)  
-3. O `fetch()` dentro de `fetchVideoAsBlobUrl` é uma **mixed-content request** (HTTPS → HTTP) que **o navegador bloqueia silenciosamente**
-4. Resultado: `videoBlobUrls[i] = null` para todos os clips
-5. O código entra no fallback (canvas preto por 5 segundos) e o vídeo gerado tem apenas as vinhetas + tela preta
+**Parte 3 — Adicionar log detalhado do pipeline + validação do blob final**
 
-**Evidência:** As URLs dos clips na resposta da API são:
-```
-"clip_url": "http://localhost:5000/api/storage/..."
-```
-E o `normalizeStorageUrl` converte isso para a URL do Cloudflare Tunnel: `https://paradise-naturals-enrollment-cams.trycloudflare.com/...`
-
-**Mas o problema é que no ExportPreviewDialog, os clips são passados com `.clipUrl` que ainda pode ter a URL de `localhost`.**
-
-### Solução em 2 partes
-
-**Parte 1 — Garantir que a URL dos clips seja normalizada antes de passar para o pipeline**
-
-Em `ExportPreviewDialog.tsx`, a função `handleDownload` monta o config assim:
+Em `useVideoCompilation.ts`, após `mediaRecorder.stop()`:
 ```typescript
-clips: clipsWithUrls.map(c => ({
-  clipUrl: c.clipUrl!,  // ← pode ser http://localhost:5000/...
-  ...
-}))
-```
-
-Precisa normalizar usando `normalizeStorageUrl` do `apiClient`:
-```typescript
-import { normalizeStorageUrl } from '@/lib/apiClient';
-// ...
-clips: clipsWithUrls.map(c => ({
-  clipUrl: normalizeStorageUrl(c.clipUrl!) || c.clipUrl!,  // ← normalizado
-  ...
-}))
-```
-
-**Parte 2 — Adicionar fallback de timeout e log de debug no pipeline**
-
-Em `useVideoCompilation.ts`, no `fetchVideoAsBlobUrl`, adicionar log quando o fetch falha para confirmar o diagnóstico e garantir que o erro seja visível ao usuário (não silencioso):
-
-```typescript
-async function fetchVideoAsBlobUrl(url: string): Promise<string> {
-  console.log('[Compilation] Fetching video:', url);
-  const response = await fetch(url);
-  // ...
+const finalBlob = new Blob(chunks, { type: mimeType });
+console.log(`[Compilation] Final blob: ${finalBlob.size} bytes, chunks: ${chunks.length}`);
+if (finalBlob.size < 10_000) {
+  throw new Error(`Vídeo gerado vazio (${finalBlob.size} bytes). O canvas pode não ter recebido frames do vídeo.`);
 }
+resolve(finalBlob);
 ```
 
-E no `compilePlaylist`, quando `videoBlobUrls[i]` é null (todos os clips falharam), exibir um erro claro em vez de gerar um vídeo preto:
+### Causa Raiz do "Vídeo Vazio"
 
+Mesmo com URL normalizada, o `renderVideoOnCanvas` pode falhar silenciosamente se:
+- O vídeo carregou mas `video.play()` foi bloqueado (autoplay policy)
+- O `setInterval` do canvas disparou antes do vídeo ter decodificado o primeiro frame
+
+Solução: Aguardar explicitamente o primeiro frame antes de iniciar o renderizador:
 ```typescript
-const successfulDownloads = videoBlobUrls.filter(Boolean).length;
-if (successfulDownloads === 0) {
-  throw new Error('Nenhum clip pôde ser carregado. Verifique se o servidor local está ativo e acessível.');
-}
+const video = await loadVideoElement(blobUrl);
+video.muted = true;
+await video.play();
+// Aguardar primeiro frame decodificado
+await new Promise<void>(resolve => {
+  if (video.readyState >= 3) { resolve(); return; }
+  video.addEventListener('playing', () => resolve(), { once: true });
+  setTimeout(resolve, 2000); // fallback
+});
+await renderVideoOnCanvas(ctx, video, width, height, cancelRef);
 ```
 
-**Parte 3 — Corrigir o erro de build no MediaSourceSelector.tsx**
-
-O arquivo ainda tem 3 referências a `supabase` nas linhas 265, 325, e 331. Precisa:
-- Linha 265-291: `fetchPlaylists` usa `supabase.from('playlists')` → substituir por retorno vazio (playlists são geridas localmente, não há endpoint de API para isso ainda) com mensagem explicativa
-- Linhas 325-331: `handleFileUpload` usa `supabase.storage` → substituir por `apiClient.uploadMedia()` usando FormData para enviar ao servidor Python local
-
-## Arquivos a Modificar
+### Arquivos a Modificar
 
 | Arquivo | Mudança |
 |---|---|
-| `src/components/media/ExportPreviewDialog.tsx` | Normalizar URLs dos clips com `normalizeStorageUrl` antes de passar para pipeline |
-| `src/hooks/useVideoCompilation.ts` | Adicionar log de URL antes do fetch; erro claro quando todos os clips falharam |
-| `src/components/social/MediaSourceSelector.tsx` | Remover as 3 referências restantes a `supabase` (erro de build) |
+| `src/components/media/ExportPreviewDialog.tsx` | Normalizar URL no `downloadSingleClip`; bloquear fechamento do dialog durante compilação; mostrar overlay de progresso mais visível |
+| `src/hooks/useVideoCompilation.ts` | Validar blob final (lançar erro se < 10KB); aguardar primeiro frame antes de renderizar vídeo; log detalhado do pipeline |
 
-## Fluxo Correto Após a Correção
+### Sequência do Pipeline Corrigida
 
 ```text
-handleDownload() no ExportPreviewDialog
-    ↓
-clipUrl: normalizeStorageUrl(c.clipUrl) 
-    → "https://paradise-naturals-....trycloudflare.com/api/storage/.../clips/.mp4"
-    ↓
-downloadCompilation(config) → compilePlaylist(config)
-    ↓
-fetchVideoAsBlobUrl("https://paradise-...trycloudflare.com/...") → Blob URL local
-    ↓ (sem bloqueio de mixed-content)
-loadVideoElement(blobUrl) → HTMLVideoElement pronto
-    ↓
-renderVideoOnCanvas() → frames capturados pelo MediaRecorder
-    ↓
-Vídeo .webm com vinhetas + clips reais
+handleDownload()
+  ↓ normalizeStorageUrl(clip.clipUrl)
+  ↓ downloadCompilation(config)
+    ↓ compilePlaylist(config)
+      ↓ generateOpeningVignette() → Blob → ImageBitmap [OK]
+      ↓ fetchVideoAsBlobUrl("https://cloudflare-tunnel.../clips/...mp4")
+          → Console: "[Compilation] Fetching video: https://..."
+          → Se CORS: throw error claro
+          → Se OK: Blob URL local
+      ↓ loadVideoElement(blobUrl)
+      ↓ video.play() → aguardar "playing" event
+      ↓ renderVideoOnCanvas() → frames reais no canvas
+      ↓ mediaRecorder.stop() → Blob > 10KB → download
 ```
