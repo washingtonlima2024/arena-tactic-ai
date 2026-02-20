@@ -43,6 +43,7 @@ import arenaPlayLogo from '@/assets/arena-play-icon.png';
 import { toast } from 'sonner';
 import { CLIP_BUFFER_BEFORE_MS, CLIP_BUFFER_AFTER_MS } from '@/hooks/useClipGeneration';
 import { useVideoCompilation } from '@/hooks/useVideoCompilation';
+import { normalizeStorageUrl } from '@/lib/apiClient';
 
 // Video formats
 const VIDEO_FORMATS = [
@@ -375,7 +376,7 @@ export function ExportPreviewDialog({
     await downloadCompilation({
       clips: clipsWithUrls.map(c => ({
         id: c.id,
-        clipUrl: c.clipUrl!,
+        clipUrl: normalizeStorageUrl(c.clipUrl!) || c.clipUrl!,
         eventType: c.type,
         minute: c.minute,
         description: c.description,

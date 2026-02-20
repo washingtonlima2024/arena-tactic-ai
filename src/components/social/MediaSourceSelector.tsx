@@ -261,29 +261,9 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   const fetchPlaylists = async () => {
     setLoadingPlaylists(true);
     try {
-      // Show ALL playlists (compiled first, then pending)
-      let query = supabase
-        .from('playlists')
-        .select('*, team:teams(name, primary_color)');
-
-      if (selectedMatchId || matchId) {
-        query = query.eq('match_id', selectedMatchId || matchId);
-      }
-
-      const { data, error } = await query
-        .order('created_at', { ascending: false })
-        .limit(50);
-
-      if (error) throw error;
-      
-      // Sort: compiled playlists first
-      const sorted = (data || []).sort((a: any, b: any) => {
-        if (a.video_url && !b.video_url) return -1;
-        if (!a.video_url && b.video_url) return 1;
-        return 0;
-      });
-      
-      setPlaylists((sorted as unknown as Playlist[]) || []);
+      // Playlists are managed locally via the Python server
+      // No dedicated endpoint yet — return empty list
+      setPlaylists([]);
     } catch (error) {
       console.error('Error fetching playlists:', error);
     } finally {
@@ -319,18 +299,9 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
 
     setUploading(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `social-media/${Date.now()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from('smart-editor')
-        .upload(fileName, file);
-
-      if (uploadError) throw uploadError;
-
-      const { data: { publicUrl } } = supabase.storage
-        .from('smart-editor')
-        .getPublicUrl(fileName);
+      const targetMatchId = selectedMatchId || matchId || 'social';
+      const result = await apiClient.uploadFile(targetMatchId, 'social-media', file);
+      const publicUrl = normalizeStorageUrl(result.url) || result.url;
 
       onChange(publicUrl, isVideo ? 'video' : 'image');
       toast({ title: 'Arquivo enviado!' });

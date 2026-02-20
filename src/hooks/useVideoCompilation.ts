@@ -157,9 +157,12 @@ async function blobToImageBitmap(blob: Blob): Promise<ImageBitmap> {
 
 // Fetch video as Blob URL to avoid canvas CORS taint
 async function fetchVideoAsBlobUrl(url: string): Promise<string> {
+  console.log('[Compilation] Fetching video:', url);
   const response = await fetch(url);
-  if (!response.ok) throw new Error(`HTTP ${response.status} ao buscar vídeo`);
+  if (!response.ok) throw new Error(`HTTP ${response.status} ao buscar vídeo: ${url}`);
   const blob = await response.blob();
+  if (blob.size === 0) throw new Error(`Blob vazio para: ${url}`);
+  console.log(`[Compilation] Blob OK: ${(blob.size / 1024 / 1024).toFixed(2)} MB`);
   return URL.createObjectURL(blob);
 }
 
