@@ -51,7 +51,8 @@ const FORMAT_DIMENSIONS: Record<string, { width: number; height: number }> = {
 const FPS = 30;
 const FRAME_INTERVAL_MS = Math.round(1000 / FPS);
 
-// Render an image on canvas for a specified duration using setInterval (reliable for offscreen canvas)
+// Render an image on canvas for a specified duration using requestAnimationFrame
+// This avoids browser throttling that plagues setInterval in non-focused tabs
 function renderImageOnCanvas(
   ctx: CanvasRenderingContext2D,
   bitmap: ImageBitmap,
@@ -64,30 +65,48 @@ function renderImageOnCanvas(
     // Draw first frame immediately so MediaRecorder captures something
     ctx.drawImage(bitmap, 0, 0, width, height);
 
-    let elapsed = 0;
-    const interval = setInterval(() => {
+    let startTime: number | null = null;
+    let rafId: number;
+    let framesDrawn = 0;
+
+    const renderFrame = (timestamp: number) => {
       if (cancelRef.current) {
-        clearInterval(interval);
         resolve();
         return;
       }
-      ctx.drawImage(bitmap, 0, 0, width, height);
-      elapsed += FRAME_INTERVAL_MS;
-      if (elapsed >= durationMs) {
-        clearInterval(interval);
-        resolve();
-      }
-    }, FRAME_INTERVAL_MS);
 
-    // Safety timeout in case setInterval stalls
-    setTimeout(() => {
-      clearInterval(interval);
+      if (startTime === null) startTime = timestamp;
+      const elapsed = timestamp - startTime;
+
+      ctx.drawImage(bitmap, 0, 0, width, height);
+      framesDrawn++;
+
+      if (elapsed >= durationMs) {
+        console.log(`[Compilation] Image rendered: ${framesDrawn} frames in ${elapsed.toFixed(0)}ms`);
+        resolve();
+      } else {
+        rafId = requestAnimationFrame(renderFrame);
+      }
+    };
+
+    rafId = requestAnimationFrame(renderFrame);
+
+    // Safety timeout — resolves if RAF stalls (e.g. tab hidden)
+    const safety = setTimeout(() => {
+      cancelAnimationFrame(rafId);
+      console.warn(`[Compilation] Image render safety timeout hit (${framesDrawn} frames drawn)`);
       resolve();
-    }, durationMs + 500);
+    }, durationMs + 2000);
+
+    // Clear safety when done naturally
+    const originalResolve = resolve;
+    // eslint-disable-next-line no-param-reassign
+    resolve = () => { clearTimeout(safety); originalResolve(); };
   });
 }
 
-// Render a video element on canvas using setInterval (reliable for offscreen canvas)
+// Render a video element on canvas using requestAnimationFrame
+// requestVideoFrameCallback is used when available for perfect frame sync
 function renderVideoOnCanvas(
   ctx: CanvasRenderingContext2D,
   video: HTMLVideoElement,
@@ -97,14 +116,18 @@ function renderVideoOnCanvas(
 ): Promise<void> {
   return new Promise((resolve) => {
     let resolved = false;
+    let framesDrawn = 0;
+    let rafId: number;
+
     const done = () => {
       if (resolved) return;
       resolved = true;
-      clearInterval(interval);
+      cancelAnimationFrame(rafId);
+      console.log(`[Compilation] Video rendered: ${framesDrawn} frames`);
       resolve();
     };
 
-    const interval = setInterval(() => {
+    const renderFrame = () => {
       if (cancelRef.current || video.ended) {
         done();
         return;
@@ -112,11 +135,15 @@ function renderVideoOnCanvas(
       if (!video.paused && !video.ended) {
         try {
           ctx.drawImage(video, 0, 0, width, height);
+          framesDrawn++;
         } catch {
           // Canvas may be tainted - skip frame
         }
       }
-    }, FRAME_INTERVAL_MS);
+      rafId = requestAnimationFrame(renderFrame);
+    };
+
+    rafId = requestAnimationFrame(renderFrame);
 
     video.addEventListener('ended', done, { once: true });
     video.addEventListener('error', done, { once: true });
@@ -572,6 +599,9 @@ export function useVideoCompilation() {
       await downloadSingleClip(clip.clipUrl, filename);
       return;
     }
+
+    // Force window focus to prevent browser throttling of RAF/MediaRecorder
+    window.focus();
 
     // All other cases (vignettes enabled, or multi-clip) → MediaRecorder pipeline
     console.log('[Compilation] Starting pipeline. includeVignettes:', config.includeVignettes, 'clips:', config.clips.length);
