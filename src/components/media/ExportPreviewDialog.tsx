@@ -92,6 +92,7 @@ interface Clip {
   thumbnail?: string;
   clipUrl?: string | null;
   totalSeconds?: number;
+  videoSecond?: number; // second in original video file (for SRT offset)
 }
 
 interface ExportPreviewDialogProps {
@@ -405,7 +406,8 @@ export function ExportPreviewDialog({
       clips: clipsWithUrls.map(c => {
         // Calculate the start time of this clip in the source video
         const bufferBefore = CLIP_BUFFER_BEFORE_MS / 1000;
-        const eventSec = c.totalSeconds ?? (c.minute * 60 + (c.second ?? 0));
+        // Use videoSecond (original video file timestamp) for SRT offset accuracy
+        const eventSec = c.videoSecond ?? c.totalSeconds ?? (c.minute * 60 + (c.second ?? 0));
         const clipStartInVideo = Math.max(0, eventSec - bufferBefore);
         const clipEndInVideo = eventSec + CLIP_BUFFER_AFTER_MS / 1000;
 

@@ -302,7 +302,7 @@ function loadVideoElement(blobUrl: string): Promise<HTMLVideoElement> {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
     // No crossOrigin needed — it's a local blob URL
-    video.muted = true;
+    // video.muted removed — AudioContext needs unmuted source to capture audio
     video.playsInline = true;
     video.preload = 'auto';
     video.src = blobUrl;
