@@ -1,97 +1,112 @@
 
-## Objetivo
+## Diagnóstico Real e Definitivo
 
-Remover todas as dependências do Supabase do código frontend, substituindo cada chamada pelo `apiClient` (servidor Python local) ou pela lógica local já existente. A decisão já foi tomada: o projeto usa 100% servidor local (JWT + SQLite + Python).
+### O que foi visto no session replay
+O toast "Download concluído!" aparece em menos de 1 segundo. Isso é o comportamento exato do `downloadSingleClip` (download direto do arquivo). Significa que o fluxo NÃO está passando pelo pipeline de Canvas + MediaRecorder.
 
----
+### Por que isso acontece
 
-## Inventário Completo de Dependências
+Ao analisar `ExportPreviewDialog.tsx` linha 362:
+```typescript
+// Single clip without vignette → fast direct download
+if (selectedClips.length === 1 && !includeVignettes && selectedClips[0].clipUrl) {
+```
 
-Após análise de todos os arquivos, as dependências estão distribuídas assim:
+E `useVideoCompilation.ts` linha 550:
+```typescript
+if (config.clips.length === 1 && !config.includeVignettes && config.clips[0]?.clipUrl) {
+```
 
-### Grupo 1 — `supabase.auth.getUser()` (autenticação errada)
-Arquivos que ainda usam Supabase Auth em vez de `useAuth()`:
-- `src/hooks/useAiPrompts.ts` — linhas 41 e 101
+Ambas as condições estão corretas no papel. Mas o session replay mostra que o download termina em ~1 segundo — o que é impossível para o pipeline MediaRecorder (que leva pelo menos 3s de vinheta de abertura + 30s de clip + etc).
 
-### Grupo 2 — Queries Supabase que buscam dados (já disponíveis via apiClient)
-- `src/pages/Analysis.tsx` — realtime channel + queries de `videos` e `generated_audio`
-- `src/pages/MatchDashboard.tsx` — query de `videos` para obter URL do vídeo
-- `src/pages/Index.tsx` — query de `matches` e `analysis_jobs` para stats do dashboard
-- `src/hooks/useMatches.ts` — fallback Supabase para listagem e criação de partidas
-- `src/hooks/useDeleteMatch.ts` — fallback Supabase para deleção de partidas
+**A conclusão é que o pipeline MediaRecorder está rodando mas o vídeo está vazio ou corrompido**, pois:
 
-### Grupo 3 — Edge Functions (lógica que deve ir para servidor local)
-- `src/pages/MatchCenter.tsx` — `supabase.functions.invoke('generate-event-comments')`
-- `src/components/media/VideoPlayerModal.tsx` — `supabase.functions.invoke('generate-event-comments')`
-- `src/components/teams/LogoSearchDialog.tsx` — `supabase.functions.invoke('fetch-football-logos')`
-- `src/hooks/useArenaChatbot.ts` — `supabase.functions.invoke('arena-chatbot')`
-- `src/hooks/useVideoAudioTranscription.ts` — `supabase.functions.invoke('transcribe-audio')`
+1. As URLs dos clips são `http://localhost:5000/api/storage/...` (HTTP)
+2. O app roda em `https://519b0589...lovableproject.com` (HTTPS)  
+3. O `fetch()` dentro de `fetchVideoAsBlobUrl` é uma **mixed-content request** (HTTPS → HTTP) que **o navegador bloqueia silenciosamente**
+4. Resultado: `videoBlobUrls[i] = null` para todos os clips
+5. O código entra no fallback (canvas preto por 5 segundos) e o vídeo gerado tem apenas as vinhetas + tela preta
 
-### Grupo 4 — Outros acessos diretos a tabelas
-- `src/hooks/useUserCredits.ts` — lê e atualiza `profiles` no Supabase (créditos)
-- `src/components/social/MediaSourceSelector.tsx` — busca `matches`, `match_events`, `playlists` e faz upload para Storage
-- `src/hooks/useAiPrompts.ts` — CRUD completo na tabela `ai_prompts`
+**Evidência:** As URLs dos clips na resposta da API são:
+```
+"clip_url": "http://localhost:5000/api/storage/..."
+```
+E o `normalizeStorageUrl` converte isso para a URL do Cloudflare Tunnel: `https://paradise-naturals-enrollment-cams.trycloudflare.com/...`
 
----
+**Mas o problema é que no ExportPreviewDialog, os clips são passados com `.clipUrl` que ainda pode ter a URL de `localhost`.**
 
-## Estratégia de Substituição por Grupo
+### Solução em 2 partes
 
-### Grupo 1 — Simples: trocar por `useAuth()`
-Em `useAiPrompts.ts`, remover `supabase.auth.getUser()` e usar `useAuth()`. O `user.id` do auth local substitui o `user?.id` do Supabase.
+**Parte 1 — Garantir que a URL dos clips seja normalizada antes de passar para o pipeline**
 
-### Grupo 2 — Remover fallback Supabase; usar apenas apiClient
-- `Analysis.tsx`: remover o canal realtime do Supabase (já tem polling com `setInterval` de 10s que funciona). Substituir queries `videos` e `generated_audio` por `apiClient.getVideos()` e `apiClient.getGeneratedAudio()`.
-- `MatchDashboard.tsx`: substituir query de `videos` por `apiClient.getVideos(matchId)`.
-- `Index.tsx`: substituir queries de stats por `apiClient.getMatches()` + contagem local.
-- `useMatches.ts`: remover bloco fallback Supabase — se servidor local estiver offline, retornar array vazio com mensagem de erro.
-- `useDeleteMatch.ts`: remover função `deleteMatchViaSupabase` — se servidor local estiver offline, mostrar erro pedindo para reconectar o servidor.
+Em `ExportPreviewDialog.tsx`, a função `handleDownload` monta o config assim:
+```typescript
+clips: clipsWithUrls.map(c => ({
+  clipUrl: c.clipUrl!,  // ← pode ser http://localhost:5000/...
+  ...
+}))
+```
 
-### Grupo 3 — Edge Functions: redirecionar para apiClient ou remover
-As Edge Functions do Supabase são wrappers das mesmas IAs já usadas pelo servidor Python:
+Precisa normalizar usando `normalizeStorageUrl` do `apiClient`:
+```typescript
+import { normalizeStorageUrl } from '@/lib/apiClient';
+// ...
+clips: clipsWithUrls.map(c => ({
+  clipUrl: normalizeStorageUrl(c.clipUrl!) || c.clipUrl!,  // ← normalizado
+  ...
+}))
+```
 
-- `generate-event-comments`: o `apiClient` já tem endpoints de análise. Substituir por uma chamada ao servidor local `/api/events/{id}/generate-comment` ou simplesmente desabilitar o botão com uma mensagem "Requer servidor local ativo".
-- `fetch-football-logos`: já existe `apiClient` para isso ou pode buscar direto da API pública. Substituir por `apiClient.fetchFootballLogos()` ou remover a dependência do Supabase.
-- `arena-chatbot`: substituir `supabase.functions.invoke('arena-chatbot')` por `apiClient.chat()` — já existe no servidor Python.
-- `transcribe-audio`: substituir por `apiClient.transcribeAudio()` — já existe no servidor Python.
+**Parte 2 — Adicionar fallback de timeout e log de debug no pipeline**
 
-### Grupo 4 — Créditos e Playlists
-- `useUserCredits.ts`: créditos ficam no perfil do usuário local. Substituir por `apiClient.getUserCredits()` e `apiClient.updateCredits()` — o servidor Python já gerencia isso via SQLite.
-- `MediaSourceSelector.tsx`: substituir busca de `matches`/`match_events` por `apiClient`. Para upload de mídia social, usar `apiClient.uploadMedia()` em vez do Storage do Supabase.
-- `useAiPrompts.ts`: os prompts de IA são configurações de admin. Migrar CRUD para `apiClient.getPrompts()`, `apiClient.updatePrompt()` etc. — ou manter no Supabase apenas esse módulo por enquanto (decisão do usuário).
+Em `useVideoCompilation.ts`, no `fetchVideoAsBlobUrl`, adicionar log quando o fetch falha para confirmar o diagnóstico e garantir que o erro seja visível ao usuário (não silencioso):
 
----
+```typescript
+async function fetchVideoAsBlobUrl(url: string): Promise<string> {
+  console.log('[Compilation] Fetching video:', url);
+  const response = await fetch(url);
+  // ...
+}
+```
+
+E no `compilePlaylist`, quando `videoBlobUrls[i]` é null (todos os clips falharam), exibir um erro claro em vez de gerar um vídeo preto:
+
+```typescript
+const successfulDownloads = videoBlobUrls.filter(Boolean).length;
+if (successfulDownloads === 0) {
+  throw new Error('Nenhum clip pôde ser carregado. Verifique se o servidor local está ativo e acessível.');
+}
+```
+
+**Parte 3 — Corrigir o erro de build no MediaSourceSelector.tsx**
+
+O arquivo ainda tem 3 referências a `supabase` nas linhas 265, 325, e 331. Precisa:
+- Linha 265-291: `fetchPlaylists` usa `supabase.from('playlists')` → substituir por retorno vazio (playlists são geridas localmente, não há endpoint de API para isso ainda) com mensagem explicativa
+- Linhas 325-331: `handleFileUpload` usa `supabase.storage` → substituir por `apiClient.uploadMedia()` usando FormData para enviar ao servidor Python local
 
 ## Arquivos a Modificar
 
 | Arquivo | Mudança |
 |---|---|
-| `src/hooks/useAiPrompts.ts` | Remover `supabase.auth.getUser()`; usar `useAuth()` |
-| `src/pages/Analysis.tsx` | Remover canal realtime Supabase; usar apiClient para `videos` e `generated_audio` |
-| `src/pages/MatchDashboard.tsx` | Substituir query Supabase de `videos` por `apiClient.getVideos()` |
-| `src/pages/Index.tsx` | Substituir queries de stats por `apiClient.getMatches()` + contagem local |
-| `src/hooks/useMatches.ts` | Remover fallback Supabase — erro claro se servidor offline |
-| `src/hooks/useDeleteMatch.ts` | Remover `deleteMatchViaSupabase` — erro claro se servidor offline |
-| `src/hooks/useArenaChatbot.ts` | Substituir `supabase.functions.invoke('arena-chatbot')` por `apiClient` |
-| `src/hooks/useVideoAudioTranscription.ts` | Substituir `supabase.functions.invoke('transcribe-audio')` por `apiClient` |
-| `src/hooks/useUserCredits.ts` | Substituir queries `profiles` por `apiClient` para créditos locais |
-| `src/components/media/VideoPlayerModal.tsx` | Substituir `supabase.functions.invoke('generate-event-comments')` por `apiClient` ou botão desabilitado |
-| `src/components/teams/LogoSearchDialog.tsx` | Substituir `supabase.functions.invoke('fetch-football-logos')` por `apiClient` |
-| `src/components/social/MediaSourceSelector.tsx` | Substituir queries Supabase por `apiClient`; upload de mídia via servidor local |
+| `src/components/media/ExportPreviewDialog.tsx` | Normalizar URLs dos clips com `normalizeStorageUrl` antes de passar para pipeline |
+| `src/hooks/useVideoCompilation.ts` | Adicionar log de URL antes do fetch; erro claro quando todos os clips falharam |
+| `src/components/social/MediaSourceSelector.tsx` | Remover as 3 referências restantes a `supabase` (erro de build) |
 
----
+## Fluxo Correto Após a Correção
 
-## O que NÃO muda
-- `src/integrations/supabase/client.ts` — arquivo auto-gerado, nunca editado
-- `src/integrations/supabase/types.ts` — arquivo auto-gerado, nunca editado
-- Dados existentes no banco continuam intactos
-
----
-
-## Pergunta antes de implementar
-
-Para `useAiPrompts.ts` e `src/components/social/MediaSourceSelector.tsx`, os dados de prompts de IA e playlists sociais ainda existem no banco Supabase. Duas opções:
-
-**Opção A** — Migrar tudo para o servidor Python local (SQLite), removendo dependência total.
-**Opção B** — Manter `ai_prompts` e `playlists` no banco Supabase temporariamente, removendo apenas as dependências de `auth` do Supabase.
-
-Qual opção prefere?
+```text
+handleDownload() no ExportPreviewDialog
+    ↓
+clipUrl: normalizeStorageUrl(c.clipUrl) 
+    → "https://paradise-naturals-....trycloudflare.com/api/storage/.../clips/.mp4"
+    ↓
+downloadCompilation(config) → compilePlaylist(config)
+    ↓
+fetchVideoAsBlobUrl("https://paradise-...trycloudflare.com/...") → Blob URL local
+    ↓ (sem bloqueio de mixed-content)
+loadVideoElement(blobUrl) → HTMLVideoElement pronto
+    ↓
+renderVideoOnCanvas() → frames capturados pelo MediaRecorder
+    ↓
+Vídeo .webm com vinhetas + clips reais
+```
