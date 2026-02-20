@@ -150,6 +150,10 @@ export function ExportPreviewDialog({
   const [showClipVignette, setShowClipVignette] = useState(false);
   const [videoReady, setVideoReady] = useState(false);
 
+  // Preview CC state
+  const [previewSrtLines, setPreviewSrtLines] = useState<{ start: number; end: number; text: string }[]>([]);
+  const [currentCC, setCurrentCC] = useState('');
+
   // Video compilation hook
   const { 
     isCompiling, 
@@ -189,6 +193,8 @@ export function ExportPreviewDialog({
       setShowSettings(false);
       setShowClipVignette(false);
       setVideoReady(false);
+      setPreviewSrtLines([]);
+      setCurrentCC('');
     }
   }, [isOpen]);
 
@@ -207,7 +213,33 @@ export function ExportPreviewDialog({
       setShowClipVignette(false);
       setVideoReady(true);
     }
+    // Clear CC on clip change
+    setCurrentCC('');
   }, [playbackState, includeVignettes, currentClip?.thumbnail]);
+
+  // CC sync with video during preview
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video || !previewSrtLines.length || !currentClip) return;
+
+    // Calculate clip start offset in the source video
+    const bufferBefore = CLIP_BUFFER_BEFORE_MS / 1000;
+    const eventSec = currentClip.videoSecond ?? currentClip.totalSeconds ?? (currentClip.minute * 60 + (currentClip.second ?? 0));
+    const clipStartInVideo = Math.max(0, eventSec - bufferBefore);
+
+    const onTime = () => {
+      // video.currentTime is relative to clip start (0 = clip start) when using clipUrl
+      // when using matchVideo it is absolute time in the source file
+      const absoluteTime = currentClip.clipUrl
+        ? clipStartInVideo + video.currentTime
+        : video.currentTime;
+      const sub = previewSrtLines.find(s => absoluteTime >= s.start && absoluteTime <= s.end);
+      setCurrentCC(sub?.text ?? '');
+    };
+
+    video.addEventListener('timeupdate', onTime);
+    return () => video.removeEventListener('timeupdate', onTime);
+  }, [previewSrtLines, currentClip, playbackState]);
 
   // Toggle clip selection
   const toggleClip = (clipId: string) => {
@@ -231,10 +263,36 @@ export function ExportPreviewDialog({
     }
   };
 
+  // Load SRT for preview CC overlay
+  const loadSRTForPreview = useCallback(async () => {
+    if (!includeSubtitles || !matchId) return;
+    try {
+      const filesData = await apiClient.listMatchFiles(matchId);
+      const srtFiles = filesData?.folders?.srt || [];
+      if (srtFiles.length > 0) {
+        const targetSrt =
+          srtFiles.find((f: any) => f.name?.toLowerCase().includes('full') || f.name?.toLowerCase() === 'transcription.srt') ||
+          srtFiles[0];
+        const srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${targetSrt.name}`;
+        const response = await fetch(srtUrl);
+        if (response.ok) {
+          const srtContent = await response.text();
+          const lines = parseSRT(srtContent);
+          setPreviewSrtLines(lines);
+          console.log(`[Preview] Loaded ${lines.length} SRT lines for CC overlay`);
+        }
+      }
+    } catch (err) {
+      console.warn('[Preview] Could not load SRT for CC overlay:', err);
+    }
+  }, [includeSubtitles, matchId]);
+
   // Start preview
   const startPreview = () => {
     if (selectedClips.length === 0) return;
     setStep('preview');
+    // Load SRT in background for CC overlay
+    loadSRTForPreview();
     setPlaybackState(includeVignettes ? { type: 'opening' } : { type: 'clip', index: 0 });
   };
 
@@ -1071,6 +1129,26 @@ export function ExportPreviewDialog({
                               onLoaded={handleVideoLoaded}
                               onEnded={handleClipEnd}
                             />
+
+                            {/* CC overlay — synced via timeupdate */}
+                            {includeSubtitles && currentCC && (
+                              <div className="absolute bottom-[14%] left-2 right-2 z-20 flex justify-center pointer-events-none">
+                                <span
+                                  className="text-white font-medium text-center leading-snug"
+                                  style={{
+                                    background: 'rgba(0,0,0,0.75)',
+                                    borderRadius: 4,
+                                    padding: '2px 8px',
+                                    fontSize: 'clamp(9px, 2.5cqw, 14px)',
+                                    maxWidth: '95%',
+                                    display: 'inline-block',
+                                    textShadow: '0 1px 3px rgba(0,0,0,0.9)',
+                                  }}
+                                >
+                                  {currentCC}
+                                </span>
+                              </div>
+                            )}
                             
                             {/* Logo banner overlay */}
                             <div className="absolute bottom-0 left-0 right-0 z-30 bg-gradient-to-t from-black/80 via-black/50 to-transparent px-2 sm:px-4 py-2 sm:py-3">
@@ -1342,22 +1420,50 @@ function OpeningVignette({
   awayScore: number;
   onComplete: () => void;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(300);
+
+  useEffect(() => {
+    const ro = new ResizeObserver(entries => setContainerWidth(entries[0].contentRect.width));
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => {
     const timer = setTimeout(onComplete, 3000);
     return () => clearTimeout(timer);
   }, [onComplete]);
 
+  const scale = Math.max(0.35, Math.min(1.4, containerWidth / 400));
+  const logoH = `${Math.round(48 * scale)}px`;
+  const titleSize = `${Math.round(16 * scale)}px`;
+  const scoreSize = `${Math.round(28 * scale)}px`;
+  const subSize = `${Math.round(11 * scale)}px`;
+  const mb1 = `${Math.round(12 * scale)}px`;
+  const mb2 = `${Math.round(6 * scale)}px`;
+
   return (
-    <div className="absolute inset-0 z-20 bg-gradient-to-br from-gray-900 via-primary/20 to-gray-900 flex items-center justify-center">
-      <div className="text-center text-white animate-in fade-in zoom-in duration-700 p-4">
-        <img src={arenaPlayLogo} alt="Arena Play" className="h-8 sm:h-12 mx-auto mb-2 sm:mb-4" />
-        <h3 className="text-sm sm:text-lg font-bold">{homeTeam} vs {awayTeam}</h3>
-        <p className="text-xl sm:text-2xl font-display font-bold mt-1">{homeScore} - {awayScore}</p>
-        <p className="text-[10px] sm:text-xs text-white/60 mt-2">Melhores Momentos</p>
-        <div className="mt-3 animate-pulse">
-          <div className="w-8 h-1 bg-primary rounded-full mx-auto" />
-        </div>
+    <div ref={containerRef} className="absolute inset-0 z-20 bg-gradient-to-br from-gray-950 via-primary/20 to-gray-950 flex items-center justify-center overflow-hidden">
+      {/* Animated lines */}
+      <div className="absolute inset-0 overflow-hidden pointer-events-none">
+        {[20,40,60,80].map(top => (
+          <div key={top} className="absolute h-px left-0 right-0 bg-gradient-to-r from-transparent via-primary/30 to-transparent" style={{ top: `${top}%`, animation: `ovLineSlide 1.5s ease-out ${top * 0.01}s forwards`, opacity: 0 }} />
+        ))}
       </div>
+      {/* Glow */}
+      <div className="absolute inset-0 pointer-events-none" style={{ background: 'radial-gradient(circle at center, hsl(var(--primary)/0.15) 0%, transparent 65%)', animation: 'ovGlow 1.5s ease-in-out infinite' }} />
+
+      <div className="text-center text-white animate-in fade-in zoom-in duration-700 relative z-10" style={{ padding: `${Math.round(16 * scale)}px` }}>
+        <img src={arenaPlayLogo} alt="Arena Play" style={{ height: logoH, marginBottom: mb1 }} className="mx-auto drop-shadow-[0_0_20px_hsl(var(--primary)/0.5)]" />
+        <h3 className="font-bold text-white" style={{ fontSize: titleSize, marginBottom: mb2 }}>{homeTeam} <span className="text-primary/70">vs</span> {awayTeam}</h3>
+        <p className="font-black text-primary drop-shadow-[0_0_15px_hsl(var(--primary)/0.6)]" style={{ fontSize: scoreSize, marginBottom: mb2 }}>{homeScore} – {awayScore}</p>
+        <p className="text-white/50 uppercase tracking-widest" style={{ fontSize: subSize, marginBottom: mb1 }}>Melhores Momentos</p>
+        <div className="animate-pulse mx-auto bg-primary rounded-full" style={{ width: `${Math.round(32 * scale)}px`, height: `${Math.round(3 * scale)}px` }} />
+      </div>
+      <style>{`
+        @keyframes ovLineSlide { 0%{transform:translateX(-100%);opacity:0} 50%{opacity:1} 100%{transform:translateX(100%);opacity:0} }
+        @keyframes ovGlow { 0%,100%{opacity:0.5} 50%{opacity:1} }
+      `}</style>
     </div>
   );
 }
@@ -1370,17 +1476,28 @@ function ClosingVignette({
   clipCount: number;
   onComplete: () => void;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [containerWidth, setContainerWidth] = useState(300);
+
+  useEffect(() => {
+    const ro = new ResizeObserver(entries => setContainerWidth(entries[0].contentRect.width));
+    if (containerRef.current) ro.observe(containerRef.current);
+    return () => ro.disconnect();
+  }, []);
+
   useEffect(() => {
     const timer = setTimeout(onComplete, 2000);
     return () => clearTimeout(timer);
   }, [onComplete]);
 
+  const scale = Math.max(0.35, Math.min(1.4, containerWidth / 400));
+
   return (
-    <div className="absolute inset-0 z-20 bg-gradient-to-br from-gray-900 via-primary/20 to-gray-900 flex items-center justify-center">
-      <div className="text-center text-white animate-in fade-in zoom-in duration-500 p-4">
-        <img src={arenaPlayLogo} alt="Arena Play" className="h-6 sm:h-10 mx-auto mb-2 opacity-80" />
-        <p className="text-sm sm:text-lg font-medium">FIM</p>
-        <p className="text-[10px] sm:text-xs text-white/60 mt-1">{clipCount} clips</p>
+    <div ref={containerRef} className="absolute inset-0 z-20 bg-gradient-to-br from-gray-950 via-primary/20 to-gray-950 flex items-center justify-center">
+      <div className="text-center text-white animate-in fade-in zoom-in duration-500 relative z-10">
+        <img src={arenaPlayLogo} alt="Arena Play" style={{ height: `${Math.round(36 * scale)}px`, marginBottom: `${Math.round(10 * scale)}px` }} className="mx-auto opacity-80" />
+        <p className="font-bold text-white/90" style={{ fontSize: `${Math.round(20 * scale)}px`, marginBottom: `${Math.round(4 * scale)}px` }}>FIM</p>
+        <p className="text-white/50 uppercase tracking-widest" style={{ fontSize: `${Math.round(10 * scale)}px` }}>{clipCount} clips</p>
       </div>
     </div>
   );
