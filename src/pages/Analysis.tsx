@@ -26,9 +26,9 @@ import { useEventHeatZones } from '@/hooks/useEventHeatZones';
 import { useClipGeneration } from '@/hooks/useClipGeneration';
 import { Link } from 'react-router-dom';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { supabase } from '@/integrations/supabase/client';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from '@/hooks/use-toast';
+import { apiClient } from '@/lib/apiClient';
 import { ReimportMatchDialog } from '@/components/events/ReimportMatchDialog';
 import { useLiveBroadcastContext } from '@/contexts/LiveBroadcastContext';
 import { getEventLabel } from '@/lib/eventLabels';
@@ -84,31 +84,13 @@ export default function Analysis() {
     return () => clearInterval(pollInterval);
   }, [currentMatchId, isLiveMatch, refetchEvents, queryClient]);
 
-  // Realtime subscription
-  useEffect(() => {
-    if (!currentMatchId) return;
-    const channel = supabase
-      .channel(`analysis-realtime-${currentMatchId}`)
-      .on('postgres_changes', {
-        event: '*', schema: 'public', table: 'match_events',
-        filter: `match_id=eq.${currentMatchId}`
-      }, (payload) => {
-        refetchEvents();
-        queryClient.invalidateQueries({ queryKey: ['match-events', currentMatchId] });
-        if (isLiveMatch && payload.eventType === 'INSERT') {
-          toast({ title: "Analise atualizada", description: "Novo evento adicionado a analise tatica" });
-        }
-      })
-      .subscribe();
-    return () => { supabase.removeChannel(channel); };
-  }, [currentMatchId, refetchEvents, queryClient, isLiveMatch]);
 
   const { data: matchVideo } = useQuery({
     queryKey: ['match-video', currentMatchId],
     queryFn: async () => {
       if (!currentMatchId) return null;
-      const { data } = await supabase.from('videos').select('*').eq('match_id', currentMatchId).maybeSingle();
-      return data;
+      const videos = await apiClient.getVideos(currentMatchId);
+      return videos?.[0] || null;
     },
     enabled: !!currentMatchId
   });
@@ -117,11 +99,12 @@ export default function Analysis() {
     queryKey: ['generated-audio', currentMatchId],
     queryFn: async () => {
       if (!currentMatchId) return [];
-      const { data } = await supabase.from('generated_audio').select('*').eq('match_id', currentMatchId).order('created_at', { ascending: false });
-      return data || [];
+      const audio = await apiClient.getAudio(currentMatchId);
+      return audio || [];
     },
     enabled: !!currentMatchId
   });
+
 
   const eventAnalysis = useEventBasedAnalysis(events, selectedMatch?.home_team, selectedMatch?.away_team);
   const tacticalAnalysis = analysis?.tacticalAnalysis as ExtendedTacticalAnalysis | null;

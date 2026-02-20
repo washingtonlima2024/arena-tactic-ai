@@ -63,21 +63,12 @@ export default function Dashboard() {
   const { data: globalStats } = useQuery({
     queryKey: ['dashboard-global-stats'],
     queryFn: async () => {
-      const { supabase } = await import('@/integrations/supabase/client');
-      
-      const { data: matches } = await supabase
-        .from('matches')
-        .select('id, status')
-        .in('status', ['completed', 'analyzing', 'analyzed', 'live']);
-      
-      const { data: jobs } = await supabase
-        .from('analysis_jobs')
-        .select('id, status')
-        .eq('status', 'completed');
+      const matches = await apiClient.getMatches();
+      const jobs = await apiClient.getAnalysisJobs();
       
       return {
-        totalMatches: matches?.length || 0,
-        analyzedMatches: jobs?.length || 0
+        totalMatches: matches?.filter((m: any) => ['completed', 'analyzing', 'analyzed', 'live'].includes(m.status)).length || 0,
+        analyzedMatches: jobs?.filter((j: any) => j.status === 'completed').length || 0
       };
     }
   });

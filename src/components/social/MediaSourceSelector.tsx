@@ -23,7 +23,6 @@ import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { supabase } from '@/integrations/supabase/client';
 import { apiClient, normalizeStorageUrl } from '@/lib/apiClient';
 import { toast } from '@/hooks/use-toast';
 import { format } from 'date-fns';
@@ -113,43 +112,21 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
   const fetchMatches = async () => {
     setLoadingMatches(true);
     try {
-      // Fetch matches with clips count
-      const { data, error } = await supabase
-        .from('matches')
-        .select(`
-          id, match_date,
-          home_team:teams!matches_home_team_id_fkey(name),
-          away_team:teams!matches_away_team_id_fkey(name)
-        `)
-        .eq('status', 'completed')
-        .order('match_date', { ascending: false })
-        .limit(20);
+      const allMatches = await apiClient.getMatches();
+      const completed = (allMatches || [])
+        .filter((m: any) => m.status === 'completed')
+        .slice(0, 20);
 
-      if (error) throw error;
-      
-      // Fetch clips count for each match
       const matchesWithCounts = await Promise.all(
-        (data || []).map(async (match: any) => {
-          const { count: eventsCount } = await supabase
-            .from('match_events')
-            .select('*', { count: 'exact', head: true })
-            .eq('match_id', match.id)
-            .in('event_type', ['goal', 'penalty', 'yellow_card', 'red_card', 'save', 'highlight', 'shot_on_target']);
-          
-          const { count: clipsCount } = await supabase
-            .from('match_events')
-            .select('*', { count: 'exact', head: true })
-            .eq('match_id', match.id)
-            .not('clip_url', 'is', null);
-          
-          return {
-            ...match,
-            events_count: eventsCount || 0,
-            clips_count: clipsCount || 0
-          };
+        completed.map(async (match: any) => {
+          const events = await apiClient.getMatchEvents(match.id).catch(() => []);
+          const highlightTypes = ['goal', 'penalty', 'yellow_card', 'red_card', 'save', 'highlight', 'shot_on_target'];
+          const eventsCount = events.filter((e: any) => highlightTypes.includes(e.event_type)).length;
+          const clipsCount = events.filter((e: any) => e.clip_url).length;
+          return { ...match, events_count: eventsCount, clips_count: clipsCount };
         })
       );
-      
+
       setMatches(matchesWithCounts as Match[]);
     } catch (error) {
       console.error('Error fetching matches:', error);
@@ -179,13 +156,11 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
         console.log('Local server not available:', e);
       }
 
-      // 2. Fetch events from Supabase for metadata (description, type, minute)
-      const { data: events } = await supabase
-        .from('match_events')
-        .select('id, event_type, description, minute, clip_url, match_id, is_highlight, metadata')
-        .eq('match_id', targetMatchId)
-        .in('event_type', ['goal', 'penalty', 'yellow_card', 'red_card', 'save', 'highlight', 'shot_on_target', 'foul', 'corner', 'offside'])
-        .order('minute', { ascending: true });
+      // 2. Fetch events from local API for metadata (description, type, minute)
+      const events = await apiClient.getMatchEvents(targetMatchId).catch(() => []);
+      const highlightEvents = events.filter((e: any) => 
+        ['goal', 'penalty', 'yellow_card', 'red_card', 'save', 'highlight', 'shot_on_target', 'foul', 'corner', 'offside'].includes(e.event_type)
+      ).sort((a: any, b: any) => (a.minute || 0) - (b.minute || 0));
 
       // 3. Build thumbnail map from local images
       const thumbnailMap: Record<string, string> = {};
@@ -228,10 +203,10 @@ export function MediaSourceSelector({ value, mediaType, matchId, onChange }: Med
         const clipMinute = minuteMatch ? parseInt(minuteMatch[1]) : null;
         
         // Find matching event in Supabase
-        const matchingEvent = events?.find(e => 
+        const matchingEvent = highlightEvents?.find((e: any) => 
           e.minute === clipMinute && 
           (e.event_type === eventType || eventType === 'highlight')
-        ) || events?.find(e => e.minute === clipMinute);
+        ) || highlightEvents?.find((e: any) => e.minute === clipMinute);
 
         const clipId = matchingEvent?.id || `local-${filename}`;
         const key = `${eventType}-${clipMinute}`;

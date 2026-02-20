@@ -9,7 +9,7 @@ import { DeviceMockup } from './DeviceMockup';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
 import { normalizeStorageUrl } from '@/lib/apiClient';
 import { cn } from '@/lib/utils';
-import { supabase } from '@/integrations/supabase/client';
+import { apiClient } from '@/lib/apiClient';
 
 type DeviceFormat = '9:16' | '16:9' | '1:1' | '4:5';
 
@@ -170,31 +170,21 @@ export function VideoPlayerModal({
     const generate = async () => {
       setIsGeneratingComment(true);
       try {
-        const { data, error } = await supabase.functions.invoke('generate-event-comments', {
-          body: {
-            events: [{
-              id: clip.id,
-              event_type: clip.type,
-              minute: clip.minute,
-              description: clip.description,
-              metadata: {},
-            }],
-            home_team: homeTeam,
-            away_team: awayTeam,
-          },
+        const result = await apiClient.post('/api/events/generate-comments', {
+          events: [{
+            id: clip.id,
+            event_type: clip.type,
+            minute: clip.minute,
+            description: clip.description,
+            metadata: {},
+          }],
+          home_team: homeTeam,
+          away_team: awayTeam,
         });
-        if (!error && data?.generated > 0) {
-          // Fetch updated comment from DB
-          const { data: updated } = await supabase
-            .from('match_events')
-            .select('metadata')
-            .eq('id', clip.id)
-            .single();
-          const comment = (updated?.metadata as any)?.ai_comment as string | undefined;
-          if (comment) {
-            setAiComment(comment);
-            onCommentGenerated?.(clip.id, comment);
-          }
+        if (result?.generated > 0 && result?.comments?.[clip.id]) {
+          const comment = result.comments[clip.id] as string;
+          setAiComment(comment);
+          onCommentGenerated?.(clip.id, comment);
         }
       } catch (e) {
         console.warn('[VideoPlayerModal] AI comment generation failed:', e);
