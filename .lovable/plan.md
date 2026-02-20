@@ -1,133 +1,103 @@
 
-## Diagnóstico Real e Definitivo
+## Problema Identificado
 
-### O Problema Raiz (confirmado)
+O código atual usa `clip.description` (nome do evento como "Gol - 45min") como texto de legenda na exportação. O que o usuário quer são os **Closed Captions reais** — frases sincronizadas com o áudio vindas do arquivo SRT do jogo, exatamente como funciona no ClipPreviewModal.
 
-A API retorna `clip_url` com endereço absoluto:
-```
-"clip_url": "http://localhost:5000/api/storage/.../clips/first_half/00min-goal-191d3061.mp4"
-```
+## Solução
 
-O `normalizeStorageUrl` converte corretamente essa URL para o tunnel do Cloudflare, mas o problema está **na sequência de execução do download**:
+### 1. Adicionar `subtitleLines` no tipo `CompilationClip`
 
-No `ExportPreviewDialog.tsx`, linha 363:
+O tipo `CompilationClip` precisa de um campo para carregar as linhas do SRT já filtradas e ajustadas para o tempo relativo do clip:
+
 ```typescript
-if (selectedClips.length === 1 && !includeVignettes && selectedClips[0].clipUrl) {
-  // DOWNLOAD DIRETO — sem pipeline MediaRecorder, sem vinhetas
+export interface SubtitleLine {
+  start: number; // seconds relative to clip start
+  end: number;
+  text: string;
+}
+
+export interface CompilationClip {
+  id: string;
+  clipUrl: string;
+  eventType: string;
+  minute: number;
+  description?: string;
+  thumbnailUrl?: string;
+  subtitleLines?: SubtitleLine[]; // ← NOVO: linhas do SRT para o intervalo do clip
+}
 ```
 
-A sessão replay mostra que o download conclui em **menos de 2 segundos** — tempo impossível para o pipeline de vinhetas (mínimo ~7-10s). Isso confirma que a condição de "download direto" está sendo ativada mesmo com vinhetas marcadas.
+### 2. Mudar `renderVideoOnCanvas` para CC sincronizado
 
-### Causa Confirmada
+Em vez de passar `subtitle?: string` (texto estático), passar `subtitleLines?: SubtitleLine[]` e calcular qual linha exibir com base no `video.currentTime`:
 
-O `ExportPreviewDialog` está em modo `preview` quando o botão de exportar é clicado. Nesse step, o estado `includeVignettes` foi definido na tela de configuração mas a condição de verificação na linha 363 usa `!includeVignettes`.
-
-**Mas há um problema mais sutil:** a condição em `useVideoCompilation.ts` linha 569 é:
 ```typescript
-if (config.clips.length === 1 && !config.includeVignettes && config.clips[0]?.clipUrl) {
+// ANTES: texto estático
+if (subtitle) drawSubtitle(ctx, subtitle, width, height);
+
+// DEPOIS: CC sincronizado com o tempo do vídeo
+const currentSub = subtitleLines?.find(
+  s => video.currentTime >= s.start && video.currentTime <= s.end
+);
+if (currentSub) drawSubtitle(ctx, currentSub.text, width, height);
 ```
 
-O `downloadCompilation` recebe o config correto com `includeVignettes: true`. Então deveria ir para o pipeline. **O que está acontecendo então?**
+### 3. `ExportPreviewDialog`: buscar e passar o SRT para cada clip
 
-Verificando novamente os logs de rede: os clips retornam com:
-```
-"clip_url": "http://localhost:5000/api/storage/..."
-```
+No `handleDownload`, antes de chamar `downloadCompilation`, buscar o arquivo SRT do match e pre-processar as linhas para cada clip:
 
-E a linha 308 em `Media.tsx` normaliza isso:
 ```typescript
-clipUrl: normalizeStorageUrl((event as any).clip_url as string | null),
+// Buscar SRT do jogo (mesma lógica do ClipPreviewModal)
+const filesData = await apiClient.listMatchFiles(matchId);
+const srtFiles = filesData?.folders?.srt || [];
+// Carregar e parsear o SRT
+const srtContent = await fetch(srtUrl).then(r => r.text());
+const allLines = parseSRT(srtContent);
+
+// Para cada clip, filtrar e ajustar os timestamps relativos
+const clipSubtitles = allLines
+  .filter(line => line.end >= clipStartInVideo && line.start <= clipEnd)
+  .map(line => ({
+    start: Math.max(0, line.start - clipStartInVideo),
+    end: Math.max(0, line.end - clipStartInVideo),
+    text: line.text,
+  }));
 ```
 
-O `normalizeStorageUrl` converte para o tunnel, então `clipUrl` deveria estar correto.
+### 4. Remover o título/descrição do evento como legenda
 
-**O verdadeiro problema**: Na linha 363 do `ExportPreviewDialog`:
-```typescript
-if (selectedClips.length === 1 && !includeVignettes && selectedClips[0].clipUrl) {
-    // SALTA para downloadSingleClip
-```
-Essa condição só seria ativada se `includeVignettes === false`. Mas o pipeline MediaRecorder ainda pode estar gerando um blob vazio (< 10KB) e lançando o erro — que está sendo **engolido silenciosamente**.
+Retirar completamente o uso de `clip.description` na linha de renderização de vídeo — esse campo não deve mais aparecer no vídeo exportado.
 
-### Raiz Real: O Pipeline MediaRecorder não Captura Frames no Lovable Preview
-
-O Lovable Preview (`id-preview--...lovable.app`) roda em HTTPS. O `MediaRecorder` com `canvas.captureStream()` funciona apenas quando a aba está em **foco ativo**. No Lovable, o preview fica em um `<iframe>` que pode perder o foco, e o `setInterval` fica **throttled** pelo browser quando a aba não está em foco — resultando em 0 frames capturados e blob < 10KB → erro → `return null` → nenhum download.
-
-Além disso, a vinheta é gerada por `canvas.toBlob()`, que também pode falhar silenciosamente em contextos de iframe sem permissão de segurança de origem.
-
-### Solução: 3 Correções Críticas
-
-**1. Separar completamente o fluxo de download do ExportPreviewDialog do iframe do Lovable**
-
-O processamento de vídeo via MediaRecorder deve acontecer **fora do iframe de preview**. A solução é usar um `Web Worker` com `OffscreenCanvas` + `MediaRecorder`, mas isso é complexo.
-
-**Alternativa mais simples e robusta**: Em vez de compilar vídeo no browser, usar a abordagem de **download ZIP** com os clips individuais + geração de vinhetas como imagens separadas. Mas isso muda a proposta.
-
-**Alternativa viável sem mudar a proposta**: Usar `requestVideoFrameCallback` em vez de `setInterval` para garantir que o canvas receba frames mesmo quando o browser throttle.
-
-**2. Adicionar logs de debug visuais na interface durante a compilação**
-
-Em vez de um overlay silencioso, mostrar **cada etapa em tempo real** na UI: "Gerando vinheta abertura... ✅", "Baixando clip 1... ✅", "Renderizando frames... X% concluído", para que o usuário confirme o que está acontecendo.
-
-**3. Validar blob com mensagem de erro clara**
-
-Se o blob tiver < 10KB, mostrar um toast de erro claro: "O vídeo ficou vazio. Possível causa: aba em segundo plano durante renderização. Mantenha a aba ativa e tente novamente."
-
-### Arquivos a Modificar
+## Arquivos a Modificar
 
 | Arquivo | Mudança |
 |---|---|
-| `src/hooks/useVideoCompilation.ts` | Substituir `setInterval` por `requestAnimationFrame` para captura de frames; adicionar contador de frames capturados com log; melhorar mensagem de erro quando blob vazio |
-| `src/components/media/ExportPreviewDialog.tsx` | Adicionar log visual por etapa no overlay de compilação; garantir que a janela permaneça em foco durante compilação (usando `window.focus()`); adicionar toast de erro com causa específica quando blob vazio |
+| `src/hooks/useVideoCompilation.ts` | Adicionar interface `SubtitleLine`; adicionar campo `subtitleLines` em `CompilationClip`; mudar `renderVideoOnCanvas` para receber `subtitleLines` e exibir CC sincronizado pelo `video.currentTime` |
+| `src/components/media/ExportPreviewDialog.tsx` | No `handleDownload`, buscar SRT do match via `apiClient.listMatchFiles`; parsear com `parseSRT`; filtrar e ajustar linhas para o intervalo de cada clip; passar `subtitleLines` em cada clip para `downloadCompilation`; também passar `matchId` como prop |
 
-### Mudança Principal: `requestAnimationFrame` para `renderImageOnCanvas` e `renderVideoOnCanvas`
-
-O `setInterval` a 30fps em uma aba que pode estar throttled é o culpado de vídeos vazios. A substituição por `requestAnimationFrame` garante sincronização com o render loop real do browser:
-
-```typescript
-// ANTES (buggy em aba throttled):
-const interval = setInterval(() => {
-  ctx.drawImage(bitmap, 0, 0, width, height);
-}, FRAME_INTERVAL_MS);
-
-// DEPOIS (sincronizado com render loop):
-let rafId: number;
-const renderFrame = () => {
-  ctx.drawImage(bitmap, 0, 0, width, height);
-  if (elapsed < durationMs) {
-    rafId = requestAnimationFrame(renderFrame);
-  } else {
-    resolve();
-  }
-};
-rafId = requestAnimationFrame(renderFrame);
-```
-
-Para o vídeo, igualmente substituir o `setInterval` do `renderVideoOnCanvas` por `requestVideoFrameCallback` (quando disponível) ou `requestAnimationFrame`.
-
-### Adicionalmente: Garantir Foco da Aba
-
-No início da compilação, chamar `window.focus()` e mostrar uma mensagem de aviso clara:
-```typescript
-// Forçar foco da janela para evitar throttling
-window.focus();
-```
-
-E adicionar ao overlay: **"⚠️ Mantenha esta aba em foco durante a geração do vídeo"**
-
-### Fluxo Corrigido
+## Fluxo Correto
 
 ```text
-handleDownload() → downloadCompilation(config)
+ExportPreviewDialog.handleDownload()
   ↓
-  window.focus() // evitar throttling
+  apiClient.listMatchFiles(matchId) → busca arquivos SRT
   ↓
-  setInterval → requestAnimationFrame // sincronizado com render loop
+  fetch(srtUrl) → texto bruto do SRT
   ↓
-  Vinheta abertura: 3s × 30fps = 90 frames capturados
-  ↓ 
-  fetchVideoAsBlobUrl("https://cloudflare-tunnel.../clips/...mp4") → Blob
+  parseSRT(content) → array de { start, end, text }
   ↓
-  renderVideoOnCanvas() com requestAnimationFrame → frames reais
+  Para cada clip: filtrar linhas que cobrem o intervalo do clip
+                  ajustar timestamps para tempo relativo (0 = início do clip)
   ↓
-  mediaRecorder.stop() → blob > 10KB → download .webm
+  downloadCompilation({ clips: [..., subtitleLines: [...]] })
+  ↓
+  renderVideoOnCanvas() → a cada frame, lookup por video.currentTime
+                         → drawSubtitle(linha atual do CC)
 ```
+
+## Observações
+
+- Se não houver SRT disponível para o match, `subtitleLines` fica vazio e nenhuma legenda é renderizada (sem erro)
+- O `matchId` já está disponível via URL (`/media?match=...`) mas precisa ser passado como prop para o `ExportPreviewDialog`
+- A lógica de busca do SRT (escolha entre first_half, second_half, full) segue o mesmo padrão já implementado no `ClipPreviewModal`
+- A opção "Incluir legendas" no painel de configuração continua funcionando — quando desmarcada, `subtitleLines` não é passado
