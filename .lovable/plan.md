@@ -1,180 +1,124 @@
 
-## Objetivo
+## Diagnóstico Real do Problema
 
-Implementar exportação com vinhetas embutidas — tanto para clips individuais quanto para playlists — sem zipar, usando recursos 100% do navegador (Canvas API + MediaRecorder), sem depender do servidor Python.
+Após leitura profunda dos arquivos, identifico **3 causas raiz** que fazem as vinhetas não aparecerem:
 
----
+### Causa 1 — Bypass silencioso no ExportPreviewDialog (linha 362)
 
-## Diagnóstico do Estado Atual
-
-| Cenário | Comportamento atual |
-|---|---|
-| 1 clip com `clipUrl` | Download direto `.mp4` — funciona ✅ |
-| 1 clip sem `clipUrl` | Nada acontece ❌ |
-| Playlist | Chama `/api/compile-playlist` no servidor → rota não existe → erro ❌ |
-| Vinhetas na exportação | São mostradas no preview mas **não entram no vídeo exportado** ❌ |
-
----
-
-## Estratégia: Exportação Client-Side com MediaRecorder
-
-A abordagem mais viável sem depender do servidor Python é usar um `<canvas>` com `MediaRecorder` para capturar o conteúdo frame a frame:
-
-1. **Para 1 clip:** renderizar a vinheta do clip no canvas por ~3s → depois exibir o vídeo no canvas → exportar como `.webm`/`.mp4`
-2. **Para playlist:** renderizar sequência: `[vinheta abertura] → [vinheta clip1] → [clip1] → [transição] → [vinheta clip2] → [clip2] → ... → [vinheta encerramento]`
-
-**Limitação conhecida:** MediaRecorder no Chrome exporta `.webm`. Para maximizar compatibilidade, usaremos `.mp4` quando disponível (Safari/Firefox suportam MP4 nativo via MediaRecorder).
-
----
-
-## Arquivos a Modificar
-
-### 1. `src/hooks/useVideoCompilation.ts` — Reescrita completa da lógica
-
-Substituir a chamada a `/api/compile-playlist` por uma pipeline de renderização client-side:
-
-```
-compilePlaylist(config)
-  ↓
-[Stage: generating-vignettes]
-  → Gerar PNG das vinhetas via useVignetteGenerator (Canvas API)
-  → Converter Blob → ObjectURL
-
-[Stage: processing]
-  → Criar OffscreenCanvas (ou canvas no DOM) com dimensões do formato
-  → Criar MediaRecorder no canvas stream (canvas.captureStream(30fps))
-  → Para cada item na sequência:
-      - Se vinheta: desenhar no canvas por duração definida (3s abertura, 2s transição, 2s encerramento)
-      - Se clip: criar <video> temporário, quando pronto → drawImage em loop no canvas até onended
-
-[Stage: concatenating]
-  → Parar MediaRecorder
-  → Coletar chunks → Blob(.webm ou .mp4)
-
-[Stage: complete]
-  → Disparar download automático (sem zip)
-```
-
-**Dimensões por formato:**
 ```typescript
-const FORMAT_DIMENSIONS = {
-  '9:16': { width: 720, height: 1280 },  // reduzido para performance
-  '16:9': { width: 1280, height: 720 },
-  '1:1':  { width: 720, height: 720 },
-  '4:5':  { width: 720, height: 900 },
-};
+// Single clip without vignette → fast direct download
+if (selectedClips.length === 1 && !includeVignettes && selectedClips[0].clipUrl) {
 ```
 
-**Estrutura de sequência para playlist:**
+A sessão de replay mostra o toast "Download concluído!" aparecendo **imediatamente** (menos de 1 segundo), o que é o comportamento do `downloadSingleClip` (download direto). Isso revela que, mesmo com "Incluir Vinhetas" ativo, o código entra nesse ramo errado quando há apenas 1 clip — o check `!includeVignettes` não está protegendo corretamente porque há uma race condition onde `includeVignettes` ainda é `false` por padrão no estado inicial antes do usuário ativar.
+
+Mas há um problema maior:
+
+### Causa 2 — `downloadCompilation` também tem um bypass idêntico (linhas 532-538 de useVideoCompilation.ts)
+
 ```typescript
-type SequenceItem =
-  | { kind: 'opening'; data: OpeningVignetteData; duration: 3000 }
-  | { kind: 'clip-vignette'; data: ClipVignetteData; duration: 2000 }
-  | { kind: 'video'; clip: CompilationClip }
-  | { kind: 'transition'; data: TransitionVignetteData; duration: 1500 }
-  | { kind: 'closing'; data: ClosingVignetteData; duration: 2000 }
+// Single clip without vignette → direct download (fastest)
+if (config.clips.length === 1 && !config.includeVignettes && config.clips[0].clipUrl) {
 ```
 
-**Para renderizar vinhetas no canvas** (que já existem como geradores de PNG):
-- `generateOpeningVignette()`, `generateClipVignette()`, `generateTransitionVignette()`, `generateClosingVignette()` retornam `Blob` (PNG)
-- Converter para `ImageBitmap` e usar `ctx.drawImage()` em loop durante a duração
+Esse bypass existe em **dois lugares**: no `ExportPreviewDialog.handleDownload` E dentro do próprio `useVideoCompilation.downloadCompilation`. Mesmo que o primeiro seja corrigido, o segundo também descartaria a pipeline.
 
-**Para renderizar vídeo no canvas:**
-- Criar `<video>` temporário com `src = clip.clipUrl`
-- Em loop de `requestAnimationFrame`, fazer `ctx.drawImage(video, 0, 0, w, h)` enquanto `!video.ended`
-- Quando vídeo terminar, prosseguir para próximo item
+### Causa 3 — Canvas offscreen e `toBlob()` silencioso
 
----
+O `getCanvas()` em `useVignetteGenerator.ts` cria canvas fora do DOM. Em alguns navegadores (especialmente quando a aba está em segundo plano), `canvas.toBlob()` pode retornar um blob vazio ou com imagem totalmente transparente/preta. O `blobToImageBitmap()` não valida se o blob é válido antes de criar o `ImageBitmap`.
 
-### 2. `src/hooks/useVideoCompilation.ts` — Função `downloadSingleClip` com vinheta
-
-Quando há 1 clip e `includeVignettes = true`:
-- Renderizar a sequência: `[vinheta do clip] → [vídeo do clip]` usando MediaRecorder
-- Exportar como arquivo único `.webm` (sem zip)
-
-Quando `includeVignettes = false` e há 1 clip com URL:
-- Manter o download direto atual (mais rápido)
+Adicionalmente, o `renderImageOnCanvas` desenha a imagem no canvas mas o MediaRecorder pode não capturar os primeiros frames se iniciado antes da primeira renderização. O `mediaRecorder.start(100)` inicia a gravação, mas os bitmaps são desenhados **depois** — já existe o código `ctx.drawImage(bitmap, 0, 0, width, height)` antes do setInterval, mas se o bitmap chegou vazio (Causa 3), nada aparece.
 
 ---
 
-### 3. `src/components/media/ExportPreviewDialog.tsx` — Ajuste do botão e lógica de download
+## Solução Completa
 
-- Alterar `handleDownload` para sempre passar `includeVignettes` e chamar o novo `compilePlaylist` (que agora funciona client-side)
-- Remover a branch especial de "1 clip = download direto" quando vinhetas estão ativas
-- Ajustar o label do botão:
-  - 1 clip sem vinheta → "Download (.mp4)" 
-  - 1 clip com vinheta → "Gerar Vídeo"
-  - N clips → "Gerar Playlist"
-- Remover referências ao ZIP/fallback manual
+### Arquivo 1: `src/hooks/useVideoCompilation.ts`
+
+**Mudança A**: Remover o bypass no `downloadCompilation` — sempre usar a pipeline MediaRecorder quando `includeVignettes = true`.
+
+**Mudança B**: Adicionar `console.log` de diagnóstico (temporário) para confirmar que o pipeline é acionado.
+
+**Mudança C**: Adicionar validação do blob gerado pelo `canvas.toBlob()` — se o blob for nulo ou vazio, registrar erro claro.
+
+**Mudança D**: Antes de iniciar o `mediaRecorder.start()`, preencher o canvas com preto e aguardar um pequeno delay (50ms) para garantir que o stream seja capturado corretamente pelo MediaRecorder antes de iniciar a renderização das vinhetas.
+
+**Mudança E**: No `renderImageOnCanvas`, fazer `ctx.drawImage` imediatamente na chamada (já existe) E verificar que o `bitmap` é válido (width/height > 0) antes de tentar renderizar.
+
+### Arquivo 2: `src/components/media/ExportPreviewDialog.tsx`
+
+**Mudança A**: Corrigir `handleDownload` — **remover** o ramo de download direto para 1 clip quando `includeVignettes = true`. A lógica correta:
+
+```typescript
+// 1 clip SEM vinheta → download direto (mais rápido)
+if (selectedClips.length === 1 && !includeVignettes && selectedClips[0].clipUrl) {
+  // download direto
+  return;
+}
+// Todos os outros casos → pipeline MediaRecorder (com ou sem vinheta)
+await downloadCompilation({ ..., includeVignettes });
+```
+
+Isso já existe, mas a variável `includeVignettes` pode estar em estado padrão `true` no código, então o bypass NÃO deveria ser atingido. O problema é na **Causa 2** (bypass duplicado dentro de `downloadCompilation`).
+
+### Arquivo 3: `src/hooks/useVignetteGenerator.ts`
+
+**Mudança**: Adicionar validação explícita no `toBlob()` de cada vinheta, garantindo que o canvas tem conteúdo antes de retornar:
+
+```typescript
+return new Promise((resolve, reject) => {
+  canvas.toBlob((blob) => {
+    if (!blob || blob.size < 100) {
+      reject(new Error('Vinheta gerada vazia'));
+    } else {
+      resolve(blob);
+    }
+  }, 'image/png', 1.0);
+});
+```
 
 ---
 
-### 4. `src/components/media/CompilationProgress.tsx` — Verificar estágios
-
-Já tem os estágios `generating-vignettes`, `processing`, `concatenating` — apenas garantir que as mensagens estão corretas para o novo fluxo.
-
----
-
-## Sequência de renderização no canvas (detalhes técnicos)
+## Sequência de renderização corrigida
 
 ```text
-Para playlist com vinhetas:
-
-1. Criar canvas com dimensões do formato
-2. Iniciar canvas.captureStream(30) → MediaRecorder
-3. Renderizar abertura:
-   - drawImage(openingPNG) em loop por 3000ms via requestAnimationFrame
-4. Para cada clip:
-   a. Renderizar vinheta do clip:
-      - drawImage(clipVignettePNG) em loop por 2000ms
-   b. Renderizar vídeo:
-      - video.src = clip.clipUrl
-      - video.play()
-      - loop: ctx.drawImage(video, 0, 0, w, h) via requestAnimationFrame
-      - aguardar video.ended
-   c. Se não é o último clip: renderizar transição por 1500ms
-5. Renderizar encerramento por 2000ms
-6. mediaRecorder.stop()
-7. Coletar chunks → Blob
-8. Trigger download como .webm
+handleDownload() no ExportPreviewDialog
+    ↓
+downloadCompilation(config) em useVideoCompilation
+    ↓ (NUNCA mais faz bypass quando includeVignettes = true)
+compilePlaylist(config)
+    ↓
+[Stage 1: generating-vignettes]
+  → generateOpeningVignette → Blob PNG validado (size > 100 bytes)
+  → blobToImageBitmap → ImageBitmap com width/height > 0
+    ↓
+[Stage 2: downloading]
+  → Buscar vídeos como blob URLs locais
+    ↓
+[Stage 3: processing] 
+  → canvas criado, preenchido com preto
+  → stream = canvas.captureStream(30)
+  → mediaRecorder.start(100)
+  → await 50ms (garantir que MediaRecorder está gravando)
+  → renderImageOnCanvas(openingBitmap, 3000ms) ← VINHETA ABERTURA APARECE
+  → renderImageOnCanvas(clipBitmap, 2000ms) ← VINHETA DO CLIP APARECE
+  → renderVideoOnCanvas(video) ← VÍDEO DO CLIP
+  → renderImageOnCanvas(transitionBitmap, 1500ms) ← TRANSIÇÃO
+  → renderImageOnCanvas(closingBitmap, 2000ms) ← ENCERRAMENTO
+    ↓
+[Stage 4: concatenating]
+  → mediaRecorder.stop() → Blob .webm
+    ↓
+[Complete]
+  → Download automático do arquivo .webm com vinhetas embutidas
 ```
 
 ---
 
-## Detalhes de implementação do MediaRecorder
+## Arquivos a modificar
 
-```typescript
-const stream = canvas.captureStream(30); // 30fps
-const mediaRecorder = new MediaRecorder(stream, {
-  mimeType: MediaRecorder.isTypeSupported('video/mp4') 
-    ? 'video/mp4' 
-    : 'video/webm;codecs=vp9',
-  videoBitsPerSecond: 4_000_000 // 4 Mbps
-});
-
-const chunks: Blob[] = [];
-mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
-mediaRecorder.onstop = () => {
-  const blob = new Blob(chunks, { type: mediaRecorder.mimeType });
-  // trigger download
-};
-```
-
----
-
-## Tratamento para clips sem URL (thumbnail apenas)
-
-Se `clip.clipUrl` é null, usar a thumbnail como imagem estática por 5s no canvas:
-- `drawImage(thumbnailImg, 0, 0, w, h)` em loop por 5000ms
-- Adicionar overlay com texto do evento (minuto, tipo) no canvas
-
----
-
-## Resumo das mudanças por arquivo
-
-| Arquivo | Mudança principal |
+| Arquivo | Mudança |
 |---|---|
-| `src/hooks/useVideoCompilation.ts` | Reescrever `compilePlaylist` com MediaRecorder; nova função `compileSingleClipWithVignette` |
-| `src/components/media/ExportPreviewDialog.tsx` | Ajustar `handleDownload` para usar novo fluxo; labels corretos no botão |
-| `src/components/media/CompilationProgress.tsx` | Verificar/ajustar mensagens dos estágios |
-
+| `src/hooks/useVideoCompilation.ts` | Remover bypass duplo; adicionar delay pós-start; validar bitmaps |
+| `src/hooks/useVignetteGenerator.ts` | Validar blob não-vazio no toBlob() |
+| `src/components/media/ExportPreviewDialog.tsx` | Garantir que o flow passa sempre pela pipeline quando vinhetas ativas |
