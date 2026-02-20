@@ -1980,6 +1980,52 @@ export const apiClient = {
     method: 'POST',
     body: JSON.stringify({ transcription }),
   }, 120000), // 2 min timeout
-};
 
+  // ============== Render Pipeline (FFmpeg backend) ==============
+
+  /** Start a server-side FFmpeg render job. Returns jobId immediately. */
+  startRenderJob: (spec: {
+    matchId?: string;
+    format: '9:16' | '16:9' | '1:1' | '4:5';
+    preset: 'best' | 'high' | 'medium';
+    includeVignettes: boolean;
+    includeSubtitles: boolean;
+    matchInfo: { homeTeam: string; awayTeam: string; homeScore: number; awayScore: number };
+    clips: Array<{
+      id: string;
+      clipUrl: string;
+      eventType: string;
+      minute: number;
+      description?: string;
+      thumbnailUrl?: string;
+      subtitleLines?: Array<{ start: number; end: number; text: string }>;
+    }>;
+    vignetteFrames?: {
+      opening?: string;       // base64 PNG
+      clips?: string[];       // base64 PNG per clip
+      transitions?: string[]; // base64 PNG per transition
+      closing?: string;       // base64 PNG
+    };
+  }): Promise<{ jobId: string; status: string }> =>
+    apiRequest<{ jobId: string; status: string }>('/api/render/compile', {
+      method: 'POST',
+      body: JSON.stringify(spec),
+    }, 30000),
+
+  /** Poll render job status. */
+  getRenderStatus: (jobId: string): Promise<{
+    jobId: string;
+    status: 'queued' | 'processing' | 'complete' | 'error';
+    progress: number;
+    log: string[];
+    outputUrl?: string;
+    error?: string;
+  }> => apiRequest(`/api/render/status/${jobId}`, { method: 'GET' }, 10000),
+
+  /** Return the direct download URL for a completed render job. */
+  downloadRenderUrl: (jobId: string): string => {
+    const base = getApiBase();
+    return buildApiUrl(base, `/api/render/download/${jobId}`);
+  },
+};
 export default apiClient;
