@@ -1,7 +1,7 @@
 // Generate static vignette images using Canvas API for video compilation
 // These are simplified versions of the React vignette components
 
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { getEventLabelUpper } from '@/lib/eventLabels';
 
 export interface VignetteConfig {
@@ -36,15 +36,12 @@ export interface ClosingVignetteData {
 }
 
 export function useVignetteGenerator() {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-
+  // Each vignette generation gets its own fresh canvas to avoid any state corruption
   const getCanvas = useCallback((width: number, height: number) => {
-    if (!canvasRef.current) {
-      canvasRef.current = document.createElement('canvas');
-    }
-    canvasRef.current.width = width;
-    canvasRef.current.height = height;
-    return canvasRef.current;
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    return canvas;
   }, []);
 
   // Draw gradient background
