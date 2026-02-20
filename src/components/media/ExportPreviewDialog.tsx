@@ -33,7 +33,9 @@ import {
   Loader2,
   Film,
   FileVideo,
-  Layers
+  Layers,
+  Server,
+  AlertTriangle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
@@ -46,7 +48,8 @@ import arenaPlayLogo from '@/assets/arena-play-icon.png';
 import { toast } from 'sonner';
 import { CLIP_BUFFER_BEFORE_MS, CLIP_BUFFER_AFTER_MS } from '@/hooks/useClipGeneration';
 import { useVideoCompilation } from '@/hooks/useVideoCompilation';
-import { normalizeStorageUrl, apiClient, getApiBase } from '@/lib/apiClient';
+import { useVignetteGenerator } from '@/hooks/useVignetteGenerator';
+import { normalizeStorageUrl, apiClient, getApiBase, isLocalServerAvailable } from '@/lib/apiClient';
 import { parseTranscription } from '@/lib/transcriptionParser';
 
 // Video formats
@@ -157,7 +160,17 @@ export function ExportPreviewDialog({
   const [previewSrtLines, setPreviewSrtLines] = useState<{ start: number; end: number; text: string }[]>([]);
   const [currentCC, setCurrentCC] = useState('');
 
-  // Video compilation hook
+  // Backend render state
+  const [isBackendRendering, setIsBackendRendering] = useState(false);
+  const [backendRenderStage, setBackendRenderStage] = useState<
+    'idle' | 'generating-vignettes' | 'uploading' | 'processing' | 'subtitles' | 'concat' | 'complete' | 'error' | 'fallback'
+  >('idle');
+  const [backendRenderProgress, setBackendRenderProgress] = useState(0);
+  const [backendRenderMessage, setBackendRenderMessage] = useState('');
+  const [backendRenderLog, setBackendRenderLog] = useState<string[]>([]);
+  const backendPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Video compilation hook (kept for single-clip no-vignette fast path + fallback)
   const { 
     isCompiling, 
     progress: compilationProgress, 
@@ -166,9 +179,15 @@ export function ExportPreviewDialog({
     cancel: cancelCompilation,
     reset: resetCompilation 
   } = useVideoCompilation();
+
+  // Vignette generator (used to produce PNGs for backend render)
+  const vignetteGenerator = useVignetteGenerator();
+
+  const isAnyRendering = isCompiling || isBackendRendering;
   
   const videoRef = useRef<HTMLVideoElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+
 
   // Get selected clips in order
   const selectedClips = clips.filter(c => selectedClipIds.has(c.id));
@@ -429,108 +448,7 @@ export function ExportPreviewDialog({
     }
   };
 
-  // Handle download - uses MediaRecorder pipeline for vignettes, direct for plain clips
-  const handleDownload = useCallback(async () => {
-    if (selectedClips.length === 0) {
-      toast.error('Nenhum clip selecionado');
-      return;
-    }
 
-    const clipsWithUrls = selectedClips.filter(c => c.clipUrl);
-
-    // Single clip without vignette → fast direct download (normalize URL to avoid mixed-content block)
-    if (selectedClips.length === 1 && !includeVignettes && selectedClips[0].clipUrl) {
-      const clip = selectedClips[0];
-      const filename = `${clip.minute}min-${clip.type.replace(/_/g, '-')}.mp4`;
-      const normalizedUrl = normalizeStorageUrl(clip.clipUrl) || clip.clipUrl;
-      await downloadSingleClip(normalizedUrl, filename);
-      return;
-    }
-
-    if (clipsWithUrls.length === 0) {
-      toast.error('Nenhum clip extraído. Extraia os clips primeiro na aba "Cortes & Capas".');
-      return;
-    }
-
-    // Fetch and parse SRT for synchronized closed captions
-    let allSrtLines: { start: number; end: number; text: string }[] = [];
-    if (includeSubtitles && matchId) {
-      try {
-        const filesData = await apiClient.listMatchFiles(matchId);
-        // Check both srt and texts folders for transcription files
-        const srtFiles = [
-          ...(filesData?.folders?.srt || []),
-          ...(filesData?.folders?.texts || []).filter((f: any) => 
-            f.name?.toLowerCase().endsWith('.srt') || f.name?.toLowerCase().endsWith('.vtt')
-          ),
-        ];
-        console.log(`[Export] Found ${srtFiles.length} transcription files:`, srtFiles.map((f: any) => f.name));
-        if (srtFiles.length > 0) {
-          // Prefer full match SRT, then any available
-          const targetSrt =
-            srtFiles.find((f: any) => f.name?.toLowerCase().includes('full') || f.name?.toLowerCase() === 'transcription.srt') ||
-            srtFiles[0];
-          const srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${targetSrt.name}`;
-          const response = await fetch(srtUrl);
-          if (response.ok) {
-            const srtContent = await response.text();
-            console.log(`[Export] Content length: ${srtContent.length}, preview: ${srtContent.slice(0, 300)}`);
-            const parsed = parseTranscription(srtContent);
-            allSrtLines = parsed.lines.filter(l => l.hasTimestamp && l.text);
-            console.log(`[Export] Loaded ${allSrtLines.length} CC lines (format: ${parsed.format})`);
-          } else {
-            console.warn(`[Export] HTTP ${response.status} fetching transcription`);
-          }
-        } else {
-          console.warn('[Export] No transcription files found for CC');
-        }
-      } catch (err) {
-        console.warn('[Export] Failed to load SRT for subtitles, proceeding without CC:', err);
-      }
-    }
-
-    // Use MediaRecorder pipeline: embeds vignettes into the video
-    await downloadCompilation({
-      clips: clipsWithUrls.map(c => {
-        // Calculate the start time of this clip in the source video
-        const bufferBefore = CLIP_BUFFER_BEFORE_MS / 1000;
-        // Use videoSecond (original video file timestamp) for SRT offset accuracy
-        const eventSec = c.videoSecond ?? c.totalSeconds ?? (c.minute * 60 + (c.second ?? 0));
-        const clipStartInVideo = Math.max(0, eventSec - bufferBefore);
-        const clipEndInVideo = eventSec + CLIP_BUFFER_AFTER_MS / 1000;
-
-        // Filter and offset SRT lines to be relative to clip start
-        const subtitleLines = includeSubtitles && allSrtLines.length > 0
-          ? allSrtLines
-              .filter(line => line.end >= clipStartInVideo && line.start <= clipEndInVideo)
-              .map(line => ({
-                start: Math.max(0, line.start - clipStartInVideo),
-                end: Math.max(0, line.end - clipStartInVideo),
-                text: line.text,
-              }))
-          : undefined;
-
-        return {
-          id: c.id,
-          clipUrl: normalizeStorageUrl(c.clipUrl!) || c.clipUrl!,
-          eventType: c.type,
-          minute: c.minute,
-          description: c.description,
-          thumbnailUrl: c.thumbnail,
-          subtitleLines,
-        };
-      }),
-      includeVignettes,
-      includeSubtitles,
-      format: selectedFormat.id as '9:16' | '16:9' | '1:1' | '4:5',
-      matchInfo: {
-        homeTeam,
-        awayTeam,
-        homeScore,
-        awayScore
-      }
-    });
-  }, [selectedClips, includeVignettes, includeSubtitles, selectedFormat, homeTeam, awayTeam, homeScore, awayScore, matchId, downloadSingleClip, downloadCompilation]);
 
   // Shared: load SRT lines (used by preview CC and Batch Export)
   const loadSrtLines = useCallback(async (): Promise<{ start: number; end: number; text: string }[]> => {
@@ -587,6 +505,119 @@ export function ExportPreviewDialog({
         };
       });
   }, []);
+
+  // Cancel backend render polling
+  const cancelBackendRender = useCallback(() => {
+    if (backendPollRef.current) clearInterval(backendPollRef.current);
+    setIsBackendRendering(false);
+    setBackendRenderStage('idle');
+    setBackendRenderProgress(0);
+    setBackendRenderMessage('');
+  }, []);
+
+  // Helper: blob → base64 string
+  const blobToBase64 = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+
+  // Handle download — tries backend FFmpeg first, falls back to MediaRecorder
+  const handleDownload = useCallback(async () => {
+    if (selectedClips.length === 0) { toast.error('Nenhum clip selecionado'); return; }
+    const clipsWithUrls = selectedClips.filter(c => c.clipUrl);
+
+    // Single clip without vignette → fast direct download
+    if (selectedClips.length === 1 && !includeVignettes && selectedClips[0].clipUrl) {
+      const clip = selectedClips[0];
+      await downloadSingleClip(normalizeStorageUrl(clip.clipUrl) || clip.clipUrl!, `${clip.minute}min-${clip.type.replace(/_/g, '-')}.mp4`);
+      return;
+    }
+    if (clipsWithUrls.length === 0) { toast.error('Nenhum clip extraído. Extraia os clips primeiro na aba "Cortes & Capas".'); return; }
+
+    const serverAvailable = await isLocalServerAvailable();
+
+    if (!serverAvailable) {
+      toast.warning('Servidor offline — usando exportação via navegador (WebM).');
+      setBackendRenderStage('fallback');
+      const srtLines = await loadSrtLines();
+      await downloadCompilation({ clips: buildClipConfig(clipsWithUrls, srtLines), includeVignettes, includeSubtitles, format: selectedFormat.id as '9:16'|'16:9'|'1:1'|'4:5', matchInfo: { homeTeam, awayTeam, homeScore, awayScore } });
+      setBackendRenderStage('idle');
+      return;
+    }
+
+    setIsBackendRendering(true);
+    setBackendRenderLog([]);
+    try {
+      setBackendRenderStage('generating-vignettes');
+      setBackendRenderProgress(5);
+      setBackendRenderMessage('Gerando vinhetas (canvas)...');
+
+      const vigConfig = { width: selectedFormat.width, height: selectedFormat.height, format: selectedFormat.id as '9:16'|'16:9'|'1:1'|'4:5' };
+      let vignetteFrames: { opening?: string; clips?: string[]; transitions?: string[]; closing?: string } = {};
+
+      if (includeVignettes) {
+        const openingB64 = await blobToBase64(await vignetteGenerator.generateOpeningVignette({ homeTeam, awayTeam, homeScore, awayScore }, vigConfig));
+        const clipB64s: string[] = [];
+        const transB64s: string[] = [];
+        for (let i = 0; i < clipsWithUrls.length; i++) {
+          const c = clipsWithUrls[i];
+          clipB64s.push(await blobToBase64(await vignetteGenerator.generateClipVignette({ eventType: c.type, minute: c.minute, title: c.description ?? `${c.minute}'`, thumbnailUrl: c.thumbnail }, vigConfig)));
+          if (i < clipsWithUrls.length - 1) {
+            const next = clipsWithUrls[i + 1];
+            transB64s.push(await blobToBase64(await vignetteGenerator.generateTransitionVignette({ nextMinute: next.minute, nextEventType: next.type }, vigConfig)));
+          }
+          setBackendRenderProgress(5 + Math.round(((i + 1) / clipsWithUrls.length) * 10));
+        }
+        const closingB64 = await blobToBase64(await vignetteGenerator.generateClosingVignette({ clipCount: clipsWithUrls.length }, vigConfig));
+        vignetteFrames = { opening: openingB64, clips: clipB64s, transitions: transB64s, closing: closingB64 };
+      }
+
+      setBackendRenderStage('uploading');
+      setBackendRenderProgress(18);
+      setBackendRenderMessage('Carregando legendas e enviando ao servidor...');
+      const allSrtLines = await loadSrtLines();
+      const clipSpecs = buildClipConfig(clipsWithUrls, allSrtLines);
+
+      setBackendRenderProgress(22);
+      setBackendRenderMessage('Enviando especificação ao servidor FFmpeg...');
+      const { jobId } = await apiClient.startRenderJob({ matchId: matchId ?? '', format: selectedFormat.id as '9:16'|'16:9'|'1:1'|'4:5', preset: 'high', includeVignettes, includeSubtitles, matchInfo: { homeTeam, awayTeam, homeScore, awayScore }, clips: clipSpecs, vignetteFrames });
+      setBackendRenderProgress(25);
+      setBackendRenderMessage('Aguardando processamento FFmpeg...');
+      setBackendRenderLog([`Job ${jobId.slice(-8)} iniciado`]);
+
+      await new Promise<void>((resolve, reject) => {
+        backendPollRef.current = setInterval(async () => {
+          try {
+            const s = await apiClient.getRenderStatus(jobId);
+            setBackendRenderLog(s.log ?? []);
+            setBackendRenderProgress(Math.max(25, Math.min(98, 25 + (s.progress ?? 0) * 0.73)));
+            if (s.status === 'processing') {
+              const last = s.log?.[s.log.length - 1] ?? '';
+              setBackendRenderStage(last.includes('concat') || last.includes('Concat') ? 'concat' : last.includes('ASS') || last.includes('legend') ? 'subtitles' : 'processing');
+              setBackendRenderMessage(last || 'Processando com FFmpeg...');
+            } else if (s.status === 'complete') {
+              clearInterval(backendPollRef.current!);
+              setBackendRenderStage('complete'); setBackendRenderProgress(100); setBackendRenderMessage('MP4 gerado com sucesso!');
+              const a = document.createElement('a'); a.href = apiClient.downloadRenderUrl(jobId); a.target = '_blank'; document.body.appendChild(a); a.click(); document.body.removeChild(a);
+              toast.success('MP4 exportado! Download iniciado.');
+              setTimeout(() => { setIsBackendRendering(false); setBackendRenderStage('idle'); setBackendRenderProgress(0); }, 2000);
+              resolve();
+            } else if (s.status === 'error') { clearInterval(backendPollRef.current!); reject(new Error(s.error || 'Erro no render backend')); }
+          } catch (e) { clearInterval(backendPollRef.current!); reject(e); }
+        }, 1500);
+      });
+    } catch (err: any) {
+      console.error('[Render] Backend falhou:', err);
+      toast.error(`Render falhou: ${err.message}. Tentando via navegador...`);
+      setBackendRenderStage('fallback'); setIsBackendRendering(false);
+      const srtLines = await loadSrtLines().catch(() => []);
+      await downloadCompilation({ clips: buildClipConfig(clipsWithUrls, srtLines), includeVignettes, includeSubtitles, format: selectedFormat.id as '9:16'|'16:9'|'1:1'|'4:5', matchInfo: { homeTeam, awayTeam, homeScore, awayScore } });
+      setBackendRenderStage('idle');
+    }
+  }, [selectedClips, includeVignettes, includeSubtitles, selectedFormat, homeTeam, awayTeam, homeScore, awayScore, matchId, downloadSingleClip, downloadCompilation, vignetteGenerator, loadSrtLines, buildClipConfig]);
 
   // Share functionality
   const handleShare = async () => {
@@ -1494,87 +1525,78 @@ export function ExportPreviewDialog({
           )}
         </div>
 
-        {/* Compilation Progress Overlay - shown inside dialog when compiling */}
-        {isCompiling && (
+        {/* Backend render progress overlay */}
+        {isBackendRendering && (
           <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm">
             <div className="bg-card border border-border rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl text-center space-y-5">
-              {/* Warning banner */}
-              <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2">
-                <span className="text-yellow-400 text-lg">⚠️</span>
-                <p className="text-xs text-yellow-300 font-medium text-left">
-                  Mantenha esta aba em foco durante a geração do vídeo
-                </p>
+              <div className="flex items-center gap-2 bg-primary/10 border border-primary/30 rounded-lg px-3 py-2">
+                <Server className="h-4 w-4 text-primary shrink-0" />
+                <p className="text-xs text-primary font-medium text-left">Render via servidor FFmpeg — pode fechar esta aba</p>
               </div>
-
               <div className="flex flex-col items-center gap-3">
-                {compilationProgress.stage === 'generating-vignettes' && (
-                  <Film className="h-10 w-10 text-primary animate-pulse" />
-                )}
-                {compilationProgress.stage === 'downloading' && (
-                  <Download className="h-10 w-10 text-blue-500 animate-bounce" />
-                )}
-                {compilationProgress.stage === 'processing' && (
-                  <Loader2 className="h-10 w-10 text-primary animate-spin" />
-                )}
-                {compilationProgress.stage === 'concatenating' && (
-                  <FileVideo className="h-10 w-10 text-primary animate-pulse" />
-                )}
-                {!['generating-vignettes','downloading','processing','concatenating'].includes(compilationProgress.stage) && (
-                  <Loader2 className="h-10 w-10 text-primary animate-spin" />
-                )}
+                {backendRenderStage === 'generating-vignettes' && <Film className="h-10 w-10 text-primary animate-pulse" />}
+                {backendRenderStage === 'uploading' && <Download className="h-10 w-10 text-primary animate-bounce" />}
+                {(backendRenderStage === 'processing' || backendRenderStage === 'concat') && <Loader2 className="h-10 w-10 text-primary animate-spin" />}
+                {backendRenderStage === 'subtitles' && <FileVideo className="h-10 w-10 text-primary animate-pulse" />}
+                {backendRenderStage === 'complete' && <Check className="h-10 w-10 text-green-400" />}
+                {!['generating-vignettes','uploading','processing','concat','subtitles','complete'].includes(backendRenderStage) && <Loader2 className="h-10 w-10 text-primary animate-spin" />}
                 <div>
-                  <p className="text-3xl font-bold text-foreground">{compilationProgress.progress.toFixed(0)}%</p>
-                  <p className="text-sm font-medium text-foreground mt-1">{compilationProgress.message}</p>
-                  {compilationProgress.currentStep && compilationProgress.totalSteps && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Etapa {compilationProgress.currentStep} de {compilationProgress.totalSteps}
-                    </p>
-                  )}
+                  <p className="text-3xl font-bold text-foreground">{backendRenderProgress.toFixed(0)}%</p>
+                  <p className="text-sm font-medium text-foreground mt-1">{backendRenderMessage}</p>
                 </div>
               </div>
-
-              {/* Progress bar */}
               <div className="w-full bg-muted rounded-full h-3 overflow-hidden">
-                <div
-                  className="h-full bg-primary rounded-full transition-all duration-500"
-                  style={{ width: `${compilationProgress.progress}%` }}
-                />
+                <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${backendRenderProgress}%` }} />
               </div>
-
-              {/* Stage checklist */}
               <div className="text-left space-y-1.5">
                 {[
-                  { stage: 'generating-vignettes', label: 'Gerando vinhetas', done: ['downloading','processing','concatenating','complete'].includes(compilationProgress.stage) },
-                  { stage: 'downloading', label: 'Baixando clips', done: ['processing','concatenating','complete'].includes(compilationProgress.stage) },
-                  { stage: 'processing', label: 'Renderizando frames no canvas', done: ['concatenating','complete'].includes(compilationProgress.stage) },
-                  { stage: 'concatenating', label: 'Finalizando vídeo', done: compilationProgress.stage === 'complete' },
+                  { key: 'generating-vignettes', label: 'Gerando vinhetas (canvas)', done: ['uploading','processing','subtitles','concat','complete'].includes(backendRenderStage) },
+                  { key: 'uploading',             label: 'Enviando ao servidor',       done: ['processing','subtitles','concat','complete'].includes(backendRenderStage) },
+                  { key: 'processing',            label: 'Processando clips (FFmpeg)',  done: ['subtitles','concat','complete'].includes(backendRenderStage) },
+                  { key: 'subtitles',             label: 'Burn-in legendas ASS',        done: ['concat','complete'].includes(backendRenderStage) },
+                  { key: 'concat',                label: 'Concatenando → MP4 final',    done: backendRenderStage === 'complete' },
                 ].map(item => {
-                  const isActive = compilationProgress.stage === item.stage;
-                  const isPending = !isActive && !item.done;
+                  const isActive = backendRenderStage === item.key;
                   return (
-                    <div key={item.stage} className={cn(
-                      "flex items-center gap-2 text-xs rounded px-2 py-1",
-                      item.done && "text-green-400",
-                      isActive && "text-primary font-medium bg-primary/10",
-                      isPending && "text-muted-foreground"
-                    )}>
-                      <span className="text-base">
-                        {item.done ? '✅' : isActive ? '⏳' : '○'}
-                      </span>
+                    <div key={item.key} className={cn("flex items-center gap-2 text-xs rounded px-2 py-1", item.done && "text-green-400", isActive && "text-primary font-medium bg-primary/10", !isActive && !item.done && "text-muted-foreground")}>
+                      <span className="text-base">{item.done ? '✅' : isActive ? '⏳' : '○'}</span>
                       {item.label}
                     </div>
                   );
                 })}
               </div>
+              {/* Live log (last 3 lines) */}
+              {backendRenderLog.length > 0 && (
+                <div className="text-left bg-muted/50 rounded-lg p-2 max-h-20 overflow-hidden">
+                  {backendRenderLog.slice(-3).map((line, i) => (
+                    <p key={i} className="text-xs text-muted-foreground font-mono truncate">{line}</p>
+                  ))}
+                </div>
+              )}
+              <Button variant="outline" size="sm" onClick={cancelBackendRender} className="w-full">Cancelar</Button>
+            </div>
+          </div>
+        )}
 
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => { cancelCompilation(); resetCompilation(); }}
-                className="w-full"
-              >
-                Cancelar
-              </Button>
+        {/* MediaRecorder fallback progress overlay */}
+        {isCompiling && (
+          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm">
+            <div className="bg-card border border-border rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl text-center space-y-5">
+              <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2">
+                <AlertTriangle className="h-4 w-4 text-yellow-400 shrink-0" />
+                <p className="text-xs text-yellow-300 font-medium text-left">Modo fallback (WebM) — mantenha esta aba em foco</p>
+              </div>
+              <div className="flex flex-col items-center gap-3">
+                <Loader2 className="h-10 w-10 text-primary animate-spin" />
+                <div>
+                  <p className="text-3xl font-bold text-foreground">{compilationProgress.progress.toFixed(0)}%</p>
+                  <p className="text-sm font-medium text-foreground mt-1">{compilationProgress.message}</p>
+                </div>
+              </div>
+              <div className="w-full bg-muted rounded-full h-3 overflow-hidden">
+                <div className="h-full bg-primary rounded-full transition-all duration-500" style={{ width: `${compilationProgress.progress}%` }} />
+              </div>
+              <Button variant="outline" size="sm" onClick={() => { cancelCompilation(); resetCompilation(); }} className="w-full">Cancelar</Button>
             </div>
           </div>
         )}

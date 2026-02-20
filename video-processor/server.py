@@ -84,6 +84,385 @@ import re
 # Global jobs trackers
 download_jobs = {}  # Para jobs de download por URL
 conversion_jobs = {}
+render_jobs = {}   # Para jobs de render FFmpeg (POST /api/render/compile)
+
+# ── Render pipeline constants ─────────────────────────────────────────────────
+FORMAT_DIMS = {
+    '9:16': (1080, 1920),
+    '16:9': (1920, 1080),
+    '1:1':  (1080, 1080),
+    '4:5':  (1080, 1350),
+}
+PRESET_CRF = {'best': 16, 'high': 18, 'medium': 20}
+PRESET_FFMPEG = {'best': 'slow', 'high': 'medium', 'medium': 'fast'}
+
+
+def _seconds_to_ass(secs: float) -> str:
+    """Convert float seconds to ASS timestamp H:MM:SS.cc"""
+    h = int(secs // 3600)
+    m = int((secs % 3600) // 60)
+    s = secs % 60
+    cs = int((s - int(s)) * 100)
+    return f"{h}:{m:02d}:{int(s):02d}.{cs:02d}"
+
+
+def _generate_ass(subtitle_events: list, width: int, height: int) -> str:
+    """Generate a minimal ASS subtitle file from a list of {start, end, text} dicts."""
+    fontsize = max(36, int(width * 0.048))
+    margin_v = max(40, int(height * 0.042))
+    lines = [
+        "[Script Info]",
+        "ScriptType: v4.00+",
+        f"PlayResX: {width}",
+        f"PlayResY: {height}",
+        "WrapStyle: 0",
+        "",
+        "[V4+ Styles]",
+        "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding",
+        f"Style: CC,Arial,{fontsize},&H00FFFFFF,&H000000FF,&H00000000,&H99000000,-1,0,0,0,100,100,0,0,3,2,0,2,10,10,{margin_v},1",
+        "",
+        "[Events]",
+        "Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text",
+    ]
+    for ev in subtitle_events:
+        t_start = _seconds_to_ass(ev['start'])
+        t_end = _seconds_to_ass(ev['end'])
+        text = str(ev['text']).replace('\n', '\\N').replace('{', '').replace('}', '')
+        lines.append(f"Dialogue: 0,{t_start},{t_end},CC,,0,0,0,,{text}")
+    return "\n".join(lines)
+
+
+def _do_render(job_id: str, spec: dict) -> None:
+    """Background thread: execute full FFmpeg render pipeline."""
+    import traceback
+
+    job = render_jobs[job_id]
+
+    def log(msg: str):
+        job['log'].append(msg)
+        print(f"[Render:{job_id[:8]}] {msg}")
+
+    def set_progress(p: int):
+        job['progress'] = p
+
+    try:
+        job['status'] = 'processing'
+        match_id = spec.get('matchId', '')
+        fmt = spec.get('format', '9:16')
+        preset = spec.get('preset', 'high')
+        include_vignettes = spec.get('includeVignettes', True)
+        include_subtitles = spec.get('includeSubtitles', True)
+        clips_spec = spec.get('clips', [])
+        vignette_frames = spec.get('vignetteFrames', {})
+        match_info = spec.get('matchInfo', {})
+
+        W, H = FORMAT_DIMS.get(fmt, (1080, 1920))
+        crf = PRESET_CRF.get(preset, 18)
+        ff_preset = PRESET_FFMPEG.get(preset, 'medium')
+
+        # Work directory
+        work_dir = os.path.join(tempfile.gettempdir(), job_id)
+        os.makedirs(work_dir, exist_ok=True)
+        log(f"Diretório de trabalho: {work_dir} | Formato: {fmt} ({W}x{H}) | Preset: {preset} CRF{crf}")
+
+        set_progress(5)
+
+        # ── 1. Salvar PNGs das vinhetas ────────────────────────────────────────
+        vig_opening_png = None
+        vig_closing_png = None
+        vig_clip_pngs = []
+        vig_trans_pngs = []
+
+        if include_vignettes and vignette_frames:
+            log("Decodificando vinhetas PNG...")
+
+            def save_b64_png(b64_str: str, filename: str) -> str:
+                if not b64_str:
+                    return None
+                # Strip data-URI prefix if present
+                if ',' in b64_str:
+                    b64_str = b64_str.split(',', 1)[1]
+                raw = base64.b64decode(b64_str)
+                path = os.path.join(work_dir, filename)
+                with open(path, 'wb') as f:
+                    f.write(raw)
+                return path
+
+            vig_opening_png = save_b64_png(vignette_frames.get('opening', ''), 'vig_opening.png')
+            vig_closing_png = save_b64_png(vignette_frames.get('closing', ''), 'vig_closing.png')
+            for i, b64 in enumerate(vignette_frames.get('clips', [])):
+                vig_clip_pngs.append(save_b64_png(b64, f'vig_clip_{i}.png'))
+            for i, b64 in enumerate(vignette_frames.get('transitions', [])):
+                vig_trans_pngs.append(save_b64_png(b64, f'vig_trans_{i}.png'))
+
+        set_progress(10)
+
+        # ── 2. Resolver caminhos dos clips ─────────────────────────────────────
+        log(f"Resolvendo {len(clips_spec)} clips...")
+        resolved_clips = []
+        for i, clip in enumerate(clips_spec):
+            clip_url = clip.get('clipUrl', '')
+            clip_path = resolve_video_path(clip_url, match_id)
+            if not clip_path or not os.path.exists(clip_path):
+                log(f"  Clip {i+1}: AVISO - arquivo não encontrado: {clip_url}")
+                resolved_clips.append(None)
+            else:
+                log(f"  Clip {i+1}: {os.path.basename(clip_path)} ({os.path.getsize(clip_path)//1024} KB)")
+                resolved_clips.append(clip_path)
+
+        set_progress(15)
+
+        # ── 3. Converter vinheta PNGs para MP4s ────────────────────────────────
+        def png_to_video(png_path: str, out_mp4: str, duration: float) -> bool:
+            if not png_path or not os.path.exists(png_path):
+                return False
+            cmd = [
+                'ffmpeg', '-y',
+                '-loop', '1', '-i', png_path,
+                '-t', str(duration),
+                '-vf', f'scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1',
+                '-c:v', 'libx264', '-crf', '20', '-preset', 'medium',
+                '-pix_fmt', 'yuv420p',
+                '-r', '30',
+                '-an',
+                out_mp4
+            ]
+            try:
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+                if result.returncode != 0:
+                    log(f"  FFmpeg vinheta erro: {result.stderr[-300:]}")
+                    return False
+                return True
+            except Exception as e:
+                log(f"  Erro ao converter vinheta: {e}")
+                return False
+
+        vig_opening_mp4 = None
+        vig_closing_mp4 = None
+        vig_clip_mp4s = []
+        vig_trans_mp4s = []
+
+        if include_vignettes:
+            log("Convertendo vinhetas PNG → MP4...")
+            if vig_opening_png:
+                p = os.path.join(work_dir, 'vig_opening.mp4')
+                if png_to_video(vig_opening_png, p, 3.0):
+                    vig_opening_mp4 = p
+            if vig_closing_png:
+                p = os.path.join(work_dir, 'vig_closing.mp4')
+                if png_to_video(vig_closing_png, p, 2.0):
+                    vig_closing_mp4 = p
+            for i, png in enumerate(vig_clip_pngs):
+                p = os.path.join(work_dir, f'vig_clip_{i}.mp4')
+                if png_to_video(png, p, 2.0):
+                    vig_clip_mp4s.append(p)
+                else:
+                    vig_clip_mp4s.append(None)
+            for i, png in enumerate(vig_trans_pngs):
+                p = os.path.join(work_dir, f'vig_trans_{i}.mp4')
+                if png_to_video(png, p, 1.5):
+                    vig_trans_mp4s.append(p)
+                else:
+                    vig_trans_mp4s.append(None)
+
+        set_progress(25)
+
+        # ── 4. Scale/crop cada clip ────────────────────────────────────────────
+        log("Processando clips com FFmpeg (scale/crop)...")
+        clip_mp4s = []
+        total_clips = len(clips_spec)
+        for i, (clip_spec, clip_path) in enumerate(zip(clips_spec, resolved_clips)):
+            out_clip = os.path.join(work_dir, f'clip_{i}.mp4')
+            if clip_path and os.path.exists(clip_path):
+                vf = (
+                    f"scale=iw*sar:ih,setsar=1,"
+                    f"scale={W}:{H}:force_original_aspect_ratio=increase,"
+                    f"crop={W}:{H}"
+                )
+                cmd = [
+                    'ffmpeg', '-y',
+                    '-i', clip_path,
+                    '-vf', vf,
+                    '-c:v', 'libx264', '-crf', str(crf), '-preset', ff_preset,
+                    '-c:a', 'aac', '-b:a', '192k', '-ac', '2',
+                    '-pix_fmt', 'yuv420p',
+                    '-movflags', '+faststart',
+                    out_clip
+                ]
+                try:
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                    if result.returncode == 0:
+                        clip_mp4s.append(out_clip)
+                        log(f"  Clip {i+1}/{total_clips}: OK ({os.path.getsize(out_clip)//1024} KB)")
+                    else:
+                        log(f"  Clip {i+1}/{total_clips}: ERRO FFmpeg: {result.stderr[-200:]}")
+                        clip_mp4s.append(None)
+                except Exception as e:
+                    log(f"  Clip {i+1}/{total_clips}: exceção: {e}")
+                    clip_mp4s.append(None)
+            else:
+                log(f"  Clip {i+1}/{total_clips}: ignorado (arquivo não encontrado)")
+                clip_mp4s.append(None)
+            set_progress(25 + int((i + 1) / total_clips * 35))
+
+        set_progress(60)
+
+        # ── 5. Montar sequência + concat demuxer ───────────────────────────────
+        sequence = []  # list of (mp4_path, start_offset_in_final_video)
+        current_time = 0.0
+
+        # Build sequence and track subtitle timings
+        subtitle_events = []
+
+        if include_vignettes and vig_opening_mp4:
+            sequence.append(vig_opening_mp4)
+            current_time += 3.0
+
+        for i, (clip_spec, clip_mp4) in enumerate(zip(clips_spec, clip_mp4s)):
+            # Per-clip vignette
+            if include_vignettes and i < len(vig_clip_mp4s) and vig_clip_mp4s[i]:
+                sequence.append(vig_clip_mp4s[i])
+                current_time += 2.0
+
+            # Clip video
+            if clip_mp4:
+                # Calculate clip duration from file
+                try:
+                    dur_cmd = ['ffprobe', '-v', 'quiet', '-show_entries', 'format=duration',
+                               '-of', 'csv=p=0', clip_mp4]
+                    dur_result = subprocess.run(dur_cmd, capture_output=True, text=True, timeout=15)
+                    clip_duration = float(dur_result.stdout.strip()) if dur_result.returncode == 0 else 30.0
+                except Exception:
+                    clip_duration = 30.0
+
+                # Map subtitle lines relative to this clip to absolute timeline
+                if include_subtitles:
+                    for sub_line in (clip_spec.get('subtitleLines') or []):
+                        subtitle_events.append({
+                            'start': current_time + float(sub_line.get('start', 0)),
+                            'end':   current_time + float(sub_line.get('end', 0)),
+                            'text':  sub_line.get('text', ''),
+                        })
+
+                sequence.append(clip_mp4)
+                current_time += clip_duration
+
+            # Transition vignette (not after last clip)
+            if include_vignettes and i < len(clips_spec) - 1 and i < len(vig_trans_mp4s) and vig_trans_mp4s[i]:
+                sequence.append(vig_trans_mp4s[i])
+                current_time += 1.5
+
+        if include_vignettes and vig_closing_mp4:
+            sequence.append(vig_closing_mp4)
+            current_time += 2.0
+
+        valid_sequence = [p for p in sequence if p and os.path.exists(p)]
+        if not valid_sequence:
+            raise RuntimeError("Nenhum arquivo de vídeo válido para concatenar. Verifique se os clips foram extraídos.")
+
+        log(f"Sequência de {len(valid_sequence)} segmentos, duração estimada ~{current_time:.1f}s")
+        set_progress(65)
+
+        # Write concat list
+        concat_list = os.path.join(work_dir, 'concat.txt')
+        with open(concat_list, 'w') as f:
+            for p in valid_sequence:
+                # Escape single quotes in path
+                safe_p = p.replace("'", "'\\''")
+                f.write(f"file '{safe_p}'\n")
+
+        # Concatenate
+        pre_ass_mp4 = os.path.join(work_dir, 'pre_ass.mp4')
+        concat_cmd = [
+            'ffmpeg', '-y',
+            '-f', 'concat', '-safe', '0', '-i', concat_list,
+            '-c:v', 'libx264', '-crf', str(crf), '-preset', ff_preset,
+            '-c:a', 'aac', '-b:a', '192k', '-ac', '2',
+            '-pix_fmt', 'yuv420p',
+            '-movflags', '+faststart',
+            pre_ass_mp4
+        ]
+        log("Concatenando segmentos...")
+        result = subprocess.run(concat_cmd, capture_output=True, text=True, timeout=600)
+        if result.returncode != 0:
+            raise RuntimeError(f"Erro na concatenação: {result.stderr[-500:]}")
+        log(f"Concatenação OK: {os.path.getsize(pre_ass_mp4)//1024} KB")
+
+        set_progress(80)
+
+        # ── 6. Burn-in ASS legendas ────────────────────────────────────────────
+        final_mp4 = os.path.join(work_dir, 'final.mp4')
+
+        if include_subtitles and subtitle_events:
+            ass_path = os.path.join(work_dir, 'subtitles.ass')
+            ass_content = _generate_ass(subtitle_events, W, H)
+            with open(ass_path, 'w', encoding='utf-8') as f:
+                f.write(ass_content)
+            log(f"ASS gerado com {len(subtitle_events)} eventos de legenda")
+
+            # Escape colons on Windows paths for FFmpeg filter
+            ass_escaped = ass_path.replace('\\', '/').replace(':', '\\:')
+            ass_cmd = [
+                'ffmpeg', '-y',
+                '-i', pre_ass_mp4,
+                '-vf', f"ass='{ass_escaped}'",
+                '-c:v', 'libx264', '-crf', str(crf), '-preset', ff_preset,
+                '-c:a', 'copy',
+                '-movflags', '+faststart',
+                final_mp4
+            ]
+            log("Aplicando legendas ASS...")
+            result = subprocess.run(ass_cmd, capture_output=True, text=True, timeout=600)
+            if result.returncode != 0:
+                log(f"ASS burn-in falhou ({result.stderr[-200:]}), usando vídeo sem legendas")
+                shutil.copy2(pre_ass_mp4, final_mp4)
+            else:
+                log(f"Legendas aplicadas: {os.path.getsize(final_mp4)//1024} KB")
+        else:
+            shutil.copy2(pre_ass_mp4, final_mp4)
+            log("Sem legendas (subtitles desativado ou sem eventos)")
+
+        set_progress(90)
+
+        # ── 7. Mover para storage ──────────────────────────────────────────────
+        renders_dir = os.path.join(STORAGE_DIR, match_id, 'clips', 'renders') if match_id else os.path.join(STORAGE_DIR, 'renders')
+        os.makedirs(renders_dir, exist_ok=True)
+
+        home_team = match_info.get('homeTeam', 'Home').replace(' ', '_')
+        away_team = match_info.get('awayTeam', 'Away').replace(' ', '_')
+        fmt_label = fmt.replace(':', 'x')
+        preset_label = {'best': 'Melhor', 'high': 'Alta', 'medium': 'Media'}.get(preset, preset)
+        n_clips = len([c for c in clip_mp4s if c])
+        output_filename = f"{home_team}_vs_{away_team}_{fmt_label}_{preset_label}_{n_clips}clips.mp4"
+        output_path = os.path.join(renders_dir, output_filename)
+
+        shutil.move(final_mp4, output_path)
+        log(f"MP4 final salvo: {output_path} ({os.path.getsize(output_path)//1024//1024} MB)")
+
+        # Build output URL (relative path served by existing /api/storage route)
+        if match_id:
+            output_url_path = f"/api/storage/{match_id}/clips/renders/{output_filename}"
+        else:
+            output_url_path = f"/api/storage/renders/{output_filename}"
+
+        job['output_path'] = output_path
+        job['output_url'] = output_url_path
+        job['status'] = 'complete'
+        job['progress'] = 100
+        log("✅ Render completo!")
+
+        # Clean up work dir (keep for download fallback for 1h)
+        try:
+            shutil.rmtree(work_dir)
+        except Exception:
+            pass
+
+    except Exception as e:
+        render_jobs[job_id]['status'] = 'error'
+        render_jobs[job_id]['error'] = str(e)
+        render_jobs[job_id]['log'].append(f"❌ ERRO: {e}")
+        print(f"[Render:{job_id[:8]}] ERRO: {e}")
+        traceback.print_exc()
 
 app = Flask(__name__)
 CORS(app)
@@ -14183,6 +14562,91 @@ def _extract_teams_by_regex(text: str) -> dict:
         return {'home': found_teams[0], 'away': None}
     
     return {}
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Render pipeline endpoints
+# ══════════════════════════════════════════════════════════════════════════════
+
+@app.route('/api/render/compile', methods=['POST'])
+def render_compile():
+    """
+    POST /api/render/compile
+    Accepts renderSpec JSON, starts async FFmpeg render, returns jobId immediately.
+    """
+    try:
+        spec = request.get_json(force=True)
+        if not spec:
+            return jsonify({'error': 'Body JSON inválido'}), 400
+
+        # Limit concurrency: max 2 active render jobs
+        active = sum(1 for j in render_jobs.values() if j['status'] == 'processing')
+        if active >= 2:
+            return jsonify({'error': 'Servidor ocupado — aguarde jobs ativos concluírem', 'active': active}), 429
+
+        job_id = f"render_{uuid.uuid4().hex}"
+        render_jobs[job_id] = {
+            'jobId': job_id,
+            'status': 'queued',
+            'progress': 0,
+            'log': [],
+            'output_path': None,
+            'output_url': None,
+            'error': None,
+            'created_at': datetime.utcnow().isoformat(),
+        }
+
+        t = threading.Thread(target=_do_render, args=(job_id, spec), daemon=True)
+        t.start()
+
+        print(f"[Render] Job {job_id[:8]} iniciado | format={spec.get('format')} preset={spec.get('preset')} clips={len(spec.get('clips', []))}")
+        return jsonify({'jobId': job_id, 'status': 'queued'}), 202
+
+    except Exception as e:
+        print(f"[Render] Erro ao iniciar job: {e}")
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/render/status/<job_id>', methods=['GET'])
+def render_status(job_id):
+    """GET /api/render/status/<job_id> — poll render progress."""
+    job = render_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job não encontrado'}), 404
+
+    resp = {
+        'jobId': job_id,
+        'status': job['status'],
+        'progress': job['progress'],
+        'log': job['log'][-50:],  # last 50 lines
+    }
+    if job.get('output_url'):
+        resp['outputUrl'] = job['output_url']
+    if job.get('error'):
+        resp['error'] = job['error']
+    return jsonify(resp)
+
+
+@app.route('/api/render/download/<job_id>', methods=['GET'])
+def render_download(job_id):
+    """GET /api/render/download/<job_id> — stream the final MP4 file."""
+    job = render_jobs.get(job_id)
+    if not job:
+        return jsonify({'error': 'Job não encontrado'}), 404
+    if job['status'] != 'complete':
+        return jsonify({'error': f"Job ainda não concluído (status: {job['status']})"}), 409
+
+    output_path = job.get('output_path')
+    if not output_path or not os.path.exists(output_path):
+        return jsonify({'error': 'Arquivo de saída não encontrado'}), 404
+
+    filename = os.path.basename(output_path)
+    return send_file(
+        output_path,
+        mimetype='video/mp4',
+        as_attachment=True,
+        download_name=filename
+    )
 
 
 if __name__ == '__main__':
