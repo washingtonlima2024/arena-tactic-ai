@@ -1162,8 +1162,16 @@ export function ExportPreviewDialog({
 
         {/* Compilation Progress Overlay - shown inside dialog when compiling */}
         {isCompiling && (
-          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm">
-            <div className="bg-card border border-border rounded-2xl p-8 max-w-sm w-full mx-4 shadow-2xl text-center space-y-5">
+          <div className="absolute inset-0 z-[60] flex items-center justify-center bg-black/90 backdrop-blur-sm">
+            <div className="bg-card border border-border rounded-2xl p-8 max-w-md w-full mx-4 shadow-2xl text-center space-y-5">
+              {/* Warning banner */}
+              <div className="flex items-center gap-2 bg-yellow-500/10 border border-yellow-500/30 rounded-lg px-3 py-2">
+                <span className="text-yellow-400 text-lg">⚠️</span>
+                <p className="text-xs text-yellow-300 font-medium text-left">
+                  Mantenha esta aba em foco durante a geração do vídeo
+                </p>
+              </div>
+
               <div className="flex flex-col items-center gap-3">
                 {compilationProgress.stage === 'generating-vignettes' && (
                   <Film className="h-10 w-10 text-primary animate-pulse" />
@@ -1181,7 +1189,7 @@ export function ExportPreviewDialog({
                   <Loader2 className="h-10 w-10 text-primary animate-spin" />
                 )}
                 <div>
-                  <p className="text-2xl font-bold text-foreground">{compilationProgress.progress.toFixed(0)}%</p>
+                  <p className="text-3xl font-bold text-foreground">{compilationProgress.progress.toFixed(0)}%</p>
                   <p className="text-sm font-medium text-foreground mt-1">{compilationProgress.message}</p>
                   {compilationProgress.currentStep && compilationProgress.totalSteps && (
                     <p className="text-xs text-muted-foreground mt-1">
@@ -1190,13 +1198,41 @@ export function ExportPreviewDialog({
                   )}
                 </div>
               </div>
+
+              {/* Progress bar */}
               <div className="w-full bg-muted rounded-full h-3 overflow-hidden">
                 <div
-                  className="h-full bg-primary rounded-full transition-all duration-300"
+                  className="h-full bg-primary rounded-full transition-all duration-500"
                   style={{ width: `${compilationProgress.progress}%` }}
                 />
               </div>
-              <p className="text-xs text-muted-foreground">Não feche esta janela enquanto o vídeo está sendo gerado</p>
+
+              {/* Stage checklist */}
+              <div className="text-left space-y-1.5">
+                {[
+                  { stage: 'generating-vignettes', label: 'Gerando vinhetas', done: ['downloading','processing','concatenating','complete'].includes(compilationProgress.stage) },
+                  { stage: 'downloading', label: 'Baixando clips', done: ['processing','concatenating','complete'].includes(compilationProgress.stage) },
+                  { stage: 'processing', label: 'Renderizando frames no canvas', done: ['concatenating','complete'].includes(compilationProgress.stage) },
+                  { stage: 'concatenating', label: 'Finalizando vídeo', done: compilationProgress.stage === 'complete' },
+                ].map(item => {
+                  const isActive = compilationProgress.stage === item.stage;
+                  const isPending = !isActive && !item.done;
+                  return (
+                    <div key={item.stage} className={cn(
+                      "flex items-center gap-2 text-xs rounded px-2 py-1",
+                      item.done && "text-green-400",
+                      isActive && "text-primary font-medium bg-primary/10",
+                      isPending && "text-muted-foreground"
+                    )}>
+                      <span className="text-base">
+                        {item.done ? '✅' : isActive ? '⏳' : '○'}
+                      </span>
+                      {item.label}
+                    </div>
+                  );
+                })}
+              </div>
+
               <Button
                 variant="outline"
                 size="sm"
