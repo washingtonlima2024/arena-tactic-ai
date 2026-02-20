@@ -675,21 +675,40 @@ export function ExportPreviewDialog({
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-between pt-4 border-t">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 pt-4 border-t">
               <div className="text-sm text-muted-foreground">
                 {selectedClipIds.size > 0 
                   ? `${selectedClipIds.size} clips selecionados • Formato ${selectedFormat.ratio} • ${selectedDevice.name}`
                   : 'Selecione pelo menos um clip para continuar'
                 }
               </div>
-              <Button 
-                variant="arena" 
-                onClick={startPreview}
-                disabled={selectedClipIds.size === 0}
-              >
-                <Eye className="mr-2 h-4 w-4" />
-                Iniciar Preview
-              </Button>
+              <div className="flex items-center gap-2 w-full sm:w-auto">
+                <Button 
+                  variant="arena-outline"
+                  onClick={startPreview}
+                  disabled={selectedClipIds.size === 0}
+                  className="flex-1 sm:flex-none"
+                >
+                  <Eye className="mr-2 h-4 w-4" />
+                  Ver Preview
+                </Button>
+                <Button 
+                  variant="arena" 
+                  onClick={async () => {
+                    if (selectedClipIds.size === 0) return;
+                    await handleDownload();
+                  }}
+                  disabled={selectedClipIds.size === 0 || isCompiling}
+                  className="flex-1 sm:flex-none"
+                >
+                  {isCompiling ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
+                  Exportar para Redes Sociais
+                </Button>
+              </div>
             </div>
           </div>
         </DialogContent>
@@ -1153,7 +1172,7 @@ export function ExportPreviewDialog({
                   onClick={() => setShowSharePanel(true)}
                 >
                   <Share2 className="h-4 w-4" />
-                  <span className="hidden sm:inline">Compartilhar</span>
+                  <span>Exportar para Redes Sociais</span>
                 </Button>
               </div>
             </div>
