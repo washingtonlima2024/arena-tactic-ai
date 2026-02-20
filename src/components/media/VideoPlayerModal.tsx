@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { X, Clock, Maximize2, Volume2, VolumeX, SkipBack, SkipForward, RotateCcw, Smartphone, Monitor, Square, Tablet, Loader2, MessageSquare } from 'lucide-react';
+import { getEventLabel } from '@/lib/eventLabels';
 import { ClipVignette } from './ClipVignette';
 import { DeviceMockup } from './DeviceMockup';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
@@ -330,9 +331,7 @@ export function VideoPlayerModal({
           {/* Header */}
           <div className="flex items-center justify-between p-4 border-b border-border bg-muted/50">
             <div className="flex items-center gap-3">
-              <Badge variant="arena" className="uppercase tracking-wider text-xs">
-                {clip.type.replace(/_/g, ' ')}
-              </Badge>
+              <span className="font-semibold text-sm text-foreground">{getEventLabel(clip.type)}</span>
               <div className="flex items-center gap-1.5 text-muted-foreground">
                 <Clock className="h-3.5 w-3.5" />
                 <span className="text-sm font-medium">{clip.minute}'</span>
@@ -471,7 +470,7 @@ export function VideoPlayerModal({
               ) : aiComment ? (
                 <div className="flex items-start gap-2">
                   <MessageSquare className="h-3.5 w-3.5 mt-0.5 text-primary shrink-0" />
-                  <p className="text-sm text-muted-foreground leading-relaxed">{aiComment}</p>
+                  <p className="text-sm text-white leading-relaxed">{aiComment.slice(0, 350)}</p>
                 </div>
               ) : null}
             </div>
