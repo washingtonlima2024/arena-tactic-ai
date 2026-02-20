@@ -136,13 +136,62 @@ function renderImageOnCanvas(
   });
 }
 
+// Draw subtitle text over the canvas
+function drawSubtitle(
+  ctx: CanvasRenderingContext2D,
+  text: string,
+  width: number,
+  height: number
+) {
+  const fontSize = Math.max(16, width * 0.035);
+  const padding = fontSize * 0.6;
+  const maxTextWidth = width * 0.88;
+
+  ctx.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  // Measure and wrap text
+  const words = text.split(' ');
+  const lines: string[] = [];
+  let currentLine = '';
+  for (const word of words) {
+    const testLine = currentLine ? `${currentLine} ${word}` : word;
+    if (ctx.measureText(testLine).width > maxTextWidth && currentLine) {
+      lines.push(currentLine);
+      currentLine = word;
+    } else {
+      currentLine = testLine;
+    }
+  }
+  if (currentLine) lines.push(currentLine);
+
+  const lineHeight = fontSize * 1.4;
+  const totalTextH = lines.length * lineHeight;
+  const boxH = totalTextH + padding * 2;
+  const boxY = height - boxH - height * 0.04;
+
+  // Semi-transparent background
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
+  ctx.beginPath();
+  ctx.roundRect(width * 0.04, boxY, width * 0.92, boxH, fontSize * 0.4);
+  ctx.fill();
+
+  // Text
+  ctx.fillStyle = '#ffffff';
+  lines.forEach((line, i) => {
+    ctx.fillText(line, width / 2, boxY + padding + i * lineHeight + lineHeight / 2, maxTextWidth);
+  });
+}
+
 // Render a video element on canvas using requestAnimationFrame
 function renderVideoOnCanvas(
   ctx: CanvasRenderingContext2D,
   video: HTMLVideoElement,
   width: number,
   height: number,
-  cancelRef: React.MutableRefObject<boolean>
+  cancelRef: React.MutableRefObject<boolean>,
+  subtitle?: string
 ): Promise<void> {
   return new Promise((resolve) => {
     let resolved = false;
@@ -168,6 +217,7 @@ function renderVideoOnCanvas(
           const vw = video.videoWidth || width;
           const vh = video.videoHeight || height;
           drawCover(ctx, video, vw, vh, width, height);
+          if (subtitle) drawSubtitle(ctx, subtitle, width, height);
           framesDrawn++;
         } catch {
           // Canvas may be tainted - skip frame
@@ -185,6 +235,7 @@ function renderVideoOnCanvas(
     setTimeout(done, 5 * 60 * 1000);
   });
 }
+
 
 // Load image from URL as ImageBitmap
 async function loadImageBitmap(url: string): Promise<ImageBitmap | null> {
@@ -526,7 +577,7 @@ export function useVideoCompilation() {
               });
 
               console.log(`[Compilation] Rendering clip ${i + 1}, readyState=${video.readyState}, currentTime=${video.currentTime}`);
-              await renderVideoOnCanvas(ctx, video, width, height, cancelRef);
+              await renderVideoOnCanvas(ctx, video, width, height, cancelRef, config.includeSubtitles ? clip.description : undefined);
               video.pause();
               video.src = '';
             } catch (err) {
