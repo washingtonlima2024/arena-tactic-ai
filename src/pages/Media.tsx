@@ -1421,6 +1421,7 @@ export default function Media() {
                 ...c,
                 thumbnail: getThumbnail(c.id)?.imageUrl,
               }))}
+              matchId={matchId}
               matchVideo={matchVideo}
               homeTeam={selectedMatch?.home_team?.name || 'Time Casa'}
               awayTeam={selectedMatch?.away_team?.name || 'Time Fora'}

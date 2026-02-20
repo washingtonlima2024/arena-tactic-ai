@@ -43,7 +43,8 @@ import arenaPlayLogo from '@/assets/arena-play-icon.png';
 import { toast } from 'sonner';
 import { CLIP_BUFFER_BEFORE_MS, CLIP_BUFFER_AFTER_MS } from '@/hooks/useClipGeneration';
 import { useVideoCompilation } from '@/hooks/useVideoCompilation';
-import { normalizeStorageUrl } from '@/lib/apiClient';
+import { normalizeStorageUrl, apiClient, getApiBase } from '@/lib/apiClient';
+import { parseSRT } from '@/lib/transcriptionParser';
 
 // Video formats
 const VIDEO_FORMATS = [
@@ -97,6 +98,7 @@ interface ExportPreviewDialogProps {
   isOpen: boolean;
   onClose: () => void;
   clips: Clip[];
+  matchId?: string;
   matchVideo?: {
     file_url: string;
     duration_seconds?: number | null;
@@ -119,6 +121,7 @@ export function ExportPreviewDialog({
   isOpen,
   onClose,
   clips,
+  matchId,
   matchVideo,
   homeTeam,
   awayTeam,
@@ -373,16 +376,60 @@ export function ExportPreviewDialog({
       return;
     }
 
+    // Fetch and parse SRT for synchronized closed captions
+    let allSrtLines: { start: number; end: number; text: string }[] = [];
+    if (includeSubtitles && matchId) {
+      try {
+        const filesData = await apiClient.listMatchFiles(matchId);
+        const srtFiles = filesData?.folders?.srt || [];
+        if (srtFiles.length > 0) {
+          // Prefer full match SRT, then any available
+          const targetSrt =
+            srtFiles.find((f: any) => f.name?.toLowerCase().includes('full') || f.name?.toLowerCase() === 'transcription.srt') ||
+            srtFiles[0];
+          const srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${targetSrt.name}`;
+          const response = await fetch(srtUrl);
+          if (response.ok) {
+            const srtContent = await response.text();
+            allSrtLines = parseSRT(srtContent);
+            console.log(`[Export] Loaded ${allSrtLines.length} SRT lines for CC`);
+          }
+        }
+      } catch (err) {
+        console.warn('[Export] Failed to load SRT for subtitles, proceeding without CC:', err);
+      }
+    }
+
     // Use MediaRecorder pipeline: embeds vignettes into the video
     await downloadCompilation({
-      clips: clipsWithUrls.map(c => ({
-        id: c.id,
-        clipUrl: normalizeStorageUrl(c.clipUrl!) || c.clipUrl!,
-        eventType: c.type,
-        minute: c.minute,
-        description: c.description,
-        thumbnailUrl: c.thumbnail
-      })),
+      clips: clipsWithUrls.map(c => {
+        // Calculate the start time of this clip in the source video
+        const bufferBefore = CLIP_BUFFER_BEFORE_MS / 1000;
+        const eventSec = c.totalSeconds ?? (c.minute * 60 + (c.second ?? 0));
+        const clipStartInVideo = Math.max(0, eventSec - bufferBefore);
+        const clipEndInVideo = eventSec + CLIP_BUFFER_AFTER_MS / 1000;
+
+        // Filter and offset SRT lines to be relative to clip start
+        const subtitleLines = includeSubtitles && allSrtLines.length > 0
+          ? allSrtLines
+              .filter(line => line.end >= clipStartInVideo && line.start <= clipEndInVideo)
+              .map(line => ({
+                start: Math.max(0, line.start - clipStartInVideo),
+                end: Math.max(0, line.end - clipStartInVideo),
+                text: line.text,
+              }))
+          : undefined;
+
+        return {
+          id: c.id,
+          clipUrl: normalizeStorageUrl(c.clipUrl!) || c.clipUrl!,
+          eventType: c.type,
+          minute: c.minute,
+          description: c.description,
+          thumbnailUrl: c.thumbnail,
+          subtitleLines,
+        };
+      }),
       includeVignettes,
       includeSubtitles,
       format: selectedFormat.id as '9:16' | '16:9' | '1:1' | '4:5',
@@ -393,7 +440,7 @@ export function ExportPreviewDialog({
         awayScore
       }
     });
-  }, [selectedClips, includeVignettes, includeSubtitles, selectedFormat, homeTeam, awayTeam, homeScore, awayScore, downloadSingleClip, downloadCompilation]);
+  }, [selectedClips, includeVignettes, includeSubtitles, selectedFormat, homeTeam, awayTeam, homeScore, awayScore, matchId, downloadSingleClip, downloadCompilation]);
 
   // Share functionality
   const handleShare = async () => {
