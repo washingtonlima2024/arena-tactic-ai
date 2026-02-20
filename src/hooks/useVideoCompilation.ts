@@ -48,7 +48,10 @@ const FORMAT_DIMENSIONS: Record<string, { width: number; height: number }> = {
   '4:5':  { width: 720, height: 900 },
 };
 
-// Render an image on canvas for a specified duration
+const FPS = 30;
+const FRAME_INTERVAL_MS = Math.round(1000 / FPS);
+
+// Render an image on canvas for a specified duration using setInterval (reliable for offscreen canvas)
 function renderImageOnCanvas(
   ctx: CanvasRenderingContext2D,
   bitmap: ImageBitmap,
@@ -58,29 +61,33 @@ function renderImageOnCanvas(
   cancelRef: React.MutableRefObject<boolean>
 ): Promise<void> {
   return new Promise((resolve) => {
-    const startTime = performance.now();
-    let rafId: number;
+    // Draw first frame immediately so MediaRecorder captures something
+    ctx.drawImage(bitmap, 0, 0, width, height);
 
-    const draw = (now: number) => {
-      if (cancelRef.current) { resolve(); return; }
+    let elapsed = 0;
+    const interval = setInterval(() => {
+      if (cancelRef.current) {
+        clearInterval(interval);
+        resolve();
+        return;
+      }
       ctx.drawImage(bitmap, 0, 0, width, height);
-      if (now - startTime < durationMs) {
-        rafId = requestAnimationFrame(draw);
-      } else {
+      elapsed += FRAME_INTERVAL_MS;
+      if (elapsed >= durationMs) {
+        clearInterval(interval);
         resolve();
       }
-    };
-    rafId = requestAnimationFrame(draw);
+    }, FRAME_INTERVAL_MS);
 
-    // Safety timeout
+    // Safety timeout in case setInterval stalls
     setTimeout(() => {
-      cancelAnimationFrame(rafId);
+      clearInterval(interval);
       resolve();
-    }, durationMs + 200);
+    }, durationMs + 500);
   });
 }
 
-// Render a video element on canvas until it ends
+// Render a video element on canvas using setInterval (reliable for offscreen canvas)
 function renderVideoOnCanvas(
   ctx: CanvasRenderingContext2D,
   video: HTMLVideoElement,
@@ -89,31 +96,33 @@ function renderVideoOnCanvas(
   cancelRef: React.MutableRefObject<boolean>
 ): Promise<void> {
   return new Promise((resolve) => {
-    let rafId: number;
-
-    const draw = () => {
-      if (cancelRef.current) { resolve(); return; }
-      if (!video.ended && !video.paused) {
-        ctx.drawImage(video, 0, 0, width, height);
-      }
-      if (!video.ended) {
-        rafId = requestAnimationFrame(draw);
-      } else {
-        resolve();
-      }
+    let resolved = false;
+    const done = () => {
+      if (resolved) return;
+      resolved = true;
+      clearInterval(interval);
+      resolve();
     };
 
-    video.addEventListener('ended', () => {
-      cancelAnimationFrame(rafId);
-      resolve();
-    }, { once: true });
+    const interval = setInterval(() => {
+      if (cancelRef.current || video.ended) {
+        done();
+        return;
+      }
+      if (!video.paused && !video.ended) {
+        try {
+          ctx.drawImage(video, 0, 0, width, height);
+        } catch {
+          // Canvas may be tainted - skip frame
+        }
+      }
+    }, FRAME_INTERVAL_MS);
 
-    video.addEventListener('error', () => {
-      cancelAnimationFrame(rafId);
-      resolve();
-    }, { once: true });
+    video.addEventListener('ended', done, { once: true });
+    video.addEventListener('error', done, { once: true });
 
-    rafId = requestAnimationFrame(draw);
+    // Safety timeout: max 5 minutes
+    setTimeout(done, 5 * 60 * 1000);
   });
 }
 
@@ -138,30 +147,49 @@ async function blobToImageBitmap(blob: Blob): Promise<ImageBitmap> {
   return createImageBitmap(blob);
 }
 
-// Load video from URL and prepare for rendering
-function createVideoElement(url: string, muted = true): Promise<HTMLVideoElement> {
+// Fetch video as Blob URL to avoid canvas CORS taint
+async function fetchVideoAsBlobUrl(url: string): Promise<string> {
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`HTTP ${response.status} ao buscar vídeo`);
+  const blob = await response.blob();
+  return URL.createObjectURL(blob);
+}
+
+// Load video from a Blob URL and prepare for rendering
+function loadVideoElement(blobUrl: string): Promise<HTMLVideoElement> {
   return new Promise((resolve, reject) => {
     const video = document.createElement('video');
-    video.crossOrigin = 'anonymous';
-    video.muted = muted;
+    // No crossOrigin needed — it's a local blob URL
+    video.muted = true;
     video.playsInline = true;
     video.preload = 'auto';
-    video.src = url;
+    video.src = blobUrl;
+
+    const cleanup = () => {
+      video.removeEventListener('canplaythrough', onReady);
+      video.removeEventListener('loadeddata', onReady);
+      video.removeEventListener('error', onError);
+    };
 
     const onReady = () => {
-      video.removeEventListener('canplaythrough', onReady);
-      video.removeEventListener('error', onError);
+      cleanup();
       resolve(video);
     };
     const onError = () => {
-      video.removeEventListener('canplaythrough', onReady);
-      video.removeEventListener('error', onError);
-      reject(new Error(`Falha ao carregar vídeo: ${url}`));
+      cleanup();
+      reject(new Error('Falha ao carregar vídeo'));
     };
 
     video.addEventListener('canplaythrough', onReady);
+    video.addEventListener('loadeddata', onReady);
     video.addEventListener('error', onError);
     video.load();
+
+    // Fallback: resolve after 10s if neither event fires
+    setTimeout(() => {
+      cleanup();
+      resolve(video);
+    }, 10_000);
   });
 }
 
@@ -216,6 +244,9 @@ export function useVideoCompilation() {
 
     const { width, height } = FORMAT_DIMENSIONS[config.format] ?? FORMAT_DIMENSIONS['16:9'];
     const vigConfig: VignetteConfig = { width, height, format: config.format };
+
+    // Track blob URLs to revoke after compilation
+    const blobUrlsToRevoke: string[] = [];
 
     try {
       // --- Stage: generating-vignettes ---
@@ -288,6 +319,35 @@ export function useVideoCompilation() {
 
       if (cancelRef.current) throw new Error('Cancelado pelo usuário');
 
+      // --- Stage: downloading videos as blobs ---
+      setProgress({
+        stage: 'downloading',
+        progress: 29,
+        message: 'Baixando clips para exportação...'
+      });
+
+      // Pre-fetch all video clips as blob URLs to avoid CORS/canvas taint
+      const videoBlobUrls: (string | null)[] = [];
+      for (let i = 0; i < config.clips.length; i++) {
+        if (cancelRef.current) break;
+        const clip = config.clips[i];
+        setProgress({
+          stage: 'downloading',
+          progress: 29 + ((i + 1) / config.clips.length) * 1,
+          message: `Baixando clip ${i + 1}/${config.clips.length}...`
+        });
+        try {
+          const blobUrl = await fetchVideoAsBlobUrl(clip.clipUrl);
+          blobUrlsToRevoke.push(blobUrl);
+          videoBlobUrls.push(blobUrl);
+        } catch (err) {
+          console.warn(`Não foi possível baixar clip ${i + 1}:`, err);
+          videoBlobUrls.push(null);
+        }
+      }
+
+      if (cancelRef.current) throw new Error('Cancelado pelo usuário');
+
       // --- Stage: processing ---
       setProgress({
         stage: 'processing',
@@ -305,14 +365,20 @@ export function useVideoCompilation() {
       ctx.fillStyle = '#000000';
       ctx.fillRect(0, 0, width, height);
 
-      // Setup MediaRecorder
-      const mimeType = MediaRecorder.isTypeSupported('video/mp4;codecs=avc1')
-        ? 'video/mp4;codecs=avc1'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
+      // Setup MediaRecorder — pick best supported mimeType
+      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9')
         ? 'video/webm;codecs=vp9'
-        : 'video/webm';
+        : MediaRecorder.isTypeSupported('video/webm;codecs=vp8')
+        ? 'video/webm;codecs=vp8'
+        : MediaRecorder.isTypeSupported('video/webm')
+        ? 'video/webm'
+        : '';
 
-      const stream = canvas.captureStream(30);
+      if (!mimeType) {
+        throw new Error('Seu navegador não suporta gravação de vídeo. Tente Chrome ou Firefox.');
+      }
+
+      const stream = canvas.captureStream(FPS);
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType,
         videoBitsPerSecond: 4_000_000
@@ -364,26 +430,45 @@ export function useVideoCompilation() {
             totalSteps: totalClips
           });
 
-          try {
-            const video = await createVideoElement(clip.clipUrl);
-            video.muted = true;
-            await video.play();
-            await renderVideoOnCanvas(ctx, video, width, height, cancelRef);
-            video.pause();
-            video.src = '';
-          } catch (err) {
-            console.warn(`Falha ao renderizar clip ${i + 1}:`, err);
-            // Fallback: show thumbnail or black for 5s
+          const blobUrl = videoBlobUrls[i];
+          if (blobUrl) {
+            try {
+              const video = await loadVideoElement(blobUrl);
+              video.muted = true;
+              await video.play();
+              await renderVideoOnCanvas(ctx, video, width, height, cancelRef);
+              video.pause();
+              video.src = '';
+            } catch (err) {
+              console.warn(`Falha ao renderizar clip ${i + 1}:`, err);
+              // Fallback: thumbnail or black for 5s
+              if (clip.thumbnailUrl) {
+                const thumbBitmap = await loadImageBitmap(clip.thumbnailUrl);
+                if (thumbBitmap) {
+                  await renderImageOnCanvas(ctx, thumbBitmap, width, height, 5000, cancelRef);
+                }
+              } else {
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, width, height);
+                ctx.fillStyle = '#ffffff';
+                ctx.font = `bold ${width * 0.05}px system-ui`;
+                ctx.textAlign = 'center';
+                ctx.fillText(`${clip.minute}'`, width / 2, height / 2);
+                await new Promise(r => setTimeout(r, 5000));
+              }
+            }
+          } else {
+            // No blob URL — show thumbnail or black
             if (clip.thumbnailUrl) {
               const thumbBitmap = await loadImageBitmap(clip.thumbnailUrl);
               if (thumbBitmap) {
                 await renderImageOnCanvas(ctx, thumbBitmap, width, height, 5000, cancelRef);
               }
             } else {
-              ctx.fillStyle = '#000000';
+              ctx.fillStyle = '#111111';
               ctx.fillRect(0, 0, width, height);
-              ctx.fillStyle = '#ffffff';
-              ctx.font = `bold ${width * 0.05}px system-ui`;
+              ctx.fillStyle = '#10b981';
+              ctx.font = `bold ${width * 0.08}px system-ui`;
               ctx.textAlign = 'center';
               ctx.fillText(`${clip.minute}'`, width / 2, height / 2);
               await new Promise(r => setTimeout(r, 5000));
@@ -437,13 +522,15 @@ export function useVideoCompilation() {
       }
       return null;
     } finally {
+      // Revoke all blob URLs created during compilation
+      blobUrlsToRevoke.forEach(url => URL.revokeObjectURL(url));
       setIsCompiling(false);
     }
   }, [vignetteGenerator]);
 
   // Download compiled playlist or single clip with vignette
   const downloadCompilation = useCallback(async (config: CompilationConfig): Promise<void> => {
-    // Single clip without vignette → direct download
+    // Single clip without vignette → direct download (fastest)
     if (config.clips.length === 1 && !config.includeVignettes && config.clips[0].clipUrl) {
       const clip = config.clips[0];
       const filename = `${clip.minute}min-${clip.eventType.replace(/_/g, '-')}.mp4`;
@@ -455,7 +542,7 @@ export function useVideoCompilation() {
     const blob = await compilePlaylist(config);
     if (!blob) return;
 
-    const ext = blob.type.includes('mp4') ? 'mp4' : 'webm';
+    const ext = 'webm';
     const filename = config.clips.length === 1
       ? `${config.clips[0].minute}min-${config.clips[0].eventType.replace(/_/g, '-')}_com_vinheta.${ext}`
       : `${config.matchInfo.homeTeam}_vs_${config.matchInfo.awayTeam}_highlights.${ext}`;
