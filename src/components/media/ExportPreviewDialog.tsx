@@ -44,7 +44,7 @@ import { toast } from 'sonner';
 import { CLIP_BUFFER_BEFORE_MS, CLIP_BUFFER_AFTER_MS } from '@/hooks/useClipGeneration';
 import { useVideoCompilation } from '@/hooks/useVideoCompilation';
 import { normalizeStorageUrl, apiClient, getApiBase } from '@/lib/apiClient';
-import { parseSRT } from '@/lib/transcriptionParser';
+import { parseTranscription } from '@/lib/transcriptionParser';
 
 // Video formats
 const VIDEO_FORMATS = [
@@ -268,19 +268,33 @@ export function ExportPreviewDialog({
     if (!includeSubtitles || !matchId) return;
     try {
       const filesData = await apiClient.listMatchFiles(matchId);
-      const srtFiles = filesData?.folders?.srt || [];
+      // Check both srt and texts folders for transcription files
+      const srtFiles = [
+        ...(filesData?.folders?.srt || []),
+        ...(filesData?.folders?.texts || []).filter((f: any) => 
+          f.name?.toLowerCase().endsWith('.srt') || f.name?.toLowerCase().endsWith('.vtt')
+        ),
+      ];
+      console.log(`[Preview] Found ${srtFiles.length} transcription files:`, srtFiles.map((f: any) => f.name));
       if (srtFiles.length > 0) {
         const targetSrt =
           srtFiles.find((f: any) => f.name?.toLowerCase().includes('full') || f.name?.toLowerCase() === 'transcription.srt') ||
           srtFiles[0];
         const srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${targetSrt.name}`;
+        console.log(`[Preview] Fetching transcription from: ${srtUrl}`);
         const response = await fetch(srtUrl);
         if (response.ok) {
           const srtContent = await response.text();
-          const lines = parseSRT(srtContent);
+          console.log(`[Preview] Content length: ${srtContent.length}, preview: ${srtContent.slice(0, 300)}`);
+          const parsed = parseTranscription(srtContent);
+          const lines = parsed.lines.filter(l => l.hasTimestamp && l.text);
           setPreviewSrtLines(lines);
-          console.log(`[Preview] Loaded ${lines.length} SRT lines for CC overlay`);
+          console.log(`[Preview] Loaded ${lines.length} CC lines (format: ${parsed.format}) for overlay`);
+        } else {
+          console.warn(`[Preview] HTTP ${response.status} fetching transcription`);
         }
+      } else {
+        console.warn('[Preview] No transcription files found in match storage');
       }
     } catch (err) {
       console.warn('[Preview] Could not load SRT for CC overlay:', err);
@@ -440,7 +454,14 @@ export function ExportPreviewDialog({
     if (includeSubtitles && matchId) {
       try {
         const filesData = await apiClient.listMatchFiles(matchId);
-        const srtFiles = filesData?.folders?.srt || [];
+        // Check both srt and texts folders for transcription files
+        const srtFiles = [
+          ...(filesData?.folders?.srt || []),
+          ...(filesData?.folders?.texts || []).filter((f: any) => 
+            f.name?.toLowerCase().endsWith('.srt') || f.name?.toLowerCase().endsWith('.vtt')
+          ),
+        ];
+        console.log(`[Export] Found ${srtFiles.length} transcription files:`, srtFiles.map((f: any) => f.name));
         if (srtFiles.length > 0) {
           // Prefer full match SRT, then any available
           const targetSrt =
@@ -450,9 +471,15 @@ export function ExportPreviewDialog({
           const response = await fetch(srtUrl);
           if (response.ok) {
             const srtContent = await response.text();
-            allSrtLines = parseSRT(srtContent);
-            console.log(`[Export] Loaded ${allSrtLines.length} SRT lines for CC`);
+            console.log(`[Export] Content length: ${srtContent.length}, preview: ${srtContent.slice(0, 300)}`);
+            const parsed = parseTranscription(srtContent);
+            allSrtLines = parsed.lines.filter(l => l.hasTimestamp && l.text);
+            console.log(`[Export] Loaded ${allSrtLines.length} CC lines (format: ${parsed.format})`);
+          } else {
+            console.warn(`[Export] HTTP ${response.status} fetching transcription`);
           }
+        } else {
+          console.warn('[Export] No transcription files found for CC');
         }
       } catch (err) {
         console.warn('[Export] Failed to load SRT for subtitles, proceeding without CC:', err);
