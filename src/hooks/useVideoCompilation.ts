@@ -136,22 +136,23 @@ function renderImageOnCanvas(
   });
 }
 
-// Draw subtitle text over the canvas
+// Draw closed captions style subtitle — small, at the bottom, TV style
 function drawSubtitle(
   ctx: CanvasRenderingContext2D,
   text: string,
   width: number,
   height: number
 ) {
-  const fontSize = Math.max(16, width * 0.035);
-  const padding = fontSize * 0.6;
-  const maxTextWidth = width * 0.88;
+  // Small font — CC style (about 2.5% of width, minimum 14px)
+  const fontSize = Math.max(14, width * 0.025);
+  const maxTextWidth = width * 0.86;
+  const padding = { x: fontSize * 0.5, y: fontSize * 0.35 };
 
-  ctx.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
+  ctx.font = `${fontSize}px system-ui, -apple-system, sans-serif`;
   ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
+  ctx.textBaseline = 'alphabetic';
 
-  // Measure and wrap text
+  // Wrap text
   const words = text.split(' ');
   const lines: string[] = [];
   let currentLine = '';
@@ -166,21 +167,28 @@ function drawSubtitle(
   }
   if (currentLine) lines.push(currentLine);
 
-  const lineHeight = fontSize * 1.4;
-  const totalTextH = lines.length * lineHeight;
-  const boxH = totalTextH + padding * 2;
-  const boxY = height - boxH - height * 0.04;
+  // Limit to 2 lines (CC convention)
+  const visibleLines = lines.slice(-2);
 
-  // Semi-transparent background
-  ctx.fillStyle = 'rgba(0, 0, 0, 0.72)';
-  ctx.beginPath();
-  ctx.roundRect(width * 0.04, boxY, width * 0.92, boxH, fontSize * 0.4);
-  ctx.fill();
+  const lineHeight = fontSize * 1.35;
+  const bottomMargin = height * 0.06;
 
-  // Text
-  ctx.fillStyle = '#ffffff';
-  lines.forEach((line, i) => {
-    ctx.fillText(line, width / 2, boxY + padding + i * lineHeight + lineHeight / 2, maxTextWidth);
+  visibleLines.forEach((line, i) => {
+    const lineIndex = visibleLines.length - 1 - i;
+    const y = height - bottomMargin - lineIndex * lineHeight;
+    const lineW = ctx.measureText(line).width;
+    const boxX = (width - lineW) / 2 - padding.x;
+    const boxW = lineW + padding.x * 2;
+    const boxH = fontSize + padding.y * 2;
+    const boxY = y - fontSize - padding.y;
+
+    // Tight background behind each line (CC style)
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.82)';
+    ctx.fillRect(boxX, boxY, boxW, boxH);
+
+    // White text
+    ctx.fillStyle = '#ffffff';
+    ctx.fillText(line, width / 2, y);
   });
 }
 
@@ -369,6 +377,8 @@ export function useVideoCompilation() {
 
     // Track blob URLs to revoke after compilation
     const blobUrlsToRevoke: string[] = [];
+    let audioCtx: AudioContext | null = null;
+
 
     try {
       // --- Stage: generating-vignettes ---
@@ -500,7 +510,15 @@ export function useVideoCompilation() {
         throw new Error('Seu navegador não suporta gravação de vídeo. Tente Chrome ou Firefox.');
       }
 
+      // Setup AudioContext for mixing audio from clips
+      audioCtx = new AudioContext();
+      const audioDestination = audioCtx.createMediaStreamDestination();
+
       const stream = canvas.captureStream(FPS);
+      // Add audio track from AudioContext destination to the stream
+      const audioTrack = audioDestination.stream.getAudioTracks()[0];
+      if (audioTrack) stream.addTrack(audioTrack);
+
       const mediaRecorder = new MediaRecorder(stream, {
         mimeType,
         videoBitsPerSecond: 4_000_000
@@ -564,7 +582,19 @@ export function useVideoCompilation() {
           if (blobUrl) {
             try {
               const video = await loadVideoElement(blobUrl);
-              video.muted = true;
+              // Do NOT mute — we want audio in the export
+              video.volume = 1;
+              video.playsInline = true;
+
+              // Connect video audio to AudioContext mixer
+              try {
+                const source = audioCtx.createMediaElementSource(video);
+                source.connect(audioDestination);
+                source.connect(audioCtx.destination); // also play locally so the element works
+              } catch {
+                // may throw if already connected or CORS issue — continue without audio
+              }
+
               await video.play();
 
               // Wait for first frame to be decoded before starting canvas capture
@@ -670,6 +700,8 @@ export function useVideoCompilation() {
     } finally {
       // Revoke all blob URLs created during compilation
       blobUrlsToRevoke.forEach(url => URL.revokeObjectURL(url));
+      // Close AudioContext
+      try { audioCtx?.close(); } catch { /* ignore */ }
       setIsCompiling(false);
     }
   }, [vignetteGenerator]);
