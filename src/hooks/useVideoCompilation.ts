@@ -11,6 +11,12 @@ import type {
   VignetteConfig,
 } from './useVignetteGenerator';
 
+export interface SubtitleLine {
+  start: number; // seconds relative to clip start
+  end: number;
+  text: string;
+}
+
 export interface CompilationClip {
   id: string;
   clipUrl: string;
@@ -18,6 +24,7 @@ export interface CompilationClip {
   minute: number;
   description?: string;
   thumbnailUrl?: string;
+  subtitleLines?: SubtitleLine[];
 }
 
 export interface CompilationConfig {
@@ -199,7 +206,7 @@ function renderVideoOnCanvas(
   width: number,
   height: number,
   cancelRef: React.MutableRefObject<boolean>,
-  subtitle?: string
+  subtitleLines?: SubtitleLine[]
 ): Promise<void> {
   return new Promise((resolve) => {
     let resolved = false;
@@ -225,7 +232,12 @@ function renderVideoOnCanvas(
           const vw = video.videoWidth || width;
           const vh = video.videoHeight || height;
           drawCover(ctx, video, vw, vh, width, height);
-          if (subtitle) drawSubtitle(ctx, subtitle, width, height);
+          if (subtitleLines) {
+            const currentSub = subtitleLines.find(
+              s => video.currentTime >= s.start && video.currentTime <= s.end
+            );
+            if (currentSub) drawSubtitle(ctx, currentSub.text, width, height);
+          }
           framesDrawn++;
         } catch {
           // Canvas may be tainted - skip frame
@@ -607,7 +619,7 @@ export function useVideoCompilation() {
               });
 
               console.log(`[Compilation] Rendering clip ${i + 1}, readyState=${video.readyState}, currentTime=${video.currentTime}`);
-              await renderVideoOnCanvas(ctx, video, width, height, cancelRef, config.includeSubtitles ? clip.description : undefined);
+              await renderVideoOnCanvas(ctx, video, width, height, cancelRef, config.includeSubtitles ? clip.subtitleLines : undefined);
               video.pause();
               video.src = '';
             } catch (err) {
