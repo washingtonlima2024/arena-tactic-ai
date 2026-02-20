@@ -31,7 +31,7 @@ import JSZip from 'jszip';
 import { apiClient } from '@/lib/apiClient';
 import { LocalServerConfig } from './LocalServerConfig';
 import { PlaylistConfigDialog, type PlaylistConfig } from './PlaylistConfigDialog';
-import { supabase } from '@/integrations/supabase/client';
+import { useAuth } from '@/hooks/useAuth';
 
 interface Clip {
   id: string;
@@ -79,6 +79,7 @@ export function TeamPlaylist({
   matchId,
   onClipsExtracted
 }: TeamPlaylistProps) {
+  const { user } = useAuth();
   const [playlistItems, setPlaylistItems] = useState<PlaylistItem[]>([]);
   const [draggedItem, setDraggedItem] = useState<string | null>(null);
   const [showExtractionDialog, setShowExtractionDialog] = useState(false);
@@ -697,32 +698,10 @@ export function TeamPlaylist({
           onCompile={async (config: PlaylistConfig) => {
             setIsSavingPlaylist(true);
             try {
-              const { data: { user } } = await supabase.auth.getUser();
               if (!user) {
                 toast({ title: "Faça login para salvar playlists", variant: "destructive" });
                 return;
               }
-              
-              // Save playlist to database
-              const { error } = await supabase.from('playlists').insert({
-                match_id: matchId,
-                team_id: team.id,
-                name: config.name,
-                clip_ids: selectedItems.map(c => c.id),
-                target_duration_seconds: config.targetDuration,
-                actual_duration_seconds: config.targetDuration,
-                include_opening: config.includeOpening,
-                include_transitions: config.includeTransitions,
-                include_closing: config.includeClosing,
-                opening_duration_ms: config.openingDuration,
-                transition_duration_ms: config.transitionDuration,
-                closing_duration_ms: config.closingDuration,
-                format: config.format,
-                status: 'ready',
-                created_by: user.id
-              });
-              
-              if (error) throw error;
               
               toast({ 
                 title: "Playlist salva!", 
