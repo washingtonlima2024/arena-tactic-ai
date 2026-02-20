@@ -51,6 +51,35 @@ const FORMAT_DIMENSIONS: Record<string, { width: number; height: number }> = {
 const FPS = 30;
 const FRAME_INTERVAL_MS = Math.round(1000 / FPS);
 
+// Draw source into canvas using "cover" behavior — crops to fill without stretching
+function drawCover(
+  ctx: CanvasRenderingContext2D,
+  source: CanvasImageSource,
+  srcW: number,
+  srcH: number,
+  dstW: number,
+  dstH: number
+) {
+  const srcRatio = srcW / srcH;
+  const dstRatio = dstW / dstH;
+  let drawW: number, drawH: number, offsetX: number, offsetY: number;
+
+  if (srcRatio > dstRatio) {
+    // Source wider — crop sides
+    drawH = dstH;
+    drawW = srcW * (dstH / srcH);
+    offsetX = (dstW - drawW) / 2;
+    offsetY = 0;
+  } else {
+    // Source taller — crop top/bottom
+    drawW = dstW;
+    drawH = srcH * (dstW / srcW);
+    offsetX = 0;
+    offsetY = (dstH - drawH) / 2;
+  }
+  ctx.drawImage(source, offsetX, offsetY, drawW, drawH);
+}
+
 // Render an image on canvas for a specified duration using requestAnimationFrame
 // This avoids browser throttling that plagues setInterval in non-focused tabs
 function renderImageOnCanvas(
@@ -63,7 +92,8 @@ function renderImageOnCanvas(
 ): Promise<void> {
   return new Promise((resolve) => {
     // Draw first frame immediately so MediaRecorder captures something
-    ctx.drawImage(bitmap, 0, 0, width, height);
+    ctx.clearRect(0, 0, width, height);
+    drawCover(ctx, bitmap, bitmap.width, bitmap.height, width, height);
 
     let startTime: number | null = null;
     let rafId: number;
@@ -78,7 +108,8 @@ function renderImageOnCanvas(
       if (startTime === null) startTime = timestamp;
       const elapsed = timestamp - startTime;
 
-      ctx.drawImage(bitmap, 0, 0, width, height);
+      ctx.clearRect(0, 0, width, height);
+      drawCover(ctx, bitmap, bitmap.width, bitmap.height, width, height);
       framesDrawn++;
 
       if (elapsed >= durationMs) {
@@ -106,7 +137,6 @@ function renderImageOnCanvas(
 }
 
 // Render a video element on canvas using requestAnimationFrame
-// requestVideoFrameCallback is used when available for perfect frame sync
 function renderVideoOnCanvas(
   ctx: CanvasRenderingContext2D,
   video: HTMLVideoElement,
@@ -134,7 +164,10 @@ function renderVideoOnCanvas(
       }
       if (!video.paused && !video.ended) {
         try {
-          ctx.drawImage(video, 0, 0, width, height);
+          ctx.clearRect(0, 0, width, height);
+          const vw = video.videoWidth || width;
+          const vh = video.videoHeight || height;
+          drawCover(ctx, video, vw, vh, width, height);
           framesDrawn++;
         } catch {
           // Canvas may be tainted - skip frame
