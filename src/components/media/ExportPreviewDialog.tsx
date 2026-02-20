@@ -349,28 +349,29 @@ export function ExportPreviewDialog({
     }
   };
 
-  // Handle download - single clip or compilation
+  // Handle download - uses MediaRecorder pipeline for vignettes, direct for plain clips
   const handleDownload = useCallback(async () => {
     if (selectedClips.length === 0) {
       toast.error('Nenhum clip selecionado');
       return;
     }
 
-    // Single clip with existing clipUrl - direct download
-    if (selectedClips.length === 1 && selectedClips[0].clipUrl) {
+    const clipsWithUrls = selectedClips.filter(c => c.clipUrl);
+
+    // Single clip without vignette → fast direct download
+    if (selectedClips.length === 1 && !includeVignettes && selectedClips[0].clipUrl) {
       const clip = selectedClips[0];
       const filename = `${clip.minute}min-${clip.type.replace(/_/g, '-')}.mp4`;
       await downloadSingleClip(clip.clipUrl, filename);
       return;
     }
 
-    // Multiple clips or need compilation
-    const clipsWithUrls = selectedClips.filter(c => c.clipUrl);
     if (clipsWithUrls.length === 0) {
       toast.error('Nenhum clip extraído. Extraia os clips primeiro na aba "Cortes & Capas".');
       return;
     }
 
+    // Use MediaRecorder pipeline: embeds vignettes into the video
     await downloadCompilation({
       clips: clipsWithUrls.map(c => ({
         id: c.id,
@@ -1137,7 +1138,9 @@ export function ExportPreviewDialog({
                     <Download className="h-4 w-4" />
                   )}
                   <span className="hidden sm:inline">
-                    {selectedClips.length === 1 ? 'Download' : 'Gerar Vídeo'}
+                    {selectedClips.length === 1
+                      ? (includeVignettes ? 'Gerar Vídeo' : 'Download (.mp4)')
+                      : 'Gerar Playlist'}
                   </span>
                 </Button>
 
