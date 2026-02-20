@@ -1,118 +1,283 @@
 
-## Diagnóstico dos Três Problemas no Preview
+## Arquitetura Atual vs. Arquitetura Alvo
 
-### Problema 1 — "Letrero no início com nome do arquivo"
+### Estado Atual (problema)
+O botão "Exportar Agora" chama `handleDownload()` → `downloadCompilation()` → `compilePlaylist()` em `useVideoCompilation.ts`. Este fluxo:
+1. Gera vinhetas como PNG frames via Canvas API (`useVignetteGenerator.ts`)
+2. Usa `MediaRecorder` sobre um `HTMLCanvasElement` com stream 30fps
+3. Produz um arquivo `.webm` (VP8/VP9) — **não MP4**
+4. Aplica legendas via `drawSubtitle()` no canvas frame a frame
+5. Mistura áudio via `AudioContext.createMediaElementSource`
 
-O `DialogTitle` do `ExportPreviewDialog` no preview step usa `VisuallyHidden`, mas o `DialogContent` pode renderizar o título acessível visível no topo em alguns navegadores/OS. Além disso, o preview de abertura (`OpeningVignette`) está correto, mas o usuário pode estar vendo um texto residual de nome de arquivo do componente anterior à abertura.
+Problemas concretos:
+- `MediaRecorder` + Canvas em aba oculta → throttled pelo browser → frames pulados → vinhetas e CC desaparecem
+- Saída é WEBM, não MP4/H.264 — incompatível com maioria dos stories/reels
+- O preview usa React/CSS com `ResizeObserver`; o export usa Canvas com outra lógica — **nunca são iguais**
+- Legendas no canvas dependem de `requestAnimationFrame` que pode ser throttled
 
-Causa mais provável: na tela de preview, quando `playbackState.type === 'idle'`, não há nenhum estado visual definido — a tela fica em branco mostrando o fundo escuro com algum texto residual antes de avançar para `opening`.
+### Arquitetura Alvo
+O frontend envia um `renderSpec.json` ao backend Python que já tem FFmpeg disponível. O backend executa a composição completa: crop/scale, overlay de vinheta, burn-in de legendas ASS via libass, e gera MP4 H.264.
 
-**Correção:** Garantir que o `startPreview` avance imediatamente para `opening` sem passar por `idle`, e remover qualquer texto visível que apareça antes da vinheta de abertura.
+```
+Browser                                    Python Backend (server.py)
+──────                                     ──────────────────────────
+1. Usuário clica "Exportar Agora"
+2. Frontend monta renderSpec.json      →   POST /api/render/compile
+   {format, clips[], srtLines[],           3. Backend gera vinhetas via Canvas (PNG)
+    matchInfo, includeVignettes,              ou usa template FFmpeg drawtext
+    includeSubtitles, preset}             4. Backend gera subtitles.ass
+                                          5. FFmpeg filter_complex:
+                                             - Scale + crop cada clip
+                                             - Overlay vinheta (abertura/clip/transição)
+                                             - ASS burn-in via subtitles=file.ass
+                                             - Concat todos os segmentos
+                                             - libx264 CRF 16-18 + AAC 192k
+                                          6. Salva MP4 no storage
+                                          7. Retorna job_id
 
-### Problema 2 — Closed Captions não aparecem no Preview
+Browser                                    Python Backend
+──────                                     ──────────────
+GET /api/render/status/<job_id>       →   Retorna {status, progress, log}
+(poll 1s)
 
-O `VideoContent` (linha 1389–1453 do `ExportPreviewDialog.tsx`) renderiza apenas `<video>` sem overlay de CC. As legendas SRT são carregadas apenas no momento do download (`handleDownload`), e não durante o preview.
-
-**Correção:** Carregar o SRT do match quando o preview é iniciado (`startPreview`) e sobrepor as linhas CC sincronizadas com o `currentTime` do vídeo, exatamente igual ao `drawSubtitle` no canvas, mas em React como um overlay `<div>` posicionado absolutamente no rodapé do vídeo.
-
-### Problema 3 — Vinheta pequena demais
-
-O `ClipVignette` usa breakpoints `sm:` e `md:` do Tailwind que dependem da largura da **janela** (`window.innerWidth`), não da largura do container. O container (device frame) tem apenas 220×450px para celular — mas o Tailwind `sm:` só ativa em `640px+` de viewport. Então todos os elementos ficam no tamanho mínimo (`text-2xl`, `h-5 w-5`, etc.) porque o breakpoint `sm:` nunca ativa dentro do frame pequeno.
-
-**Correção:** Substituir os breakpoints responsivos do Tailwind por tamanhos baseados em `%` ou `clamp()` via `style` inline, que escalam com o container em vez da viewport. Alternativamente, usar `container queries` (mas não disponível no projeto atual). A solução mais simples e compatível é usar `font-size` e dimensões em percentual do container via propriedades CSS inline calculadas.
-
-## Solução Técnica
-
-### 1. ExportPreviewDialog — Overlay de CC no Preview
-
-**Onde:** dentro do bloco `{/* Video Player */}` (linha 1043), após o `VideoContent`.
-
-Adicionar:
-- Estado `previewSubtitles: SubtitleLine[]` (carregado quando o preview inicia)
-- Estado `currentCC: string` (atualizado via `timeupdate` no `videoRef`)
-- Overlay de CC: `<div className="absolute bottom-[8%] left-2 right-2 z-20 text-center">` com fundo preto semitransparente e texto branco, renderizado apenas quando `currentCC` não for vazio
-
-```tsx
-// Sincronização de CC com o vídeo no preview
-useEffect(() => {
-  const video = videoRef.current;
-  if (!video || !previewSubtitles.length) return;
-  const onTime = () => {
-    const sub = previewSubtitles.find(s => video.currentTime >= s.start && video.currentTime <= s.end);
-    setCurrentCC(sub?.text ?? '');
-  };
-  video.addEventListener('timeupdate', onTime);
-  return () => video.removeEventListener('timeupdate', onTime);
-}, [previewSubtitles, playbackState]);
+GET /api/render/download/<job_id>     →   stream do arquivo MP4
 ```
 
-**Carregamento do SRT:** mover a lógica de fetch do SRT de `handleDownload` para uma função `loadSRTForPreview(matchId)` chamada também em `startPreview()`, e armazenar em `previewSrtLines`. Cada clip terá seus timestamps ajustados no momento em que o vídeo começa.
+## Análise de Impacto
 
-### 2. ClipVignette — Tamanhos baseados no container
+O backend Python (`video-processor/server.py`) já possui:
+- `ffmpeg` disponível e funcional (verificado em `/health`)
+- `extract_clip()` que usa libx264 + AAC
+- `concatenate_videos()` que usa concat demuxer
+- `normalize_video()` para uniformizar resolução
+- `VIGNETTES_DIR` com vinhetas `.mp4` locais (usadas pelo `/extract-clip` e `/extract-batch`)
+- `add_subtitles_to_clip()` que usa `drawtext` (mas precisamos de ASS/libass para CC)
+- Sistema de jobs em `download_jobs` e `conversion_jobs` dicts globais
 
-**Onde:** `src/components/media/ClipVignette.tsx`
-
-Trocar breakpoints Tailwind por escala proporcional via `style` inline. O componente já recebe `w-full h-full` do parent, então podemos usar `vh`/`vw` relativo ao container com `containerRef` + `ResizeObserver`, ou simplesmente usar `%` + `clamp()`:
-
-```tsx
-// Exemplo: em vez de "text-2xl sm:text-4xl md:text-5xl"
-// usar style={{ fontSize: 'clamp(1.5rem, 8cqw, 4rem)' }}
-```
-
-Como `container queries` não estão disponíveis, usaremos `ResizeObserver` no container da vinheta para obter a largura real e calcular os tamanhos de fonte inline.
-
-```tsx
-const containerRef = useRef<HTMLDivElement>(null);
-const [containerWidth, setContainerWidth] = useState(300);
-
-useEffect(() => {
-  const ro = new ResizeObserver(entries => {
-    setContainerWidth(entries[0].contentRect.width);
-  });
-  if (containerRef.current) ro.observe(containerRef.current);
-  return () => ro.disconnect();
-}, []);
-
-const scale = Math.min(1, containerWidth / 400); // 400px = design base
-```
-
-E então aplicar `scale` como multiplicador em todos os tamanhos de fonte e ícones.
-
-O mesmo para `TransitionVignette.tsx`.
-
-### 3. OpeningVignette — Texto "nome do arquivo"
-
-**Onde:** `OpeningVignette` (linha 1332 do `ExportPreviewDialog.tsx`)
-
-Inspecionar se há algum texto "idle" ou nome de arquivo sendo exibido. O `playbackState.type === 'idle'` não tem renderização condicional no bloco do screen — fica branco. Adicionar um estado de "loading/idle" que exibe o logo sem texto de arquivo, e garantir que o `DialogTitle` não vaze visualmente.
-
-Adicionalmente, aumentar o tamanho e qualidade do `OpeningVignette` no preview para ser imersivo como o `ClipVignette`.
+O frontend já possui:
+- `useVignetteGenerator.ts` que renderiza vinhetas em Canvas como PNG/Blob — podemos reusar para enviar ao backend como PNGs
+- `loadSrtLines()` em `ExportPreviewDialog.tsx` — já carrega o SRT corretamente
+- `apiClient.ts` com padrão `apiRequest` para POST ao backend
 
 ## Arquivos a Modificar
 
-| Arquivo | Mudança |
-|---|---|
-| `src/components/media/ExportPreviewDialog.tsx` | 1) Carregar SRT em `startPreview`; 2) Overlay CC sincronizado no VideoContent; 3) Corrigir estado idle; 4) Melhorar OpeningVignette para ser mais imersivo |
-| `src/components/media/ClipVignette.tsx` | Substituir breakpoints Tailwind por `ResizeObserver` + escala proporcional ao container |
-| `src/components/media/TransitionVignette.tsx` | Mesma correção de escala por container |
+### Backend: `video-processor/server.py`
 
-## Fluxo Correto do Preview
+Adicionar três novos endpoints após a linha 7926 (logo após `/extract-batch`):
+
+**1. `POST /api/render/compile`**
+
+Recebe o `renderSpec`:
+```json
+{
+  "matchId": "...",
+  "format": "9:16",
+  "preset": "best",
+  "includeVignettes": true,
+  "includeSubtitles": true,
+  "matchInfo": { "homeTeam": "...", "awayTeam": "...", "homeScore": 2, "awayScore": 1 },
+  "clips": [
+    {
+      "id": "...",
+      "clipUrl": "http://localhost:5000/api/storage/.../clips/...",
+      "eventType": "goal",
+      "minute": 23,
+      "description": "...",
+      "thumbnailUrl": "...",
+      "subtitleLines": [{"start": 0.0, "end": 2.5, "text": "narração aqui"}]
+    }
+  ],
+  "vignetteFrames": {
+    "opening": "<base64 PNG>",
+    "clips": ["<base64 PNG>", ...],
+    "transitions": ["<base64 PNG>", ...],
+    "closing": "<base64 PNG>"
+  }
+}
+```
+
+Lógica do endpoint:
+1. Cria job `render_<uuid>` em `render_jobs` dict global
+2. Inicia `threading.Thread` para processar assincronamente
+3. Retorna imediatamente `{"jobId": "...", "status": "queued"}`
+
+Lógica da thread (`_do_render`):
+```python
+FORMAT_DIMS = {
+    '9:16': (1080, 1920),
+    '16:9': (1920, 1080),
+    '1:1':  (1080, 1080),
+    '4:5':  (1080, 1350),
+}
+PRESET_CRF = {'best': 16, 'high': 18, 'medium': 20}
+PRESET_FFMPEG = {'best': 'slow', 'high': 'medium', 'medium': 'fast'}
+```
+
+Passos dentro da thread:
+1. **Resolver caminhos dos clips**: `resolve_video_path(clip['clipUrl'], match_id)` → path local
+2. **Salvar PNGs das vinhetas**: Decodifica base64 dos `vignetteFrames` e salva como `/tmp/<job_id>/vignette_opening.png`, etc.
+3. **Gerar arquivo ASS** (legendas burn-in):
+   - PlayResX = largura do formato, PlayResY = altura
+   - Gera eventos `Dialogue:` com timestamps de cada `subtitleLine` de cada clip, ajustando offset acumulado de `startTime`
+4. **Para cada clip**: Aplicar crop/scale via FFmpeg:
+   ```
+   ffmpeg -ss <start> -i <path> -t <duration>
+     -vf "scale=iw*sar:ih,setsar=1,
+          scale=W:H:force_original_aspect_ratio=increase,
+          crop=W:H,
+          pad=W:H:(ow-iw)/2:(oh-ih)/2"
+     -c:v libx264 -crf <CRF> -preset <PRESET>
+     -c:a aac -b:a 192k
+     -movflags +faststart
+     /tmp/<job>/clip_<i>.mp4
+   ```
+5. **Para cada vinheta PNG**: Converter para vídeo com duração:
+   ```
+   ffmpeg -loop 1 -i vignette_opening.png -t 3
+     -vf "scale=W:H" -c:v libx264 -crf 18 -preset medium
+     -c:a anullsrc -r 30 -pix_fmt yuv420p vignette_opening.mp4
+   ```
+6. **Montar sequência**: `[opening_vig, clip_vig_0, clip_0, trans_vig_0, clip_vig_1, clip_1, ..., closing_vig]`
+7. **Concatenar com concat demuxer** → `/tmp/<job>/pre_ass.mp4`
+8. **Burn-in ASS**:
+   ```
+   ffmpeg -i pre_ass.mp4 -vf "ass=subtitles.ass" -c:v libx264 -crf <CRF>
+     -preset <PRESET> -c:a copy -movflags +faststart final.mp4
+   ```
+9. **Mover para storage**: `storage/<match_id>/clips/renders/<job_id>.mp4`
+10. Atualiza job status para `complete` com `output_url`
+
+**2. `GET /api/render/status/<job_id>`**
+
+Retorna:
+```json
+{
+  "jobId": "...",
+  "status": "queued|processing|complete|error",
+  "progress": 45,
+  "log": ["Processando clip 1/3...", "..."],
+  "outputUrl": "http://localhost:5000/api/storage/..."
+}
+```
+
+**3. `GET /api/render/download/<job_id>`**
+
+`send_file()` do MP4 final como attachment.
+
+### Frontend: `src/components/media/ExportPreviewDialog.tsx`
+
+**Modificar `handleDownload()`**:
+
+Substituir a chamada `downloadCompilation()` por:
+1. Gerar as vinhetas via `useVignetteGenerator` (Canvas API) como Blob
+2. Converter cada Blob para base64
+3. Montar `renderSpec` com todos os dados + `vignetteFrames` em base64
+4. `POST /api/render/compile` → recebe `jobId`
+5. Poll `GET /api/render/status/<jobId>` a cada 1.5s — atualizar progress no overlay existente
+6. Quando `status === 'complete'` → `window.open(outputUrl)` ou download direto via `<a href>` apontando para `/api/render/download/<jobId>`
+
+**Modificar o overlay de progresso** (linha 1497–1580):
+- Atualizar os estágios do checklist para refletir o pipeline FFmpeg:
+  - Gerando vinhetas (canvas) 
+  - Enviando ao servidor
+  - Processando clips (FFmpeg scale/crop)
+  - Aplicando legendas (ASS burn-in)
+  - Concatenando e finalizando MP4
+- Remover o aviso "Mantenha esta aba em foco" — não é mais necessário com backend render
+
+**Adicionar fallback gracioso**: Se o servidor local não estiver disponível (`apiClient.isLocalServerAvailable()` retornar false), manter o MediaRecorder como fallback com aviso ao usuário.
+
+### Frontend: `src/lib/apiClient.ts`
+
+Adicionar três métodos:
+```typescript
+startRenderJob: (spec: RenderSpec) => Promise<{ jobId: string; status: string }>
+getRenderStatus: (jobId: string) => Promise<RenderJobStatus>
+downloadRenderUrl: (jobId: string) => string  // retorna a URL direta
+```
+
+### Frontend: `src/hooks/useVideoCompilation.ts`
+
+Adicionar método `downloadCompilationViaBackend(config, vignetteBlobs)` que:
+1. Converte vinheta blobs para base64
+2. Monta o `renderSpec`
+3. Chama o pipeline de backend (poll + download)
+
+O método `downloadCompilation` existente muda para:
+1. Tentar o backend FFmpeg primeiro
+2. Fallback para MediaRecorder se o servidor não estiver disponível
+
+## Geração do arquivo ASS
+
+O formato ASS é suportado nativamente pelo libass integrado ao FFmpeg (`-vf ass=<file>`). A estrutura mínima necessária:
+
+```ass
+[Script Info]
+ScriptType: v4.00+
+PlayResX: 1080
+PlayResY: 1920
+WrapStyle: 0
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, Bold, Italic, BorderStyle, Outline, Shadow, Alignment, MarginV
+Style: CC,Arial,52,&H00FFFFFF,&H00000000,-1,0,3,2,1,2,80
+
+[Events]
+Format: Layer, Start, End, Style, Text
+Dialogue: 0,0:00:01.00,0:00:03.50,CC,Narração do gol aqui
+```
+
+- `Alignment: 2` = centralizado na margem inferior
+- `MarginV: 80` = margem do rodapé
+- `Fontsize: 52` = em resolução 1080px (escala com PlayResX/Y)
+- `BorderStyle: 3` = caixa de fundo opaca
+- `OutlineColour` com alpha = fundo semitransparente: `&H99000000`
+
+Os timestamps são gerados acumulando a duração de cada segmento (vinheta + clip) na sequência final.
+
+## Sequência de Segmentos e Timestamps ASS
 
 ```
-startPreview()
-  ↓
-  Carrega SRT (matchId) → previewSrtLines[]
-  ↓
-  playbackState: opening → ClipVignette (escala pelo container) → vídeo
-  ↓
-  Durante vídeo: timeupdate → lookup em previewSrtLines filtrado pelo clip atual
-              → currentCC: string → overlay CC no rodapé do vídeo
-  ↓
-  Transition → próximo clip → closing
+Segmento              Duração   Início acumulado
+─────────────────     ────────  ────────────────
+opening vignette      3.0s      t=0.0s
+clip[0] vignette      2.0s      t=3.0s
+clip[0] video         ~30s      t=5.0s     ← subtitles mapeados aqui
+transition vignette   1.5s      t=35.0s
+clip[1] vignette      2.0s      t=36.5s
+clip[1] video         ~30s      t=38.5s    ← subtitles mapeados aqui
+closing vignette      2.0s      t=68.5s
 ```
 
-## Resultado Esperado
+O backend calcula o offset acumulado e mapeia as `subtitleLines` (relativas ao início do clip) para o tempo absoluto no arquivo final.
 
-- Preview mostrará CC sincronizados como texto pequeno no rodapé do vídeo (idêntico ao CC do arquivo exportado)
-- Vinhetas (ClipVignette e TransitionVignette) escalarão proporcionalmente ao tamanho do device mockup, sem depender de breakpoints de viewport
-- Não aparece mais o "letrero" com nome de arquivo antes da vinheta de abertura
+## Formato de Saída
+
+```
+Codec de vídeo:   libx264, pix_fmt yuv420p
+CRF:              16 (best) / 18 (high) / 20 (medium)
+Preset:           slow (best) / medium (high) / fast (medium)
+Codec de áudio:   aac, bitrate 192k, stereo
+Container:        MP4, -movflags +faststart
+Extensão:         .mp4
+Nome do arquivo:  Home_vs_Away_9x16_Melhor_3clips.mp4
+```
+
+## Tabela Resumo de Mudanças
+
+| Arquivo | Tipo | Mudança |
+|---|---|---|
+| `video-processor/server.py` | Backend Python | Adicionar `render_jobs` dict + 3 novos endpoints: `POST /api/render/compile`, `GET /api/render/status/<id>`, `GET /api/render/download/<id>` |
+| `src/lib/apiClient.ts` | Frontend TS | Adicionar `startRenderJob()`, `getRenderStatus()`, `downloadRenderUrl()` |
+| `src/hooks/useVideoCompilation.ts` | Frontend TS | Adicionar `downloadCompilationViaBackend()` com poll; manter MediaRecorder como fallback |
+| `src/components/media/ExportPreviewDialog.tsx` | Frontend TS | Modificar `handleDownload()` para usar backend; atualizar overlay de progresso; remover aviso de aba em foco |
+
+## Observações Críticas
+
+1. **Sem mudanças no preview** — o preview React permanece inalterado. A fidelidade entre preview e export é garantida pelo fato de ambos usarem os mesmos parâmetros (format, matchInfo, subtitleLines), mas o preview usa React/CSS e o export usa FFmpeg. Isso é aceitável e esperado: o preview é uma simulação, o export é o produto final.
+
+2. **Vinhetas como PNG**: O frontend gera as vinhetas via Canvas (já existente em `useVignetteGenerator.ts`) e envia como base64. O backend converte PNG → vídeo 3s/2s/1.5s com `ffmpeg -loop 1`. Isso elimina a dependência de vinhetas `.mp4` locais no `VIGNETTES_DIR` para o export profissional.
+
+3. **Concorrência limitada**: O endpoint aceita jobs mas o servidor Flask roda com thread-per-request. Jobs pesados rodam em threads separadas. Para evitar sobrecarga, o dict `render_jobs` rastreia quantos jobs estão `processing` e retorna 429 se > 2.
+
+4. **Fallback**: Se `isLocalServerAvailable()` retornar false (servidor Python offline), o sistema cai automaticamente para o MediaRecorder existente, garantindo que o botão nunca trave.
