@@ -5,6 +5,7 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { 
   X, 
   Smartphone, 
@@ -31,7 +32,8 @@ import {
   Download,
   Loader2,
   Film,
-  FileVideo
+  FileVideo,
+  Layers
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { VisuallyHidden } from '@radix-ui/react-visually-hidden';
@@ -39,6 +41,7 @@ import { TransitionVignette } from './TransitionVignette';
 import { ClipVignette } from './ClipVignette';
 import { SocialSharePanel } from './SocialSharePanel';
 import { CompilationProgress } from './CompilationProgress';
+import { BatchExportPanel } from './BatchExportPanel';
 import arenaPlayLogo from '@/assets/arena-play-icon.png';
 import { toast } from 'sonner';
 import { CLIP_BUFFER_BEFORE_MS, CLIP_BUFFER_AFTER_MS } from '@/hooks/useClipGeneration';
@@ -529,6 +532,62 @@ export function ExportPreviewDialog({
     });
   }, [selectedClips, includeVignettes, includeSubtitles, selectedFormat, homeTeam, awayTeam, homeScore, awayScore, matchId, downloadSingleClip, downloadCompilation]);
 
+  // Shared: load SRT lines (used by preview CC and Batch Export)
+  const loadSrtLines = useCallback(async (): Promise<{ start: number; end: number; text: string }[]> => {
+    if (!matchId) return [];
+    try {
+      const filesData = await apiClient.listMatchFiles(matchId);
+      const srtFiles = [
+        ...(filesData?.folders?.srt || []),
+        ...(filesData?.folders?.texts || []).filter((f: any) =>
+          f.name?.toLowerCase().endsWith('.srt') || f.name?.toLowerCase().endsWith('.vtt')
+        ),
+      ];
+      if (srtFiles.length === 0) return [];
+      const targetSrt =
+        srtFiles.find((f: any) => f.name?.toLowerCase().includes('full') || f.name?.toLowerCase() === 'transcription.srt') ||
+        srtFiles[0];
+      const srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${targetSrt.name}`;
+      const response = await fetch(srtUrl);
+      if (!response.ok) return [];
+      const srtContent = await response.text();
+      const parsed = parseTranscription(srtContent);
+      return parsed.lines.filter((l: any) => l.hasTimestamp && l.text);
+    } catch {
+      return [];
+    }
+  }, [matchId]);
+
+  // Shared: build CompilationConfig['clips'] from Clip[] + srtLines
+  const buildClipConfig = useCallback((clipsIn: Clip[], srtLines: { start: number; end: number; text: string }[]) => {
+    return clipsIn
+      .filter(c => c.clipUrl)
+      .map(c => {
+        const bufferBefore = CLIP_BUFFER_BEFORE_MS / 1000;
+        const eventSec = c.videoSecond ?? c.totalSeconds ?? (c.minute * 60 + (c.second ?? 0));
+        const clipStartInVideo = Math.max(0, eventSec - bufferBefore);
+        const clipEndInVideo = eventSec + CLIP_BUFFER_AFTER_MS / 1000;
+        const subtitleLines = srtLines.length > 0
+          ? srtLines
+              .filter(line => line.end >= clipStartInVideo && line.start <= clipEndInVideo)
+              .map(line => ({
+                start: Math.max(0, line.start - clipStartInVideo),
+                end: Math.max(0, line.end - clipStartInVideo),
+                text: line.text,
+              }))
+          : undefined;
+        return {
+          id: c.id,
+          clipUrl: normalizeStorageUrl(c.clipUrl!) || c.clipUrl!,
+          eventType: c.type,
+          minute: c.minute,
+          description: c.description,
+          thumbnailUrl: c.thumbnail,
+          subtitleLines,
+        };
+      });
+  }, []);
+
   // Share functionality
   const handleShare = async () => {
     const shareData = {
@@ -612,18 +671,18 @@ export function ExportPreviewDialog({
   if (step === 'config') {
     return (
       <Dialog open={isOpen} onOpenChange={onClose}>
-        <DialogContent className="max-w-4xl max-h-[90vh] overflow-hidden flex flex-col p-0">
+        <DialogContent className="max-w-5xl max-h-[90vh] overflow-hidden flex flex-col p-0">
           <VisuallyHidden>
             <DialogTitle>Exportar Preview</DialogTitle>
           </VisuallyHidden>
           
           <div className="flex flex-col flex-1 min-h-0">
-            {/* Header - sticky */}
+            {/* Header */}
             <div className="flex items-center justify-between px-6 pt-6 pb-4 border-b shrink-0">
               <div>
                 <h2 className="text-xl font-bold">Exportar para Redes Sociais</h2>
                 <p className="text-sm text-muted-foreground">
-                  Configure o formato, dispositivo e clips para preview
+                  Preview individual ou exportação em lote com múltiplos formatos
                 </p>
               </div>
               <Button variant="ghost" size="icon" onClick={onClose}>
@@ -631,222 +690,321 @@ export function ExportPreviewDialog({
               </Button>
             </div>
 
-            {/* Scrollable content */}
-            <div className="flex-1 overflow-y-auto px-6 py-4">
-            <div className="grid gap-6 lg:grid-cols-2">
-              {/* Left: Format & Device Selection */}
-              <div className="space-y-6">
-                {/* Format Selection */}
-                <div className="space-y-3">
-                  <h3 className="font-medium flex items-center gap-2">
-                    <RectangleVertical className="h-4 w-4 text-primary" />
-                    Formato do Vídeo
-                  </h3>
-                  <div className="grid grid-cols-4 gap-2">
-                    {VIDEO_FORMATS.map(format => {
-                      const IconComponent = format.icon;
-                      return (
-                        <Card
-                          key={format.id}
-                          className={cn(
-                            "cursor-pointer transition-all hover:border-primary/50",
-                            selectedFormat.id === format.id && "border-primary bg-primary/10"
-                          )}
-                          onClick={() => setSelectedFormat(format)}
-                        >
-                          <CardContent className="p-3 text-center">
-                            <IconComponent className="h-6 w-6 mx-auto mb-1 text-primary" />
-                            <p className="text-xs font-medium">{format.name}</p>
-                            <p className="text-[10px] text-muted-foreground">{format.ratio}</p>
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                </div>
+            {/* Tabs */}
+            <Tabs defaultValue="preview" className="flex-1 flex flex-col min-h-0">
+              <div className="px-6 pt-3 shrink-0 border-b">
+                <TabsList className="w-full sm:w-auto">
+                  <TabsTrigger value="preview" className="flex items-center gap-2">
+                    <Eye className="h-4 w-4" />
+                    Preview Export
+                  </TabsTrigger>
+                  <TabsTrigger value="batch" className="flex items-center gap-2">
+                    <Layers className="h-4 w-4" />
+                    Batch Export
+                  </TabsTrigger>
+                </TabsList>
+              </div>
 
-                {/* Device Selection */}
-                <div className="space-y-3">
-                  <h3 className="font-medium flex items-center gap-2">
-                    <Smartphone className="h-4 w-4 text-primary" />
-                    Dispositivo de Preview
-                  </h3>
-                  <div className="grid grid-cols-3 gap-2">
-                    {DEVICES.map(device => {
-                      const IconComponent = device.icon;
-                      const isRecommended = device.bestFor.includes(selectedFormat.id);
-                      return (
-                        <Card
-                          key={device.id}
-                          className={cn(
-                            "cursor-pointer transition-all hover:border-primary/50",
-                            selectedDevice.id === device.id && "border-primary bg-primary/10"
-                          )}
-                          onClick={() => setSelectedDevice(device)}
-                        >
-                          <CardContent className="p-3 text-center">
-                            <IconComponent className="h-6 w-6 mx-auto mb-1 text-primary" />
-                            <p className="text-xs font-medium">{device.name}</p>
-                            {isRecommended && (
-                              <Badge variant="arena" className="text-[8px] mt-1">
-                                Ideal
-                              </Badge>
-                            )}
-                          </CardContent>
-                        </Card>
-                      );
-                    })}
-                  </div>
-                  
-                  {/* Orientation toggle */}
-                  <div className="flex items-center gap-2 mt-3">
-                    <span className="text-xs text-muted-foreground">Orientação:</span>
-                    <div className="flex gap-1 bg-muted/50 p-1 rounded-lg">
-                      <Button
-                        variant={orientation === 'portrait' ? 'default' : 'ghost'}
-                        size="sm"
-                        className="h-7 px-2 gap-1"
-                        onClick={() => setOrientation('portrait')}
-                      >
-                        <RectangleVertical className="h-3.5 w-3.5" />
-                        <span className="text-xs">Vertical</span>
-                      </Button>
-                      <Button
-                        variant={orientation === 'landscape' ? 'default' : 'ghost'}
-                        size="sm"
-                        className="h-7 px-2 gap-1"
-                        onClick={() => setOrientation('landscape')}
-                      >
-                        <RectangleHorizontal className="h-3.5 w-3.5" />
-                        <span className="text-xs">Horizontal</span>
-                      </Button>
+              {/* ── TAB: Preview Export ── */}
+              <TabsContent value="preview" className="flex-1 flex flex-col min-h-0 mt-0">
+                <div className="flex-1 overflow-y-auto px-6 py-4">
+                  <div className="grid gap-6 lg:grid-cols-2">
+                    {/* Left: Format & Device Selection */}
+                    <div className="space-y-6">
+                      {/* Format Selection */}
+                      <div className="space-y-3">
+                        <h3 className="font-medium flex items-center gap-2">
+                          <RectangleVertical className="h-4 w-4 text-primary" />
+                          Formato do Vídeo
+                        </h3>
+                        <div className="grid grid-cols-4 gap-2">
+                          {VIDEO_FORMATS.map(format => {
+                            const IconComponent = format.icon;
+                            return (
+                              <Card
+                                key={format.id}
+                                className={cn(
+                                  "cursor-pointer transition-all hover:border-primary/50",
+                                  selectedFormat.id === format.id && "border-primary bg-primary/10"
+                                )}
+                                onClick={() => setSelectedFormat(format)}
+                              >
+                                <CardContent className="p-3 text-center">
+                                  <IconComponent className="h-6 w-6 mx-auto mb-1 text-primary" />
+                                  <p className="text-xs font-medium">{format.name}</p>
+                                  <p className="text-[10px] text-muted-foreground">{format.ratio}</p>
+                                </CardContent>
+                              </Card>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Device Selection */}
+                      <div className="space-y-3">
+                        <h3 className="font-medium flex items-center gap-2">
+                          <Smartphone className="h-4 w-4 text-primary" />
+                          Dispositivo de Preview
+                        </h3>
+                        <div className="grid grid-cols-3 gap-2">
+                          {DEVICES.map(device => {
+                            const IconComponent = device.icon;
+                            const isRecommended = device.bestFor.includes(selectedFormat.id);
+                            return (
+                              <Card
+                                key={device.id}
+                                className={cn(
+                                  "cursor-pointer transition-all hover:border-primary/50",
+                                  selectedDevice.id === device.id && "border-primary bg-primary/10"
+                                )}
+                                onClick={() => setSelectedDevice(device)}
+                              >
+                                <CardContent className="p-3 text-center">
+                                  <IconComponent className="h-6 w-6 mx-auto mb-1 text-primary" />
+                                  <p className="text-xs font-medium">{device.name}</p>
+                                  {isRecommended && (
+                                    <Badge variant="arena" className="text-[8px] mt-1">
+                                      Ideal
+                                    </Badge>
+                                  )}
+                                </CardContent>
+                              </Card>
+                            );
+                          })}
+                        </div>
+                        
+                        {/* Orientation toggle */}
+                        <div className="flex items-center gap-2 mt-3">
+                          <span className="text-xs text-muted-foreground">Orientação:</span>
+                          <div className="flex gap-1 bg-muted/50 p-1 rounded-lg">
+                            <Button
+                              variant={orientation === 'portrait' ? 'default' : 'ghost'}
+                              size="sm"
+                              className="h-7 px-2 gap-1"
+                              onClick={() => setOrientation('portrait')}
+                            >
+                              <RectangleVertical className="h-3.5 w-3.5" />
+                              <span className="text-xs">Vertical</span>
+                            </Button>
+                            <Button
+                              variant={orientation === 'landscape' ? 'default' : 'ghost'}
+                              size="sm"
+                              className="h-7 px-2 gap-1"
+                              onClick={() => setOrientation('landscape')}
+                            >
+                              <RectangleHorizontal className="h-3.5 w-3.5" />
+                              <span className="text-xs">Horizontal</span>
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Options */}
+                      <div className="space-y-2">
+                        <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                          <Checkbox
+                            id="vignettes"
+                            checked={includeVignettes}
+                            onCheckedChange={(checked) => setIncludeVignettes(!!checked)}
+                          />
+                          <label htmlFor="vignettes" className="text-sm cursor-pointer">
+                            Incluir vinhetas (abertura, transições, encerramento)
+                          </label>
+                        </div>
+                        <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
+                          <Checkbox
+                            id="subtitles"
+                            checked={includeSubtitles}
+                            onCheckedChange={(checked) => setIncludeSubtitles(!!checked)}
+                          />
+                          <label htmlFor="subtitles" className="text-sm cursor-pointer">
+                            Incluir legendas nos clips
+                          </label>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Right: Clip Selection */}
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between">
+                        <h3 className="font-medium flex items-center gap-2">
+                          <ListVideo className="h-4 w-4 text-primary" />
+                          Selecionar Clips ({selectedClipIds.size}/{clips.length})
+                        </h3>
+                        <Button variant="ghost" size="sm" onClick={selectAll}>
+                          {selectedClipIds.size === clips.length ? 'Desmarcar Todos' : 'Selecionar Todos'}
+                        </Button>
+                      </div>
+                      
+                      <ScrollArea className="h-[300px] border rounded-lg p-2">
+                        <div className="space-y-2">
+                          {clips.map(clip => (
+                            <div
+                              key={clip.id}
+                              className={cn(
+                                "flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors",
+                                selectedClipIds.has(clip.id) 
+                                  ? "bg-primary/10 border border-primary/30"
+                                  : "hover:bg-muted"
+                              )}
+                              onClick={() => toggleClip(clip.id)}
+                            >
+                              <div className={cn(
+                                "w-5 h-5 rounded border-2 flex items-center justify-center transition-colors",
+                                selectedClipIds.has(clip.id) 
+                                  ? "bg-primary border-primary" 
+                                  : "border-muted-foreground/30"
+                              )}>
+                                {selectedClipIds.has(clip.id) && (
+                                  <Check className="h-3 w-3 text-primary-foreground" />
+                                )}
+                              </div>
+                              
+                              {clip.thumbnail ? (
+                                <img 
+                                  src={clip.thumbnail} 
+                                  alt={clip.title}
+                                  className="w-16 h-10 object-cover rounded"
+                                />
+                              ) : (
+                                <div className="w-16 h-10 bg-muted rounded flex items-center justify-center">
+                                  <Play className="h-4 w-4 text-muted-foreground" />
+                                </div>
+                              )}
+                              
+                              <div className="flex-1 min-w-0">
+                                <p className="text-sm font-medium truncate">{clip.title}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {clip.minute}' • {clip.type.replace(/_/g, ' ')}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      </ScrollArea>
                     </div>
                   </div>
                 </div>
 
-                {/* Options */}
-                <div className="space-y-2">
-                  <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
-                    <Checkbox
-                      id="vignettes"
-                      checked={includeVignettes}
-                      onCheckedChange={(checked) => setIncludeVignettes(!!checked)}
-                    />
-                    <label htmlFor="vignettes" className="text-sm cursor-pointer">
-                      Incluir vinhetas (abertura, transições, encerramento)
-                    </label>
+                {/* Footer preview tab */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-6 py-4 border-t shrink-0">
+                  <div className="text-sm text-muted-foreground">
+                    {selectedClipIds.size > 0 
+                      ? `${selectedClipIds.size} clips selecionados • Formato ${selectedFormat.ratio} • ${selectedDevice.name}`
+                      : 'Selecione pelo menos um clip para continuar'
+                    }
                   </div>
-                  <div className="flex items-center gap-2 p-3 bg-muted/50 rounded-lg">
-                    <Checkbox
-                      id="subtitles"
-                      checked={includeSubtitles}
-                      onCheckedChange={(checked) => setIncludeSubtitles(!!checked)}
-                    />
-                    <label htmlFor="subtitles" className="text-sm cursor-pointer">
-                      Incluir legendas nos clips
-                    </label>
+                  <div className="flex items-center gap-2 w-full sm:w-auto">
+                    <Button 
+                      variant="arena-outline"
+                      onClick={startPreview}
+                      disabled={selectedClipIds.size === 0}
+                      className="flex-1 sm:flex-none"
+                    >
+                      <Eye className="mr-2 h-4 w-4" />
+                      Ver Preview
+                    </Button>
+                    <Button 
+                      variant="arena" 
+                      onClick={async () => {
+                        if (selectedClipIds.size === 0) return;
+                        await handleDownload();
+                      }}
+                      disabled={selectedClipIds.size === 0 || isCompiling}
+                      className="flex-1 sm:flex-none"
+                    >
+                      {isCompiling ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="mr-2 h-4 w-4" />
+                      )}
+                      Exportar Agora
+                    </Button>
                   </div>
                 </div>
-              </div>
+              </TabsContent>
 
-              {/* Right: Clip Selection */}
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-medium flex items-center gap-2">
-                    <ListVideo className="h-4 w-4 text-primary" />
-                    Selecionar Clips ({selectedClipIds.size}/{clips.length})
-                  </h3>
-                  <Button variant="ghost" size="sm" onClick={selectAll}>
-                    {selectedClipIds.size === clips.length ? 'Desmarcar Todos' : 'Selecionar Todos'}
-                  </Button>
-                </div>
-                
-                <ScrollArea className="h-[300px] border rounded-lg p-2">
-                  <div className="space-y-2">
-                    {clips.map(clip => (
-                      <div
-                        key={clip.id}
-                        className={cn(
-                          "flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors",
-                          selectedClipIds.has(clip.id) 
-                            ? "bg-primary/10 border border-primary/30"
-                            : "hover:bg-muted"
-                        )}
-                        onClick={() => toggleClip(clip.id)}
-                      >
-                        <div className={cn(
-                          "w-5 h-5 rounded border-2 flex items-center justify-center transition-colors",
-                          selectedClipIds.has(clip.id) 
-                            ? "bg-primary border-primary" 
-                            : "border-muted-foreground/30"
-                        )}>
-                          {selectedClipIds.has(clip.id) && (
-                            <Check className="h-3 w-3 text-primary-foreground" />
-                          )}
-                        </div>
-                        
-                        {clip.thumbnail ? (
-                          <img 
-                            src={clip.thumbnail} 
-                            alt={clip.title}
-                            className="w-16 h-10 object-cover rounded"
-                          />
-                        ) : (
-                          <div className="w-16 h-10 bg-muted rounded flex items-center justify-center">
-                            <Play className="h-4 w-4 text-muted-foreground" />
+              {/* ── TAB: Batch Export ── */}
+              <TabsContent value="batch" className="flex-1 overflow-y-auto mt-0">
+                <div className="px-6 py-4">
+                  {/* Clip selector (shared with preview tab) */}
+                  <div className="space-y-3 mb-6">
+                    <div className="flex items-center justify-between">
+                      <h3 className="font-medium flex items-center gap-2">
+                        <ListVideo className="h-4 w-4 text-primary" />
+                        Clips para o Lote ({selectedClipIds.size}/{clips.length})
+                      </h3>
+                      <Button variant="ghost" size="sm" onClick={selectAll}>
+                        {selectedClipIds.size === clips.length ? 'Desmarcar Todos' : 'Selecionar Todos'}
+                      </Button>
+                    </div>
+                    <ScrollArea className="h-[160px] border rounded-lg p-2">
+                      <div className="space-y-1.5">
+                        {clips.map(clip => (
+                          <div
+                            key={clip.id}
+                            className={cn(
+                              "flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors",
+                              selectedClipIds.has(clip.id) 
+                                ? "bg-primary/10 border border-primary/30"
+                                : "hover:bg-muted"
+                            )}
+                            onClick={() => toggleClip(clip.id)}
+                          >
+                            <div className={cn(
+                              "w-4 h-4 rounded border-2 flex items-center justify-center transition-colors flex-shrink-0",
+                              selectedClipIds.has(clip.id) ? "bg-primary border-primary" : "border-muted-foreground/30"
+                            )}>
+                              {selectedClipIds.has(clip.id) && <Check className="h-2.5 w-2.5 text-primary-foreground" />}
+                            </div>
+                            {clip.thumbnail
+                              ? <img src={clip.thumbnail} alt={clip.title} className="w-12 h-8 object-cover rounded flex-shrink-0" />
+                              : <div className="w-12 h-8 bg-muted rounded flex items-center justify-center flex-shrink-0"><Play className="h-3 w-3 text-muted-foreground" /></div>
+                            }
+                            <div className="flex-1 min-w-0">
+                              <p className="text-xs font-medium truncate">{clip.title}</p>
+                              <p className="text-[11px] text-muted-foreground">{clip.minute}' • {clip.type.replace(/_/g, ' ')}</p>
+                            </div>
                           </div>
-                        )}
-                        
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{clip.title}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {clip.minute}' • {clip.type.replace(/_/g, ' ')}
-                          </p>
-                        </div>
+                        ))}
                       </div>
-                    ))}
-                  </div>
-                </ScrollArea>
-              </div>
-            </div>
-            </div>{/* end scrollable content */}
+                    </ScrollArea>
 
-            {/* Footer - sticky at bottom */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 px-6 py-4 border-t shrink-0">
-              <div className="text-sm text-muted-foreground">
-                {selectedClipIds.size > 0 
-                  ? `${selectedClipIds.size} clips selecionados • Formato ${selectedFormat.ratio} • ${selectedDevice.name}`
-                  : 'Selecione pelo menos um clip para continuar'
-                }
-              </div>
-              <div className="flex items-center gap-2 w-full sm:w-auto">
-                <Button 
-                  variant="arena-outline"
-                  onClick={startPreview}
-                  disabled={selectedClipIds.size === 0}
-                  className="flex-1 sm:flex-none"
-                >
-                  <Eye className="mr-2 h-4 w-4" />
-                  Ver Preview
-                </Button>
-                <Button 
-                  variant="arena" 
-                  onClick={async () => {
-                    if (selectedClipIds.size === 0) return;
-                    await handleDownload();
-                  }}
-                  disabled={selectedClipIds.size === 0 || isCompiling}
-                  className="flex-1 sm:flex-none"
-                >
-                  {isCompiling ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Download className="mr-2 h-4 w-4" />
-                  )}
-                  Exportar para Redes Sociais
-                </Button>
-              </div>
-            </div>
+                    {/* Shared options */}
+                    <div className="flex gap-3">
+                      <div
+                        className={cn("flex-1 flex items-center gap-2 p-2.5 bg-muted/50 rounded-lg cursor-pointer", includeVignettes && "bg-primary/10 border border-primary/20")}
+                        onClick={() => setIncludeVignettes(!includeVignettes)}
+                      >
+                        <Checkbox checked={includeVignettes} onCheckedChange={(c) => setIncludeVignettes(!!c)} />
+                        <span className="text-xs">Vinhetas</span>
+                      </div>
+                      <div
+                        className={cn("flex-1 flex items-center gap-2 p-2.5 bg-muted/50 rounded-lg cursor-pointer", includeSubtitles && "bg-primary/10 border border-primary/20")}
+                        onClick={() => setIncludeSubtitles(!includeSubtitles)}
+                      >
+                        <Checkbox checked={includeSubtitles} onCheckedChange={(c) => setIncludeSubtitles(!!c)} />
+                        <span className="text-xs">Legendas</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Batch panel */}
+                  <BatchExportPanel
+                    clips={clips}
+                    selectedClipIds={selectedClipIds}
+                    includeVignettes={includeVignettes}
+                    includeSubtitles={includeSubtitles}
+                    homeTeam={homeTeam}
+                    awayTeam={awayTeam}
+                    homeScore={homeScore}
+                    awayScore={awayScore}
+                    buildClipConfig={buildClipConfig}
+                    loadSrtLines={loadSrtLines}
+                  />
+                </div>
+              </TabsContent>
+            </Tabs>
           </div>
         </DialogContent>
       </Dialog>
