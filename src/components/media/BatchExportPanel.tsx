@@ -1,4 +1,4 @@
-// BatchExportPanel — UI for the batch export queue
+// BatchExportPanel — UI for the batch export queue (backend FFmpeg render)
 import { useState, useCallback } from 'react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -12,8 +12,9 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useBatchExport, ExportJob, PRESET_LABEL, PRESET_BITRATE } from '@/hooks/useBatchExport';
-import { useVideoCompilation, CompilationConfig } from '@/hooks/useVideoCompilation';
+import { normalizeStorageUrl } from '@/lib/apiClient';
 import { toast } from 'sonner';
+import { CLIP_BUFFER_BEFORE_MS, CLIP_BUFFER_AFTER_MS } from '@/hooks/useClipGeneration';
 
 const FORMAT_LABELS: Record<string, string> = {
   '9:16': 'Stories (9:16)',
@@ -56,7 +57,7 @@ interface BatchExportPanelProps {
   awayTeam: string;
   homeScore: number;
   awayScore: number;
-  buildClipConfig: (clips: Clip[], srtLines: { start: number; end: number; text: string }[]) => CompilationConfig['clips'];
+  matchId?: string;
   loadSrtLines: () => Promise<{ start: number; end: number; text: string }[]>;
 }
 
@@ -69,11 +70,10 @@ export function BatchExportPanel({
   awayTeam,
   homeScore,
   awayScore,
-  buildClipConfig,
+  matchId,
   loadSrtLines,
 }: BatchExportPanelProps) {
   const batch = useBatchExport();
-  const { compilePlaylist } = useVideoCompilation();
 
   const [selectedFormats, setSelectedFormats] = useState<Set<string>>(new Set(['9:16']));
   const [selectedPresets, setSelectedPresets] = useState<Set<ExportJob['preset']>>(new Set(['best']));
@@ -99,6 +99,36 @@ export function BatchExportPanel({
 
   const totalJobs = selectedFormats.size * selectedPresets.size;
 
+  // Build backend render clips from selected clips + SRT lines
+  const buildRenderClips = useCallback((clipsIn: Clip[], srtLines: { start: number; end: number; text: string }[]) => {
+    return clipsIn
+      .filter(c => c.clipUrl)
+      .map(c => {
+        const bufferBefore = CLIP_BUFFER_BEFORE_MS / 1000;
+        const eventSec = c.videoSecond ?? c.totalSeconds ?? (c.minute * 60 + (c.second ?? 0));
+        const clipStartInVideo = Math.max(0, eventSec - bufferBefore);
+        const clipEndInVideo = eventSec + CLIP_BUFFER_AFTER_MS / 1000;
+        const subtitleLines = srtLines.length > 0
+          ? srtLines
+              .filter(line => line.end >= clipStartInVideo && line.start <= clipEndInVideo)
+              .map(line => ({
+                start: Math.max(0, line.start - clipStartInVideo),
+                end: Math.max(0, line.end - clipStartInVideo),
+                text: line.text,
+              }))
+          : undefined;
+        return {
+          id: c.id,
+          clipUrl: normalizeStorageUrl(c.clipUrl!) || c.clipUrl!,
+          eventType: c.type,
+          minute: c.minute,
+          description: c.description,
+          thumbnailUrl: c.thumbnail ? (normalizeStorageUrl(c.thumbnail) || c.thumbnail) : undefined,
+          subtitleLines,
+        };
+      });
+  }, []);
+
   const handleAddToQueue = useCallback(async () => {
     if (selectedClips.length === 0 || selectedFormats.size === 0 || selectedPresets.size === 0) {
       toast.error('Selecione pelo menos um formato e um preset');
@@ -107,7 +137,7 @@ export function BatchExportPanel({
     setIsLoadingQueue(true);
     try {
       const srtLines = includeSubtitles ? await loadSrtLines() : [];
-      const compiledClips = buildClipConfig(selectedClips, srtLines);
+      const renderClips = buildRenderClips(selectedClips, srtLines);
 
       const jobsToAdd: Parameters<typeof batch.addJobs>[0] = [];
 
@@ -121,7 +151,7 @@ export function BatchExportPanel({
             format.replace(':', 'x'),
             preset,
             `${selectedClips.length}clips`,
-          ].join('_') + '.webm';
+          ].join('_') + '.mp4';
 
           jobsToAdd.push({
             id: `${format}_${preset}_${Date.now()}_${Math.random().toString(36).slice(2)}`,
@@ -129,12 +159,14 @@ export function BatchExportPanel({
             format,
             preset,
             filename,
-            config: {
-              clips: compiledClips,
+            renderSpec: {
+              matchId: matchId ?? '',
+              format,
+              preset,
               includeVignettes,
               includeSubtitles,
-              format,
               matchInfo: { homeTeam, awayTeam, homeScore, awayScore },
+              clips: renderClips,
             },
           });
         }
@@ -148,25 +180,13 @@ export function BatchExportPanel({
     } finally {
       setIsLoadingQueue(false);
     }
-  }, [selectedClips, selectedFormats, selectedPresets, includeSubtitles, includeVignettes, homeTeam, awayTeam, homeScore, awayScore, batch, buildClipConfig, loadSrtLines]);
+  }, [selectedClips, selectedFormats, selectedPresets, includeSubtitles, includeVignettes, homeTeam, awayTeam, homeScore, awayScore, matchId, batch, buildRenderClips, loadSrtLines]);
 
   const handleExportAll = useCallback(async () => {
-    window.focus();
-    const compileFn = async (
-      config: CompilationConfig,
-      _preset: ExportJob['preset'],
-      onProgress: (p: number, msg: string) => void,
-      cancelRef: { cancel: boolean }
-    ): Promise<Blob | null> => {
-      onProgress(1, 'Iniciando compilação...');
-      const blob = await compilePlaylist(config);
-      if (!cancelRef.cancel) onProgress(100, 'Concluído!');
-      return blob;
-    };
-    await batch.processQueue(compileFn);
-  }, [batch, compilePlaylist]);
+    await batch.processQueue();
+  }, [batch]);
 
-  const completedJobs = batch.jobs.filter(j => j.status === 'completed' && j.blob);
+  const completedJobs = batch.jobs.filter(j => j.status === 'completed' && j.downloadUrl);
   const pendingCount = batch.stats.queued + batch.stats.paused;
 
   return (
