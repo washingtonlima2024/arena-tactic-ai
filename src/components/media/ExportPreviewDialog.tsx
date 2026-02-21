@@ -52,7 +52,7 @@ import { CLIP_BUFFER_BEFORE_MS, CLIP_BUFFER_AFTER_MS } from '@/hooks/useClipGene
 import { useVideoCompilation } from '@/hooks/useVideoCompilation';
 import { useVignetteGenerator } from '@/hooks/useVignetteGenerator';
 import { useBackendRender } from '@/hooks/useBackendRender';
-import { normalizeStorageUrl, apiClient, getApiBase, isLocalServerAvailable } from '@/lib/apiClient';
+import { normalizeStorageUrl, apiClient, getApiBase, buildApiUrl, isLocalServerAvailable } from '@/lib/apiClient';
 import { parseTranscription } from '@/lib/transcriptionParser';
 
 // Video formats
@@ -304,7 +304,7 @@ export function ExportPreviewDialog({
           srtFiles.find((f: any) => (f.filename || f.name)?.toLowerCase().includes('full') || (f.filename || f.name)?.toLowerCase() === 'transcription.srt') ||
           srtFiles[0];
         const fname = targetSrt.filename || targetSrt.name;
-        const srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${fname}`;
+        const srtUrl = normalizeStorageUrl(targetSrt.url) || buildApiUrl(getApiBase(), `/api/storage/${matchId}/srt/${fname}`);
         console.log(`[Preview] Fetching transcription from: ${srtUrl}`);
         const response = await fetch(srtUrl);
         if (response.ok) {
@@ -479,7 +479,7 @@ export function ExportPreviewDialog({
       
       const fname = targetSrt.filename || targetSrt.name;
       // Try primary URL, then fallback to alternate folder
-      let srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${fname}`;
+      let srtUrl = normalizeStorageUrl(targetSrt.url) || buildApiUrl(getApiBase(), `/api/storage/${matchId}/srt/${fname}`);
       console.log(`[ExportPreviewDialog] loadSrtLines: usando arquivo "${fname}", URL: ${srtUrl}`);
       
       let response = await fetch(srtUrl);
@@ -487,7 +487,7 @@ export function ExportPreviewDialog({
       // Fallback: if srt/ fails, try texts/ and vice-versa
       if (!response.ok) {
         const altFolder = srtUrl.includes('/srt/') ? 'texts' : 'srt';
-        const altUrl = `${getApiBase()}/api/storage/${matchId}/${altFolder}/${fname}`;
+        const altUrl = buildApiUrl(getApiBase(), `/api/storage/${matchId}/${altFolder}/${fname}`);
         console.warn(`[ExportPreviewDialog] loadSrtLines: fetch falhou (${response.status}), tentando fallback: ${altUrl}`);
         response = await fetch(altUrl);
       }
@@ -1568,7 +1568,7 @@ export function ExportPreviewDialog({
                 {backendRender.state.stage === 'uploading' || backendRender.state.stage === 'building-spec' ? <Download className="h-10 w-10 text-primary animate-bounce" /> : null}
                 {(backendRender.state.stage === 'processing' || backendRender.state.stage === 'concat' || backendRender.state.stage === 'queued') && <Loader2 className="h-10 w-10 text-primary animate-spin" />}
                 {backendRender.state.stage === 'subtitles' && <FileVideo className="h-10 w-10 text-primary animate-pulse" />}
-                {backendRender.state.stage === 'complete' && <Check className="h-10 w-10 text-green-400" />}
+                {backendRender.state.stage === 'complete' && <Download className="h-10 w-10 text-green-400" />}
                 {!['generating-vignettes','uploading','building-spec','processing','concat','subtitles','complete','queued'].includes(backendRender.state.stage) && <Loader2 className="h-10 w-10 text-primary animate-spin" />}
                 <div>
                   <p className="text-3xl font-bold text-foreground">{backendRender.state.progress.toFixed(0)}%</p>
@@ -1604,7 +1604,26 @@ export function ExportPreviewDialog({
                   ))}
                 </div>
               )}
-              <Button variant="outline" size="sm" onClick={cancelBackendRender} className="w-full">Cancelar</Button>
+              {backendRender.state.stage === 'complete' ? (
+                <div className="flex gap-2 w-full">
+                  {backendRender.state.downloadUrl && (
+                    <Button size="sm" className="flex-1" onClick={() => {
+                      const a = document.createElement('a');
+                      a.href = backendRender.state.downloadUrl!;
+                      a.download = 'export.mp4';
+                      a.target = '_blank';
+                      document.body.appendChild(a);
+                      a.click();
+                      document.body.removeChild(a);
+                    }}>
+                      <Download className="h-4 w-4 mr-1" /> Baixar MP4
+                    </Button>
+                  )}
+                  <Button variant="outline" size="sm" className="flex-1" onClick={() => backendRender.dismiss()}>Fechar</Button>
+                </div>
+              ) : (
+                <Button variant="outline" size="sm" onClick={cancelBackendRender} className="w-full">Cancelar</Button>
+              )}
             </div>
           </div>
         )}
