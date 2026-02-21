@@ -269,7 +269,19 @@ def _do_render(job_id: str, spec: dict) -> None:
 
         set_progress(25)
 
-        # ── 4. Scale/crop cada clip ────────────────────────────────────────────
+        # ── 4. Scale/crop cada clip (garantir áudio em todos) ────────────────
+        def _clip_has_audio(path: str) -> bool:
+            """Probe whether a video file has at least one audio stream."""
+            try:
+                probe = subprocess.run(
+                    ['ffprobe', '-v', 'quiet', '-select_streams', 'a',
+                     '-show_entries', 'stream=codec_type', '-of', 'csv=p=0', path],
+                    capture_output=True, text=True, timeout=15
+                )
+                return bool(probe.stdout.strip())
+            except Exception:
+                return False
+
         log("Processando clips com FFmpeg (scale/crop)...")
         clip_mp4s = []
         total_clips = len(clips_spec)
@@ -281,21 +293,39 @@ def _do_render(job_id: str, spec: dict) -> None:
                     f"scale={W}:{H}:force_original_aspect_ratio=increase,"
                     f"crop={W}:{H}"
                 )
-                cmd = [
-                    'ffmpeg', '-y',
-                    '-i', clip_path,
-                    '-vf', vf,
-                    '-c:v', 'libx264', '-crf', str(crf), '-preset', ff_preset,
-                    '-c:a', 'aac', '-b:a', '192k', '-ac', '2',
-                    '-pix_fmt', 'yuv420p',
-                    '-movflags', '+faststart',
-                    out_clip
-                ]
+                has_audio = _clip_has_audio(clip_path)
+                if has_audio:
+                    cmd = [
+                        'ffmpeg', '-y',
+                        '-i', clip_path,
+                        '-vf', vf,
+                        '-c:v', 'libx264', '-crf', str(crf), '-preset', ff_preset,
+                        '-c:a', 'aac', '-b:a', '192k', '-ac', '2',
+                        '-pix_fmt', 'yuv420p',
+                        '-movflags', '+faststart',
+                        out_clip
+                    ]
+                else:
+                    # Clip sem áudio: injetar silêncio para manter uniformidade no concat
+                    log(f"  Clip {i+1}: sem áudio detectado, injetando silêncio")
+                    cmd = [
+                        'ffmpeg', '-y',
+                        '-i', clip_path,
+                        '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
+                        '-vf', vf,
+                        '-map', '0:v:0', '-map', '1:a:0',
+                        '-c:v', 'libx264', '-crf', str(crf), '-preset', ff_preset,
+                        '-c:a', 'aac', '-b:a', '192k', '-ac', '2',
+                        '-pix_fmt', 'yuv420p',
+                        '-shortest',
+                        '-movflags', '+faststart',
+                        out_clip
+                    ]
                 try:
                     result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
                     if result.returncode == 0:
                         clip_mp4s.append(out_clip)
-                        log(f"  Clip {i+1}/{total_clips}: OK ({os.path.getsize(out_clip)//1024} KB)")
+                        log(f"  Clip {i+1}/{total_clips}: OK ({os.path.getsize(out_clip)//1024} KB) audio={'real' if has_audio else 'silent'}")
                     else:
                         log(f"  Clip {i+1}/{total_clips}: ERRO FFmpeg: {result.stderr[-200:]}")
                         clip_mp4s.append(None)
