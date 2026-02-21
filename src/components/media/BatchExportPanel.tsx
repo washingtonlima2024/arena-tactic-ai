@@ -46,6 +46,7 @@ interface Clip {
   clipUrl?: string | null;
   totalSeconds?: number;
   videoSecond?: number;
+  eventVideo?: { start_minute?: number } | null;
 }
 
 interface BatchExportPanelProps {
@@ -106,8 +107,11 @@ export function BatchExportPanel({
       .map(c => {
         const bufferBefore = CLIP_BUFFER_BEFORE_MS / 1000;
         const eventSec = c.videoSecond ?? c.totalSeconds ?? (c.minute * 60 + (c.second ?? 0));
-        const clipStartInVideo = Math.max(0, eventSec - bufferBefore);
-        const clipEndInVideo = eventSec + CLIP_BUFFER_AFTER_MS / 1000;
+        const videoStartMinute = c.eventVideo?.start_minute ?? 0;
+        const eventSecInVideoFile = eventSec - (videoStartMinute * 60);
+        const clipStartInVideo = Math.max(0, eventSecInVideoFile - bufferBefore);
+        const clipEndInVideo = eventSecInVideoFile + CLIP_BUFFER_AFTER_MS / 1000;
+        console.log(`[BatchExport] clip=${c.id} eventSec=${eventSec} videoStart=${videoStartMinute}min offsetSec=${eventSecInVideoFile} window=[${clipStartInVideo.toFixed(1)},${clipEndInVideo.toFixed(1)}] srtMatches=${srtLines.filter(l => l.end >= clipStartInVideo && l.start <= clipEndInVideo).length}`);
         const subtitleLines = srtLines.length > 0
           ? srtLines
               .filter(line => line.end >= clipStartInVideo && line.start <= clipEndInVideo)
