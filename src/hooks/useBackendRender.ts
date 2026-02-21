@@ -35,6 +35,7 @@ export interface RenderState {
   log: string[];
   debugFrameUrl: string | null; // data URL of a single PNG frame for preview
   jobId: string | null;
+  downloadUrl: string | null;
 }
 
 export interface BackendRenderClip {
@@ -87,6 +88,7 @@ export function useBackendRender() {
     log: [],
     debugFrameUrl: null,
     jobId: null,
+    downloadUrl: null,
   });
 
   const setPartial = useCallback((patch: Partial<RenderState>) => {
@@ -107,6 +109,7 @@ export function useBackendRender() {
       log: [],
       debugFrameUrl: null,
       jobId: null,
+      downloadUrl: null,
     });
   }, []);
 
@@ -185,6 +188,7 @@ export function useBackendRender() {
       log: [],
       debugFrameUrl: null,
       jobId: null,
+      downloadUrl: null,
     });
 
     try {
@@ -298,12 +302,12 @@ export function useBackendRender() {
               pollStopped = true;
               clearInterval(pollRef.current!);
               pollRef.current = null;
-              setPartial({ stage: 'complete', progress: 100, message: 'MP4 gerado! Iniciando download...' });
+              const dlUrl = apiClient.downloadRenderUrl(jobId);
+              setPartial({ stage: 'complete', progress: 100, message: 'MP4 gerado! Clique em Baixar MP4.', downloadUrl: dlUrl });
 
-              // ── Step 5: Download MP4 ──
-              const downloadUrl = apiClient.downloadRenderUrl(jobId);
+              // ── Step 5: Auto-download MP4 ──
               const a = document.createElement('a');
-              a.href = downloadUrl;
+              a.href = dlUrl;
               a.download = `${options.matchInfo.homeTeam}_vs_${options.matchInfo.awayTeam}_${options.format.replace(':', 'x')}_${options.preset}.mp4`.replace(/\s+/g, '_');
               a.target = '_blank';
               document.body.appendChild(a);
@@ -311,9 +315,7 @@ export function useBackendRender() {
               document.body.removeChild(a);
 
               toast.success('🎬 MP4 exportado com sucesso!');
-              setTimeout(() => {
-                setState(prev => ({ ...prev, isRendering: false, stage: 'idle', progress: 0 }));
-              }, 3000);
+              // Keep stage=complete so user can download manually if auto-download failed
               resolve();
             } else if (s.status === 'error') {
               pollStopped = true;
@@ -344,10 +346,15 @@ export function useBackendRender() {
     }
   }, [vignetteGen, setPartial]);
 
+  const dismiss = useCallback(() => {
+    setState(prev => ({ ...prev, isRendering: false, stage: 'idle', progress: 0, message: '', downloadUrl: null }));
+  }, []);
+
   return {
     state,
     startRender,
     cancel,
+    dismiss,
     generateDebugFrame,
     clearDebugFrame,
   };
