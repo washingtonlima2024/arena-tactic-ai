@@ -102,6 +102,7 @@ interface Clip {
   clipUrl?: string | null;
   totalSeconds?: number;
   videoSecond?: number; // second in original video file (for SRT offset)
+  eventVideo?: { start_minute?: number; duration_seconds?: number | null; file_url?: string } | null;
 }
 
 interface ExportPreviewDialogProps {
@@ -242,16 +243,18 @@ export function ExportPreviewDialog({
     const video = videoRef.current;
     if (!video || !previewSrtLines.length || !currentClip) return;
 
-    // Calculate clip start offset in the source video
+    // Calculate clip start offset relative to video file (same domain as SRT)
     const bufferBefore = CLIP_BUFFER_BEFORE_MS / 1000;
     const eventSec = currentClip.videoSecond ?? currentClip.totalSeconds ?? (currentClip.minute * 60 + (currentClip.second ?? 0));
-    const clipStartInVideo = Math.max(0, eventSec - bufferBefore);
+    const videoStartMinute = currentClip.eventVideo?.start_minute ?? 0;
+    const eventSecInVideoFile = eventSec - (videoStartMinute * 60);
+    const clipStartInVideoFile = Math.max(0, eventSecInVideoFile - bufferBefore);
 
     const onTime = () => {
       // video.currentTime is relative to clip start (0 = clip start) when using clipUrl
       // when using matchVideo it is absolute time in the source file
       const absoluteTime = currentClip.clipUrl
-        ? clipStartInVideo + video.currentTime
+        ? clipStartInVideoFile + video.currentTime
         : video.currentTime;
       const sub = previewSrtLines.find(s => absoluteTime >= s.start && absoluteTime <= s.end);
       setCurrentCC(sub?.text ?? '');
@@ -480,18 +483,31 @@ export function ExportPreviewDialog({
       .filter(c => c.clipUrl)
       .map(c => {
         const bufferBefore = CLIP_BUFFER_BEFORE_MS / 1000;
+        const bufferAfter = CLIP_BUFFER_AFTER_MS / 1000;
+        
+        // Absolute second of the event in the game
         const eventSec = c.videoSecond ?? c.totalSeconds ?? (c.minute * 60 + (c.second ?? 0));
-        const clipStartInVideo = Math.max(0, eventSec - bufferBefore);
-        const clipEndInVideo = eventSec + CLIP_BUFFER_AFTER_MS / 1000;
+        
+        // Get video start offset to convert game-absolute → video-file-relative (SRT domain)
+        const videoStartMinute = c.eventVideo?.start_minute ?? 0;
+        const eventSecInVideoFile = eventSec - (videoStartMinute * 60);
+        
+        const clipStartInVideoFile = Math.max(0, eventSecInVideoFile - bufferBefore);
+        const clipEndInVideoFile = eventSecInVideoFile + bufferAfter;
+        
+        // Filter SRT lines that fall within the clip window, then offset to clip-relative (0s = clip start)
         const subtitleLines = srtLines.length > 0
           ? srtLines
-              .filter(line => line.end >= clipStartInVideo && line.start <= clipEndInVideo)
+              .filter(line => line.end >= clipStartInVideoFile && line.start <= clipEndInVideoFile)
               .map(line => ({
-                start: Math.max(0, line.start - clipStartInVideo),
-                end: Math.max(0, line.end - clipStartInVideo),
+                start: Math.max(0, line.start - clipStartInVideoFile),
+                end: Math.max(0, line.end - clipStartInVideoFile),
                 text: line.text,
               }))
           : undefined;
+
+        console.log(`[buildClipConfig] Clip ${c.minute}' (${c.type}): eventSec=${eventSec}, videoStart=${videoStartMinute}min, inFile=${eventSecInVideoFile.toFixed(1)}s, window=[${clipStartInVideoFile.toFixed(1)}, ${clipEndInVideoFile.toFixed(1)}], srtMatches=${subtitleLines?.length ?? 0}/${srtLines.length}`);
+
         return {
           id: c.id,
           clipUrl: normalizeStorageUrl(c.clipUrl!) || c.clipUrl!,
@@ -533,7 +549,11 @@ export function ExportPreviewDialog({
     if (clipsWithUrls.length === 0) { toast.error('Nenhum clip extraído. Extraia os clips primeiro na aba "Cortes & Capas".'); return; }
 
     const allSrtLines = await loadSrtLines();
+    console.log(`[Export] SRT total: ${allSrtLines.length} linhas`);
     const clipSpecs = buildClipConfig(clipsWithUrls, allSrtLines);
+    for (const spec of clipSpecs) {
+      console.log(`[Export] Clip ${spec.minute}' (${spec.eventType}): ${spec.subtitleLines?.length ?? 0} legendas`);
+    }
 
     await backendRender.startRender({
       matchId: matchId ?? '',
