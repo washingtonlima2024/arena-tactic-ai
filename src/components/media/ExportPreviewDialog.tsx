@@ -295,15 +295,16 @@ export function ExportPreviewDialog({
       const srtFiles = [
         ...(filesData?.folders?.srt || []),
         ...(filesData?.folders?.texts || []).filter((f: any) => 
-          f.name?.toLowerCase().endsWith('.srt') || f.name?.toLowerCase().endsWith('.vtt')
+          (f.filename || f.name)?.toLowerCase().endsWith('.srt') || (f.filename || f.name)?.toLowerCase().endsWith('.vtt')
         ),
       ];
-      console.log(`[Preview] Found ${srtFiles.length} transcription files:`, srtFiles.map((f: any) => f.name));
+      console.log(`[Preview] Found ${srtFiles.length} transcription files:`, srtFiles.map((f: any) => f.filename || f.name));
       if (srtFiles.length > 0) {
         const targetSrt =
-          srtFiles.find((f: any) => f.name?.toLowerCase().includes('full') || f.name?.toLowerCase() === 'transcription.srt') ||
+          srtFiles.find((f: any) => (f.filename || f.name)?.toLowerCase().includes('full') || (f.filename || f.name)?.toLowerCase() === 'transcription.srt') ||
           srtFiles[0];
-        const srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${targetSrt.name}`;
+        const fname = targetSrt.filename || targetSrt.name;
+        const srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${fname}`;
         console.log(`[Preview] Fetching transcription from: ${srtUrl}`);
         const response = await fetch(srtUrl);
         if (response.ok) {
@@ -462,7 +463,7 @@ export function ExportPreviewDialog({
       const filesData = await apiClient.listMatchFiles(matchId);
       const srtFolder = filesData?.folders?.srt || [];
       const textsFolder = (filesData?.folders?.texts || []).filter((f: any) =>
-        f.name?.toLowerCase().endsWith('.srt') || f.name?.toLowerCase().endsWith('.vtt')
+        (f.filename || f.name)?.toLowerCase().endsWith('.srt') || (f.filename || f.name)?.toLowerCase().endsWith('.vtt')
       );
       console.log(`[ExportPreviewDialog] loadSrtLines: srt/ tem ${srtFolder.length} arquivo(s), texts/ tem ${textsFolder.length} arquivo(s) SRT/VTT`);
       
@@ -473,19 +474,20 @@ export function ExportPreviewDialog({
       }
       
       const targetSrt =
-        srtFiles.find((f: any) => f.name?.toLowerCase().includes('full') || f.name?.toLowerCase() === 'transcription.srt') ||
+        srtFiles.find((f: any) => (f.filename || f.name)?.toLowerCase().includes('full') || (f.filename || f.name)?.toLowerCase() === 'transcription.srt') ||
         srtFiles[0];
       
+      const fname = targetSrt.filename || targetSrt.name;
       // Try primary URL, then fallback to alternate folder
-      let srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${targetSrt.name}`;
-      console.log(`[ExportPreviewDialog] loadSrtLines: usando arquivo "${targetSrt.name}", URL: ${srtUrl}`);
+      let srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${fname}`;
+      console.log(`[ExportPreviewDialog] loadSrtLines: usando arquivo "${fname}", URL: ${srtUrl}`);
       
       let response = await fetch(srtUrl);
       
       // Fallback: if srt/ fails, try texts/ and vice-versa
       if (!response.ok) {
         const altFolder = srtUrl.includes('/srt/') ? 'texts' : 'srt';
-        const altUrl = `${getApiBase()}/api/storage/${matchId}/${altFolder}/${targetSrt.name}`;
+        const altUrl = `${getApiBase()}/api/storage/${matchId}/${altFolder}/${fname}`;
         console.warn(`[ExportPreviewDialog] loadSrtLines: fetch falhou (${response.status}), tentando fallback: ${altUrl}`);
         response = await fetch(altUrl);
       }
