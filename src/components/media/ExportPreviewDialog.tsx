@@ -987,7 +987,7 @@ export function ExportPreviewDialog({
                     awayTeam={awayTeam}
                     homeScore={homeScore}
                     awayScore={awayScore}
-                    buildClipConfig={buildClipConfig}
+                    matchId={matchId}
                     loadSrtLines={loadSrtLines}
                   />
                 </div>
