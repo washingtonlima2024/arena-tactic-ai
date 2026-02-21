@@ -95,7 +95,10 @@ export function useBackendRender() {
 
   const cancel = useCallback(() => {
     cancelledRef.current = true;
-    if (pollRef.current) clearInterval(pollRef.current);
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
     setState({
       isRendering: false,
       stage: 'idle',
@@ -168,6 +171,11 @@ export function useBackendRender() {
       return false;
     }
 
+    // Limpar qualquer polling anterior
+    if (pollRef.current) {
+      clearInterval(pollRef.current);
+      pollRef.current = null;
+    }
     cancelledRef.current = false;
     setState({
       isRendering: true,
@@ -259,14 +267,20 @@ export function useBackendRender() {
 
       // ── Step 4: Poll status ──
       await new Promise<void>((resolve, reject) => {
+        let pollStopped = false;
+        let consecutiveErrors = 0;
+        const MAX_CONSECUTIVE_ERRORS = 5;
+
         pollRef.current = setInterval(async () => {
-          if (cancelledRef.current) {
+          if (cancelledRef.current || pollStopped) {
             clearInterval(pollRef.current!);
+            pollRef.current = null;
             resolve();
             return;
           }
           try {
             const s = await apiClient.getRenderStatus(jobId);
+            consecutiveErrors = 0; // Reset on success
             const newLog = s.log ?? [];
             const lastLine = newLog[newLog.length - 1] ?? '';
 
@@ -281,7 +295,9 @@ export function useBackendRender() {
             setPartial({ stage, progress: uiProgress, message: lastLine || 'Processando...', log: newLog });
 
             if (s.status === 'complete') {
+              pollStopped = true;
               clearInterval(pollRef.current!);
+              pollRef.current = null;
               setPartial({ stage: 'complete', progress: 100, message: 'MP4 gerado! Iniciando download...' });
 
               // ── Step 5: Download MP4 ──
@@ -300,12 +316,20 @@ export function useBackendRender() {
               }, 3000);
               resolve();
             } else if (s.status === 'error') {
+              pollStopped = true;
               clearInterval(pollRef.current!);
+              pollRef.current = null;
               reject(new Error(s.error ?? 'Erro desconhecido no render'));
             }
           } catch (e) {
-            clearInterval(pollRef.current!);
-            reject(e);
+            consecutiveErrors++;
+            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+              pollStopped = true;
+              clearInterval(pollRef.current!);
+              pollRef.current = null;
+              reject(new Error('Servidor perdeu o job de render após múltiplas tentativas'));
+            }
+            // Se não atingiu o max, deixa tentar de novo no próximo tick
           }
         }, 1500);
       });
