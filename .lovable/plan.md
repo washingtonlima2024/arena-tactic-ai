@@ -1,60 +1,83 @@
 
 
-## Correcao: Audio e Legendas ausentes no Batch Export
+## Correcao: SRT nao encontrado + video nao baixa apos conclusao
 
 ### Diagnostico
 
-Ha **dois problemas independentes**:
+Tres problemas identificados:
 
-**1. Legendas (CC) ausentes no BatchExportPanel**
+**1. SRT URL nao normalizada (causa do aviso "nao achou SRT")**
 
-O `BatchExportPanel` tem sua propria funcao `buildRenderClips` (linha 103) que **nunca foi atualizada** com a correcao de offset `eventVideo.start_minute`. Ele usa `eventSec` diretamente como timestamp do video, gerando uma janela de filtro errada para o SRT. Resultado: zero linhas de legenda casam, e `subtitleLines` chega vazio ao backend.
+A funcao `loadSrtLines` (linha 482 do ExportPreviewDialog) usa `targetSrt.url` diretamente, sem passar por `normalizeStorageUrl`. O servidor Python retorna URLs como `http://localhost:5000/api/storage/.../srt/first_half.srt`, que nao funcionam no ambiente Lovable Cloud (o browser nao consegue acessar `localhost`). O fetch falha com erro de rede, retorna `[]`, e o toast de aviso aparece.
 
-Alem disso, a interface `Clip` no `BatchExportPanel` nao inclui `eventVideo`, entao mesmo que a logica fosse corrigida, o dado nao estaria disponivel.
+A mesma funcao `loadSRTForPreview` (linha 307) tem o mesmo problema.
 
-O `ExportPreviewDialog.buildClipConfig` ja esta corrigido — mas o `BatchExportPanel` tem uma **copia separada** da mesma logica que ficou desatualizada.
+**2. Download automatico se perde**
 
-**2. Audio ausente**
+No `useBackendRender.ts`, apos o render completar (linha 297-316):
+- O download e disparado via `a.click()` (criando um link temporario)
+- Apos 3 segundos, o estado e resetado para `idle` e `isRendering: false`
+- O overlay de progresso desaparece
+- Se o download automatico falhar (popup bloqueado, erro de rede, etc), nao existe botao de fallback para baixar o arquivo
 
-A correcao do `anullsrc` ja esta no codigo do `server.py` (linha 222). Porem, o servidor Python roda **localmente** na sua maquina. Se voce nao reiniciou o servidor desde a ultima edicao, ele ainda usa o codigo antigo com `-an` (sem audio). **Reinicie o servidor Python para aplicar a correcao.**
+O usuario ve o processo "se perder" porque o overlay some e o arquivo nao chega.
+
+**3. Sem estado persistente de "concluido"**
+
+Nao ha um estado intermediario entre "renderizando" e "idle" que permita ao usuario clicar manualmente em um botao de download caso o download automatico falhe.
 
 ### Correcoes
 
-#### 1. `src/components/media/BatchExportPanel.tsx` — Adicionar `eventVideo` ao tipo `Clip` e corrigir `buildRenderClips`
+#### 1. `src/components/media/ExportPreviewDialog.tsx` — Normalizar URL do SRT
 
-Atualizar a interface `Clip` para incluir `eventVideo`:
-
-```typescript
-interface Clip {
-  // ... campos existentes ...
-  eventVideo?: { start_minute?: number } | null;
-}
-```
-
-Corrigir `buildRenderClips` para subtrair o offset do video, identico ao fix ja aplicado em `ExportPreviewDialog.buildClipConfig`:
+Em `loadSrtLines` e `loadSRTForPreview`, aplicar `normalizeStorageUrl` na URL do arquivo SRT antes de fazer o fetch:
 
 ```typescript
-const videoStartMinute = c.eventVideo?.start_minute ?? 0;
-const eventSecInVideoFile = eventSec - (videoStartMinute * 60);
-const clipStartInVideo = Math.max(0, eventSecInVideoFile - bufferBefore);
-const clipEndInVideo = eventSecInVideoFile + CLIP_BUFFER_AFTER_MS / 1000;
+// Antes (linha 482):
+let srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${fname}`;
+
+// Depois:
+let srtUrl = normalizeStorageUrl(targetSrt.url) || buildApiUrl(getApiBase(), `/api/storage/${matchId}/srt/${fname}`);
 ```
 
-Adicionar log de debug para diagnostico.
+Tambem corrigir a URL de fallback (linha 490):
+```typescript
+const altUrl = buildApiUrl(getApiBase(), `/api/storage/${matchId}/${altFolder}/${fname}`);
+```
 
-#### 2. Audio — Reiniciar o servidor Python
+Aplicar a mesma correcao em `loadSRTForPreview` (linha 307).
 
-O codigo do `server.py` ja contem a correcao (anullsrc). Basta **reiniciar o servidor Python** (`Ctrl+C` e rodar novamente). Os renders iniciados antes do restart continuarao com o codigo antigo.
+#### 2. `src/hooks/useBackendRender.ts` — Manter estado "complete" com downloadUrl
+
+Em vez de resetar para `idle` apos 3 segundos, manter o estado `complete` com a URL de download persistente:
+
+```typescript
+// Antes (linha 314-316):
+setTimeout(() => {
+  setState(prev => ({ ...prev, isRendering: false, stage: 'idle', progress: 0 }));
+}, 3000);
+
+// Depois:
+// Manter isRendering: true e stage: 'complete' para que o overlay persista
+// com um botao de download manual
+```
+
+Adicionar `downloadUrl` ao `RenderState` e expor uma funcao `dismiss` para o usuario fechar manualmente.
+
+#### 3. `src/components/media/ExportPreviewDialog.tsx` — Adicionar botao de download no overlay de "complete"
+
+No overlay de progresso (linha 1571), quando `stage === 'complete'`, exibir um botao "Baixar MP4" que chama a URL de download, e um botao "Fechar" para dismissar o overlay.
 
 ### Tabela de mudancas
 
 | Arquivo | Mudanca |
 |---|---|
-| `src/components/media/BatchExportPanel.tsx` | Adicionar `eventVideo` ao tipo `Clip`; corrigir `buildRenderClips` com offset `start_minute`; adicionar logging |
+| `src/components/media/ExportPreviewDialog.tsx` | Normalizar URLs do SRT com `normalizeStorageUrl` em `loadSrtLines` e `loadSRTForPreview`; adicionar botao de download no overlay de conclusao |
+| `src/hooks/useBackendRender.ts` | Adicionar `downloadUrl` ao `RenderState`; manter estado `complete` apos render; adicionar funcao `dismiss` para fechar overlay manualmente |
 
 ### Resultado esperado
 
-- As legendas do SRT serao corretamente filtradas e enviadas ao backend no batch export
-- Apos reiniciar o servidor Python, o audio sera preservado no MP4 final
-- Os novos renders terao tanto audio quanto closed captions
-
+- O arquivo SRT sera encontrado e carregado corretamente, sem aviso falso
+- O video sera baixado automaticamente ao concluir
+- Se o download automatico falhar, o usuario vera um botao "Baixar MP4" no overlay de conclusao
+- O usuario podera fechar o overlay manualmente apos baixar
