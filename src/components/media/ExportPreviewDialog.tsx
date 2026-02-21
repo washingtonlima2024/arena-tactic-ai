@@ -453,26 +453,56 @@ export function ExportPreviewDialog({
 
   // Shared: load SRT lines (used by preview CC and Batch Export)
   const loadSrtLines = useCallback(async (): Promise<{ start: number; end: number; text: string }[]> => {
-    if (!matchId) return [];
+    if (!matchId) {
+      console.log('[ExportPreviewDialog] loadSrtLines: sem matchId, retornando []');
+      return [];
+    }
     try {
+      console.log(`[ExportPreviewDialog] loadSrtLines: buscando arquivos do match ${matchId}...`);
       const filesData = await apiClient.listMatchFiles(matchId);
-      const srtFiles = [
-        ...(filesData?.folders?.srt || []),
-        ...(filesData?.folders?.texts || []).filter((f: any) =>
-          f.name?.toLowerCase().endsWith('.srt') || f.name?.toLowerCase().endsWith('.vtt')
-        ),
-      ];
-      if (srtFiles.length === 0) return [];
+      const srtFolder = filesData?.folders?.srt || [];
+      const textsFolder = (filesData?.folders?.texts || []).filter((f: any) =>
+        f.name?.toLowerCase().endsWith('.srt') || f.name?.toLowerCase().endsWith('.vtt')
+      );
+      console.log(`[ExportPreviewDialog] loadSrtLines: srt/ tem ${srtFolder.length} arquivo(s), texts/ tem ${textsFolder.length} arquivo(s) SRT/VTT`);
+      
+      const srtFiles = [...srtFolder, ...textsFolder];
+      if (srtFiles.length === 0) {
+        console.warn('[ExportPreviewDialog] loadSrtLines: nenhum arquivo SRT/VTT encontrado em srt/ nem texts/');
+        return [];
+      }
+      
       const targetSrt =
         srtFiles.find((f: any) => f.name?.toLowerCase().includes('full') || f.name?.toLowerCase() === 'transcription.srt') ||
         srtFiles[0];
-      const srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${targetSrt.name}`;
-      const response = await fetch(srtUrl);
-      if (!response.ok) return [];
+      
+      // Try primary URL, then fallback to alternate folder
+      let srtUrl = targetSrt.url || `${getApiBase()}/api/storage/${matchId}/srt/${targetSrt.name}`;
+      console.log(`[ExportPreviewDialog] loadSrtLines: usando arquivo "${targetSrt.name}", URL: ${srtUrl}`);
+      
+      let response = await fetch(srtUrl);
+      
+      // Fallback: if srt/ fails, try texts/ and vice-versa
+      if (!response.ok) {
+        const altFolder = srtUrl.includes('/srt/') ? 'texts' : 'srt';
+        const altUrl = `${getApiBase()}/api/storage/${matchId}/${altFolder}/${targetSrt.name}`;
+        console.warn(`[ExportPreviewDialog] loadSrtLines: fetch falhou (${response.status}), tentando fallback: ${altUrl}`);
+        response = await fetch(altUrl);
+      }
+      
+      if (!response.ok) {
+        console.error(`[ExportPreviewDialog] loadSrtLines: fetch falhou definitivamente (${response.status})`);
+        return [];
+      }
+      
       const srtContent = await response.text();
+      console.log(`[ExportPreviewDialog] loadSrtLines: conteúdo recebido (${srtContent.length} chars)`);
       const parsed = parseTranscription(srtContent);
-      return parsed.lines.filter((l: any) => l.hasTimestamp && l.text);
-    } catch {
+      const lines = parsed.lines.filter((l: any) => l.hasTimestamp && l.text);
+      console.log(`[ExportPreviewDialog] loadSrtLines: ${lines.length} linhas com timestamp parseadas`);
+      return lines;
+    } catch (err) {
+      console.error('[ExportPreviewDialog] loadSrtLines: erro ao carregar SRT:', err);
       return [];
     }
   }, [matchId]);
@@ -550,6 +580,11 @@ export function ExportPreviewDialog({
 
     const allSrtLines = await loadSrtLines();
     console.log(`[Export] SRT total: ${allSrtLines.length} linhas`);
+    
+    if (includeSubtitles && allSrtLines.length === 0) {
+      toast.warning('Nenhum arquivo de legendas (SRT) encontrado. O vídeo será gerado sem closed captions.', { duration: 5000 });
+    }
+    
     const clipSpecs = buildClipConfig(clipsWithUrls, allSrtLines);
     for (const spec of clipSpecs) {
       console.log(`[Export] Clip ${spec.minute}' (${spec.eventType}): ${spec.subtitleLines?.length ?? 0} legendas`);

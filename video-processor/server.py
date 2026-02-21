@@ -219,12 +219,14 @@ def _do_render(job_id: str, spec: dict) -> None:
             cmd = [
                 'ffmpeg', '-y',
                 '-loop', '1', '-i', png_path,
+                '-f', 'lavfi', '-i', 'anullsrc=r=44100:cl=stereo',
                 '-t', str(duration),
                 '-vf', f'scale={W}:{H}:force_original_aspect_ratio=decrease,pad={W}:{H}:(ow-iw)/2:(oh-ih)/2,setsar=1',
                 '-c:v', 'libx264', '-crf', '20', '-preset', 'medium',
+                '-c:a', 'aac', '-b:a', '128k',
                 '-pix_fmt', 'yuv420p',
                 '-r', '30',
-                '-an',
+                '-shortest',
                 out_mp4
             ]
             try:
