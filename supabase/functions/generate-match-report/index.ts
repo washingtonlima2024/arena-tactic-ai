@@ -195,7 +195,7 @@ serve(async (req) => {
           { role: "user", content: userPrompt },
         ],
         temperature: 0.3,
-        max_tokens: 4096,
+        max_tokens: 12000,
       }),
     });
 
@@ -222,26 +222,47 @@ serve(async (req) => {
 
     console.log(`[generate-match-report] Raw response length: ${rawText.length}`);
 
-    // Parse the JSON from the response
+    // Robust JSON extraction with truncation repair
     let report;
+    const extractJson = (text: string): any => {
+      // Remove markdown code blocks
+      let cleaned = text.replace(/```json\s*/gi, "").replace(/```\s*/g, "").trim();
+      
+      // Find first { 
+      const start = cleaned.indexOf("{");
+      if (start === -1) throw new Error("No JSON found");
+      cleaned = cleaned.substring(start);
+      
+      // Try direct parse first
+      try { return JSON.parse(cleaned); } catch {}
+      
+      // Fix trailing commas and control chars
+      cleaned = cleaned.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]").replace(/[\x00-\x1F\x7F]/g, " ");
+      try { return JSON.parse(cleaned); } catch {}
+      
+      // Truncation repair: close open strings, braces, brackets
+      let repaired = cleaned;
+      // Close any unclosed string (odd number of unescaped quotes)
+      const quotes = (repaired.match(/(?<!\\)"/g) || []).length;
+      if (quotes % 2 !== 0) repaired += '"';
+      // Close open braces/brackets
+      const openB = (repaired.match(/{/g) || []).length - (repaired.match(/}/g) || []).length;
+      const openK = (repaired.match(/\[/g) || []).length - (repaired.match(/]/g) || []).length;
+      for (let i = 0; i < openK; i++) repaired += "]";
+      for (let i = 0; i < openB; i++) repaired += "}";
+      // Remove trailing comma before closing
+      repaired = repaired.replace(/,\s*}/g, "}").replace(/,\s*]/g, "]");
+      try { return JSON.parse(repaired); } catch {}
+      
+      throw new Error("Could not parse JSON even after repair");
+    };
+
     try {
-      const jsonMatch = rawText.match(/```(?:json)?\s*([\s\S]*?)```/);
-      const jsonStr = jsonMatch ? jsonMatch[1].trim() : rawText.trim();
-      report = JSON.parse(jsonStr);
+      report = extractJson(rawText);
     } catch (parseError) {
       console.error("[generate-match-report] Failed to parse JSON response:", parseError);
       console.error("[generate-match-report] Raw text:", rawText.slice(0, 500));
-      
-      const jsonObjectMatch = rawText.match(/\{[\s\S]*\}/);
-      if (jsonObjectMatch) {
-        try {
-          report = JSON.parse(jsonObjectMatch[0]);
-        } catch {
-          throw new Error("Falha ao processar resposta da IA. Tente novamente.");
-        }
-      } else {
-        throw new Error("Resposta da IA nao continha um relatorio valido. Tente novamente.");
-      }
+      throw new Error("Falha ao processar resposta da IA. Tente novamente.");
     }
 
     // Validate required fields
